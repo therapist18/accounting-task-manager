@@ -64,13 +64,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/dashboard">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <LayoutDashboard className="size-4" />
-                </div>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">BCL Task Manager</span>
-                  <span className="truncate text-xs">Enterprise</span>
-                </div>
+                <span className="font-bold text-xl">BCL Task Manager</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -102,7 +96,7 @@ export function AppSidebar() {
                 <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted">
                   <Users className="h-3 w-3" />
                 </div>
-                <span className="text-sm">Demo User</span>
+                <span className="text-lg">Demo User</span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>

@@ -8,13 +8,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Plus, Users, AlertTriangle, CheckCircle, ArrowRight, Calendar } from "lucide-react"
-import { format } from "date-fns"
+import { format, parseISO } from "date-fns"
+import { taskColumns } from "./components/tasksfields"
 import { StageTimer } from "@/components/stage-timer"
 import { TaskAssignmentDialog } from "@/components/task-assignment-dialog"
 import { StageTransitionDialog } from "@/components/stage-transition-dialog"
 import { StageTimeline } from "@/components/stage-timeline"
 import { StageAutomation } from "@/lib/stage-automation"
-import { NewTaskDialog } from "@/components/new-task-dialog"
+import { NewTaskDialog } from "@/app/(dashboard)/dashboard/tasks/components/new-task-dialog"
 import { getTasks, updateTaskAssignment } from "@/lib/supabase/tasks"
 import { supabase } from "@/lib/supabase/client"
 import type { Database } from "@/lib/supabase/database.types"
@@ -80,16 +81,53 @@ export default function TasksPage() {
 
   // Format task data for display
   const formatTaskData = (task: Task) => {
+    // Parse dates to ensure consistent formatting
+    const formatDate = (dateString?: string | null) => {
+      if (!dateString) return ''
+      try {
+        return format(parseISO(dateString), 'yyyy-MM-dd')
+      } catch (e) {
+        return dateString
+      }
+    }
+
     const formattedTask: any = {
       ...task,
-      jobDescription: task.job_description || '',
+      // Basic info
+      website: task.client?.website || '',
+      job_description: task.job_description || '',
+      job_head: task.task_manager?.full_name || 'Unassigned',
+      class: task.subdepartment?.name || 'N/A',
+      
+      // Applicant info
+      applicant_name: task.client?.full_name || 'N/A',
+      company_name: task.client_company || 'N/A',
+      dependent_name: '', // This would come from client data if available
+      renewal_status: 'New', // Default to New, would come from task data
+      
+      // Dates
+      applied_date: formatDate(task.date_initiated),
+      processing_paid_date: formatDate(task.processing_paid_date),
+      paid_ksh: task.paid_amount || 0,
+      processing_upload_date: formatDate(task.processing_upload_date),
+      received_date: formatDate(task.received_date),
+      approved_date: formatDate(task.approved_date),
+      kcb_paid_date: formatDate(task.kcb_paid_date),
+      issuance_upload_date: formatDate(task.issuance_upload_date),
+      write_up_date: formatDate(task.write_up_date),
+      
+      // Additional info
+      account_used: task.account_used || '',
+      applied_by: task.created_by || 'System',
+      batch: task.batch_number || '',
+      
+      // Original fields (kept for compatibility)
       department: task.department?.name || 'N/A',
       subdepartment: task.subdepartment?.name || 'N/A',
-      subdepartmentId: task.subdepartment_id,
       taskManager: task.task_manager?.full_name || 'Unassigned',
       taskAssistant: task.task_assistant?.full_name || 'Unassigned',
       client: task.client?.full_name || task.client_company || 'N/A',
-      dateInitiated: task.date_initiated ? new Date(task.date_initiated).toLocaleDateString() : 'N/A',
+      dateInitiated: formatDate(task.date_initiated),
       currentStage: task.current_stage ? {
         id: task.current_stage.id,
         name: task.current_stage.name,
@@ -164,7 +202,7 @@ export default function TasksPage() {
   }
 
   return (
-    <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+    <div className="flex-1 space-y-4 p-2">
       <div className="flex items-center justify-between space-y-2">
         <h2 className="text-3xl font-bold tracking-tight">Task Management</h2>
         <div className="flex items-center space-x-2">
@@ -185,9 +223,9 @@ export default function TasksPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="active" className="space-y-4">
+      <Tabs defaultValue="all" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="active">Active Tasks</TabsTrigger>
+          {/* <TabsTrigger value="active">Active Tasks</TabsTrigger> */}
           <TabsTrigger value="all">All Tasks</TabsTrigger>
           <TabsTrigger value="overdue">Overdue</TabsTrigger>
           <TabsTrigger value="completed">Completed</TabsTrigger>
@@ -285,51 +323,49 @@ export default function TasksPage() {
               <CardTitle>All Tasks</CardTitle>
               <CardDescription>Complete overview of all tasks in the system.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Job Description</TableHead>
-                    <TableHead>Department</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Current Stage</TableHead>
-                    <TableHead>Manager</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {tasks.map((task) => (formatTaskData(task))).map((task) => (
-                    <TableRow key={task.id}>
-                      <TableCell className="font-medium">{task.jobDescription}</TableCell>
-                      <TableCell>{task.department}</TableCell>
-                      <TableCell>{getStatusBadge(task.status)}</TableCell>
-                      <TableCell>
-                        {task.currentStage && (
-                          <div className="flex items-center gap-2">
-                            <span>{task.currentStage.name}</span>
-                            {task.currentStage.isOverdue && <AlertTriangle className="h-4 w-4 text-destructive" />}
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell>{task.taskManager}</TableCell>
-                      <TableCell>{task.client}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => handleTaskAssignment(task.id)}>
-                            <Users className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => handleStageTransition(task.id)}>
-                            <ArrowRight className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
+            <CardContent className="p-0 h-[calc(100vh-250px)] flex flex-col">
+              <div className="rounded-md border w-full overflow-hidden flex-1 flex flex-col">
+                <div className="overflow-auto flex-1">
+                  <Table className="min-w-full w-[1600px] relative">
+                    <TableHeader className="sticky top-0 z-10 bg-background">
+                      <TableRow>
+                      {taskColumns.map((column) => (
+                        <TableHead key={column.key} className="whitespace-nowrap">
+                          {column.header}
+                        </TableHead>
+                      ))}
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
+                  </TableHeader>
+                  <TableBody>
+                    {tasks.length > 0 ? (
+                      tasks.map((task) => {
+                        const formattedTask = formatTaskData(task)
+                        return (
+                          <TableRow key={task.id}>
+                            {taskColumns.map((column) => (
+                              <TableCell key={`${task.id}-${column.key}`} className="whitespace-nowrap">
+                                {column.render 
+                                  ? column.render(formattedTask[column.key as keyof typeof formattedTask], formattedTask)
+                                  : (formattedTask[column.key as keyof typeof formattedTask] || '-')}
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        )
+                      })
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={taskColumns.length} className="h-24 text-center">
+                          No tasks found.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                  </Table>
+                </div>
+              </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
 
         <TabsContent value="overdue" className="space-y-4">
           <Card>

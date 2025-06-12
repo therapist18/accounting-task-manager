@@ -1,14 +1,13 @@
-// @ts-nocheck
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { supabase } from "../lib/supabase/client"
+import { supabase } from "../../../../../lib/supabase/client"
 
 interface Department {
   id: string
@@ -74,8 +73,9 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   const [users, setUsers] = useState<User[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [selectedClient, setSelectedClient] = useState<Client | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [formData, setFormData] = useState<FormData>({
+  const [loading, setLoading] = useState(false)
+  const [initialLoad, setInitialLoad] = useState(true)
+  const [formData, setFormData] = useState<FormData>(() => ({
     job_description: '',
     department_id: '',
     subdepartment_id: '',
@@ -84,69 +84,78 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     client_id: '',
     status: 'registered',
     date_initiated: new Date().toISOString().split('T')[0]
-  })
+  }))
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true)
-
-        // Fetch departments
-        const { data: depts } = await supabase
-          .from('tm_departments')
-          .select('*')
-          .order('name')
-
-        // Fetch users with role 'staff'
-        const { data: staff } = await supabase
-          .from('tm_users')
+  // Memoize the fetchData function to prevent unnecessary re-creations
+  const fetchInitialData = useCallback(async () => {
+    if (!open || !initialLoad) return
+    
+    try {
+      setLoading(true)
+      
+      // Use Promise.all to fetch data in parallel
+      const [
+        { data: depts },
+        { data: staff },
+        { data: clientData }
+      ] = await Promise.all([
+        supabase.from('tm_departments').select('*').order('name'),
+        supabase.from('tm_users')
           .select('id, name, email')
           .eq('role', 'staff')
-          .order('name')
-
-        // Fetch clients with contact details
-        const { data: clientData } = await supabase
-          .from('registry_individuals')
+          .order('name'),
+        supabase.from('registry_individuals')
           .select('id, full_name, alternative_email, contact_details')
           .order('full_name')
+      ])
 
-        setDepartments(depts || [])
-        setUsers(staff || [])
-        setClients(clientData || [])
-      } catch (error) {
-        console.error('Error fetching data:', error)
-      } finally {
-        setLoading(false)
-      }
+      setDepartments(depts || [])
+      setUsers(staff || [])
+      setClients(clientData || [])
+      setInitialLoad(false)
+    } catch (error) {
+      console.error('Error fetching data:', error)
+    } finally {
+      setLoading(false)
     }
-
-
-    if (open) {
-      fetchData()
-    }
-  }, [open])
+  }, [open, initialLoad])
 
   useEffect(() => {
-    const fetchSubdepartments = async () => {
-      if (!formData.department_id) return
+    fetchInitialData()
+  }, [fetchInitialData])
 
-      const { data } = await supabase
-        .from('tm_subdepartments')
-        .select('*')
-        .eq('department_id', formData.department_id)
-        .order('name')
-
-      setSubdepartments(data || [])
-      setFormData(prev => ({ ...prev, subdepartment_id: '' }))
+  // Memoize the fetchSubdepartments function
+  const fetchSubdepartments = useCallback(async (departmentId: string) => {
+    if (!departmentId) {
+      setSubdepartments([])
+      return
     }
 
-    fetchSubdepartments()
-  }, [formData.department_id])
+    const { data } = await supabase
+      .from('tm_subdepartments')
+      .select('*')
+      .eq('department_id', departmentId)
+      .order('name')
 
-  const handleSubmit = async (e: React.FormEvent) => {
+    setSubdepartments(data || [])
+  }, [])
+
+  // Only fetch subdepartments when department changes
+  useEffect(() => {
+    if (formData.department_id) {
+      fetchSubdepartments(formData.department_id)
+    } else {
+      setSubdepartments([])
+    }
+  }, [formData.department_id, fetchSubdepartments])
+
+  // Memoize the form submission handler
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
+    if (loading) return
 
     try {
+      setLoading(true)
       const { data, error } = await supabase
         .from('tm_tasks')
         .insert([{
@@ -181,22 +190,53 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       })
     } catch (error) {
       console.error('Error creating task:', error)
-      // You might want to show an error toast/message to the user here
+      // Consider using a toast notification here
+    } finally {
+      setLoading(false)
     }
-  }
+  }, [formData, loading, onOpenChange, onCreate])
 
-  const handleChange = <K extends keyof FormData>(field: K, value: FormData[K]) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }))
+  // Memoize the handleChange function
+  const handleChange = useCallback(<K extends keyof FormData>(field: K, value: FormData[K]) => {
+    setFormData(prev => {
+      // If department changes, clear subdepartment
+      if (field === 'department_id') {
+        return { ...prev, [field]: value, subdepartment_id: '' }
+      }
+      return { ...prev, [field]: value }
+    })
 
     // When client changes, update the selected client
     if (field === 'client_id') {
       const client = clients.find(c => c.id === value) || null
       setSelectedClient(client)
     }
-  }
+  }, [clients])
+
+  // Memoize the client details section to prevent unnecessary re-renders
+  const clientDetails = useMemo(() => {
+    if (!selectedClient) return null
+    
+    return (
+      <div className="mt-2 text-sm text-gray-600 space-y-1">
+        {selectedClient.alternative_email && (
+          <div>Email: {selectedClient.alternative_email}</div>
+        )}
+        {selectedClient.contact_details?.email?.primary && (
+          <div>Primary Email: {selectedClient.contact_details.email.primary}</div>
+        )}
+        {selectedClient.contact_details?.email?.alternative && (
+          <div>Alt. Email: {selectedClient.contact_details.email.alternative}</div>
+        )}
+        {selectedClient.contact_details?.phone?.kenyan?.primary && (
+          <div>Phone: {selectedClient.contact_details.phone.kenyan.primary}</div>
+        )}
+        {selectedClient.contact_details?.phone?.whatsapp && (
+          <div>WhatsApp: {selectedClient.contact_details.phone.whatsapp}</div>
+        )}
+      </div>
+    )
+  }, [selectedClient])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -244,7 +284,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                 </SelectTrigger>
                 <SelectContent>
                   {departments.map((dept) => (
-                    <SelectItem key={dept.id} value={dept.id}>
+                    <SelectItem key={dept.id} value={dept.id} className="truncate">
                       {dept.name}
                     </SelectItem>
                   ))}
@@ -264,13 +304,11 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                   <SelectValue placeholder="Select subdepartment" />
                 </SelectTrigger>
                 <SelectContent>
-                  {subdepartments
-                    .filter(sub => sub.department_id === formData.department_id)
-                    .map((sub) => (
-                      <SelectItem key={sub.id} value={sub.id}>
-                        {sub.name}
-                      </SelectItem>
-                    ))}
+                  {subdepartments.map((sub) => (
+                    <SelectItem key={sub.id} value={sub.id} className="truncate">
+                      {sub.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -289,7 +327,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                 </SelectTrigger>
                 <SelectContent>
                   {users.map((user) => (
-                    <SelectItem key={user.id} value={user.id}>
+                    <SelectItem key={user.id} value={user.id} className="truncate">
                       {user.name || user.email}
                     </SelectItem>
                   ))}
@@ -300,16 +338,16 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
             <div className="grid gap-2">
               <Label htmlFor="task-assistant">Task Assistant</Label>
               <Select
-                value={formData.task_assistant_id || undefined}
-                onValueChange={(value: string) => handleChange('task_assistant_id', value || '')}
+                value={formData.task_assistant_id || 'none'}
+                onValueChange={(value: string) => handleChange('task_assistant_id', value === 'none' ? '' : value)}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select task assistant (optional)" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="none" className="truncate">None</SelectItem>
                   {users.map((user) => (
-                    <SelectItem key={user.id} value={user.id}>
+                    <SelectItem key={user.id} value={user.id} className="truncate">
                       {user.name || user.email}
                     </SelectItem>
                   ))}
@@ -330,32 +368,14 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
               </SelectTrigger>
               <SelectContent>
                 {clients.map((client) => (
-                  <SelectItem key={client.id} value={client.id}>
+                  <SelectItem key={client.id} value={client.id} className="truncate">
                     {client.full_name || client.alternative_email || 'Unnamed Client'}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
 
-            {selectedClient && (
-              <div className="mt-2 text-sm text-gray-600">
-                {selectedClient.alternative_email && (
-                  <div>Email: {selectedClient.alternative_email}</div>
-                )}
-                {selectedClient.contact_details?.email?.primary && (
-                  <div>Primary Email: {selectedClient.contact_details.email.primary}</div>
-                )}
-                {selectedClient.contact_details?.email?.alternative && (
-                  <div>Alt. Email: {selectedClient.contact_details.email.alternative}</div>
-                )}
-                {selectedClient.contact_details?.phone?.kenyan?.primary && (
-                  <div>Phone: {selectedClient.contact_details.phone.kenyan.primary}</div>
-                )}
-                {selectedClient.contact_details?.phone?.whatsapp && (
-                  <div>WhatsApp: {selectedClient.contact_details.phone.whatsapp}</div>
-                )}
-              </div>
-            )}
+            {clientDetails}
           </div>
 
           <DialogFooter>
