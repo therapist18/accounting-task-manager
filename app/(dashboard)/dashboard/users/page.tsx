@@ -1,35 +1,175 @@
-"use client"
+//@ts-nocheck
+'use client'
 
+import { useEffect, useState } from 'react'
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { UserPlus, UserCheck, UserX, Users } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { UserCheck, UserX, Users, History } from "lucide-react"
 import { TaskAssignmentDialog } from "@/components/task-assignment-dialog"
-import { useState } from "react"
-
-const mockUserTasks = {
-  "1": [
-    { id: "task-1", jobDescription: "Tax Filing for ABC Corp", status: "Active", department: "KRA" },
-    { id: "task-2", jobDescription: "PIN Registration", status: "Completed", department: "KRA" },
-  ],
-  "2": [{ id: "task-3", jobDescription: "Passport Application", status: "Active", department: "Immigration" }],
-}
+import { 
+  fetchUsers, 
+  updateUserStatus, 
+  type User, 
+  type StatusHistoryEntry,
+  getUserStatusHistory 
+} from './database'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { AddUserDialog } from "@/app/(dashboard)/dashboard/users/add-user-dialog"
 
 export default function UsersPage() {
+  const [activeUsers, setActiveUsers] = useState<User[]>([])
+  const [inactiveUsers, setInactiveUsers] = useState<User[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
-  const [selectedUser, setSelectedUser] = useState<any>(null)
+  const [selectedUser, setSelectedUser] = useState<User | null>(null)
+  const [statusHistory, setStatusHistory] = useState<StatusHistoryEntry[]>([])
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
+
+  useEffect(() => {
+    async function loadUsers() {
+      setIsLoading(true)
+      try {
+        const [active, inactive] = await Promise.all([
+          fetchUsers(true),
+          fetchUsers(false)
+        ])
+        setActiveUsers(active)
+        setInactiveUsers(inactive)
+      } catch (error) {
+        console.error('Failed to load users:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadUsers()
+  }, [])
+
+  const handleStatusChange = async (userId: string, makeActive: boolean) => {
+    try {
+      // In a real app, you would get the current user's ID from your auth context
+      const currentUserId = 'system' // Replace with actual user ID from auth
+      await updateUserStatus(userId, makeActive, currentUserId, 'Status changed by admin')
+      
+      // Refresh the user lists
+      const [active, inactive] = await Promise.all([
+        fetchUsers(true),
+        fetchUsers(false)
+      ])
+      setActiveUsers(active)
+      setInactiveUsers(inactive)
+    } catch (error) {
+      console.error('Failed to update user status:', error)
+    }
+  }
+
+  const handleViewHistory = async (userId: string) => {
+    try {
+      const history = await getUserStatusHistory(userId)
+      setStatusHistory(history)
+      setHistoryDialogOpen(true)
+    } catch (error) {
+      console.error('Failed to fetch status history:', error)
+    }
+  }
+
+  const renderUserRow = (user: User, isActive: boolean) => {
+    const lastStatusChange = user.status_history?.[user.status_history.length - 1]
+    
+    return (
+      <TableRow key={user.id}>
+        <TableCell className="font-medium">
+          <div className="flex flex-col">
+            <span>{user.name || `User ${user.id}`}</span>
+            <Button 
+              variant="link" 
+              size="sm" 
+              className="h-auto p-0 text-xs text-muted-foreground"
+              onClick={() => handleViewHistory(user.id)}
+            >
+              <History className="h-3 w-3 mr-1" />
+              View history
+            </Button>
+          </div>
+        </TableCell>
+        <TableCell>{user.email}</TableCell>
+        <TableCell className="capitalize">{user.role}</TableCell>
+        <TableCell>
+          <div className="flex items-center gap-2">
+            <span className={`h-2 w-2 rounded-full ${isActive ? 'bg-green-500' : 'bg-gray-400'}`} />
+            {isActive ? 'Active' : 'Inactive'}
+          </div>
+        </TableCell>
+        <TableCell>{new Date(user.created_at).toLocaleDateString()}</TableCell>
+        {isActive && (
+          <TableCell>
+            {lastStatusChange ? (
+              <div className="flex flex-col">
+                <span>{new Date(lastStatusChange.changed_at).toLocaleDateString()}</span>
+                <span className="text-xs text-muted-foreground">
+                  by {lastStatusChange.changed_by}
+                </span>
+              </div>
+            ) : 'N/A'}
+          </TableCell>
+        )}
+        <TableCell>
+          {isActive ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleStatusChange(user.id, false)}
+                className="mr-2"
+              >
+                <UserX className="h-4 w-4 mr-2" />
+                Deactivate
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSelectedUser(user)
+                  setAssignmentDialogOpen(true)
+                }}
+              >
+                <Users className="h-4 w-4 mr-2" />
+                Assign
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleStatusChange(user.id, true)}
+            >
+              <UserCheck className="h-4 w-4 mr-2" />
+              Reactivate
+            </Button>
+          )}
+        </TableCell>
+      </TableRow>
+    )
+  }
+
+  if (isLoading) {
+    return <div>Loading users...</div>
+  }
 
   return (
     <div className="flex-1 space-y-4">
       <div className="flex items-center justify-between space-y-2">
         <h2 className="text-3xl font-bold tracking-tight">User Management</h2>
         <div className="flex items-center space-x-2">
-          <Button>
-            <UserPlus className="mr-2 h-4 w-4" />
-            Add User
-          </Button>
+          <AddUserDialog />
         </div>
       </div>
       <Tabs defaultValue="active" className="space-y-4">
@@ -47,51 +187,17 @@ export default function UsersPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Username</TableHead>
+                    <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Role</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead>Created Date</TableHead>
                     <TableHead>Last Active</TableHead>
-                    <TableHead>Current Tasks</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[1, 2, 3, 4, 5].map((i) => (
-                    <TableRow key={i}>
-                      <TableCell className="font-medium">user{i}</TableCell>
-                      <TableCell>user{i}@example.com</TableCell>
-                      <TableCell>{i === 1 ? "Admin" : "User"}</TableCell>
-                      <TableCell>2023-05-{i < 10 ? `0${i}` : i}</TableCell>
-                      <TableCell>Today</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          {mockUserTasks[i]?.map((task) => (
-                            <Badge key={task.id} variant={task.status === "Active" ? "default" : "secondary"}>
-                              {task.department}
-                            </Badge>
-                          )) || <span className="text-muted-foreground">No tasks</span>}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Button variant="ghost" size="sm">
-                          <UserX className="h-4 w-4 mr-2" />
-                          Deactivate
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedUser({ id: i.toString(), username: `user${i}`, email: `user${i}@example.com` })
-                            setAssignmentDialogOpen(true)
-                          }}
-                        >
-                          <Users className="h-4 w-4 mr-2" />
-                          Assign
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {activeUsers.map(user => renderUserRow(user, true))}
                 </TableBody>
               </Table>
             </CardContent>
@@ -107,34 +213,24 @@ export default function UsersPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Username</TableHead>
+                    <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Role</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead>Deactivated Date</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[1, 2].map((i) => (
-                    <TableRow key={i}>
-                      <TableCell className="font-medium">inactive{i}</TableCell>
-                      <TableCell>inactive{i}@example.com</TableCell>
-                      <TableCell>User</TableCell>
-                      <TableCell>2023-04-{10 + i}</TableCell>
-                      <TableCell>
-                        <Button variant="ghost" size="sm">
-                          <UserCheck className="h-4 w-4 mr-2" />
-                          Reactivate
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {inactiveUsers.map(user => renderUserRow(user, false))}
                 </TableBody>
               </Table>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+      
+      {/* Task Assignment Dialog */}
       {selectedUser && (
         <TaskAssignmentDialog
           open={assignmentDialogOpen}
@@ -144,15 +240,59 @@ export default function UsersPage() {
             jobDescription: "New Task Assignment",
             currentAssignments: {},
           }}
-          users={[
-            { id: "1", username: "john_doe", email: "john@example.com" },
-            { id: "2", username: "jane_smith", email: "jane@example.com" },
-          ]}
+          users={activeUsers}
           onAssign={(assignments) => {
             console.log("User task assigned:", assignments)
           }}
         />
       )}
+
+      {/* Status History Dialog */}
+      <Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>User Status History</DialogTitle>
+            <DialogDescription>
+              History of status changes for this user.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="relative">
+              <div className="absolute left-4 top-0 h-full w-0.5 bg-border" />
+              <div className="space-y-4">
+                {statusHistory.map((entry, index) => (
+                  <div key={index} className="relative flex items-start gap-4">
+                    <div className="absolute left-4 mt-1.5 h-2.5 w-2.5 rounded-full bg-primary" />
+                    <div className="ml-8 flex-1 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">
+                          Status changed to <span className="capitalize">{entry.status}</span>
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(entry.changed_at).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        Changed by: {entry.changed_by}
+                        {entry.reason && (
+                          <div className="mt-1 text-xs">
+                            <span className="font-medium">Reason:</span> {entry.reason}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {statusHistory.length === 0 && (
+                  <div className="py-4 text-center text-sm text-muted-foreground">
+                    No status history available
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -326,7 +326,7 @@ export default function TasksPage() {
             <CardContent className="p-4">
               <div className="rounded-md border w-full overflow-hidden">
                 <div className="w-full overflow-auto" style={{ maxHeight: '70vh', maxWidth: '90vw' }}>
-                  <Table className="min-w-[1600px] w-full">
+                  <Table className="min-w-[1200px] w-full">
                     <TableHeader className="sticky top-0 z-10 bg-background">
                       <TableRow>
                       {taskColumns.map((column) => (
