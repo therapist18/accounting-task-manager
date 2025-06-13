@@ -30,6 +30,8 @@ import { AddUserDialog } from "@/app/(dashboard)/dashboard/users/add-user-dialog
 export default function UsersPage() {
   const [activeUsers, setActiveUsers] = useState<User[]>([])
   const [inactiveUsers, setInactiveUsers] = useState<User[]>([])
+  const [activeOfficers, setActiveOfficers] = useState<User[]>([])
+  const [inactiveOfficers, setInactiveOfficers] = useState<User[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
   const [statusHistory, setStatusHistory] = useState<StatusHistoryEntry[]>([])
@@ -38,12 +40,31 @@ export default function UsersPage() {
   const [userAssignments, setUserAssignments] = useState<{[key: string]: {departments: string[], subdepartments: string[]}}>({})
   const [assignmentsDialogOpen, setAssignmentsDialogOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
+  const [activeTab, setActiveTab] = useState<'users' | 'officers'>('users')
+  const [activeStatusTab, setActiveStatusTab] = useState<'active' | 'inactive'>('active')
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  const refreshUsers = async () => {
+    try {
+      const [active, inactive] = await Promise.all([
+        fetchUsers(true),
+        fetchUsers(false)
+      ])
+      setActiveUsers(active.filter(user => user.role !== 'officer'))
+      setInactiveUsers(inactive.filter(user => user.role !== 'officer'))
+      setActiveOfficers(active.filter(user => user.role === 'officer'))
+      setInactiveOfficers(inactive.filter(user => user.role === 'officer'))
+      setRefreshKey(prev => prev + 1)
+    } catch (error) {
+      console.error('Failed to refresh users:', error)
+    }
+  }
 
   useEffect(() => {
     async function loadData() {
       setIsLoading(true)
       try {
-        const [active, inactive, depts] = await Promise.all([
+        const [allActive, allInactive, depts] = await Promise.all([
           fetchUsers(true),
           fetchUsers(false),
           fetchDepartments()
@@ -51,11 +72,17 @@ export default function UsersPage() {
         
         setDepartments(depts)
         
+        // Separate users and officers
+        const active = allActive.filter(user => user.role !== 'officer')
+        const inactive = allInactive.filter(user => user.role !== 'officer')
+        const activeOfficers = allActive.filter(user => user.role === 'officer')
+        const inactiveOfficers = allInactive.filter(user => user.role === 'officer')
+        
         // Process user assignments
         const assignments: {[key: string]: {departments: string[], subdepartments: string[]}} = {}
         
-        // Initialize assignments for all users
-        ;[...active, ...inactive].forEach(user => {
+        // Initialize assignments for all users and officers
+        ;[...allActive, ...allInactive].forEach(user => {
           assignments[user.id] = { departments: [], subdepartments: [] }
         })
         
@@ -84,6 +111,8 @@ export default function UsersPage() {
         setUserAssignments(assignments)
         setActiveUsers(active)
         setInactiveUsers(inactive)
+        setActiveOfficers(activeOfficers)
+        setInactiveOfficers(inactiveOfficers)
       } catch (error) {
         console.error('Failed to load data:', error)
       } finally {
@@ -98,15 +127,10 @@ export default function UsersPage() {
     try {
       // In a real app, you would get the current user's ID from your auth context
       const currentUserId = 'system' // Replace with actual user ID from auth
-      await updateUserStatus(userId, makeActive, currentUserId, 'Status changed by admin')
+      await updateUserStatus(userId, makeActive, currentUserId, makeActive ? 'User reactivated by admin' : 'User deactivated by admin')
       
       // Refresh the user lists
-      const [active, inactive] = await Promise.all([
-        fetchUsers(true),
-        fetchUsers(false)
-      ])
-      setActiveUsers(active)
-      setInactiveUsers(inactive)
+      await refreshUsers()
     } catch (error) {
       console.error('Failed to update user status:', error)
     }
@@ -122,7 +146,7 @@ export default function UsersPage() {
     }
   }
 
-  const renderUserRow = (user: User, isActive: boolean) => {
+  const renderUserRow = (user: User, isActive: boolean, index: number) => {
     const lastStatusChange = user.status_history?.[user.status_history.length - 1]
     const assignments = userAssignments[user.id] || { departments: [], subdepartments: [] }
     
@@ -140,39 +164,29 @@ export default function UsersPage() {
     }
     
     return (
-      <TableRow key={user.id}>
+      <TableRow key={`${user.id}-${refreshKey}`} className="border-b">
+        <TableCell className="font-medium w-12 text-center">{index + 1}</TableCell>
         <TableCell className="font-medium">
           <div className="flex flex-col">
             <span>{user.name || `User ${user.id}`}</span>
-            <Button 
-              variant="link" 
-              size="sm" 
-              className="h-auto p-0 text-xs text-muted-foreground"
-              onClick={() => handleViewHistory(user.id)}
-            >
-              <History className="h-3 w-3 mr-1" />
-              View history
-            </Button>
+            {user.email && <span className="text-xs text-muted-foreground">{user.email}</span>}
           </div>
         </TableCell>
-        <TableCell>{user.email}</TableCell>
         <TableCell className="capitalize">
           <div className="flex flex-col">
             <span>{user.role.replace(/_/g, ' ')}</span>
             {assignments.departments.length > 0 && (
-              <div className="mt-1">
-                <div 
-              className="flex items-center text-xs text-muted-foreground hover:text-primary cursor-pointer transition-colors"
-              onClick={(e) => {
-                e.stopPropagation()
-                setSelectedUser(user)
-                setAssignmentsDialogOpen(true)
-              }}
-            >
-              <Briefcase className="h-3 w-3 mr-1 flex-shrink-0" />
-              <span className="truncate">{assignments.departments.length} department(s)</span>
-              <ChevronRight className="h-3 w-3 ml-1" />
-            </div>
+              <div 
+                className="flex items-center text-xs text-muted-foreground hover:text-primary cursor-pointer transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setSelectedUser(user)
+                  setAssignmentsDialogOpen(true)
+                }}
+              >
+                <Briefcase className="h-3 w-3 mr-1 flex-shrink-0" />
+                <span className="truncate">{assignments.departments.length} department(s)</span>
+                <ChevronRight className="h-3 w-3 ml-1" />
               </div>
             )}
           </div>
@@ -196,38 +210,49 @@ export default function UsersPage() {
             ) : 'N/A'}
           </TableCell>
         )}
-        <TableCell>
+        <TableCell className="space-x-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => handleViewHistory(user.id)}
+            title="View history"
+            className="h-8 w-8 p-0"
+          >
+            <History className="h-4 w-4" />
+          </Button>
           {isActive ? (
             <>
               <Button
                 variant="ghost"
-                size="sm"
+                size="icon"
                 onClick={() => handleStatusChange(user.id, false)}
-                className="mr-2"
+                title="Deactivate user"
+                className="h-8 w-8 p-0"
               >
-                <UserX className="h-4 w-4 mr-2" />
-                Deactivate
+                <UserX className="h-4 w-4" />
               </Button>
               <Button
                 variant="ghost"
-                size="sm"
+                size="icon"
                 onClick={() => {
                   setSelectedUser(user)
                   setAssignmentDialogOpen(true)
                 }}
+                title="Assign departments"
+                className="h-8 w-8 p-0"
               >
-                <Users className="h-4 w-4 mr-2" />
-                Assign
+                <Users className="h-4 w-4" />
               </Button>
             </>
           ) : (
             <Button
               variant="ghost"
-              size="sm"
+              size="icon"
               onClick={() => handleStatusChange(user.id, true)}
+              title="Reactivate user"
+              className="h-8 w-8 p-0"
             >
-              <UserCheck className="h-4 w-4 mr-2" />
-              Reactivate
+              <UserCheck className="h-4 w-4" />
             </Button>
           )}
         </TableCell>
@@ -244,66 +269,89 @@ export default function UsersPage() {
       <div className="flex items-center justify-between space-y-2">
         <h2 className="text-3xl font-bold tracking-tight">User Management</h2>
         <div className="flex items-center space-x-2">
-          <AddUserDialog />
+          <AddUserDialog 
+            defaultRole={activeTab === 'officers' ? 'officer' : 'user'} 
+            onUserAdded={refreshUsers} 
+          />
         </div>
       </div>
-      <Tabs defaultValue="active" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="active">Active Users</TabsTrigger>
-          <TabsTrigger value="inactive">Inactive Users</TabsTrigger>
-        </TabsList>
-        <TabsContent value="active" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Active Users</CardTitle>
-              <CardDescription>Manage your active user accounts.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Role & Assignments</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Created Date</TableHead>
-                    <TableHead>Last Active</TableHead>
-                    <TableHead className="w-48">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {activeUsers.map(user => renderUserRow(user, true))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value="inactive" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Inactive Users</CardTitle>
-              <CardDescription>View and manage inactive user accounts.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Deactivated Date</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {inactiveUsers.map(user => renderUserRow(user, false))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      
+      <div className="space-y-4">
+        <Tabs 
+          value={activeTab} 
+          onValueChange={(value) => setActiveTab(value as 'users' | 'officers')} 
+          className="space-y-4"
+        >
+          <TabsList>
+            <TabsTrigger value="users">Users</TabsTrigger>
+            <TabsTrigger value="officers">Officers</TabsTrigger>
+          </TabsList>
+          
+          <Tabs 
+            value={activeStatusTab}
+            onValueChange={(value) => setActiveStatusTab(value as 'active' | 'inactive')}
+            className="space-y-4"
+          >
+            <TabsList>
+              <TabsTrigger value="active">Active {activeTab === 'users' ? 'Users' : 'Officers'}</TabsTrigger>
+              <TabsTrigger value="inactive">Inactive {activeTab === 'users' ? 'Users' : 'Officers'}</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="active" className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Active {activeTab === 'users' ? 'Users' : 'Officers'}</CardTitle>
+                  <CardDescription>Manage your active {activeTab} accounts.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">#</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Role & Assignments</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Created Date</TableHead>
+                        {activeStatusTab === 'active' && <TableHead>Last Active</TableHead>}
+                        <TableHead className="w-48">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(activeTab === 'users' ? activeUsers : activeOfficers).map((user, index) => renderUserRow(user, true, index))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </TabsContent>
+            
+            <TabsContent value="inactive" className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Inactive {activeTab === 'users' ? 'Users' : 'Officers'}</CardTitle>
+                  <CardDescription>View and manage inactive {activeTab} accounts.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">#</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Deactivated Date</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(activeTab === 'users' ? inactiveUsers : inactiveOfficers).map((user, index) => renderUserRow(user, false, index))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </Tabs>
+      </div>
       
       {/* Task Assignment Dialog */}
       {selectedUser && (
@@ -315,7 +363,7 @@ export default function UsersPage() {
             jobDescription: "New Task Assignment",
             currentAssignments: {},
           }}
-          users={activeUsers}
+          users={activeTab === 'users' ? activeUsers : activeOfficers}
           onAssign={(assignments) => {
             console.log("User task assigned:", assignments)
           }}
