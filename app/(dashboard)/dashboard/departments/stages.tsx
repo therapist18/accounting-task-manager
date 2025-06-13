@@ -255,7 +255,7 @@ export default function Stages() {
             {/* Department Header Row */}
             <TableRow className="bg-muted/50">
               <TableHead rowSpan={3} className="border-r font-bold w-12">#</TableHead>
-              <TableHead rowSpan={3} className="border-r font-bold min-w-[200px]">Stage Details</TableHead>
+              <TableHead rowSpan={3} className="border-r font-bold">Stage Details</TableHead>
               {departments.map(dept => (
                 <TableHead 
                   key={`dept-${dept.id}`}
@@ -294,7 +294,7 @@ export default function Stages() {
                   ).map((cls, i) => (
                     <React.Fragment key={`class-${subdept.id}-${i}`}>
                       <TableHead className="border text-center" colSpan={2}>
-                        {cls.name || 'All'}
+                        {cls.name || 'N/A'}
                       </TableHead>
                     </React.Fragment>
                   ))
@@ -307,47 +307,33 @@ export default function Stages() {
               <TableHead className="border-r" rowSpan={2}>
                 <div className="text-center">#</div>
               </TableHead>
-              <TableHead className="border-r" colSpan={2}>
+              <TableHead className="border-r" colSpan={1}>
                 <div className="text-center">Stage Details</div>
               </TableHead>
-              {departments.flatMap(dept => 
-                (dept.subdepartments || []).flatMap(subdept => 
-                  (subdept.classes && subdept.classes.length > 0 
-                    ? subdept.classes 
-                    : [{}]
-                  ).flatMap((_, i) => [
-                    <TableHead key={`alloc-${subdept.id}-${i}`} className="border text-center">
-                      Allocate
-                    </TableHead>,
-                    <TableHead key={`disp-${subdept.id}-${i}`} className="border text-center">
-                      Display
-                    </TableHead>
-                  ])
-                )
-              )}
+              {departments.map(dept => (
+                <React.Fragment key={`dept-${dept.id}`}>
+                  <TableHead className="border text-center">
+                    Allocate
+                  </TableHead>
+                  <TableHead className="border text-center">
+                    Display
+                  </TableHead>
+                </React.Fragment>
+              ))}
             </TableRow>
             <TableRow>
-              <TableHead className="border-r text-center">
+              <TableHead className="border-r text-center" colSpan={1}>
                 Name
               </TableHead>
-              <TableHead className="border-r text-center">
+              <TableHead className="border-r text-center" colSpan={1}>
                 Time (mins)
               </TableHead>
-              {departments.flatMap(dept => 
-                (dept.subdepartments || []).flatMap(subdept => 
-                  (subdept.classes && subdept.classes.length > 0 
-                    ? subdept.classes 
-                    : [{}]
-                  ).flatMap((_, i) => [
-                    <TableHead key={`alloc2-${subdept.id}-${i}`} className="border text-center">
-                      
-                    </TableHead>,
-                    <TableHead key={`disp2-${subdept.id}-${i}`} className="border text-center">
-                      
-                    </TableHead>
-                  ])
-                )
-              )}
+              {departments.map(dept => (
+                <React.Fragment key={`dept2-${dept.id}`}>
+                  <TableHead className="border text-center"></TableHead>
+                  <TableHead className="border text-center"></TableHead>
+                </React.Fragment>
+              ))}
             </TableRow>
           </TableHeader>
         
@@ -385,48 +371,46 @@ export default function Stages() {
                 </div>
               </TableCell>
               
-              {departments.flatMap(dept => 
-                (dept.subdepartments || []).flatMap(subdept => 
-                  (subdept.classes && subdept.classes.length > 0 
-                    ? subdept.classes 
-                    : [{}]
-                  ).map((cls, i) => {
-                    const isAllocated = subdept.stages?.includes(stage.id) || false
-                    return (
-                      <React.Fragment key={`cell-${subdept.id}-${i}-${stage.id}`}>
-                        <TableCell className="border p-0">
-                          <Select
-                            value={isAllocated ? 'allocated' : 'not-allocated'}
-                            onValueChange={(value) => 
-                              handleAllocationChange(subdept.id, stage.id, value === 'allocated')
-                            }
-                          >
-                            <SelectTrigger className="border-0 focus:ring-0">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="allocated">Allocate</SelectItem>
-                              <SelectItem value="not-allocated">Not Allocated</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell className="border p-0">
-                          <div className="flex items-center justify-center h-full">
-                            <Checkbox 
-                              checked={isAllocated}
-                              onCheckedChange={(checked) => 
-                                handleDisplayToggle(subdept.id, stage.id, checked === true)
-                              }
-                              disabled={!isAllocated}
-                              className="border-gray-300"
-                            />
-                          </div>
-                        </TableCell>
-                      </React.Fragment>
-                    )
-                  })
-                )
-              )}
+              {departments.map(dept => {
+                // Check if any subdepartment has this stage allocated
+                const hasAllocation = dept.subdepartments?.some(
+                  subdept => subdept.stages?.includes(stage.id)
+                ) || false;
+                
+                // Get the first subdepartment ID for this department (for the handler)
+                const subdeptId = dept.subdepartments?.[0]?.id || 0;
+                
+                return (
+                  <React.Fragment key={`cell-${dept.id}-${stage.id}`}>
+                    <TableCell className="border p-0">
+                      <Select
+                        value={hasAllocation ? 'allocated' : 'not-allocated'}
+                        onValueChange={(value) => 
+                          handleAllocationChange(subdeptId, stage.id, value === 'allocated')
+                        }
+                      >
+                        <SelectTrigger className="h-8 w-full border-0 shadow-none focus:ring-1 focus:ring-ring">
+                          <SelectValue placeholder="Select" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="allocated">Allocated</SelectItem>
+                          <SelectItem value="not-allocated">Not Allocated</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell className="border p-0">
+                      <div className="flex items-center justify-center p-2">
+                        <Checkbox 
+                          checked={hasAllocation}
+                          onCheckedChange={(checked) => 
+                            handleDisplayChange(subdeptId, stage.id, checked as boolean)
+                          }
+                        />
+                      </div>
+                    </TableCell>
+                  </React.Fragment>
+                );
+              })}
             </TableRow>
           ))}
         </TableBody>
