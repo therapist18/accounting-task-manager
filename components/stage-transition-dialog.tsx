@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { ArrowRight, Clock, CheckCircle } from "lucide-react"
+import type { Stage } from "@/lib/supabase/stages"
 
 interface StageTransitionDialogProps {
   open: boolean
@@ -25,11 +26,8 @@ interface StageTransitionDialogProps {
     estimatedDuration: number
     actualDuration?: number
   }
-  nextStages: Array<{
-    id: string
-    name: string
-    estimatedDuration: number
-  }>
+  stages: Stage[]
+  currentStageId?: string | null
   onTransition: (data: {
     nextStageId?: string
     notes?: string
@@ -41,12 +39,28 @@ export function StageTransitionDialog({
   open,
   onOpenChange,
   currentStage,
-  nextStages,
+  stages,
+  currentStageId,
   onTransition,
 }: StageTransitionDialogProps) {
-  const [nextStageId, setNextStageId] = useState<string>(nextStages[0]?.id || "")
+  const [nextStageId, setNextStageId] = useState<string>("")
   const [notes, setNotes] = useState("")
   const [skipToStage, setSkipToStage] = useState(false)
+  const [availableStages, setAvailableStages] = useState<Stage[]>([])
+
+  useEffect(() => {
+    if (!currentStageId) {
+      // If no current stage, show all stages
+      setAvailableStages(stages)
+      setNextStageId(stages[0]?.id?.toString() || "")
+    } else {
+      // Show only stages that come after the current one
+      const currentStageIndex = stages.findIndex(s => s.id.toString() === currentStageId)
+      const nextStages = currentStageIndex >= 0 ? stages.slice(currentStageIndex + 1) : []
+      setAvailableStages(nextStages)
+      setNextStageId(nextStages[0]?.id?.toString() || "")
+    }
+  }, [stages, currentStageId])
 
   const handleTransition = () => {
     onTransition({
@@ -60,6 +74,7 @@ export function StageTransitionDialog({
   }
 
   const formatDuration = (minutes: number) => {
+    if (!minutes) return "0m"
     const hours = Math.floor(minutes / 60)
     const mins = minutes % 60
     if (hours > 0) {
@@ -83,7 +98,7 @@ export function StageTransitionDialog({
             <div className="flex items-center justify-between p-3 border rounded-lg">
               <div className="flex items-center gap-2">
                 <CheckCircle className="h-4 w-4 text-green-600" />
-                <span className="font-medium">{currentStage.name}</span>
+                <span className="font-medium">{currentStage.name || 'Not Started'}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant={isOverdue ? "destructive" : "secondary"}>
@@ -104,12 +119,12 @@ export function StageTransitionDialog({
                 <SelectValue placeholder="Select next stage" />
               </SelectTrigger>
               <SelectContent>
-                {nextStages.map((stage) => (
-                  <SelectItem key={stage.id} value={stage.id}>
+                {availableStages.map((stage) => (
+                  <SelectItem key={stage.id} value={stage.id.toString()}>
                     <div className="flex items-center justify-between w-full">
                       <span>{stage.name}</span>
                       <Badge variant="outline" className="ml-2">
-                        {formatDuration(stage.estimatedDuration)}
+                        {formatDuration(stage.estimated_time || 0)}
                       </Badge>
                     </div>
                   </SelectItem>
@@ -138,7 +153,7 @@ export function StageTransitionDialog({
             <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
               <ArrowRight className="h-4 w-4" />
               <span className="text-sm">
-                Transitioning to: <strong>{nextStages.find((s) => s.id === nextStageId)?.name}</strong>
+                Transitioning to: <strong>{availableStages.find((s) => s.id.toString() === nextStageId)?.name}</strong>
               </span>
             </div>
           )}
@@ -147,7 +162,7 @@ export function StageTransitionDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleTransition}>
+          <Button onClick={handleTransition} disabled={!nextStageId}>
             {nextStageId === "complete" ? "Complete Task" : "Transition Stage"}
           </Button>
         </DialogFooter>

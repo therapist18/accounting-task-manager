@@ -3,9 +3,10 @@
 import { useState } from 'react'
 import { UserPlus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { useForm } from 'react-hook-form'
+import { useForm, SubmitHandler } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
+import { UserRole } from './database'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -42,7 +43,7 @@ const userFormSchema = z.object({
   email: z.string().email({
     message: 'Please enter a valid email address.',
   }),
-  role: z.enum(['admin', 'user', 'manager']),
+  role: z.enum(['admin', 'task_manager', 'task_assistant', 'officer']),
   start_date: z.string().optional(),
 })
 
@@ -54,14 +55,16 @@ export function AddUserDialog() {
   const router = useRouter()
 
   const form = useForm<UserFormValues>({
-    resolver: zodResolver(userFormSchema),
+    resolver: zodResolver(userFormSchema) as any,
     defaultValues: {
-      role: 'user',
+      name: '',
+      email: '',
+      role: 'task_assistant' as UserRole,
       start_date: new Date().toISOString().split('T')[0],
     },
   })
-
-  async function onSubmit(data: UserFormValues) {
+  
+  const onSubmit: SubmitHandler<UserFormValues> = async (data) => {
     try {
       setIsLoading(true)
 
@@ -95,6 +98,8 @@ export function AddUserDialog() {
       setIsLoading(false)
     }
   }
+
+
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -153,8 +158,9 @@ export function AddUserDialog() {
                     </FormControl>
                     <SelectContent>
                       <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="manager">Manager</SelectItem>
-                      <SelectItem value="user">User</SelectItem>
+                      <SelectItem value="task_manager">Task Manager</SelectItem>
+                      <SelectItem value="task_assistant">Task Assistant</SelectItem>
+                      <SelectItem value="officer">Officer</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />

@@ -6,10 +6,11 @@ import {
   fetchDepartments, 
   createDepartment as createDepartmentDb,
   createStage as createStageDb,
-  User,
+  User as DbUser,
   Department,
   Subdepartment,
-  Stage
+  Stage,
+  UserRole
 } from "./database"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -22,14 +23,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2 } from "lucide-react"
+import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, UserPlus, UserCheck, UserX } from "lucide-react"
+import supabase from "@/lib/supabase/client"
 import { toast } from "sonner"
-
 type User = {
   id: string
-  name: string
+  name: string | null
   email: string
-  role: 'admin' | 'task_manager' | 'task_assistant'
+  role: 'admin' | 'task_manager' | 'task_assistant' | 'officer' | string
+  created_at?: string
+  updated_at?: string
+  assignedDepartments?: string[]
+  assignedSubdepartments?: string[]
 }
 
 type Stage = {
@@ -91,19 +96,11 @@ export default function DepartmentsPage() {
   const [newClassInput, setNewClassInput] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
+  const [selectedSubdept, setSelectedSubdept] = useState<{deptId: string, subdept: Subdepartment} | null>(null)
 
-  // Default stages for all subdepartments
-  const defaultStages = [
-    "APPLIED DATE",
-    "PROCESSING PAID DATE",
-    "PAID KSH",
-    "PROCESSING UPLOAD DATE",
-    "RECEIVED DATE",
-    "APPROVED DATE",
-    "KCB PAID DATE",
-    "ISSUANCE UPLOAD DATE",
-    "WRITE UP DATE"
-  ]
+  // Global stages loaded from the database
+  const [globalStages, setGlobalStages] = useState<Array<{id: string, name: string}>>([])
 
   const [users, setUsers] = useState<User[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
@@ -117,20 +114,48 @@ export default function DepartmentsPage() {
 
   // Fetch data on component mount
   useEffect(() => {
+    const fetchGlobalStages = async () => {
+      try {
+        const { data: stages, error } = await supabase
+          .from('tm_stages')
+          .select('id, name')
+          .order('order_num', { ascending: true })
+        
+        if (error) throw error
+        setGlobalStages(stages || [])
+      } catch (error) {
+        console.error('Error fetching global stages:', error)
+        toast.error('Failed to load workflow stages')
+      }
+    }
+
     fetchData()
+    fetchUsers()
+    fetchGlobalStages()
   }, [])
+
+  // Fetch users from the database
+  const fetchUsers = async () => {
+    try {
+      const { data: users, error } = await supabase
+        .from('tm_users')
+        .select('*')
+        .order('name')
+      
+      if (error) throw error
+      setUsers(users || [])
+    } catch (error) {
+      console.error('Error fetching users:', error)
+      toast.error('Failed to load users')
+    }
+  }
 
   const fetchData = async () => {
     try {
       setLoading(true)
 
-      // Fetch users and departments in parallel using direct database functions
-      const [usersData, departmentsData] = await Promise.all([
-        fetchUsers(),
-        fetchDepartments()
-      ])
-
-      setUsers(usersData)
+      // Fetch departments using direct database function
+      const departmentsData = await fetchDepartments()
       setDepartments(departmentsData)
     } catch (error) {
       console.error('Error fetching data:', error)
@@ -156,8 +181,8 @@ export default function DepartmentsPage() {
       classes: [],
       taskManagerId: '',
       taskAssistantId: '',
-      stages: defaultStages.reduce((acc, stage) => {
-        acc[stage] = {
+      stages: globalStages.reduce((acc, stage) => {
+        acc[stage.name] = {
           applies: true,
           estimatedTime: 8,
           reminderDays: 1
@@ -244,35 +269,43 @@ export default function DepartmentsPage() {
   const handleSaveDepartment = async () => {
     try {
       setSaving(true)
-
+  
       // Validate form
       if (!departmentForm.name.trim()) {
         toast.error('Department name is required')
         return
       }
-
+  
       if (departmentForm.subdepartments.length === 0) {
         toast.error('At least one subdepartment is required')
         return
       }
-
-      // Validate subdepartments
-      for (const subdept of departmentForm.subdepartments) {
-        if (!subdept.name.trim()) {
-          toast.error('All subdepartments must have a name')
-          return
-        }
-        if (!subdept.taskManagerId || !subdept.taskAssistantId) {
-          toast.error('All subdepartments must have a task manager and assistant assigned')
-          return
-        }
+  
+      // Prepare department data
+      const departmentData = {
+        name: departmentForm.name.trim(),
+        description: departmentForm.description.trim() || null,
+        subdepartments: departmentForm.subdepartments.map(subdept => ({
+          name: subdept.name.trim(),
+          description: subdept.description.trim() || null,
+          classes: subdept.classes,
+          taskManagerId: subdept.taskManagerId === 'none' ? null : subdept.taskManagerId,
+          taskAssistantId: subdept.taskAssistantId === 'none' ? null : subdept.taskAssistantId,
+          stages: Object.entries(subdept.stages)
+            .filter(([_, stage]) => stage.applies)
+            .map(([name, stage]) => ({
+              name,
+              estimatedTime: stage.estimatedTime,
+              reminderDays: stage.reminderDays
+            }))
+        }))
       }
-
-      const newDepartment = await createDepartmentDb(departmentForm)
+  
+      const newDepartment = await createDepartmentDb(departmentData)
       setDepartments(prev => [...prev, newDepartment])
       setIsAddDepartmentOpen(false)
       toast.success('Department created successfully')
-
+  
       // Reset form
       setDepartmentForm({
         name: '',
@@ -331,6 +364,41 @@ export default function DepartmentsPage() {
   const getUserName = (userId: string) => {
     const user = users.find(u => u.id === userId)
     return user ? user.name : 'Unassigned'
+  }
+
+  const handleOpenAssignmentDialog = (deptId: string, subdept: Subdepartment) => {
+    setSelectedSubdept({ deptId, subdept })
+    setAssignmentDialogOpen(true)
+  }
+
+  const handleSaveAssignments = async (taskManagerId: string, taskAssistantId: string) => {
+    if (!selectedSubdept) return
+
+    try {
+      setSaving(true)
+      
+      // Update the subdepartment with new assignments
+      const { error } = await supabase
+        .from('tm_subdepartments')
+        .update({
+          task_manager_id: taskManagerId || null,
+          task_assistant_id: taskAssistantId || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', selectedSubdept.subdept.id)
+
+      if (error) throw error
+
+      // Refresh the data
+      await fetchData()
+      setAssignmentDialogOpen(false)
+      toast.success('Assignments updated successfully')
+    } catch (error) {
+      console.error('Error updating assignments:', error)
+      toast.error('Failed to update assignments')
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (loading) {
@@ -505,8 +573,12 @@ export default function DepartmentsPage() {
                                 </TableCell>
                                 <TableCell>
                                   <div className="flex space-x-2">
-                                    <Button variant="ghost" size="sm">
-                                      <Users className="h-4 w-4" />
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm"
+                                      onClick={() => handleOpenAssignmentDialog(dept.id, subdept)}
+                                    >
+                                      <UserPlus className="h-4 w-4" />
                                     </Button>
                                     <Button variant="ghost" size="sm">
                                       <Settings className="h-4 w-4" />
@@ -605,36 +677,38 @@ export default function DepartmentsPage() {
                       <div className="space-y-2">
                         <Label>Task Manager</Label>
                         <Select
-                          value={subdept.taskManagerId}
-                          onValueChange={(value) => handleSubdepartmentChange(subdeptIndex, 'taskManagerId', value)}
+                          value={subdept.taskManagerId || 'none'}
+                          onValueChange={(value) => handleSubdepartmentChange(subdeptIndex, 'taskManagerId', value === 'none' ? null : value)}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select task manager" />
                           </SelectTrigger>
                           <SelectContent>
-                            {users.filter(u => u.role === 'task_manager' || u.role === 'admin').map(user => (
-                              <SelectItem key={user.id} value={user.id}>
-                                {user.name} ({user.email})
-                              </SelectItem>
-                            ))}
+                            <SelectItem value="none">None</SelectItem>
+                            {users.map(user => (
+                                <SelectItem key={user.id} value={user.id}>
+                                  {user.name}
+                                </SelectItem>
+                              ))}
                           </SelectContent>
                         </Select>
                       </div>
                       <div className="space-y-2">
                         <Label>Task Assistant</Label>
                         <Select
-                          value={subdept.taskAssistantId}
-                          onValueChange={(value) => handleSubdepartmentChange(subdeptIndex, 'taskAssistantId', value)}
+                          value={subdept.taskAssistantId || 'none'}
+                          onValueChange={(value) => handleSubdepartmentChange(subdeptIndex, 'taskAssistantId', value === 'none' ? null : value)}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select task assistant" />
                           </SelectTrigger>
                           <SelectContent>
-                            {users.filter(u => u.role === 'task_assistant' || u.role === 'admin').map(user => (
-                              <SelectItem key={user.id} value={user.id}>
-                                {user.name} ({user.email})
-                              </SelectItem>
-                            ))}
+                            <SelectItem value="none">None</SelectItem>
+                            {users.map(user => (
+                                <SelectItem key={user.id} value={user.id}>
+                                  {user.name}
+                                </SelectItem>
+                              ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -680,51 +754,67 @@ export default function DepartmentsPage() {
 
                     {/* Stages Configuration */}
                     <div className="space-y-2">
-                      <Label>Stages Configuration</Label>
-                      <div className="border rounded-md p-4 space-y-3 max-h-60 overflow-y-auto">
-                        {defaultStages.map((stageName) => (
-                          <div key={stageName} className="flex items-center space-x-4 p-2 border rounded">
-                            <div className="flex items-center space-x-2">
-                              <Checkbox
-                                checked={subdept.stages[stageName]?.applies || false}
-                                onCheckedChange={(checked) =>
-                                  handleStageChange(subdeptIndex, stageName, 'applies', checked)
-                                }
-                              />
-                              <span className="text-sm font-medium min-w-[150px]">{stageName}</span>
-                            </div>
-
-                            {subdept.stages[stageName]?.applies && (
-                              <div className="flex items-center space-x-2 flex-1">
-                                <div className="flex items-center space-x-1">
-                                  <Label className="text-xs">Time (hrs):</Label>
-                                  <Input
-                                    type="number"
-                                    min="1"
-                                    className="w-20"
-                                    value={subdept.stages[stageName]?.estimatedTime || 8}
-                                    onChange={(e) =>
-                                      handleStageChange(subdeptIndex, stageName, 'estimatedTime', parseInt(e.target.value) || 8)
-                                    }
-                                  />
-                                </div>
-                                <div className="flex items-center space-x-1">
-                                  <Label className="text-xs">Reminder (days):</Label>
-                                  <Input
-                                    type="number"
-                                    min="1"
-                                    className="w-20"
-                                    value={subdept.stages[stageName]?.reminderDays || 1}
-                                    onChange={(e) =>
-                                      handleStageChange(subdeptIndex, stageName, 'reminderDays', parseInt(e.target.value) || 1)
-                                    }
-                                  />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
+                      <div className="flex items-center justify-between">
+                        <Label>Stages Configuration</Label>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => window.location.href = '/dashboard/settings/workflow-stages'}
+                        >
+                          <Settings className="h-4 w-4 mr-2" />
+                          Manage Stages
+                        </Button>
                       </div>
+                      {globalStages.length > 0 ? (
+                        <div className="border rounded-md p-4 space-y-3 max-h-60 overflow-y-auto">
+                          {globalStages.map((stage) => (
+                            <div key={stage.id} className="flex items-center space-x-4 p-2 border rounded">
+                              <div className="flex items-center space-x-2">
+                                <Checkbox
+                                  checked={subdept.stages[stage.name]?.applies || false}
+                                  onCheckedChange={(checked) =>
+                                    handleStageChange(subdeptIndex, stage.name, 'applies', checked)
+                                  }
+                                />
+                                <span className="text-sm font-medium min-w-[150px]">{stage.name}</span>
+                              </div>
+
+                              {subdept.stages[stage.name]?.applies && (
+                                <div className="flex items-center space-x-2 flex-1">
+                                  <div className="flex items-center space-x-1">
+                                    <Label className="text-xs">Time (hrs):</Label>
+                                    <Input
+                                      type="number"
+                                      min="1"
+                                      className="w-20"
+                                      value={subdept.stages[stage.name]?.estimatedTime || 8}
+                                      onChange={(e) =>
+                                        handleStageChange(subdeptIndex, stage.name, 'estimatedTime', parseInt(e.target.value) || 8)
+                                      }
+                                    />
+                                  </div>
+                                  <div className="flex items-center space-x-1">
+                                    <Label className="text-xs">Reminder (days):</Label>
+                                    <Input
+                                      type="number"
+                                      min="1"
+                                      className="w-20"
+                                      value={subdept.stages[stage.name]?.reminderDays || 1}
+                                      onChange={(e) =>
+                                        handleStageChange(subdeptIndex, stage.name, 'reminderDays', parseInt(e.target.value) || 1)
+                                      }
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-4 text-muted-foreground text-sm">
+                          No workflow stages found. Please add stages in the workflow settings.
+                        </div>
+                      )}
                     </div>
                   </div>
                 </Card>
@@ -793,11 +883,107 @@ export default function DepartmentsPage() {
                 }}
                 disabled={saving}
               >
-                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Add Stage
+                {saving ? 'Saving...' : 'Add Stage'}
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assignment Dialog */}
+      <Dialog open={assignmentDialogOpen} onOpenChange={setAssignmentDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Assign Team Members</DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              {selectedSubdept?.subdept.name} - {departments.find(d => d.id === selectedSubdept?.deptId)?.name}
+            </p>
+          </DialogHeader>
+          
+          {selectedSubdept && (
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Task Manager</Label>
+                <Select
+                  value={selectedSubdept.subdept.taskManagerId || ''}
+                  onValueChange={(value) => {
+                    setSelectedSubdept(prev => prev ? {
+                      ...prev,
+                      subdept: {
+                        ...prev.subdept,
+                        taskManagerId: value || undefined
+                      }
+                    } : null)
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select task manager" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Unassigned</SelectItem>
+                    {users
+                      .filter(u => ['admin', 'task_manager'].includes(u.role))
+                      .map(user => (
+                        <SelectItem key={user.id} value={user.id}>
+                          {user.name}
+                        </SelectItem>
+                      ))
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Task Assistant</Label>
+                <Select
+                  value={selectedSubdept.subdept.taskAssistantId || ''}
+                  onValueChange={(value) => {
+                    setSelectedSubdept(prev => prev ? {
+                      ...prev,
+                      subdept: {
+                        ...prev.subdept,
+                        taskAssistantId: value || undefined
+                      }
+                    } : null)
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select task assistant" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Unassigned</SelectItem>
+                    {users
+                      .filter(u => ['admin', 'task_assistant', 'officer'].includes(u.role))
+                      .map(user => (
+                        <SelectItem key={user.id} value={user.id}>
+                          {user.name}
+                        </SelectItem>
+                      ))
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-4">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setAssignmentDialogOpen(false)}
+                  disabled={saving}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={() => selectedSubdept && handleSaveAssignments(
+                    selectedSubdept.subdept.taskManagerId || '',
+                    selectedSubdept.subdept.taskAssistantId || ''
+                  )}
+                  disabled={saving}
+                >
+                  {saving ? 'Saving...' : 'Save Assignments'}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

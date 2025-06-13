@@ -44,7 +44,6 @@ export async function fetchUsers(): Promise<User[]> {
     const { data, error } = await supabase
       .from('tm_users')
       .select('id, name, email, role')
-      .in('role', ['admin', 'task_manager', 'task_assistant'])
       .order('name')
 
     if (error) throw error
@@ -118,12 +117,13 @@ export async function fetchDepartments(): Promise<Department[]> {
 
 export async function createDepartment(departmentData: {
   name: string
-  description?: string
+  description?: string | null
   subdepartments: Array<{
     name: string
-    description?: string
-    taskManagerId: string
-    taskAssistantId: string
+    description?: string | null
+    classes?: any[]
+    taskManagerId?: string | null
+    taskAssistantId?: string | null
     stages: {
       [key: string]: {
         applies: boolean
@@ -134,45 +134,79 @@ export async function createDepartment(departmentData: {
   }>
 }): Promise<Department> {
   try {
-    const departmentId = nanoid()
-
-    // Insert department
-    const { error: deptError } = await supabase
+    // Insert department (let DB auto-generate the ID)
+    const { data: newDepartment, error: deptError } = await supabase
       .from('tm_departments')
       .insert({
-        id: departmentId,
         name: departmentData.name,
         description: departmentData.description
       })
+      .select()
+      .single()
 
     if (deptError) throw deptError
+    const departmentId = newDepartment.id
 
     // Insert subdepartments and stages
     for (const subdeptData of departmentData.subdepartments) {
-      const subdepartmentId = nanoid()
+      // Prepare task manager data
+      const taskManagerUser = subdeptData.taskManagerId ? await supabase
+        .from('tm_users')
+        .select('*')
+        .eq('id', subdeptData.taskManagerId)
+        .single() : null
 
-      // Insert subdepartment
-      const { error: subdeptError } = await supabase
+      // Prepare task assistant data
+      const taskAssistantUser = subdeptData.taskAssistantId ? await supabase
+        .from('tm_users')
+        .select('*')
+        .eq('id', subdeptData.taskAssistantId)
+        .single() : null
+
+      // Insert subdepartment with task assignments
+      const { data: subdeptResult, error: subdeptError } = await supabase
         .from('tm_subdepartments')
         .insert({
-          id: subdepartmentId,
           name: subdeptData.name,
           description: subdeptData.description,
-          department_id: departmentId
+          department_id: departmentId,
+          task_manager: taskManagerUser?.data ? {
+            id: taskManagerUser.data.id,
+            start_date: new Date().toISOString(),
+            end_date: null
+          } : null,
+          task_assistant: taskAssistantUser?.data ? {
+            id: taskAssistantUser.data.id,
+            start_date: new Date().toISOString(),
+            end_date: null
+          } : null
         })
+        .select()
+        .single()
+
+      if (subdeptError) throw subdeptError
+      
+      const subdepartmentId = subdeptResult?.id
+      if (!subdepartmentId) throw new Error('Failed to create subdepartment')
 
       if (subdeptError) throw subdeptError
 
       // Insert stages that apply
       const applicableStages = Object.entries(subdeptData.stages)
-        .filter(([_, stageConfig]) => stageConfig.applies)
-        .map(([stageName, stageConfig], index) => ({
-          id: nanoid(),
-          name: stageName,
-          subdepartment_id: subdepartmentId,
-          order_num: index + 1,
-          estimated_time: stageConfig.estimatedTime * 60 // Convert hours to minutes
-        }))
+        .filter(([_, stageConfig]) => {
+          const config = stageConfig as { applies: boolean }
+          return config.applies
+        })
+        .map(([stageName, stageConfig], index) => {
+          const config = stageConfig as { estimatedTime: number }
+          return {
+            id: nanoid(),
+            name: stageName,
+            subdepartment_id: subdepartmentId,
+            order_num: index + 1,
+            estimated_time: config.estimatedTime * 60 // Convert hours to minutes
+          }
+        })
 
       if (applicableStages.length > 0) {
         const { error: stagesError } = await supabase

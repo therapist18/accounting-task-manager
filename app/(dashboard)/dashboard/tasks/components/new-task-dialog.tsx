@@ -102,7 +102,6 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         supabase.from('tm_departments').select('*').order('name'),
         supabase.from('tm_users')
           .select('id, name, email')
-          .eq('role', 'staff')
           .order('name'),
         supabase.from('registry_individuals')
           .select('id, full_name, alternative_email, contact_details')

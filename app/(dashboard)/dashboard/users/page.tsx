@@ -6,15 +6,18 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { UserCheck, UserX, Users, History } from "lucide-react"
+import { UserCheck, UserX, Users, History, Briefcase, ChevronRight } from "lucide-react"
 import { TaskAssignmentDialog } from "@/components/task-assignment-dialog"
 import { 
   fetchUsers, 
   updateUserStatus, 
   type User, 
   type StatusHistoryEntry,
-  getUserStatusHistory 
+  getUserStatusHistory,
+  type UserRole 
 } from './database'
+import { fetchDepartments } from '../departments/database'
+import { UserAssignmentsDialog } from "./user-assignments-dialog"
 import {
   Dialog,
   DialogContent,
@@ -29,28 +32,66 @@ export default function UsersPage() {
   const [inactiveUsers, setInactiveUsers] = useState<User[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
-  const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [statusHistory, setStatusHistory] = useState<StatusHistoryEntry[]>([])
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
+  const [departments, setDepartments] = useState<any[]>([])
+  const [userAssignments, setUserAssignments] = useState<{[key: string]: {departments: string[], subdepartments: string[]}}>({})
+  const [assignmentsDialogOpen, setAssignmentsDialogOpen] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<User | null>(null)
 
   useEffect(() => {
-    async function loadUsers() {
+    async function loadData() {
       setIsLoading(true)
       try {
-        const [active, inactive] = await Promise.all([
+        const [active, inactive, depts] = await Promise.all([
           fetchUsers(true),
-          fetchUsers(false)
+          fetchUsers(false),
+          fetchDepartments()
         ])
+        
+        setDepartments(depts)
+        
+        // Process user assignments
+        const assignments: {[key: string]: {departments: string[], subdepartments: string[]}} = {}
+        
+        // Initialize assignments for all users
+        ;[...active, ...inactive].forEach(user => {
+          assignments[user.id] = { departments: [], subdepartments: [] }
+        })
+        
+        // Process department assignments
+        depts.forEach(dept => {
+          dept.subdepartments.forEach(subdept => {
+            if (subdept.taskManagerId && assignments[subdept.taskManagerId]) {
+              assignments[subdept.taskManagerId].departments = [
+                ...new Set([...assignments[subdept.taskManagerId].departments, dept.id])
+              ]
+              assignments[subdept.taskManagerId].subdepartments = [
+                ...new Set([...assignments[subdept.taskManagerId].subdepartments, subdept.id])
+              ]
+            }
+            if (subdept.taskAssistantId && assignments[subdept.taskAssistantId]) {
+              assignments[subdept.taskAssistantId].departments = [
+                ...new Set([...assignments[subdept.taskAssistantId].departments, dept.id])
+              ]
+              assignments[subdept.taskAssistantId].subdepartments = [
+                ...new Set([...assignments[subdept.taskAssistantId].subdepartments, subdept.id])
+              ]
+            }
+          })
+        })
+        
+        setUserAssignments(assignments)
         setActiveUsers(active)
         setInactiveUsers(inactive)
       } catch (error) {
-        console.error('Failed to load users:', error)
+        console.error('Failed to load data:', error)
       } finally {
         setIsLoading(false)
       }
     }
 
-    loadUsers()
+    loadData()
   }, [])
 
   const handleStatusChange = async (userId: string, makeActive: boolean) => {
@@ -83,6 +124,20 @@ export default function UsersPage() {
 
   const renderUserRow = (user: User, isActive: boolean) => {
     const lastStatusChange = user.status_history?.[user.status_history.length - 1]
+    const assignments = userAssignments[user.id] || { departments: [], subdepartments: [] }
+    
+    const getDepartmentName = (id: string) => {
+      const dept = departments.find(d => d.id === id)
+      return dept?.name || 'Unknown Department'
+    }
+    
+    const getSubdepartmentName = (id: string) => {
+      for (const dept of departments) {
+        const subdept = dept.subdepartments?.find((s: any) => s.id === id)
+        if (subdept) return subdept.name
+      }
+      return 'Unknown Subdepartment'
+    }
     
     return (
       <TableRow key={user.id}>
@@ -101,7 +156,27 @@ export default function UsersPage() {
           </div>
         </TableCell>
         <TableCell>{user.email}</TableCell>
-        <TableCell className="capitalize">{user.role}</TableCell>
+        <TableCell className="capitalize">
+          <div className="flex flex-col">
+            <span>{user.role.replace(/_/g, ' ')}</span>
+            {assignments.departments.length > 0 && (
+              <div className="mt-1">
+                <div 
+              className="flex items-center text-xs text-muted-foreground hover:text-primary cursor-pointer transition-colors"
+              onClick={(e) => {
+                e.stopPropagation()
+                setSelectedUser(user)
+                setAssignmentsDialogOpen(true)
+              }}
+            >
+              <Briefcase className="h-3 w-3 mr-1 flex-shrink-0" />
+              <span className="truncate">{assignments.departments.length} department(s)</span>
+              <ChevronRight className="h-3 w-3 ml-1" />
+            </div>
+              </div>
+            )}
+          </div>
+        </TableCell>
         <TableCell>
           <div className="flex items-center gap-2">
             <span className={`h-2 w-2 rounded-full ${isActive ? 'bg-green-500' : 'bg-gray-400'}`} />
@@ -189,11 +264,11 @@ export default function UsersPage() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
-                    <TableHead>Role</TableHead>
+                    <TableHead>Role & Assignments</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Created Date</TableHead>
                     <TableHead>Last Active</TableHead>
-                    <TableHead>Actions</TableHead>
+                    <TableHead className="w-48">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -293,6 +368,13 @@ export default function UsersPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <UserAssignmentsDialog 
+        open={assignmentsDialogOpen} 
+        onOpenChange={setAssignmentsDialogOpen} 
+        user={selectedUser}
+        departments={departments}
+      />
     </div>
   )
 }

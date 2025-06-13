@@ -17,8 +17,10 @@ import { StageTimeline } from "@/components/stage-timeline"
 import { StageAutomation } from "@/lib/stage-automation"
 import { NewTaskDialog } from "@/app/(dashboard)/dashboard/tasks/components/new-task-dialog"
 import { getTasks, updateTaskAssignment } from "@/lib/supabase/tasks"
+import { getStages } from "@/lib/supabase/stages"
 import { supabase } from "@/lib/supabase/client"
 import type { Database } from "@/lib/supabase/database.types"
+import type { Stage } from "@/lib/supabase/stages"
 
 type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
   department?: { id: string; name: string } | null
@@ -51,32 +53,37 @@ type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
 }
 
 export default function TasksPage() {
-  // Remove unused date state
-  // const [date, setDate] = useState<Date>()
-  const [selectedTask, setSelectedTask] = useState<any>(null)
-  const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
-  const [transitionDialogOpen, setTransitionDialogOpen] = useState(false)
-  const [newTaskDialogOpen, setNewTaskDialogOpen] = useState(false)
   const [tasks, setTasks] = useState<Task[]>([])
+  const [users, setUsers] = useState<{ id: string; name: string | null; email: string | null; role?: string }[]>([])
+  const [stages, setStages] = useState<Stage[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  // Fetch tasks from the database
-  const fetchTasks = async () => {
-    try {
-      setLoading(true)
-      const fetchedTasks = await getTasks()
-      setTasks(fetchedTasks)
-    } catch (err) {
-      console.error("Error fetching tasks:", err)
-      setError("Failed to load tasks. Please try again later.")
-    } finally {
-      setLoading(false)
-    }
-  }
+  const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [stageTransitionDialogOpen, setStageTransitionDialogOpen] = useState(false)
+  const [newTaskDialogOpen, setNewTaskDialogOpen] = useState(false)
 
   useEffect(() => {
-    fetchTasks()
+    const loadData = async () => {
+      try {
+        const [tasksData, { data: usersData, error: usersError }, stagesData] = await Promise.all([
+          getTasks(),
+          supabase.from('tm_users').select('id, name, email, role'),
+          getStages()
+        ])
+
+        if (usersError) throw usersError
+
+        setTasks(tasksData)
+        setUsers(usersData || [])
+        setStages(stagesData)
+      } catch (error) {
+        console.error('Error loading data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadData()
   }, [])
 
   // Format task data for display
@@ -165,29 +172,11 @@ export default function TasksPage() {
   }
 
   const handleStageTransition = (taskId: string) => {
-    const task = tasks.find((t) => t.id === taskId)
-    if (task && task.current_stage) {
-      setSelectedTask({
-        id: task.id,
-        currentStage: {
-          id: task.current_stage.id,
-          name: task.current_stage.name,
-          estimatedDuration: task.current_stage.estimated_time || 0,
-          startedAt: task.current_stage_started_at || task.created_at || new Date().toISOString(),
-          actualDuration: Math.floor((new Date().getTime() - new Date(task.current_stage_started_at || task.created_at || new Date()).getTime()) / (1000 * 60)),
-          order_num: task.current_stage.order_num || 0,
-        },
-        nextStages: (task.subdepartment?.stages || [])
-          .filter((s) => s.order_num > (task.current_stage?.order_num || 0))
-          .map((s) => ({
-            id: s.id,
-            name: s.name,
-            estimatedDuration: s.estimated_time || 0,
-            order_num: s.order_num || 0,
-          })) || [],
-      } as any)
-      setTransitionDialogOpen(true)
-    }
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) return
+    
+    setSelectedTask(task)
+    setStageTransitionDialogOpen(true)
   }
 
   const getStatusBadge = (status: string) => {
@@ -489,34 +478,54 @@ export default function TasksPage() {
       {/* Stage Transition Dialog */}
       {selectedTask && (
         <StageTransitionDialog
-          open={transitionDialogOpen}
-          onOpenChange={setTransitionDialogOpen}
-          currentStage={selectedTask.currentStage}
-          nextStages={selectedTask.nextStages || []}
+          open={stageTransitionDialogOpen}
+          onOpenChange={setStageTransitionDialogOpen}
+          currentStage={{
+            id: selectedTask.current_stage?.id?.toString() || '',
+            name: selectedTask.current_stage?.name || 'Not Started',
+            estimatedDuration: selectedTask.current_stage?.estimated_time || 0,
+            actualDuration: selectedTask.current_stage_started_at
+              ? (new Date().getTime() - new Date(selectedTask.current_stage_started_at).getTime()) / (1000 * 60) // in minutes
+              : 0
+          }}
+          stages={stages}
+          currentStageId={selectedTask.current_stage?.id?.toString()}
           onTransition={async (data) => {
             try {
-              // Update task's current stage
-              await supabase
+              // Update the task's current stage
+              const { data: updatedTask, error } = await supabase
                 .from('tm_tasks')
                 .update({
-                  current_stage_id: data.nextStageId,
-                  current_stage_started_at: new Date().toISOString(),
+                  current_stage_id: data.nextStageId ? parseInt(data.nextStageId) : null,
+                  current_stage_started_at: data.nextStageId ? new Date().toISOString() : null,
                   status: data.nextStageId ? 'in_progress' : 'completed',
                   updated_at: new Date().toISOString()
                 })
                 .eq('id', selectedTask.id)
+                .select('*')
+                .single()
+
+              if (error) throw error
+
+              // Update the tasks list
+              setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t))
               
-              // Add to stage history
-              if (selectedTask.currentStage) {
-                await supabase
-                  .from('tm_task_stages')
-                  .insert([{
-                    task_id: selectedTask.id,
-                    stage_id: selectedTask.currentStage.id,
-                    started_at: selectedTask.currentStage.startedAt || new Date().toISOString(),
-                    completed_at: new Date().toISOString(),
-                    notes: data.notes
-                  }])
+              // Add stage history
+              if (data.nextStageId) {
+                await supabase.from('tm_task_stage_history').insert({
+                  task_id: selectedTask.id,
+                  stage_id: parseInt(data.nextStageId),
+                  started_at: new Date().toISOString(),
+                  notes: data.notes
+                })
+              } else {
+                await supabase.from('tm_task_stage_history').insert({
+                  task_id: selectedTask.id,
+                  stage_id: selectedTask.current_stage?.id,
+                  started_at: selectedTask.currentStage.startedAt || new Date().toISOString(),
+                  completed_at: new Date().toISOString(),
+                  notes: data.notes
+                })
               }
               
               // Refresh tasks

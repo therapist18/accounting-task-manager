@@ -9,12 +9,14 @@ export interface StatusHistoryEntry {
     end_date?: string | null
 }
 
+export type UserRole = 'admin' | 'task_manager' | 'task_assistant' | 'officer'
+
 export interface User {
     id: string
     clerk_id: string
     email: string
     name: string
-    role: string
+    role: UserRole
     created_at: string
     updated_at: string
     status_history: StatusHistoryEntry[]
