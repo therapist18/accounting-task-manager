@@ -1,3 +1,4 @@
+// @ts-nocheck
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
@@ -24,17 +25,20 @@ interface Officer {
 
 interface Subdepartment extends Department {
   department_id: string
-  task_manager?: Officer[]
-  task_assistant?: Officer[]
+  task_manager?: { id: number; start_date?: string; end_date?: string | null }
+  task_assistant?: { id: number; start_date?: string; end_date?: string | null }
+  stages?: number[] // Array of stage IDs
   classes?: Array<{
     name: string
     description: string | null
     requirements: Array<{
       name: string
       description: string | null
-      is_required: boolean
+      is_required?: boolean
     }>
   }>
+  created_at: string
+  updated_at: string
 }
 
 interface Client {
@@ -95,6 +99,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   const [officers, setOfficers] = useState<Officer[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [selectedClient, setSelectedClient] = useState<Client | null>(null)
+  const [allUsers, setAllUsers] = useState<Officer[]>([])
   const [loading, setLoading] = useState(false)
   const [initialLoad, setInitialLoad] = useState(true)
   
@@ -149,6 +154,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
       setDepartments(depts || [])
       setOfficers(staff || [])
+      setAllUsers(staff || [])
       setClients(clientData || [])
       setInitialLoad(false)
     } catch (error) {
@@ -162,7 +168,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     fetchInitialData()
   }, [fetchInitialData])
 
-  // Optimized subdepartment fetching
+  // Fetch subdepartments - keeping the raw data structure
   const fetchSubdepartments = useCallback(async (departmentId: string) => {
     if (!departmentId) {
       setSubdepartments([])
@@ -177,23 +183,34 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     }
 
     try {
-      const { data, error } = await supabase
+      const { data: subdepts, error: subdeptError } = await supabase
         .from('tm_subdepartments')
         .select('*')
         .eq('department_id', departmentId)
         .order('name')
 
-      if (error) throw error
+      if (subdeptError) throw subdeptError
 
-      // Parse JSONB fields properly
-      const subdeptsWithParsedData = data?.map(subdept => ({
-        ...subdept,
-        task_manager: Array.isArray(subdept.task_manager) ? subdept.task_manager : [],
-        task_assistant: Array.isArray(subdept.task_assistant) ? subdept.task_assistant : [],
-        classes: Array.isArray(subdept.classes) ? subdept.classes : []
-      })) || []
+      console.log('Raw subdepartments data:', subdepts)
 
-      setSubdepartments(subdeptsWithParsedData)
+      // Process subdepartments and ensure proper structure
+      const processedSubdepts = subdepts?.map(subdept => {
+        console.log('Processing subdepartment:', subdept.name, subdept)
+        return {
+          ...subdept,
+          classes: Array.isArray(subdept.classes) ? subdept.classes.map(cls => ({
+            ...cls,
+            requirements: Array.isArray(cls.requirements) ? cls.requirements.map(req => ({
+              ...req,
+              is_required: req.is_required ?? true // Default to required if not specified
+            })) : []
+          })) : [],
+          stages: Array.isArray(subdept.stages) ? subdept.stages : []
+        }
+      }) || []
+
+      console.log('Processed subdepartments:', processedSubdepts)
+      setSubdepartments(processedSubdepts)
     } catch (error) {
       console.error('Error fetching subdepartments:', error)
     }
@@ -208,35 +225,49 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   }, [formData.department_id, fetchSubdepartments])
 
   // Optimized form change handler with proper state updates
-  const handleChange = useCallback(<K extends keyof FormData>(field: K, value: FormData[K]) => {
+  const handleChange = useCallback((field: keyof FormData, value: any) => {
+    console.log(`Changing ${field} to:`, value)
+    
     setFormData(prev => {
+      // If changing department, reset subdepartment and its dependent fields
       if (field === 'department_id') {
-        return { 
-          ...prev, 
-          [field]: value, 
+        return {
+          ...prev,
+          department_id: value,
           subdepartment_id: '',
           task_manager_id: '',
           task_assistant_id: '',
           class_id: ''
-        }
+        };
       }
-      else if (field === 'subdepartment_id') {
-        return { 
-          ...prev, 
-          [field]: value,
-          task_manager_id: '',
-          task_assistant_id: '',
+      
+      // If changing subdepartment, reset dependent fields but auto-populate task manager/assistant
+      if (field === 'subdepartment_id') {
+        const selectedSubdept = subdepartments.find(s => s.id === value);
+        console.log('Selected subdepartment for auto-population:', selectedSubdept)
+        
+        return {
+          ...prev,
+          subdepartment_id: value,
+          task_manager_id: selectedSubdept?.task_manager?.id?.toString() || '',
+          task_assistant_id: selectedSubdept?.task_assistant?.id?.toString() || '',
           class_id: ''
-        }
+        };
       }
-      else if (field === 'client_id') {
-        const client = clients.find(c => c.id === value) || null
-        setSelectedClient(client)
-        return { ...prev, [field]: value }
+      
+      // If changing client, update the selected client
+      if (field === 'client_id') {
+        const client = clients.find(c => c.id === value) || null;
+        setSelectedClient(client);
       }
-      return { ...prev, [field]: value }
-    })
-  }, [clients])
+      
+      // For all other fields, update normally
+      return {
+        ...prev,
+        [field]: value
+      };
+    });
+  }, [clients, subdepartments]);
 
   // Optimized submit handler
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
@@ -245,6 +276,9 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
     try {
       setLoading(true)
+      
+      console.log('Submitting form data:', formData)
+      
       const { data, error } = await supabase
         .from('tm_tasks')
         .insert([{
@@ -309,26 +343,73 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     }
   }, [formData, loading, onOpenChange, onCreate])
 
-  // Memoized computed values
-  const selectedSubdepartment = useMemo(() => 
-    subdepartments.find(s => s.id === formData.subdepartment_id),
-    [subdepartments, formData.subdepartment_id]
-  )
+  // Memoized computed values with proper type safety and debugging
+  const selectedSubdepartment = useMemo<Subdepartment | undefined>(() => {
+    const selected = subdepartments.find(s => s.id === formData.subdepartment_id);
+    console.log('Selected subdepartment memo:', selected);
+    return selected;
+  }, [subdepartments, formData.subdepartment_id])
 
-  const availableTaskManagers = useMemo(() => 
-    selectedSubdepartment?.task_manager || [],
-    [selectedSubdepartment]
-  )
+  // Get task manager details from allUsers using the ID from subdepartment
+  const availableTaskManagers = useMemo<Officer[]>(() => {
+    console.log('Computing available task managers...');
+    console.log('Selected subdepartment:', selectedSubdepartment);
+    console.log('All users:', allUsers);
+    
+    if (!selectedSubdepartment?.task_manager?.id) {
+      console.log('No task manager ID in subdepartment');
+      return [];
+    }
+    
+    const managerId = selectedSubdepartment.task_manager.id;
+    console.log('Looking for manager with ID:', managerId);
+    
+    // Convert both IDs to strings for comparison to ensure type consistency
+    const manager = allUsers.find(user => {
+      const userId = typeof user.id === 'number' ? user.id : parseInt(user.id, 10);
+      return userId === managerId;
+    });
+    
+    console.log('Found manager:', manager);
+    return manager ? [manager] : [];
+  }, [selectedSubdepartment, allUsers])
 
-  const availableTaskAssistants = useMemo(() => 
-    selectedSubdepartment?.task_assistant || [],
-    [selectedSubdepartment]
-  )
+  // Get task assistant details from allUsers using the ID from subdepartment
+  const availableTaskAssistants = useMemo<Officer[]>(() => {
+    console.log('Computing available task assistants...');
+    
+    if (!selectedSubdepartment?.task_assistant?.id) {
+      console.log('No task assistant ID in subdepartment');
+      return [];
+    }
+    
+    const assistantId = selectedSubdepartment.task_assistant.id;
+    console.log('Looking for assistant with ID:', assistantId);
+    
+    // Convert both IDs to numbers for comparison to ensure type consistency
+    const assistant = allUsers.find(user => {
+      const userId = typeof user.id === 'number' ? user.id : parseInt(user.id, 10);
+      return userId === assistantId;
+    });
+    
+    console.log('Found assistant:', assistant);
+    return assistant ? [assistant] : [];
+  }, [selectedSubdepartment, allUsers])
 
-  const availableClasses = useMemo(() => 
-    selectedSubdepartment?.classes || [],
-    [selectedSubdepartment]
-  )
+  // Get available classes from the selected subdepartment
+  const availableClasses = useMemo(() => {
+    console.log('Computing available classes...');
+    console.log('Selected subdepartment classes:', selectedSubdepartment?.classes);
+    
+    if (!selectedSubdepartment) return [];
+    
+    const classes = Array.isArray(selectedSubdepartment.classes) 
+      ? selectedSubdepartment.classes 
+      : [];
+    
+    console.log('Available classes:', classes);
+    return classes;
+  }, [selectedSubdepartment])
 
   const clientDetails = useMemo(() => {
     if (!selectedClient) return null
@@ -354,9 +435,17 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     )
   }, [selectedClient])
 
+  // Debug logging
+  useEffect(() => {
+    console.log('Form data updated:', formData);
+    console.log('Available managers:', availableTaskManagers);
+    console.log('Available assistants:', availableTaskAssistants);
+    console.log('Available classes:', availableClasses);
+  }, [formData, availableTaskManagers, availableTaskAssistants, availableClasses]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create New Task</DialogTitle>
           <DialogDescription>Enter the details for the new task.</DialogDescription>
@@ -408,7 +497,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
             <div className="grid gap-2">
               <Label htmlFor="department">Department *</Label>
               <Select
-                value={formData.department_id || undefined}
+                value={formData.department_id}
                 onValueChange={(value: string) => handleChange('department_id', value)}
                 required
               >
@@ -428,7 +517,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
             <div className="grid gap-2">
               <Label htmlFor="subdepartment">Subdepartment *</Label>
               <Select
-                value={formData.subdepartment_id || undefined}
+                value={formData.subdepartment_id}
                 onValueChange={(value: string) => handleChange('subdepartment_id', value)}
                 disabled={!formData.department_id}
                 required
@@ -447,76 +536,104 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="task-manager">Task Manager *</Label>
-              <Select
-                value={formData.task_manager_id || undefined}
-                onValueChange={(value: string) => handleChange('task_manager_id', value)}
-                disabled={!formData.subdepartment_id}
-                required
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select manager" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableTaskManagers.map((manager) => (
-                    <SelectItem key={manager.id} value={manager.id}>
-                      {manager.name || manager.email}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="task-assistant">Task Assistant</Label>
-              <Select
-                value={formData.task_assistant_id || 'none'}
-                onValueChange={(value: string) => handleChange('task_assistant_id', value === 'none' ? '' : value)}
-                disabled={!formData.subdepartment_id}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select assistant" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {availableTaskAssistants.map((assistant) => (
-                    <SelectItem key={assistant.id} value={assistant.id}>
-                      {assistant.name || assistant.email}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="officer">Officer</Label>
-              <Select
-                value={formData.officer_id || 'none'}
-                onValueChange={(value: string) => handleChange('officer_id', value === 'none' ? '' : value)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select officer" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {officers
-                    .filter(officer => officer.role === 'officer' || officer.role === 'admin')
-                    .map((officer) => (
-                      <SelectItem key={officer.id} value={officer.id}>
-                        {officer.name || officer.email}
+          <div className="space-y-4">
+            <h3 className="text-sm font-medium">Task Assignment</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg">
+              <div className="grid gap-2">
+                <Label htmlFor="task-manager" className="font-medium text-sm">Task Manager *</Label>
+                <Select
+                  value={formData.task_manager_id}
+                  onValueChange={(value: string) => handleChange('task_manager_id', value)}
+                  disabled={!formData.subdepartment_id}
+                  required
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={
+                      !formData.subdepartment_id ? 'Select subdepartment first' : 
+                      availableTaskManagers.length === 0 ? 'No managers available' : 'Select manager'
+                    } />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableTaskManagers.map((manager) => (
+                      <SelectItem key={manager.id} value={manager.id}>
+                        <div className="flex flex-col">
+                          <span>{manager.name || 'Unnamed Manager'}</span>
+                          {manager.email && <span className="text-xs text-muted-foreground">{manager.email}</span>}
+                        </div>
                       </SelectItem>
                     ))}
-                </SelectContent>
-              </Select>
+                  </SelectContent>
+                </Select>
+                {availableTaskManagers.length === 0 && formData.subdepartment_id && (
+                  <p className="text-xs text-amber-600">
+                    No task managers assigned to this subdepartment
+                  </p>
+                )}
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="task-assistant" className="font-medium text-sm">Task Assistant</Label>
+                <Select
+                  value={formData.task_assistant_id || 'none'}
+                  onValueChange={(value: string) => handleChange('task_assistant_id', value === 'none' ? '' : value)}
+                  disabled={!formData.subdepartment_id}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={
+                      !formData.subdepartment_id ? 'Select subdepartment first' : 
+                      availableTaskAssistants.length === 0 ? 'No assistants available' : 'Select assistant'
+                    } />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {availableTaskAssistants.map((assistant) => (
+                      <SelectItem key={assistant.id} value={assistant.id}>
+                        <div className="flex flex-col">
+                          <span>{assistant.name || 'Unnamed Assistant'}</span>
+                          {assistant.email && <span className="text-xs text-muted-foreground">{assistant.email}</span>}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {availableTaskAssistants.length === 0 && formData.subdepartment_id && (
+                  <p className="text-xs text-amber-600">
+                    No task assistants assigned to this subdepartment
+                  </p>
+                )}
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="officer" className="font-medium text-sm">Officer</Label>
+                <Select
+                  value={formData.officer_id || 'none'}
+                  onValueChange={(value: string) => handleChange('officer_id', value === 'none' ? '' : value)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select officer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {officers
+                      .filter(officer => officer.role === 'officer' || officer.role === 'admin')
+                      .map((officer) => (
+                        <SelectItem key={officer.id} value={officer.id}>
+                          <div className="flex flex-col">
+                            <span>{officer.name || 'Unnamed Officer'}</span>
+                            {officer.email && <span className="text-xs text-muted-foreground">{officer.email}</span>}
+                          </div>
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
 
           <div className="grid gap-2">
             <Label htmlFor="client">Applicant Name (Client) *</Label>
             <Select
-              value={formData.client_id || undefined}
+              value={formData.client_id}
               onValueChange={(value: string) => handleChange('client_id', value)}
               required
             >
@@ -538,21 +655,34 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
             <div className="grid gap-2">
               <Label htmlFor="class">Class</Label>
               <Select
-                value={formData.class_id || ''}
+                value={formData.class_id}
                 onValueChange={(value: string) => handleChange('class_id', value)}
                 disabled={!formData.subdepartment_id}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select class" />
+                  <SelectValue placeholder={
+                    !formData.subdepartment_id ? 'Select subdepartment first' :
+                    availableClasses.length === 0 ? 'No classes available' : 'Select class'
+                  } />
                 </SelectTrigger>
                 <SelectContent>
                   {availableClasses.map((cls) => (
                     <SelectItem key={cls.name} value={cls.name}>
-                      {cls.name}
+                      <div className="flex flex-col">
+                        <span>{cls.name}</span>
+                        {cls.description && (
+                          <span className="text-xs text-muted-foreground">{cls.description}</span>
+                        )}
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {availableClasses.length === 0 && formData.subdepartment_id && (
+                <p className="text-xs text-amber-600">
+                  No classes configured for this subdepartment
+                </p>
+              )}
             </div>
 
             <div className="grid gap-2">

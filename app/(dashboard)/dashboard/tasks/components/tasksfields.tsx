@@ -11,13 +11,13 @@ import { cn } from "@/lib/utils"
 interface TaskColumn {
   key: string
   header: string
-  render?: (value: any, task: any) => React.ReactNode
+  render?: (value: any, task: any, index?: number) => React.ReactNode
 }
 
 interface Requirement {
   name: string
   description?: string | null
-  is_required: boolean
+  is_required?: boolean
   submitted?: boolean
 }
 
@@ -37,31 +37,41 @@ interface DocumentActionCellProps {
 const DocumentActionCell = ({ task, onDocumentUpload }: DocumentActionCellProps) => {
   const [docDialogOpen, setDocDialogOpen] = useState(false)
   const [requirements, setRequirements] = useState<Requirement[]>([])
-  
+
   const handleUpload = (url: string) => {
     onDocumentUpload(url)
     setDocDialogOpen(false)
   }
 
   const handleClick = () => {
-    // Get requirements from the subdepartment's classes
-    if (task.subdepartment?.classes && task.class_name) {
-      const selectedClass = Array.isArray(task.subdepartment.classes) 
-        ? task.subdepartment.classes.find((c: any) => c.name === task.class_name)
+    console.log('Document button clicked for task:', task)
+    console.log('Task subdepartment:', task.subdepartment)
+    console.log('Task class_name:', task.class)
+
+    // Get requirements from the subdepartment's classes based on the selected class
+    if (task.subdepartment?.classes && task.class) {
+      const selectedClass = Array.isArray(task.subdepartment.classes)
+        ? task.subdepartment.classes.find((c: any) => c.name === task.class)
         : null
-      
+
+      console.log('Selected class:', selectedClass)
+
       if (selectedClass?.requirements) {
-        const reqs = Array.isArray(selectedClass.requirements) 
+        const reqs = Array.isArray(selectedClass.requirements)
           ? selectedClass.requirements.map((req: any) => ({
-              ...req,
-              submitted: false // This would come from actual submission data
-            }))
+            ...req,
+            is_required: req.is_required ?? true, // Default to required if not specified
+            submitted: false // This would come from actual submission data
+          }))
           : []
+        console.log('Mapped requirements:', reqs)
         setRequirements(reqs)
       } else {
+        console.log('No requirements found in class')
         setRequirements([])
       }
     } else {
+      console.log('No subdepartment classes or class name found')
       setRequirements([])
     }
     setDocDialogOpen(true)
@@ -74,15 +84,15 @@ const DocumentActionCell = ({ task, onDocumentUpload }: DocumentActionCellProps)
   return (
     <div className="flex items-center">
       <div className="relative">
-        <Button 
-          variant="ghost" 
-          size="icon" 
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={handleClick}
           className={cn(
             "relative",
-            hasMissingRequired ? "text-yellow-500 hover:text-yellow-600" : 
-            hasRequirements ? "text-green-500 hover:text-green-600" : 
-            "text-red-500 hover:text-red-600"
+            hasMissingRequired ? "text-yellow-500 hover:text-yellow-600" :
+              hasRequirements ? "text-green-500 hover:text-green-600" :
+                "text-red-500 hover:text-red-600"
           )}
         >
           {hasMissingRequired ? (
@@ -93,15 +103,15 @@ const DocumentActionCell = ({ task, onDocumentUpload }: DocumentActionCellProps)
             <FileX className="h-4 w-4" />
           )}
         </Button>
-        
+
         {hasMissingRequired && (
           <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-yellow-500"></span>
         )}
       </div>
-      
-      <DocumentDialog 
-        open={docDialogOpen} 
-        onOpenChange={setDocDialogOpen} 
+
+      <DocumentDialog
+        open={docDialogOpen}
+        onOpenChange={setDocDialogOpen}
         onUpload={handleUpload}
         requirements={requirements}
         task={task}
@@ -113,7 +123,7 @@ const DocumentActionCell = ({ task, onDocumentUpload }: DocumentActionCellProps)
 const DocumentDialog = ({ open, onOpenChange, onUpload, requirements, task }: DocumentDialogProps) => {
   const [documentUrl, setDocumentUrl] = useState("")
   const [selectedRequirements, setSelectedRequirements] = useState<Set<string>>(new Set())
-  
+
   const handleSubmit = () => {
     if (documentUrl.trim()) {
       onUpload(documentUrl)
@@ -136,12 +146,12 @@ const DocumentDialog = ({ open, onOpenChange, onUpload, requirements, task }: Do
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>Document Requirements - {task.class_name || 'General'}</DialogTitle>
+          <DialogTitle>Document Requirements - {task.class || 'General'}</DialogTitle>
           <DialogDescription>
             Review the document requirements and upload files for this task.
           </DialogDescription>
         </DialogHeader>
-        
+
         <div className="space-y-4">
           {requirements.length > 0 ? (
             <div className="space-y-3">
@@ -189,17 +199,17 @@ const DocumentDialog = ({ open, onOpenChange, onUpload, requirements, task }: Do
             />
           </div>
         </div>
-        
+
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button 
-            type="button" 
+          <Button
+            type="button"
             onClick={handleSubmit}
             disabled={!documentUrl.trim()}
           >
-            <Upload className="mr-2 h-4 w-4" /> 
+            <Upload className="mr-2 h-4 w-4" />
             Upload Document
           </Button>
         </DialogFooter>
@@ -212,7 +222,7 @@ export const taskColumns: TaskColumn[] = [
   {
     key: "index",
     header: "#",
-    render: (_, index) => (
+    render: (_, __, index) => (
       <div className="font-medium text-muted-foreground">
         {(index || 0) + 1}
       </div>
@@ -238,11 +248,11 @@ export const taskColumns: TaskColumn[] = [
     key: "submitted_documents",
     header: "All Submitted Documents",
     render: (_, task) => (
-      <DocumentActionCell 
-        task={task} 
+      <DocumentActionCell
+        task={task}
         onDocumentUpload={(url) => {
           console.log("Uploading document for task:", task.id, "URL:", url)
-        }} 
+        }}
       />
     ),
   },
@@ -343,4 +353,4 @@ export const taskColumns: TaskColumn[] = [
     key: "batch",
     header: "Batch",
   },
- ]
+]
