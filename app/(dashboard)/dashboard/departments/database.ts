@@ -56,59 +56,65 @@ export async function fetchUsers(): Promise<User[]> {
 
 export async function fetchDepartments(): Promise<Department[]> {
   try {
-    // Fetch departments with subdepartments and stages
+    // First, fetch all stages
+    const { data: allStages, error: stagesError } = await supabase
+      .from('tm_stages')
+      .select('*')
+      .order('order_num')
+
+    if (stagesError) throw stagesError
+
+    // Create a map of stage IDs to stage details for quick lookup
+    const stagesMap = new Map(allStages?.map(stage => [stage.id, stage]) || [])
+
+    // Fetch departments with their subdepartments
     const { data: departmentsData, error: deptError } = await supabase
       .from('tm_departments')
       .select(`
-        id,
-        name,
-        description,
-        tm_subdepartments (
-          id,
-          name,
-          description,
-          department_id,
-          tm_stages (
-            id,
-            name,
-            estimated_time,
-            order_num,
-            subdepartment_id
-          )
-        )
+        *,
+        tm_subdepartments (*)
       `)
       .order('name')
 
     if (deptError) throw deptError
 
-    // Transform the data to match our component structure
-    const departments: Department[] = (departmentsData || []).map(dept => ({
-      id: dept.id,
-      name: dept.name,
-      description: dept.description,
-      subdepartments: (dept.tm_subdepartments || []).map((subdept: any) => ({
-        id: subdept.id,
-        name: subdept.name,
-        description: subdept.description,
-        departmentId: subdept.department_id,
-        taskManagerId: undefined, // We'll fetch this separately if needed
-        taskAssistantId: undefined, // We'll fetch this separately if needed
-        processingTime: 2, // Default values - you can store these in DB too
-        deliveryTime: 5,
-        stages: (subdept.tm_stages || []).map((stage: any) => ({
-          id: stage.id,
-          name: stage.name,
-          estimatedTime: Math.round((stage.estimated_time || 0) / 60), // Convert minutes to hours
-          reminderDays: 1, // Default - you can add this field to DB
-          order: stage.order_num,
-          isActive: false, // Default - you can add this field to DB
-          status: 'yes' as const,
-          subdepartmentId: stage.subdepartment_id
-        })).sort((a: Stage, b: Stage) => a.order - b.order)
-      }))
-    }))
+    // Transform the data to include stage details
+    return (departmentsData || []).map((dept: any) => {
+      const subdepartments = (dept.tm_subdepartments || []).map((subdept: any) => {
+        // Get the stage IDs for this subdepartment
+        const stageIds: number[] = subdept.stages || [];
+        
+        // Get the stage details for each ID
+        const stages = stageIds.map((stageId: number) => {
+          const stageDetails = stagesMap.get(stageId);
+          return stageDetails ? {
+            id: stageDetails.id,
+            name: stageDetails.name,
+            estimatedTime: stageDetails.estimated_time / 60, // Convert to hours
+            reminderDays: 1, // Default, can be updated if stored in DB
+            order: stageDetails.order_num,
+            isActive: true,
+            status: 'yes' as const,
+            subdepartmentId: subdept.id
+          } : null;
+        }).filter(Boolean);
 
-    return departments
+        return {
+          ...subdept,
+          stages,
+          // Ensure classes always has requirements array
+          classes: ((subdept.classes as any[]) || []).map((cls: any) => ({
+            ...cls,
+            requirements: cls.requirements || []
+          }))
+        }
+      })
+
+      return {
+        ...dept,
+        subdepartments
+      }
+    })
   } catch (error) {
     console.error('Error fetching departments:', error)
     throw new Error('Failed to fetch departments')
@@ -117,25 +123,44 @@ export async function fetchDepartments(): Promise<Department[]> {
 
 export async function createDepartment(departmentData: {
   name: string
-  description?: string | null
+  description: string | null
   subdepartments: Array<{
     name: string
-    description?: string | null
-    classes?: any[]
-    taskManagerId?: string | null
-    taskAssistantId?: string | null
-    stages: {
-      [key: string]: {
-        applies: boolean
-        estimatedTime: number
-        reminderDays: number
-      }
-    }
+    description: string | null
+    classes?: Array<{
+      name: string
+      description: string | null
+      requirements: Array<{
+        name: string
+        description: string | null
+        is_required: boolean
+      }>
+    }>
+    task_manager: {
+      id: string
+      name: string
+      email: string
+      start_date: string
+      end_date: string | null
+    } | null
+    task_assistant: {
+      id: string
+      name: string
+      email: string
+      start_date: string
+      end_date: string | null
+    } | null
+    stages: Array<{
+      id: number
+      name: string
+      order_num: number
+      estimated_time: number
+    }>
   }>
 }): Promise<Department> {
   try {
-    // Insert department (let DB auto-generate the ID)
-    const { data: newDepartment, error: deptError } = await supabase
+    // Start by creating the department
+    const { data: department, error: deptError } = await supabase
       .from('tm_departments')
       .insert({
         name: departmentData.name,
@@ -145,87 +170,63 @@ export async function createDepartment(departmentData: {
       .single()
 
     if (deptError) throw deptError
-    const departmentId = newDepartment.id
+    if (!department) throw new Error('Failed to create department')
 
-    // Insert subdepartments and stages
-    for (const subdeptData of departmentData.subdepartments) {
-      // Prepare task manager data
-      const taskManagerUser = subdeptData.taskManagerId ? await supabase
-        .from('tm_users')
-        .select('*')
-        .eq('id', subdeptData.taskManagerId)
-        .single() : null
+    // Process each subdepartment
+    for (const subdept of departmentData.subdepartments) {
+      // Prepare stages data - only store the IDs
+      const stageIds = subdept.stages.map(stage => stage.id)
 
-      // Prepare task assistant data
-      const taskAssistantUser = subdeptData.taskAssistantId ? await supabase
-        .from('tm_users')
-        .select('*')
-        .eq('id', subdeptData.taskAssistantId)
-        .single() : null
-
-      // Insert subdepartment with task assignments
-      const { data: subdeptResult, error: subdeptError } = await supabase
+      // Insert subdepartment with stages as JSONB
+      const { data: subdepartment, error: subdeptError } = await supabase
         .from('tm_subdepartments')
         .insert({
-          name: subdeptData.name,
-          description: subdeptData.description,
-          department_id: departmentId,
-          task_manager: taskManagerUser?.data ? {
-            id: taskManagerUser.data.id,
-            start_date: new Date().toISOString(),
-            end_date: null
+          name: subdept.name,
+          description: subdept.description,
+          department_id: department.id,
+          classes: subdept.classes || [],
+          stages: stageIds, // Only store stage IDs
+          task_manager: subdept.task_manager ? {
+            id: subdept.task_manager.id,
+            name: subdept.task_manager.name,
+            email: subdept.task_manager.email,
+            start_date: subdept.task_manager.start_date,
+            end_date: subdept.task_manager.end_date
           } : null,
-          task_assistant: taskAssistantUser?.data ? {
-            id: taskAssistantUser.data.id,
-            start_date: new Date().toISOString(),
-            end_date: null
+          task_assistant: subdept.task_assistant ? {
+            id: subdept.task_assistant.id,
+            name: subdept.task_assistant.name,
+            email: subdept.task_assistant.email,
+            start_date: subdept.task_assistant.start_date,
+            end_date: subdept.task_assistant.end_date
           } : null
         })
         .select()
         .single()
 
       if (subdeptError) throw subdeptError
-      
-      const subdepartmentId = subdeptResult?.id
-      if (!subdepartmentId) throw new Error('Failed to create subdepartment')
-
-      if (subdeptError) throw subdeptError
-
-      // Insert stages that apply
-      const applicableStages = Object.entries(subdeptData.stages)
-        .filter(([_, stageConfig]) => {
-          const config = stageConfig as { applies: boolean }
-          return config.applies
-        })
-        .map(([stageName, stageConfig], index) => {
-          const config = stageConfig as { estimatedTime: number }
-          return {
-            id: nanoid(),
-            name: stageName,
-            subdepartment_id: subdepartmentId,
-            order_num: index + 1,
-            estimated_time: config.estimatedTime * 60 // Convert hours to minutes
-          }
-        })
-
-      if (applicableStages.length > 0) {
-        const { error: stagesError } = await supabase
-          .from('tm_stages')
-          .insert(applicableStages)
-
-        if (stagesError) throw stagesError
-      }
+      if (!subdepartment) continue
     }
 
-    // Fetch and return the created department
-    const createdDepartment = await fetchDepartmentById(departmentId)
+    // Fetch and return the created department with its subdepartments
+    const { data: createdDepartment, error: fetchError } = await supabase
+      .from('tm_departments')
+      .select(`
+        *,
+        tm_subdepartments (*)
+      `)
+      .eq('id', department.id)
+      .single()
+
+    if (fetchError) throw fetchError
+    if (!createdDepartment) throw new Error('Failed to fetch created department')
+
     return createdDepartment
   } catch (error) {
-    console.error('Error creating department:', error)
-    throw new Error('Failed to create department')
+    console.error('Error in createDepartment:', error)
+    throw error
   }
 }
-
 export async function fetchDepartmentById(id: string): Promise<Department> {
   try {
     const { data, error } = await supabase

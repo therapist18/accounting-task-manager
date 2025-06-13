@@ -1,9 +1,9 @@
 // @ts-nocheck
 "use client"
 import { useState, useEffect } from "react"
-import { 
-  fetchUsers, 
-  fetchDepartments, 
+import {
+  fetchUsers,
+  fetchDepartments,
   createDepartment as createDepartmentDb,
   createStage as createStageDb,
   User as DbUser,
@@ -23,7 +23,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, UserPlus, UserCheck, UserX } from "lucide-react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, UserPlus, UserCheck, UserX, ChevronDown, Check } from "lucide-react"
 import supabase from "@/lib/supabase/client"
 import { toast } from "sonner"
 type User = {
@@ -49,10 +50,18 @@ type Stage = {
   status: 'yes' | 'na' // yes or N/A
 }
 
+type ClassRequirement = {
+  id: string
+  name: string
+  description?: string
+  isRequired: boolean
+}
+
 type SubdepartmentClass = {
   id: string
   name: string
   description?: string
+  requirements: ClassRequirement[]
 }
 
 type Subdepartment = {
@@ -94,14 +103,18 @@ export default function DepartmentsPage() {
   const [isAddStageOpen, setIsAddStageOpen] = useState(false)
   const [currentSubdept, setCurrentSubdept] = useState<Subdepartment | null>(null)
   const [newClassInput, setNewClassInput] = useState('')
+  const [newClassRequirement, setNewClassRequirement] = useState({
+    name: '',
+    description: '',
+    isRequired: true
+  })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
-  const [selectedSubdept, setSelectedSubdept] = useState<{deptId: string, subdept: Subdepartment} | null>(null)
-
-  // Global stages loaded from the database
-  const [globalStages, setGlobalStages] = useState<Array<{id: string, name: string}>>([])
-
+  const [selectedSubdept, setSelectedSubdept] = useState<{ deptId: string, subdept: Subdepartment } | null>(null)
+  const [isAddSubdepartmentOpen, setIsAddSubdepartmentOpen] = useState(false)
+  const [currentDepartmentId, setCurrentDepartmentId] = useState<string | null>(null)
+  const [globalStages, setGlobalStages] = useState<Array<{ id: string, name: string }>>([])
   const [users, setUsers] = useState<User[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
 
@@ -120,7 +133,7 @@ export default function DepartmentsPage() {
           .from('tm_stages')
           .select('id, name')
           .order('order_num', { ascending: true })
-        
+
         if (error) throw error
         setGlobalStages(stages || [])
       } catch (error) {
@@ -141,7 +154,7 @@ export default function DepartmentsPage() {
         .from('tm_users')
         .select('*')
         .order('name')
-      
+
       if (error) throw error
       setUsers(users || [])
     } catch (error) {
@@ -174,29 +187,6 @@ export default function DepartmentsPage() {
     setIsAddDepartmentOpen(true)
   }
 
-  const handleAddSubdepartment = () => {
-    const newSubdept: SubdepartmentForm = {
-      name: '',
-      description: '',
-      classes: [],
-      taskManagerId: '',
-      taskAssistantId: '',
-      stages: globalStages.reduce((acc, stage) => {
-        acc[stage.name] = {
-          applies: true,
-          estimatedTime: 8,
-          reminderDays: 1
-        }
-        return acc
-      }, {} as any)
-    }
-
-    setDepartmentForm(prev => ({
-      ...prev,
-      subdepartments: [...prev.subdepartments, newSubdept]
-    }))
-  }
-
   const handleRemoveSubdepartment = (index: number) => {
     setDepartmentForm(prev => ({
       ...prev,
@@ -210,18 +200,79 @@ export default function DepartmentsPage() {
     const newClass: SubdepartmentClass = {
       id: `temp-${Date.now()}`,
       name: newClassInput.trim(),
-      description: ''
+      description: '',
+      requirements: []
     }
 
     setDepartmentForm(prev => ({
       ...prev,
       subdepartments: prev.subdepartments.map((subdept, index) =>
         index === subdeptIndex
-          ? { ...subdept, classes: [...subdept.classes, newClass] }
+          ? { ...subdept, classes: [...(subdept.classes || []), newClass] }
           : subdept
       )
     }))
     setNewClassInput('')
+  }
+
+  const handleAddClassRequirement = (subdeptIndex: number, classIndex: number) => {
+    if (!newClassRequirement.name.trim()) return
+
+    const requirement: ClassRequirement = {
+      id: `req-${Date.now()}`,
+      name: newClassRequirement.name.trim(),
+      description: newClassRequirement.description?.trim(),
+      isRequired: newClassRequirement.isRequired
+    }
+
+    setDepartmentForm(prev => {
+      const updatedSubdepartments = [...prev.subdepartments]
+      const subdept = { ...updatedSubdepartments[subdeptIndex] }
+      const updatedClasses = [...(subdept.classes || [])]
+
+      if (updatedClasses[classIndex]) {
+        updatedClasses[classIndex] = {
+          ...updatedClasses[classIndex],
+          requirements: [...(updatedClasses[classIndex].requirements || []), requirement]
+        }
+        subdept.classes = updatedClasses
+        updatedSubdepartments[subdeptIndex] = subdept
+      }
+
+      return {
+        ...prev,
+        subdepartments: updatedSubdepartments
+      }
+    })
+
+    // Reset requirement form
+    setNewClassRequirement({
+      name: '',
+      description: '',
+      isRequired: true
+    })
+  }
+
+  const handleRemoveClassRequirement = (subdeptIndex: number, classIndex: number, reqIndex: number) => {
+    setDepartmentForm(prev => {
+      const updatedSubdepartments = [...prev.subdepartments]
+      const subdept = { ...updatedSubdepartments[subdeptIndex] }
+      const updatedClasses = [...(subdept.classes || [])]
+
+      if (updatedClasses[classIndex]?.requirements) {
+        updatedClasses[classIndex] = {
+          ...updatedClasses[classIndex],
+          requirements: updatedClasses[classIndex].requirements.filter((_, i) => i !== reqIndex)
+        }
+        subdept.classes = updatedClasses
+        updatedSubdepartments[subdeptIndex] = subdept
+      }
+
+      return {
+        ...prev,
+        subdepartments: updatedSubdepartments
+      }
+    })
   }
 
   const handleRemoveClass = (subdeptIndex: number, classIndex: number) => {
@@ -267,54 +318,164 @@ export default function DepartmentsPage() {
   }
 
   const handleSaveDepartment = async () => {
+    if (!departmentForm.name.trim()) {
+      toast.error('Department name is required')
+      return
+    }
+
+    // If we're adding a subdepartment, use the currentDepartmentId
+    const isAddingSubdepartment = !!currentDepartmentId
+
     try {
       setSaving(true)
-  
-      // Validate form
-      if (!departmentForm.name.trim()) {
-        toast.error('Department name is required')
+
+      // For subdepartments, we only need to process the first subdepartment in the form
+      if (isAddingSubdepartment) {
+        const subdept = departmentForm.subdepartments[0]
+        if (!subdept.name.trim()) {
+          toast.error('Please enter a subdepartment name')
+          return
+        }
+
+        // Prepare task manager data if selected
+        const taskManager = subdept.taskManagerId && subdept.taskManagerId !== 'none'
+          ? await supabase
+              .from('tm_users')
+              .select('id, name, email')
+              .eq('id', subdept.taskManagerId)
+              .single()
+          : { data: null }
+
+        // Prepare task assistant data if selected
+        const taskAssistant = subdept.taskAssistantId && subdept.taskAssistantId !== 'none'
+          ? await supabase
+              .from('tm_users')
+              .select('id, name, email')
+              .eq('id', subdept.taskAssistantId)
+              .single()
+          : { data: null }
+
+
+        // Get selected stages with their IDs
+        const selectedStages = await supabase
+          .from('tm_stages')
+          .select('id, name, order_num, estimated_time')
+          .in('name', Object.entries(subdept.stages)
+            .filter(([_, stage]) => stage.applies)
+            .map(([name]) => name)
+          )
+
+        const subdeptData = {
+          name: subdept.name.trim(),
+          description: subdept.description.trim() || null,
+          department_id: currentDepartmentId,
+          classes: subdept.classes.map(cls => ({
+            name: cls.name,
+            description: cls.description || null,
+            requirements: cls.requirements.map(req => ({
+              name: req.name,
+              description: req.description || null,
+              is_required: req.isRequired
+            }))
+          })),
+          task_manager: taskManager.data ? {
+            id: taskManager.data.id,
+            name: taskManager.data.name,
+            email: taskManager.data.email,
+            start_date: new Date().toISOString(),
+            end_date: null
+          } : null,
+          task_assistant: taskAssistant.data ? {
+            id: taskAssistant.data.id,
+            name: taskAssistant.data.name,
+            email: taskAssistant.data.email,
+            start_date: new Date().toISOString(),
+            end_date: null
+          } : null,
+          stages: selectedStages.data?.map(stage => ({
+            id: stage.id,
+            name: stage.name,
+            order_num: stage.order_num,
+            estimated_time: stage.estimated_time
+          })) || []
+        }
+
+        const { data: newSubdept, error: subdeptError } = await supabase
+          .from('tm_subdepartments')
+          .insert(subdeptData)
+          .select()
+          .single()
+
+        if (subdeptError) throw subdeptError
+
+        // Refresh the data
+        await fetchData()
+        toast.success('Subdepartment added successfully')
+        setIsAddDepartmentOpen(false)
+        setCurrentDepartmentId(null)
         return
       }
-  
-      if (departmentForm.subdepartments.length === 0) {
-        toast.error('At least one subdepartment is required')
-        return
-      }
-  
-      // Prepare department data
+
+
+      // Original department creation logic here...
       const departmentData = {
         name: departmentForm.name.trim(),
         description: departmentForm.description.trim() || null,
-        subdepartments: departmentForm.subdepartments.map(subdept => ({
-          name: subdept.name.trim(),
-          description: subdept.description.trim() || null,
-          classes: subdept.classes,
-          taskManagerId: subdept.taskManagerId === 'none' ? null : subdept.taskManagerId,
-          taskAssistantId: subdept.taskAssistantId === 'none' ? null : subdept.taskAssistantId,
-          stages: Object.entries(subdept.stages)
-            .filter(([_, stage]) => stage.applies)
-            .map(([name, stage]) => ({
-              name,
-              estimatedTime: stage.estimatedTime,
-              reminderDays: stage.reminderDays
-            }))
-        }))
+        subdepartments: departmentForm.subdepartments.map(subdept => {
+          // Prepare task manager data if selected
+          const taskManager = subdept.taskManagerId && subdept.taskManagerId !== 'none'
+            ? users.find(u => u.id === subdept.taskManagerId)
+            : null
+
+          // Prepare task assistant data if selected
+          const taskAssistant = subdept.taskAssistantId && subdept.taskAssistantId !== 'none'
+            ? users.find(u => u.id === subdept.taskAssistantId)
+            : null
+
+          return {
+            name: subdept.name.trim(),
+            description: subdept.description.trim() || null,
+            classes: subdept.classes.map(cls => ({
+              name: cls.name,
+              description: cls.description || null,
+              requirements: cls.requirements.map(req => ({
+                name: req.name,
+                description: req.description || null,
+                is_required: req.isRequired
+              }))
+            })),
+            task_manager: taskManager ? {
+              id: taskManager.id,
+              name: taskManager.name || '',
+              email: taskManager.email,
+              start_date: new Date().toISOString(),
+              end_date: null
+            } : null,
+            task_assistant: taskAssistant ? {
+              id: taskAssistant.id,
+              name: taskAssistant.name || '',
+              email: taskAssistant.email,
+              start_date: new Date().toISOString(),
+              end_date: null
+            } : null,
+            stages: Object.entries(subdept.stages)
+              .filter(([_, stage]) => stage.applies)
+              .map(([name]) => ({
+                name,
+                estimated_time: 8 * 60, // Default 8 hours in minutes
+                order_num: globalStages.findIndex(s => s.name === name) + 1
+              }))
+          }
+        })
       }
-  
-      const newDepartment = await createDepartmentDb(departmentData)
-      setDepartments(prev => [...prev, newDepartment])
-      setIsAddDepartmentOpen(false)
+
+      await createDepartment(departmentData)
+      await fetchData()
       toast.success('Department created successfully')
-  
-      // Reset form
-      setDepartmentForm({
-        name: '',
-        description: '',
-        subdepartments: []
-      })
+      setIsAddDepartmentOpen(false)
     } catch (error) {
-      console.error('Error creating department:', error)
-      toast.error('Failed to create department. Please try again.')
+      console.error('Error saving department:', error)
+      toast.error('Failed to save department')
     } finally {
       setSaving(false)
     }
@@ -323,6 +484,56 @@ export default function DepartmentsPage() {
   const handleAddStage = (subdept: Subdepartment) => {
     setCurrentSubdept(subdept)
     setIsAddStageOpen(true)
+  }
+
+  const handleAddSubdepartment = (deptId: string, deptName: string) => {
+    // If we're already in the dialog, just add a new subdepartment
+    if (isAddDepartmentOpen) {
+      const newSubdept = {
+        name: `Subdepartment ${departmentForm.subdepartments.length + 1}`,
+        description: '',
+        classes: [],
+        taskManagerId: '',
+        taskAssistantId: '',
+        stages: globalStages.reduce((acc, stage) => ({
+          ...acc,
+          [stage.name]: {
+            applies: true,
+            estimatedTime: 8,
+            reminderDays: 1
+          }
+        }), {} as any)
+      }
+      
+      setDepartmentForm(prev => ({
+        ...prev,
+        subdepartments: [...prev.subdepartments, newSubdept]
+      }))
+      return
+    }
+    
+    // If we're opening the dialog for the first time
+    setCurrentDepartmentId(deptId)
+    setDepartmentForm({ 
+      name: deptName,
+      description: '',
+      subdepartments: [{
+        name: 'Subdepartment 1',
+        description: '',
+        classes: [],
+        taskManagerId: '',
+        taskAssistantId: '',
+        stages: globalStages.reduce((acc, stage) => ({
+          ...acc,
+          [stage.name]: {
+            applies: true,
+            estimatedTime: 8,
+            reminderDays: 1
+          }
+        }), {} as any)
+      }]
+    })
+    setIsAddDepartmentOpen(true)
   }
 
   const handleSaveStage = async (stageData: Omit<Stage, 'id' | 'order' | 'isActive'>) => {
@@ -376,7 +587,7 @@ export default function DepartmentsPage() {
 
     try {
       setSaving(true)
-      
+
       // Update the subdepartment with new assignments
       const { error } = await supabase
         .from('tm_subdepartments')
@@ -400,6 +611,17 @@ export default function DepartmentsPage() {
       setSaving(false)
     }
   }
+
+  useEffect(() => {
+    if (!isAddDepartmentOpen) {
+      setDepartmentForm({
+        name: '',
+        description: '',
+        subdepartments: []
+      })
+      setCurrentDepartmentId(null)
+    }
+  }, [isAddDepartmentOpen])
 
   if (loading) {
     return (
@@ -465,29 +687,42 @@ export default function DepartmentsPage() {
                     <div className="pl-4 pr-2 pt-2">
                       <div className="flex justify-between items-center mb-2">
                         <h4 className="text-sm font-medium">Subdepartments</h4>
-                        <Button variant="outline" size="sm">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleAddSubdepartment(dept.id, dept.name)}
+                        >
                           <Plus className="h-4 w-4 mr-2" />
                           Add Subdepartment
                         </Button>
                       </div>
+                      <div className="space-y-2">
+                        {dept.subdepartments.length === 0 && (
+                          <p className="text-sm text-muted-foreground">No subdepartments yet. Click the button above to add one.</p>
+                        )}
+                      </div>
                       <div className="border rounded-md overflow-hidden">
                         <Table>
-                          <TableHeader>
+                          <TableHeader className="bg-muted/50">
                             <TableRow>
-                              <TableHead className="w-[200px]">Subdepartment</TableHead>
-                              <TableHead>Classes</TableHead>
-                              <TableHead>Task Manager</TableHead>
-                              <TableHead>Task Assistant</TableHead>
-                              <TableHead>Processing Time</TableHead>
-                              <TableHead>Delivery Time</TableHead>
-                              <TableHead>Stages</TableHead>
+                              <TableHead className="w-[50px] text-center">#</TableHead>
+                              <TableHead className="w-[200px] border-r">Subdepartment</TableHead>
+                              <TableHead className="border-r">Classes</TableHead>
+                              <TableHead className="border-r">Task Manager</TableHead>
+                              <TableHead className="border-r">Task Assistant</TableHead>
+                              <TableHead className="border-r">Processing Time</TableHead>
+                              <TableHead className="border-r">Delivery Time</TableHead>
+                              <TableHead className="border-r">Stages</TableHead>
                               <TableHead>Actions</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {dept.subdepartments.map((subdept) => (
-                              <TableRow key={subdept.id}>
-                                <TableCell>
+                            {dept.subdepartments.map((subdept, index) => (
+                              <TableRow key={subdept.id} className="hover:bg-muted/50">
+                                <TableCell className="text-center text-sm text-muted-foreground border-r">
+                                  {index + 1}
+                                </TableCell>
+                                <TableCell className="border-r">
                                   <div>
                                     <div className="font-medium">{subdept.name}</div>
                                     {subdept.description && (
@@ -495,93 +730,142 @@ export default function DepartmentsPage() {
                                     )}
                                   </div>
                                 </TableCell>
-                                <TableCell>
-                                  {subdept.classes && subdept.classes.length > 0 ? (
-                                    <div className="flex flex-wrap gap-1">
-                                      {subdept.classes.map(cls => (
-                                        <Badge key={cls.id} variant="outline" className="text-xs">
-                                          {cls.name}
-                                        </Badge>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <span className="text-sm text-muted-foreground">No classes</span>
-                                  )}
+                                <TableCell className="border-r">
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button variant="outline" size="sm" className="h-8 w-full justify-between">
+                                        <span>{subdept.classes?.length || 0} Classes</span>
+                                        <ChevronDown className="h-4 w-4 ml-2" />
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-80">
+                                      <div className="space-y-4">
+                                        <h4 className="font-medium leading-none">Classes & Requirements</h4>
+                                        {subdept.classes && subdept.classes.length > 0 ? (
+                                          <div className="space-y-4">
+                                            {subdept.classes.map((cls) => (
+                                              <div key={cls.id} className="border rounded-md p-3">
+                                                <div className="font-medium">{cls.name}</div>
+                                                {cls.description && (
+                                                  <p className="text-sm text-muted-foreground">{cls.description}</p>
+                                                )}
+                                                {cls.requirements && cls.requirements.length > 0 && (
+                                                  <div className="mt-2">
+                                                    <div className="text-xs font-medium text-muted-foreground mb-1">Requirements:</div>
+                                                    <ul className="space-y-1">
+                                                      {cls.requirements.map((req, idx) => (
+                                                        <li key={idx} className="flex items-start">
+                                                          <Check className="h-3 w-3 text-green-500 mt-0.5 mr-1 flex-shrink-0" />
+                                                          <span className="text-sm">
+                                                            {req.name}
+                                                            {req.description && (
+                                                              <span className="text-muted-foreground"> - {req.description}</span>
+                                                            )}
+                                                          </span>
+                                                        </li>
+                                                      ))}
+                                                    </ul>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <div className="text-sm text-muted-foreground">No classes defined</div>
+                                        )}
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
                                 </TableCell>
-                                <TableCell>
-                                  <span className="text-sm">{getUserName(subdept.taskManagerId || '')}</span>
+                                <TableCell className="border-r">
+                                  <div className="min-w-[120px]">
+                                    <span className="text-sm">{getUserName(subdept.taskManagerId || '') || '-'}</span>
+                                  </div>
                                 </TableCell>
-                                <TableCell>
-                                  <span className="text-sm">{getUserName(subdept.taskAssistantId || '')}</span>
+                                <TableCell className="border-r">
+                                  <div className="min-w-[120px]">
+                                    <span className="text-sm">{getUserName(subdept.taskAssistantId || '') || '-'}</span>
+                                  </div>
                                 </TableCell>
-                                <TableCell>{subdept.processingTime} days</TableCell>
-                                <TableCell>{subdept.deliveryTime} days</TableCell>
-                                <TableCell>
+                                <TableCell className="border-r text-center">
+                                  <Badge variant="outline">{subdept.processingTime} days</Badge>
+                                </TableCell>
+                                <TableCell className="border-r text-center">
+                                  <Badge variant="outline">{subdept.deliveryTime} days</Badge>
+                                </TableCell>
+                                <TableCell className="border-r">
                                   <div className="flex items-center space-x-2">
-                                    <span className="text-sm text-muted-foreground">
-                                      {subdept.stages.length} stages
-                                    </span>
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <Button variant="outline" size="sm" className="h-8 w-full justify-between">
+                                          <span>{subdept.stages?.length || 0} Stages</span>
+                                          <ChevronDown className="h-4 w-4 ml-2" />
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent className="w-96">
+                                        <div className="space-y-4">
+                                          <h4 className="font-medium leading-none">Workflow Stages</h4>
+                                          <div className="space-y-4">
+                                            {subdept.stages && subdept.stages.length > 0 ? (
+                                              <div className="space-y-2">
+                                                {subdept.stages.map((stage) => (
+                                                  <div key={stage.id} className="border rounded-md p-3">
+                                                    <div className="flex justify-between items-start">
+                                                      <div>
+                                                        <div className="font-medium">{stage.name}</div>
+                                                        <div className="text-sm text-muted-foreground">
+                                                          {stage.estimatedTime} hours • Order: {stage.order}
+                                                        </div>
+                                                      </div>
+                                                      <Badge variant={stage.status === 'yes' ? 'default' : 'outline'}>
+                                                        {stage.status === 'yes' ? 'Active' : 'N/A'}
+                                                      </Badge>
+                                                    </div>
+                                                    {stage.reminderDays > 0 && (
+                                                      <div className="mt-2 text-sm text-muted-foreground">
+                                                        Reminder after {stage.reminderDays} days
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            ) : (
+                                              <div className="text-sm text-muted-foreground">No stages defined</div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </PopoverContent>
+                                    </Popover>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="w-[180px]">
+                                  <div className="flex space-x-2">
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      onClick={() => handleAddStage(subdept)}
-                                    >
-                                      <Plus className="h-4 w-4 mr-1" />
-                                      Add Stage
-                                    </Button>
-                                  </div>
-                                  {subdept.stages.length > 0 && (
-                                    <div className="mt-2 space-y-1">
-                                      {subdept.stages.map(stage => (
-                                        <div
-                                          key={stage.id}
-                                          className="flex items-center justify-between p-2 text-sm rounded border"
-                                        >
-                                          <div className="flex items-center space-x-2">
-                                            <div className={`w-2 h-2 rounded-full ${stage.isActive ? 'bg-green-500' : 'bg-gray-300'
-                                              }`} />
-                                            <span>{stage.name}</span>
-                                            <Badge variant={stage.status === 'yes' ? 'default' : 'secondary'} className="text-xs">
-                                              {stage.status === 'yes' ? 'Active' : 'N/A'}
-                                            </Badge>
-                                            <span className="text-xs text-muted-foreground flex items-center">
-                                              <Clock className="h-3 w-3 mr-1" />
-                                              {stage.estimatedTime}h
-                                            </span>
-                                            <span className="text-xs text-muted-foreground">
-                                              {stage.reminderDays}d reminder
-                                            </span>
-                                            {stage.isActive && (
-                                              <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full flex items-center">
-                                                <AlertTriangle className="h-3 w-3 mr-1" />
-                                                Active
-                                              </span>
-                                            )}
-                                          </div>
-                                          <div className="flex space-x-2">
-                                            <Button variant="ghost" size="sm" className="h-6">
-                                              <Users className="h-3 w-3" />
-                                            </Button>
-                                            <Button variant="ghost" size="sm" className="h-6">
-                                              <Settings className="h-3 w-3" />
-                                            </Button>
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex space-x-2">
-                                    <Button 
-                                      variant="ghost" 
-                                      size="sm"
+                                      className="h-8 w-8 p-0"
                                       onClick={() => handleOpenAssignmentDialog(dept.id, subdept)}
+                                      title="Assign users"
                                     >
                                       <UserPlus className="h-4 w-4" />
                                     </Button>
-                                    <Button variant="ghost" size="sm">
-                                      <Settings className="h-4 w-4" />
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 w-8 p-0"
+                                      onClick={() => handleEditSubdepartment(dept.id, subdept)}
+                                      title="Edit subdepartment"
+                                    >
+                                      <Edit className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                      onClick={() => handleDeleteSubdepartment(dept.id, subdept.id)}
+                                      title="Delete subdepartment"
+                                    >
+                                      <X className="h-4 w-4" />
                                     </Button>
                                   </div>
                                 </TableCell>
@@ -599,11 +883,13 @@ export default function DepartmentsPage() {
         </CardContent>
       </Card>
 
-      {/* Add Department Dialog */}
+      {/* Add Department/Subdepartment Dialog */}
       <Dialog open={isAddDepartmentOpen} onOpenChange={setIsAddDepartmentOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add New Department</DialogTitle>
+            <DialogTitle>
+              {currentDepartmentId ? 'Add New Subdepartment' : 'Add New Department'}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-6 py-4">
             {/* Department Basic Info */}
@@ -686,10 +972,10 @@ export default function DepartmentsPage() {
                           <SelectContent>
                             <SelectItem value="none">None</SelectItem>
                             {users.map(user => (
-                                <SelectItem key={user.id} value={user.id}>
-                                  {user.name}
-                                </SelectItem>
-                              ))}
+                              <SelectItem key={user.id} value={user.id}>
+                                {user.name}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -705,10 +991,10 @@ export default function DepartmentsPage() {
                           <SelectContent>
                             <SelectItem value="none">None</SelectItem>
                             {users.map(user => (
-                                <SelectItem key={user.id} value={user.id}>
-                                  {user.name}
-                                </SelectItem>
-                              ))}
+                              <SelectItem key={user.id} value={user.id}>
+                                {user.name}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -738,15 +1024,88 @@ export default function DepartmentsPage() {
                         </Button>
                       </div>
                       {subdept.classes.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mt-2">
+                        <div className="space-y-3 mt-2">
                           {subdept.classes.map((cls, classIndex) => (
-                            <Badge key={cls.id} variant="secondary" className="flex items-center gap-1">
-                              {cls.name}
-                              <X
-                                className="h-3 w-3 cursor-pointer"
-                                onClick={() => handleRemoveClass(subdeptIndex, classIndex)}
-                              />
-                            </Badge>
+                            <div key={cls.id} className="border rounded-md p-3 space-y-2">
+                              <div className="flex justify-between items-center">
+                                <div className="font-medium">{cls.name}</div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleRemoveClass(subdeptIndex, classIndex)}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+
+                              {/* Class Requirements */}
+                              <div className="pl-2 border-l-2 border-muted">
+                                <div className="text-sm font-medium mb-2">Requirements:</div>
+                                <div className="space-y-2">
+                                  <div className="flex space-x-2">
+                                    <Input
+                                      placeholder="Requirement name"
+                                      value={newClassRequirement.name}
+                                      onChange={(e) => setNewClassRequirement(prev => ({ ...prev, name: e.target.value }))}
+                                      className="flex-1"
+                                    />
+                                    <Input
+                                      placeholder="Description (optional)"
+                                      value={newClassRequirement.description || ''}
+                                      onChange={(e) => setNewClassRequirement(prev => ({ ...prev, description: e.target.value }))}
+                                      className="flex-1"
+                                    />
+                                    <div className="flex items-center space-x-2">
+                                      <Checkbox
+                                        id={`req-required-${subdeptIndex}-${classIndex}`}
+                                        checked={newClassRequirement.isRequired}
+                                        onCheckedChange={(checked) =>
+                                          setNewClassRequirement(prev => ({ ...prev, isRequired: Boolean(checked) }))
+                                        }
+                                      />
+                                      <Label htmlFor={`req-required-${subdeptIndex}-${classIndex}`} className="whitespace-nowrap">
+                                        Required
+                                      </Label>
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      onClick={() => handleAddClassRequirement(subdeptIndex, classIndex)}
+                                      variant="outline"
+                                      size="sm"
+                                    >
+                                      Add
+                                    </Button>
+                                  </div>
+
+                                  {cls.requirements?.length > 0 && (
+                                    <div className="space-y-1">
+                                      {cls.requirements.map((req, reqIndex) => (
+                                        <div key={req.id} className="flex items-center justify-between bg-muted/50 p-2 rounded">
+                                          <div className="flex-1">
+                                            <div className="flex items-center gap-2">
+                                              <span className="font-medium">{req.name}</span>
+                                              {req.description && (
+                                                <span className="text-muted-foreground text-sm">{req.description}</span>
+                                              )}
+                                              {req.isRequired && (
+                                                <Badge variant="default" className="text-xs">Required</Badge>
+                                              )}
+                                            </div>
+                                          </div>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleRemoveClassRequirement(subdeptIndex, classIndex, reqIndex)}
+                                          >
+                                            <X className="h-4 w-4" />
+                                          </Button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
                           ))}
                         </div>
                       )}
@@ -756,14 +1115,14 @@ export default function DepartmentsPage() {
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <Label>Stages Configuration</Label>
-                        <Button 
+                        {/* <Button 
                           variant="outline" 
                           size="sm" 
                           onClick={() => window.location.href = '/dashboard/settings/workflow-stages'}
                         >
                           <Settings className="h-4 w-4 mr-2" />
                           Manage Stages
-                        </Button>
+                        </Button> */}
                       </div>
                       {globalStages.length > 0 ? (
                         <div className="border rounded-md p-4 space-y-3 max-h-60 overflow-y-auto">
@@ -829,12 +1188,21 @@ export default function DepartmentsPage() {
 
             {/* Dialog Actions */}
             <div className="flex justify-end space-x-2 pt-4 border-t">
-              <Button variant="outline" onClick={() => setIsAddDepartmentOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsAddDepartmentOpen(false)
+                  setCurrentDepartmentId(null)
+                }}
+                disabled={saving}
+              >
                 Cancel
               </Button>
-              <Button onClick={handleSaveDepartment} disabled={saving}>
-                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Create Department
+              <Button
+                onClick={handleSaveDepartment}
+                disabled={saving}
+              >
+                {saving ? 'Saving...' : currentDepartmentId ? 'Save Subdepartment' : 'Save Department'}
               </Button>
             </div>
           </div>
@@ -899,7 +1267,7 @@ export default function DepartmentsPage() {
               {selectedSubdept?.subdept.name} - {departments.find(d => d.id === selectedSubdept?.deptId)?.name}
             </p>
           </DialogHeader>
-          
+
           {selectedSubdept && (
             <div className="space-y-4 py-4">
               <div className="space-y-2">
@@ -965,14 +1333,14 @@ export default function DepartmentsPage() {
               </div>
 
               <div className="flex justify-end space-x-2 pt-4">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => setAssignmentDialogOpen(false)}
                   disabled={saving}
                 >
                   Cancel
                 </Button>
-                <Button 
+                <Button
                   onClick={() => selectedSubdept && handleSaveAssignments(
                     selectedSubdept.subdept.taskManagerId || '',
                     selectedSubdept.subdept.taskAssistantId || ''
