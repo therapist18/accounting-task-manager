@@ -102,7 +102,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   const [allUsers, setAllUsers] = useState<Officer[]>([])
   const [loading, setLoading] = useState(false)
   const [initialLoad, setInitialLoad] = useState(true)
-  
+
   const [formData, setFormData] = useState<FormData>(() => ({
     job_description: '',
     department_id: '',
@@ -124,10 +124,10 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   // Optimized data fetching with proper error handling
   const fetchInitialData = useCallback(async () => {
     if (!open || !initialLoad) return
-    
+
     try {
       setLoading(true)
-      
+
       const [
         { data: depts, error: deptsError },
         { data: staff, error: staffError },
@@ -172,12 +172,12 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   const fetchSubdepartments = useCallback(async (departmentId: string) => {
     if (!departmentId) {
       setSubdepartments([])
-      setFormData(prev => ({ 
-        ...prev, 
-        subdepartment_id: '', 
+      setFormData(prev => ({
+        ...prev,
+        subdepartment_id: '',
         task_manager_id: '',
         task_assistant_id: '',
-        class_id: '' 
+        class_id: ''
       }))
       return
     }
@@ -226,8 +226,8 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
   // Optimized form change handler with proper state updates
   const handleChange = useCallback((field: keyof FormData, value: any) => {
-    console.log(`Changing ${field} to:`, value)
-    
+    console.log(`Changing ${field} to:`, value);
+
     setFormData(prev => {
       // If changing department, reset subdepartment and its dependent fields
       if (field === 'department_id') {
@@ -240,12 +240,12 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
           class_id: ''
         };
       }
-      
+
       // If changing subdepartment, reset dependent fields but auto-populate task manager/assistant
       if (field === 'subdepartment_id') {
-        const selectedSubdept = subdepartments.find(s => s.id === value);
-        console.log('Selected subdepartment for auto-population:', selectedSubdept)
-        
+        const selectedSubdept = subdepartments.find(s => s.id.toString() === value.toString());
+        console.log('Selected subdepartment for auto-population:', selectedSubdept);
+
         return {
           ...prev,
           subdepartment_id: value,
@@ -254,18 +254,21 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
           class_id: ''
         };
       }
-      
+
       // If changing client, update the selected client
       if (field === 'client_id') {
         const client = clients.find(c => c.id === value) || null;
         setSelectedClient(client);
       }
-      
+
       // For all other fields, update normally
-      return {
+      const newState = {
         ...prev,
         [field]: value
       };
+
+      console.log('Updated form data:', newState);
+      return newState;
     });
   }, [clients, subdepartments]);
 
@@ -276,9 +279,9 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
     try {
       setLoading(true)
-      
+
       console.log('Submitting form data:', formData)
-      
+
       const { data, error } = await supabase
         .from('tm_tasks')
         .insert([{
@@ -344,55 +347,84 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   }, [formData, loading, onOpenChange, onCreate])
 
   // Memoized computed values with proper type safety and debugging
-  const selectedSubdepartment = useMemo<Subdepartment | undefined>(() => {
-    const selected = subdepartments.find(s => s.id === formData.subdepartment_id);
-    console.log('Selected subdepartment memo:', selected);
-    return selected;
-  }, [subdepartments, formData.subdepartment_id])
+  const selectedSubdepartment = useMemo(() => {
+    if (!formData.subdepartment_id) return null;
+    const sub = subdepartments.find(sd => sd.id.toString() === formData.subdepartment_id.toString());
+    console.log('Selected subdepartment:', sub);
+    return sub || null;
+  }, [subdepartments, formData.subdepartment_id]);
 
   // Get task manager details from allUsers using the ID from subdepartment
   const availableTaskManagers = useMemo<Officer[]>(() => {
     console.log('Computing available task managers...');
     console.log('Selected subdepartment:', selectedSubdepartment);
     console.log('All users:', allUsers);
-    
+
     if (!selectedSubdepartment?.task_manager?.id) {
       console.log('No task manager ID in subdepartment');
       return [];
     }
-    
+
     const managerId = selectedSubdepartment.task_manager.id;
     console.log('Looking for manager with ID:', managerId);
-    
-    // Convert both IDs to strings for comparison to ensure type consistency
+
+    // Find the manager in the users list by ID
     const manager = allUsers.find(user => {
-      const userId = typeof user.id === 'number' ? user.id : parseInt(user.id, 10);
-      return userId === managerId;
+      // Convert both IDs to strings for comparison to handle any type mismatches
+      const userId = user.id.toString();
+      return userId === managerId.toString();
     });
-    
+
     console.log('Found manager:', manager);
+
+    // If no manager found, try to find by email as fallback
+    if (!manager && selectedSubdepartment.task_manager.email) {
+      const email = selectedSubdepartment.task_manager.email.toLowerCase();
+      const fallbackManager = allUsers.find(user =>
+        user.email.toLowerCase() === email
+      );
+      if (fallbackManager) {
+        console.log('Found manager by email fallback:', fallbackManager);
+        return [fallbackManager];
+      }
+    }
+
     return manager ? [manager] : [];
   }, [selectedSubdepartment, allUsers])
 
   // Get task assistant details from allUsers using the ID from subdepartment
   const availableTaskAssistants = useMemo<Officer[]>(() => {
     console.log('Computing available task assistants...');
-    
+
     if (!selectedSubdepartment?.task_assistant?.id) {
       console.log('No task assistant ID in subdepartment');
       return [];
     }
-    
+
     const assistantId = selectedSubdepartment.task_assistant.id;
     console.log('Looking for assistant with ID:', assistantId);
-    
-    // Convert both IDs to numbers for comparison to ensure type consistency
+
+    // Find the assistant in the users list by ID
     const assistant = allUsers.find(user => {
-      const userId = typeof user.id === 'number' ? user.id : parseInt(user.id, 10);
-      return userId === assistantId;
+      // Convert both IDs to strings for comparison to handle any type mismatches
+      const userId = user.id.toString();
+      return userId === assistantId.toString();
     });
-    
+
     console.log('Found assistant:', assistant);
+
+    // If no assistant found, try to find by email as fallback
+    if (!assistant && selectedSubdepartment.task_assistant.email) {
+      const email = selectedSubdepartment.task_assistant.email.toLowerCase();
+      const fallbackAssistant = allUsers.find(user =>
+        user.email.toLowerCase() === email
+      );
+      if (fallbackAssistant) {
+        console.log('Found assistant by email fallback:', fallbackAssistant);
+        return [fallbackAssistant];
+      }
+    }
+
     return assistant ? [assistant] : [];
   }, [selectedSubdepartment, allUsers])
 
@@ -400,20 +432,20 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   const availableClasses = useMemo(() => {
     console.log('Computing available classes...');
     console.log('Selected subdepartment classes:', selectedSubdepartment?.classes);
-    
+
     if (!selectedSubdepartment) return [];
-    
-    const classes = Array.isArray(selectedSubdepartment.classes) 
-      ? selectedSubdepartment.classes 
+
+    const classes = Array.isArray(selectedSubdepartment.classes)
+      ? selectedSubdepartment.classes
       : [];
-    
+
     console.log('Available classes:', classes);
     return classes;
   }, [selectedSubdepartment])
 
   const clientDetails = useMemo(() => {
     if (!selectedClient) return null
-    
+
     return (
       <div className="mt-2 p-3 bg-gray-50 rounded-md text-sm space-y-1">
         {selectedClient.bill_to?.company_name && (
@@ -437,21 +469,23 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
   // Debug logging
   useEffect(() => {
-    console.log('Form data updated:', formData);
+    console.log('Form data updated:', JSON.parse(JSON.stringify(formData)));
     console.log('Available managers:', availableTaskManagers);
     console.log('Available assistants:', availableTaskAssistants);
-    console.log('Available classes:', availableClasses);
-  }, [formData, availableTaskManagers, availableTaskAssistants, availableClasses]);
+    console.log('Selected subdepartment:', selectedSubdepartment);
+    console.log('All users:', allUsers);
+  }, [formData, availableTaskManagers, availableTaskAssistants, selectedSubdepartment, allUsers]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[800px]">
         <DialogHeader>
           <DialogTitle>Create New Task</DialogTitle>
-          <DialogDescription>Enter the details for the new task.</DialogDescription>
+          <DialogDescription>
+            Fill in the details below to create a new task.
+          </DialogDescription>
         </DialogHeader>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid gap-2">
             <Label htmlFor="job-description">Job Description *</Label>
             <Textarea
@@ -502,7 +536,11 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                 required
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select department" />
+                  <SelectValue>
+                    {formData.department_id ? (
+                      departments.find(d => d.id === formData.department_id)?.name || 'Select department'
+                    ) : 'Select department'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {departments.map((dept) => (
@@ -523,8 +561,16 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                 required
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select subdepartment" />
-                </SelectTrigger>
+  <SelectValue>
+    {formData.subdepartment_id ? (
+      subdepartments.find(s => s.id === formData.subdepartment_id)?.name || 'Select subdepartment'
+    ) : formData.department_id ? (
+      'Select subdepartment'
+    ) : (
+      'Select department first'
+    )}
+  </SelectValue>
+</SelectTrigger>
                 <SelectContent>
                   {subdepartments.map((sub) => (
                     <SelectItem key={sub.id} value={sub.id}>
@@ -548,10 +594,22 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                   required
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder={
-                      !formData.subdepartment_id ? 'Select subdepartment first' : 
-                      availableTaskManagers.length === 0 ? 'No managers available' : 'Select manager'
-                    } />
+                    <SelectValue>
+                      {formData.task_manager_id ? (
+                        <div className="flex flex-col">
+                          <span>{allUsers.find(u => u.id === formData.task_manager_id)?.name || 'Unnamed Manager'}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {allUsers.find(u => u.id === formData.task_manager_id)?.email}
+                          </span>
+                        </div>
+                      ) : !formData.subdepartment_id ? (
+                        'Select subdepartment first'
+                      ) : availableTaskManagers.length === 0 ? (
+                        'No managers available'
+                      ) : (
+                        'Select manager'
+                      )}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {availableTaskManagers.map((manager) => (
@@ -579,10 +637,22 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                   disabled={!formData.subdepartment_id}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder={
-                      !formData.subdepartment_id ? 'Select subdepartment first' : 
-                      availableTaskAssistants.length === 0 ? 'No assistants available' : 'Select assistant'
-                    } />
+                    <SelectValue>
+                      {formData.task_assistant_id ? (
+                        <div className="flex flex-col">
+                          <span>{allUsers.find(u => u.id === formData.task_assistant_id)?.name || 'Unnamed Assistant'}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {allUsers.find(u => u.id === formData.task_assistant_id)?.email}
+                          </span>
+                        </div>
+                      ) : !formData.subdepartment_id ? (
+                        'Select subdepartment first'
+                      ) : availableTaskAssistants.length === 0 ? (
+                        'No assistants available'
+                      ) : (
+                        'Select assistant'
+                      )}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">None</SelectItem>
@@ -610,7 +680,18 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                   onValueChange={(value: string) => handleChange('officer_id', value === 'none' ? '' : value)}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select officer" />
+                    <SelectValue>
+                      {formData.officer_id ? (
+                        <div className="flex flex-col">
+                          <span>{allUsers.find(u => u.id === formData.officer_id)?.name || 'Unnamed Officer'}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {allUsers.find(u => u.id === formData.officer_id)?.email}
+                          </span>
+                        </div>
+                      ) : (
+                        'Select officer'
+                      )}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">None</SelectItem>
@@ -638,12 +719,26 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
               required
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select client" />
+                <SelectValue>
+                  {formData.client_id ? (
+                    <div className="flex flex-col">
+                      <span>{clients.find(c => c.id === formData.client_id)?.full_name || 'Unnamed Client'}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {clients.find(c => c.id === formData.client_id)?.alternative_email}
+                      </span>
+                    </div>
+                  ) : (
+                    'Select client'
+                  )}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {clients.map((client) => (
                   <SelectItem key={client.id} value={client.id}>
-                    {client.full_name || client.alternative_email || 'Unnamed Client'}
+                    <div className="flex flex-col">
+                      <span>{client.full_name || client.alternative_email || 'Unnamed Client'}</span>
+                      {client.alternative_email && <span className="text-xs text-muted-foreground">{client.alternative_email}</span>}
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -662,7 +757,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                 <SelectTrigger>
                   <SelectValue placeholder={
                     !formData.subdepartment_id ? 'Select subdepartment first' :
-                    availableClasses.length === 0 ? 'No classes available' : 'Select class'
+                      availableClasses.length === 0 ? 'No classes available' : 'Select class'
                   } />
                 </SelectTrigger>
                 <SelectContent>
