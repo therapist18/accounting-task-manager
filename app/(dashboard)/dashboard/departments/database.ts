@@ -67,6 +67,15 @@ export async function fetchDepartments(): Promise<Department[]> {
     // Create a map of stage IDs to stage details for quick lookup
     const stagesMap = new Map(allStages?.map(stage => [stage.id, stage]) || [])
 
+    // First, fetch all users for quick lookup
+    const { data: allUsers, error: usersError } = await supabase
+      .from('tm_users')
+      .select('id, name, email, phone_number, role')
+      
+    if (usersError) throw usersError
+    
+    const usersMap = new Map(allUsers?.map(user => [user.id, user]) || []);
+
     // Fetch departments with their subdepartments
     const { data: departmentsData, error: deptError } = await supabase
       .from('tm_departments')
@@ -99,9 +108,27 @@ export async function fetchDepartments(): Promise<Department[]> {
           } : null;
         }).filter(Boolean);
 
+        // Get user data for task manager and task assistant
+        const taskManagerUser = subdept.task_manager?.id ? usersMap.get(subdept.task_manager.id) : null;
+        const taskAssistantUser = subdept.task_assistant?.id ? usersMap.get(subdept.task_assistant.id) : null;
+
         return {
           ...subdept,
           stages,
+          task_manager: taskManagerUser ? {
+            id: taskManagerUser.id,
+            name: taskManagerUser.name,
+            email: taskManagerUser.email,
+            phone_number: taskManagerUser.phone_number,
+            role: taskManagerUser.role
+          } : null,
+          task_assistant: taskAssistantUser ? {
+            id: taskAssistantUser.id,
+            name: taskAssistantUser.name,
+            email: taskAssistantUser.email,
+            phone_number: taskAssistantUser.phone_number,
+            role: taskAssistantUser.role
+          } : null,
           // Ensure classes always has requirements array
           classes: ((subdept.classes as any[]) || []).map((cls: any) => ({
             ...cls,
@@ -148,9 +175,6 @@ export async function createDepartment(departmentData: {
     } | null
     stages: Array<{
       id: number
-      name: string
-      order_num: number
-      estimated_time: number
     }>
   }>
 }): Promise<Department> {

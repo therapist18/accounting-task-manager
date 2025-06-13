@@ -24,18 +24,61 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, UserPlus, UserCheck, UserX, ChevronDown, Check } from "lucide-react"
+import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, UserPlus, UserCheck, UserX, ChevronDown, Check, User } from "lucide-react"
 import supabase from "@/lib/supabase/client"
 import { toast } from "sonner"
 type User = {
   id: string
   name: string | null
   email: string
+  phone_number?: string
   role: 'admin' | 'task_manager' | 'task_assistant' | 'officer' | string
   created_at?: string
   updated_at?: string
   assignedDepartments?: string[]
   assignedSubdepartments?: string[]
+}
+
+function UserDetailsPopover({ userId, users, role, children }: { 
+  userId: string, 
+  users: User[],
+  role: 'manager' | 'assistant',
+  children: React.ReactNode 
+}) {
+  const user = users.find(u => u.id === userId)
+  
+  if (!user) return <span>{children}</span>
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <span className="cursor-pointer hover:underline">{children}</span>
+      </PopoverTrigger>
+      <PopoverContent className="w-64">
+        <div className="space-y-4">
+          <div className="flex items-center space-x-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+              <User className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-medium">{user.name || 'No name'}</p>
+              <p className="text-sm text-muted-foreground">{user.email}</p>
+            </div>
+          </div>
+          {user.phone_number && (
+            <div className="text-sm">
+              <p className="text-muted-foreground">Phone Number</p>
+              <p>{user.phone_number}</p>
+            </div>
+          )}
+          <div className="text-sm">
+            <p className="text-muted-foreground">Role</p>
+            <p className="capitalize">Task {role === 'manager' ? 'Manager' : 'Assistant'}</p>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 type Stage = {
@@ -152,7 +195,7 @@ export default function DepartmentsPage() {
     try {
       const { data: users, error } = await supabase
         .from('tm_users')
-        .select('*')
+        .select('id, name, email, phone_number, role, created_at, updated_at')
         .order('name')
 
       if (error) throw error
@@ -387,12 +430,7 @@ export default function DepartmentsPage() {
             start_date: new Date().toISOString(),
             end_date: null
           } : null,
-          stages: selectedStages.data?.map(stage => ({
-            id: stage.id,
-            name: stage.name,
-            order_num: stage.order_num,
-            estimated_time: stage.estimated_time
-          })) || []
+          stages: selectedStages.data?.map(stage => stage.id) || []
         }
 
         if (isEditingSubdepartment) {
@@ -601,14 +639,19 @@ export default function DepartmentsPage() {
   const getUserName = (userData: any) => {
     if (!userData) return 'Unassigned';
     
-    if (typeof userData === 'string') {
-      const user = users.find(u => u.id === userData);
-      return user ? user.name : 'Unassigned';
+    // Handle case where userData is an object with id (from API response)
+    if (typeof userData === 'object' && userData !== null) {
+      if (userData.name) return userData.name;
+      if (userData.id) {
+        const user = users.find(u => u.id === userData.id);
+        return user ? user.name : 'Unassigned';
+      }
+      return 'Unassigned';
     }
     
-    // Handle case where userData is an object with id
-    if (userData.id) {
-      const user = users.find(u => u.id === userData.id);
+    // Handle case where userData is just an ID string
+    if (typeof userData === 'string') {
+      const user = users.find(u => u.id === userData);
       return user ? user.name : 'Unassigned';
     }
     
@@ -845,12 +888,24 @@ export default function DepartmentsPage() {
                                 </TableCell>
                                 <TableCell className="border-r">
                                   <div className="min-w-[120px]">
-                                    <span className="text-sm">{getUserName(subdept.taskManagerId || '') || '-'}</span>
+                                    {subdept.task_manager ? (
+                                      <UserDetailsPopover userId={subdept.task_manager.id} users={users} role="manager">
+                                        <span className="text-sm">{subdept.task_manager.name || 'Unassigned'}</span>
+                                      </UserDetailsPopover>
+                                    ) : (
+                                      <span className="text-sm text-muted-foreground">Unassigned</span>
+                                    )}
                                   </div>
                                 </TableCell>
                                 <TableCell className="border-r">
                                   <div className="min-w-[120px]">
-                                    <span className="text-sm">{getUserName(subdept.taskAssistantId || '') || '-'}</span>
+                                    {subdept.task_assistant ? (
+                                      <UserDetailsPopover userId={subdept.task_assistant.id} users={users} role="assistant">
+                                        <span className="text-sm">{subdept.task_assistant.name || 'Unassigned'}</span>
+                                      </UserDetailsPopover>
+                                    ) : (
+                                      <span className="text-sm text-muted-foreground">Unassigned</span>
+                                    )}
                                   </div>
                                 </TableCell>
                                 <TableCell className="border-r text-center">

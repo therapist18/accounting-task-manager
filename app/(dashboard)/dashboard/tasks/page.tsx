@@ -28,6 +28,15 @@ type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
     id: string; 
     name: string; 
     department_id: string;
+    classes?: Array<{
+      name: string;
+      description: string | null;
+      requirements: Array<{
+        name: string;
+        description: string | null;
+        is_required: boolean;
+      }>
+    }>
     stages?: Array<{
       id: string;
       name: string;
@@ -37,7 +46,17 @@ type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
   } | null
   task_manager?: { id: string; full_name: string | null; email: string } | null
   task_assistant?: { id: string; full_name: string | null; email: string } | null
-  client?: { id: string; full_name: string | null; email: string | null } | null
+  officer?: { id: string; full_name: string | null; email: string } | null
+  client?: { 
+    id: string; 
+    full_name: string | null; 
+    email: string | null;
+    bill_to?: {
+      company_name?: string;
+      company_address?: string;
+      contact_person?: string;
+    } | null;
+  } | null
   current_stage?: { 
     id: string; 
     name: string; 
@@ -50,6 +69,12 @@ type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
   date_initiated?: string | null
   created_at?: string
   status: string
+  class_name?: string | null
+  renewal_status?: string | null
+  account_used?: string | null
+  applied_by?: string | null
+  batch?: string | null
+  dependent_name?: string | null
 }
 
 export default function TasksPage() {
@@ -89,9 +114,8 @@ export default function TasksPage() {
     loadData()
   }, [])
 
-  // Format task data for display
-  const formatTaskData = (task: Task) => {
-    // Parse dates to ensure consistent formatting
+  // Format task data for display with enhanced company name mapping
+  const formatTaskData = (task: Task, index: number) => {
     const formatDate = (dateString?: string | null) => {
       if (!dateString) return ''
       try {
@@ -101,19 +125,28 @@ export default function TasksPage() {
       }
     }
 
+    // Get company name from bill_to details
+    const getCompanyName = () => {
+      if (task.client?.bill_to?.company_name) {
+        return task.client.bill_to.company_name
+      }
+      return 'N/A'
+    }
+
     const formattedTask: any = {
       ...task,
-      // Basic info
+      // Basic info with index
+      index: index,
       website: task.client?.website || '',
       job_description: task.job_description || '',
       job_head: task.task_manager?.full_name || 'Unassigned',
-      class: task.subdepartment?.name || 'N/A',
+      class: task.class_name || 'N/A',
       
-      // Applicant info
+      // Applicant info with enhanced company mapping
       applicant_name: task.client?.full_name || 'N/A',
-      company_name: task.client_company || 'N/A',
-      dependent_name: '', // This would come from client data if available
-      renewal_status: 'New', // Default to New, would come from task data
+      company_name: getCompanyName(),
+      dependent_name: task.dependent_name || '',
+      renewal_status: task.renewal_status || 'New',
       
       // Dates
       applied_date: formatDate(task.date_initiated),
@@ -128,15 +161,16 @@ export default function TasksPage() {
       
       // Additional info
       account_used: task.account_used || '',
-      applied_by: task.created_by || 'System',
-      batch: task.batch_number || '',
+      applied_by: task.applied_by || 'System',
+      batch: task.batch || '',
       
       // Original fields (kept for compatibility)
       department: task.department?.name || 'N/A',
       subdepartment: task.subdepartment?.name || 'N/A',
       taskManager: task.task_manager?.full_name || 'Unassigned',
       taskAssistant: task.task_assistant?.full_name || 'Unassigned',
-      client: task.client?.full_name || task.client_company || 'N/A',
+      officer: task.officer?.full_name || 'Unassigned',
+      client: task.client?.full_name || getCompanyName() || 'N/A',
       dateInitiated: formatDate(task.date_initiated),
       currentStage: task.current_stage ? {
         id: task.current_stage.id,
@@ -153,6 +187,7 @@ export default function TasksPage() {
       subdepartment: string
       taskManager: string
       taskAssistant: string
+      officer: string
       client: string
       dateInitiated: string
       currentStage: { id: string; name: string; estimatedMinutes: number } | null
@@ -217,7 +252,6 @@ export default function TasksPage() {
 
       <Tabs defaultValue="all" className="space-y-4">
         <TabsList>
-          {/* <TabsTrigger value="active">Active Tasks</TabsTrigger> */}
           <TabsTrigger value="all">All Tasks</TabsTrigger>
           <TabsTrigger value="overdue">Overdue</TabsTrigger>
           <TabsTrigger value="completed">Completed</TabsTrigger>
@@ -232,11 +266,14 @@ export default function TasksPage() {
             <CardContent className="p-4">
               <div className="rounded-md border w-full overflow-hidden">
                 <div className="w-full overflow-auto" style={{ maxHeight: '70vh', maxWidth: '90vw' }}>
-                  <Table className="min-w-[1200px] w-full">
+                  <Table className="min-w-[1400px] w-full">
                     <TableHeader className="sticky top-0 z-10 bg-background">
                       <TableRow>
                         {taskColumns.map((column) => (
-                          <TableHead key={column.key} className="whitespace-nowrap">
+                          <TableHead 
+                            key={column.key} 
+                            className="whitespace-nowrap border-r border-border last:border-r-0 bg-muted/50 font-semibold"
+                          >
                             {column.header}
                           </TableHead>
                         ))}
@@ -256,14 +293,24 @@ export default function TasksPage() {
                           </TableCell>
                         </TableRow>
                       ) : tasks.length > 0 ? (
-                        tasks.map((task) => {
-                          const formattedTask = formatTaskData(task)
+                        tasks.map((task, index) => {
+                          const formattedTask = formatTaskData(task, index)
                           return (
-                            <TableRow key={task.id}>
+                            <TableRow 
+                              key={task.id}
+                              className="hover:bg-muted/50"
+                            >
                               {taskColumns.map((column) => (
-                                <TableCell key={`${task.id}-${column.key}`} className="whitespace-nowrap">
+                                <TableCell 
+                                  key={`${task.id}-${column.key}`} 
+                                  className="whitespace-nowrap border-r border-border last:border-r-0 py-2"
+                                >
                                   {column.render 
-                                    ? column.render(formattedTask[column.key as keyof typeof formattedTask], formattedTask)
+                                    ? column.render(
+                                        formattedTask[column.key as keyof typeof formattedTask], 
+                                        formattedTask,
+                                        index
+                                      )
                                     : (formattedTask[column.key as keyof typeof formattedTask] || '-')}
                                 </TableCell>
                               ))}
@@ -284,6 +331,7 @@ export default function TasksPage() {
             </CardContent>
           </Card>
         </TabsContent>
+        
         <TabsContent value="overdue" className="space-y-4">
           <Card>
             <CardHeader>
@@ -294,10 +342,10 @@ export default function TasksPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Job Description</TableHead>
-                    <TableHead>Current Stage</TableHead>
-                    <TableHead>Overdue By</TableHead>
-                    <TableHead>Manager</TableHead>
+                    <TableHead className="border-r border-border">Job Description</TableHead>
+                    <TableHead className="border-r border-border">Current Stage</TableHead>
+                    <TableHead className="border-r border-border">Overdue By</TableHead>
+                    <TableHead className="border-r border-border">Manager</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -306,19 +354,19 @@ export default function TasksPage() {
                     .filter((task) => {
                       if (!task.current_stage_started_at || !task.current_stage?.estimated_time) return false
                       const elapsedMinutes = (new Date().getTime() - new Date(task.current_stage_started_at).getTime()) / (1000 * 60)
-                      return elapsedMinutes > (task.current_stage.estimated_time * 1.5) // 50% over estimated time
+                      return elapsedMinutes > (task.current_stage.estimated_time * 1.5)
                     })
-                    .map((task) => (formatTaskData(task))).map((task) => (
+                    .map((task) => (formatTaskData(task, 0))).map((task) => (
                       <TableRow key={task.id}>
-                        <TableCell className="font-medium">{task.jobDescription}</TableCell>
-                        <TableCell>
+                        <TableCell className="font-medium border-r border-border">{task.jobDescription}</TableCell>
+                        <TableCell className="border-r border-border">
                           <Badge variant="destructive">
                             <AlertTriangle className="h-3 w-3 mr-1" />
                             {task.currentStage?.name}
                           </Badge>
                         </TableCell>
-                        <TableCell>2 hours</TableCell>
-                        <TableCell>{task.taskManager}</TableCell>
+                        <TableCell className="border-r border-border">2 hours</TableCell>
+                        <TableCell className="border-r border-border">{task.taskManager}</TableCell>
                         <TableCell>
                           <Button variant="outline" size="sm" onClick={() => handleStageTransition(task.id)}>
                             <ArrowRight className="h-4 w-4 mr-2" />
@@ -343,26 +391,30 @@ export default function TasksPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Job Description</TableHead>
-                    <TableHead>Completed Date</TableHead>
-                    <TableHead>Total Time</TableHead>
-                    <TableHead>Performance</TableHead>
+                    <TableHead className="border-r border-border">Job Description</TableHead>
+                    <TableHead className="border-r border-border">Completed Date</TableHead>
+                    <TableHead className="border-r border-border">Total Time</TableHead>
+                    <TableHead className="border-r border-border">Performance</TableHead>
                     <TableHead>Manager</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  <TableRow>
-                    <TableCell className="font-medium">Vehicle Registration - DEF Motors</TableCell>
-                    <TableCell>2023-05-28</TableCell>
-                    <TableCell>2.5 days</TableCell>
-                    <TableCell>
-                      <Badge variant="success">
-                        <CheckCircle className="h-3 w-3 mr-1" />
-                        On Time
-                      </Badge>
-                    </TableCell>
-                    <TableCell>John Doe</TableCell>
-                  </TableRow>
+                  {tasks
+                    .filter(task => task.status === 'completed')
+                    .map((task) => (formatTaskData(task, 0))).map((task) => (
+                      <TableRow key={task.id}>
+                        <TableCell className="font-medium border-r border-border">{task.jobDescription}</TableCell>
+                        <TableCell className="border-r border-border">{task.dateInitiated}</TableCell>
+                        <TableCell className="border-r border-border">2.5 days</TableCell>
+                        <TableCell className="border-r border-border">
+                          <Badge variant="default">
+                            <CheckCircle className="h-3 w-3 mr-1" />
+                            On Time
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{task.taskManager}</TableCell>
+                      </TableRow>
+                    ))}
                 </TableBody>
               </Table>
             </CardContent>
@@ -388,7 +440,6 @@ export default function TasksPage() {
                 taskAssistant: assignments.taskAssistant
               })
               
-              // Update local state
               setTasks(tasks.map(t => 
                 t.id === selectedTask.id 
                   ? { ...t, ...updatedTask } 
@@ -413,14 +464,13 @@ export default function TasksPage() {
             name: selectedTask.current_stage?.name || 'Not Started',
             estimatedDuration: selectedTask.current_stage?.estimated_time || 0,
             actualDuration: selectedTask.current_stage_started_at
-              ? (new Date().getTime() - new Date(selectedTask.current_stage_started_at).getTime()) / (1000 * 60) // in minutes
+              ? (new Date().getTime() - new Date(selectedTask.current_stage_started_at).getTime()) / (1000 * 60)
               : 0
           }}
           stages={stages}
           currentStageId={selectedTask.current_stage?.id?.toString()}
           onTransition={async (data) => {
             try {
-              // Update the task's current stage
               const { data: updatedTask, error } = await supabase
                 .from('tm_tasks')
                 .update({
@@ -435,10 +485,8 @@ export default function TasksPage() {
 
               if (error) throw error
 
-              // Update the tasks list
               setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t))
               
-              // Add stage history
               if (data.nextStageId) {
                 await supabase.from('tm_task_stage_history').insert({
                   task_id: selectedTask.id,
@@ -456,7 +504,6 @@ export default function TasksPage() {
                 })
               }
               
-              // Refresh tasks
               const [tasksData] = await Promise.all([
                 getTasks()
               ])
