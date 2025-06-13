@@ -138,15 +138,11 @@ export async function createDepartment(departmentData: {
     }>
     task_manager: {
       id: string
-      name: string
-      email: string
       start_date: string
       end_date: string | null
     } | null
     task_assistant: {
       id: string
-      name: string
-      email: string
       start_date: string
       end_date: string | null
     } | null
@@ -188,15 +184,11 @@ export async function createDepartment(departmentData: {
           stages: stageIds, // Only store stage IDs
           task_manager: subdept.task_manager ? {
             id: subdept.task_manager.id,
-            name: subdept.task_manager.name,
-            email: subdept.task_manager.email,
             start_date: subdept.task_manager.start_date,
             end_date: subdept.task_manager.end_date
           } : null,
           task_assistant: subdept.task_assistant ? {
             id: subdept.task_assistant.id,
-            name: subdept.task_assistant.name,
-            email: subdept.task_assistant.email,
             start_date: subdept.task_assistant.start_date,
             end_date: subdept.task_assistant.end_date
           } : null

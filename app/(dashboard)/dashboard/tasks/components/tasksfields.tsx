@@ -11,6 +11,84 @@ interface TaskColumn {
   render?: (value: any, task: any) => React.ReactNode
 }
 
+interface DocumentDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onUpload: (url: string) => void
+}
+
+interface DocumentActionCellProps {
+  task: any
+  onDocumentUpload: (url: string) => void
+}
+
+const DocumentActionCell = ({ task, onDocumentUpload }: DocumentActionCellProps) => {
+  const [docDialogOpen, setDocDialogOpen] = useState(false)
+  
+  const handleUpload = (url: string) => {
+    onDocumentUpload(url)
+    setDocDialogOpen(false)
+  }
+
+  return (
+    <div className="flex items-center">
+      <Button 
+        variant="ghost" 
+        size="icon"
+        onClick={() => setDocDialogOpen(true)}
+      >
+        <X className="h-4 w-4 text-red-500" />
+      </Button>
+      <DocumentDialog 
+        open={docDialogOpen} 
+        onOpenChange={setDocDialogOpen} 
+        onUpload={handleUpload} 
+      />
+    </div>
+  )
+}
+
+const DocumentDialog = ({ open, onOpenChange, onUpload }: DocumentDialogProps) => {
+  const [documentUrl, setDocumentUrl] = useState("")
+  
+  const handleSubmit = () => {
+    onUpload(documentUrl)
+    setDocumentUrl("")
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Upload Document</DialogTitle>
+          <DialogDescription>
+            Enter the document URL or upload a file.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 py-4">
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="document-url" className="text-right">
+              Document URL
+            </Label>
+            <Input
+              id="document-url"
+              value={documentUrl}
+              onChange={(e) => setDocumentUrl(e.target.value)}
+              className="col-span-3"
+              placeholder="Enter document URL"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="button" onClick={handleSubmit}>
+            <Upload className="mr-2 h-4 w-4" /> Upload
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export const taskColumns: TaskColumn[] = [
   {
     key: "website",
@@ -31,60 +109,14 @@ export const taskColumns: TaskColumn[] = [
   {
     key: "submitted_documents",
     header: "All Submitted Documents",
-    render: (_, task) => {
-      const [docDialogOpen, setDocDialogOpen] = useState(false)
-      const [documentUrl, setDocumentUrl] = useState("")
-      
-      const handleUpload = () => {
-        // Handle document upload logic here
-        console.log("Uploading document for task:", task.id, "URL:", documentUrl)
-        // Reset and close
-        setDocumentUrl("")
-        setDocDialogOpen(false)
-      }
-
-      return (
-        <div className="flex items-center">
-          <Button 
-            variant="ghost" 
-            size="icon"
-            onClick={() => setDocDialogOpen(true)}
-          >
-            <X className="h-4 w-4 text-red-500" />
-          </Button>
-          
-          <Dialog open={docDialogOpen} onOpenChange={setDocDialogOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Upload Document</DialogTitle>
-                <DialogDescription>
-                  Enter the document URL or upload a file.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="document-url" className="text-right">
-                    Document URL
-                  </Label>
-                  <Input
-                    id="document-url"
-                    value={documentUrl}
-                    onChange={(e) => setDocumentUrl(e.target.value)}
-                    className="col-span-3"
-                    placeholder="Enter document URL"
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button type="submit" onClick={handleUpload}>
-                  <Upload className="mr-2 h-4 w-4" /> Upload
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-      )
-    },
+    render: (_, task) => (
+      <DocumentActionCell 
+        task={task} 
+        onDocumentUpload={(url) => {
+          console.log("Uploading document for task:", task.id, "URL:", url)
+        }} 
+      />
+    ),
   },
   // Separator column
   {

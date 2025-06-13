@@ -323,8 +323,8 @@ export default function DepartmentsPage() {
       return
     }
 
-    // If we're adding a subdepartment, use the currentDepartmentId
     const isAddingSubdepartment = !!currentDepartmentId
+    const isEditingSubdepartment = departmentForm.subdepartments[0]?.id !== undefined
 
     try {
       setSaving(true)
@@ -355,40 +355,35 @@ export default function DepartmentsPage() {
               .single()
           : { data: null }
 
-
         // Get selected stages with their IDs
         const selectedStages = await supabase
           .from('tm_stages')
           .select('id, name, order_num, estimated_time')
           .in('name', Object.entries(subdept.stages)
-            .filter(([_, stage]) => stage.applies)
+            .filter(([_, stage]) => stage?.applies)
             .map(([name]) => name)
           )
 
         const subdeptData = {
           name: subdept.name.trim(),
-          description: subdept.description.trim() || null,
+          description: subdept.description ? subdept.description.trim() : null,
           department_id: currentDepartmentId,
-          classes: subdept.classes.map(cls => ({
+          classes: subdept.classes?.map(cls => ({
             name: cls.name,
             description: cls.description || null,
-            requirements: cls.requirements.map(req => ({
+            requirements: cls.requirements?.map(req => ({
               name: req.name,
               description: req.description || null,
               is_required: req.isRequired
-            }))
-          })),
+            })) || []
+          })) || [],
           task_manager: taskManager.data ? {
             id: taskManager.data.id,
-            name: taskManager.data.name,
-            email: taskManager.data.email,
             start_date: new Date().toISOString(),
             end_date: null
           } : null,
           task_assistant: taskAssistant.data ? {
             id: taskAssistant.data.id,
-            name: taskAssistant.data.name,
-            email: taskAssistant.data.email,
             start_date: new Date().toISOString(),
             end_date: null
           } : null,
@@ -400,17 +395,29 @@ export default function DepartmentsPage() {
           })) || []
         }
 
-        const { data: newSubdept, error: subdeptError } = await supabase
-          .from('tm_subdepartments')
-          .insert(subdeptData)
-          .select()
-          .single()
+        if (isEditingSubdepartment) {
+          // Update existing subdepartment
+          const { error: updateError } = await supabase
+            .from('tm_subdepartments')
+            .update(subdeptData)
+            .eq('id', subdept.id)
 
-        if (subdeptError) throw subdeptError
+          if (updateError) throw updateError
+          toast.success('Subdepartment updated successfully')
+        } else {
+          // Create new subdepartment
+          const { error: subdeptError } = await supabase
+            .from('tm_subdepartments')
+            .insert(subdeptData)
+            .select()
+            .single()
+
+          if (subdeptError) throw subdeptError
+          toast.success('Subdepartment added successfully')
+        }
 
         // Refresh the data
         await fetchData()
-        toast.success('Subdepartment added successfully')
         setIsAddDepartmentOpen(false)
         setCurrentDepartmentId(null)
         return
@@ -420,7 +427,7 @@ export default function DepartmentsPage() {
       // Original department creation logic here...
       const departmentData = {
         name: departmentForm.name.trim(),
-        description: departmentForm.description.trim() || null,
+        description: departmentForm.description ? departmentForm.description.trim() : null,
         subdepartments: departmentForm.subdepartments.map(subdept => {
           // Prepare task manager data if selected
           const taskManager = subdept.taskManagerId && subdept.taskManagerId !== 'none'
@@ -434,32 +441,28 @@ export default function DepartmentsPage() {
 
           return {
             name: subdept.name.trim(),
-            description: subdept.description.trim() || null,
+            description: subdept.description ? subdept.description.trim() : null,
             classes: subdept.classes.map(cls => ({
               name: cls.name,
-              description: cls.description || null,
+              description: cls.description ? cls.description : null,
               requirements: cls.requirements.map(req => ({
                 name: req.name,
-                description: req.description || null,
+                description: req.description ? req.description : null,
                 is_required: req.isRequired
               }))
             })),
             task_manager: taskManager ? {
               id: taskManager.id,
-              name: taskManager.name || '',
-              email: taskManager.email,
               start_date: new Date().toISOString(),
               end_date: null
             } : null,
             task_assistant: taskAssistant ? {
               id: taskAssistant.id,
-              name: taskAssistant.name || '',
-              email: taskAssistant.email,
               start_date: new Date().toISOString(),
               end_date: null
             } : null,
             stages: Object.entries(subdept.stages)
-              .filter(([_, stage]) => stage.applies)
+              .filter(([_, stage]) => stage && stage.applies)
               .map(([name]) => ({
                 name,
                 estimated_time: 8 * 60, // Default 8 hours in minutes
@@ -469,7 +472,7 @@ export default function DepartmentsPage() {
         })
       }
 
-      await createDepartment(departmentData)
+      await createDepartmentDb(departmentData)
       await fetchData()
       toast.success('Department created successfully')
       setIsAddDepartmentOpen(false)
@@ -493,6 +496,8 @@ export default function DepartmentsPage() {
       description: '',
       subdepartments: [{
         ...subdept,
+        taskManagerId: subdept.taskManagerId || '',
+        taskAssistantId: subdept.taskAssistantId || '',
         // Convert stages to the format expected by the form
         stages: globalStages.reduce((acc, stage) => ({
           ...acc,
@@ -593,15 +598,55 @@ export default function DepartmentsPage() {
     }
   }
 
-  const getUserName = (userId: string) => {
-    const user = users.find(u => u.id === userId)
-    return user ? user.name : 'Unassigned'
+  const getUserName = (userData: any) => {
+    if (!userData) return 'Unassigned';
+    
+    if (typeof userData === 'string') {
+      const user = users.find(u => u.id === userData);
+      return user ? user.name : 'Unassigned';
+    }
+    
+    // Handle case where userData is an object with id
+    if (userData.id) {
+      const user = users.find(u => u.id === userData.id);
+      return user ? user.name : 'Unassigned';
+    }
+    
+    return 'Unassigned';
   }
 
   const handleOpenAssignmentDialog = (deptId: string, subdept: Subdepartment) => {
     setSelectedSubdept({ deptId, subdept })
     setAssignmentDialogOpen(true)
   }
+
+  const handleDeleteSubdepartment = async (departmentId: string, subdepartmentId: string) => {
+    if (!confirm('Are you sure you want to delete this subdepartment? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      
+      // First, delete any related data (e.g., stages, assignments)
+      // This is a simplified example - adjust according to your database schema
+      const { error: deleteError } = await supabase
+        .from('tm_subdepartments')
+        .delete()
+        .eq('id', subdepartmentId);
+
+      if (deleteError) throw deleteError;
+
+      // Refresh the data
+      await fetchData();
+      toast.success('Subdepartment deleted successfully');
+    } catch (error) {
+      console.error('Error deleting subdepartment:', error);
+      toast.error('Failed to delete subdepartment');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleSaveAssignments = async (taskManagerId: string, taskAssistantId: string) => {
     if (!selectedSubdept) return

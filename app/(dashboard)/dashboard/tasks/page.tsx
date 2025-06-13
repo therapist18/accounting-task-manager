@@ -57,6 +57,7 @@ export default function TasksPage() {
   const [users, setUsers] = useState<{ id: string; name: string | null; email: string | null; role?: string }[]>([])
   const [stages, setStages] = useState<Stage[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [stageTransitionDialogOpen, setStageTransitionDialogOpen] = useState(false)
@@ -76,8 +77,10 @@ export default function TasksPage() {
         setTasks(tasksData)
         setUsers(usersData || [])
         setStages(stagesData)
+        setError(null)
       } catch (error) {
         console.error('Error loading data:', error)
+        setError('Failed to load tasks. Please try again later.')
       } finally {
         setLoading(false)
       }
@@ -220,92 +223,6 @@ export default function TasksPage() {
           <TabsTrigger value="completed">Completed</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="active" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            {loading ? (
-            <div className="col-span-2 flex items-center justify-center py-12">
-              <div className="text-muted-foreground">Loading tasks...</div>
-            </div>
-          ) : error ? (
-            <div className="col-span-2 flex items-center justify-center py-12 text-destructive">
-              {error}
-            </div>
-          ) : tasks
-              .filter((task) => task.status !== "completed")
-              .map((task) => (formatTaskData(task))).map((task) => (
-                <Card key={task.id}>
-                  <CardHeader className="pb-2">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <CardTitle className="text-base">{task.jobDescription}</CardTitle>
-                        <CardDescription>
-                          {task.department} • {task.subdepartment}
-                        </CardDescription>
-                      </div>
-                      {getStatusBadge(task.status)}
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Manager:</span>
-                        <p className="font-medium">{task.taskManager}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Assistant:</span>
-                        <p className="font-medium">{task.taskAssistant}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Client:</span>
-                        <p className="font-medium">{task.client}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Initiated:</span>
-                        <p className="font-medium">{task.dateInitiated}</p>
-                      </div>
-                    </div>
-
-                    {(() => {
-                      const subdepartment = mockSubdepartments.find((s) => s.id === task.subdepartmentId)
-                      if (!subdepartment) return null
-
-                      const stageProgression = StageAutomation.calculateStageProgression(subdepartment, mockStages)
-                      const currentStage = stageProgression.find((s) => s.id === task.currentStageId)
-                      const timeline = StageAutomation.generateStageTimeline(task, stageProgression)
-
-                      return (
-                        <div className="space-y-4">
-                          {currentStage && (
-                            <StageTimer
-                              stageName={currentStage.name}
-                              estimatedMinutes={currentStage.timeEstimate}
-                              startedAt={task.currentStageStartedAt || task.dateInitiated}
-                              autoCalculated={true}
-                              onCompleteStage={() => handleStageTransition(task.id)}
-                              onNextStage={() => handleStageTransition(task.id)}
-                            />
-                          )}
-                          <StageTimeline timeline={timeline} />
-                        </div>
-                      )
-                    })()}
-
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => handleTaskAssignment(task.id)}>
-                        <Users className="h-4 w-4 mr-2" />
-                        Reassign
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleStageTransition(task.id)}>
-                        <ArrowRight className="h-4 w-4 mr-2" />
-                        Transition
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-          </div>
-        </TabsContent>
-
         <TabsContent value="all" className="space-y-4">
           <Card>
             <CardHeader>
@@ -318,44 +235,55 @@ export default function TasksPage() {
                   <Table className="min-w-[1200px] w-full">
                     <TableHeader className="sticky top-0 z-10 bg-background">
                       <TableRow>
-                      {taskColumns.map((column) => (
-                        <TableHead key={column.key} className="whitespace-nowrap">
-                          {column.header}
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {tasks.length > 0 ? (
-                      tasks.map((task) => {
-                        const formattedTask = formatTaskData(task)
-                        return (
-                          <TableRow key={task.id}>
-                            {taskColumns.map((column) => (
-                              <TableCell key={`${task.id}-${column.key}`} className="whitespace-nowrap">
-                                {column.render 
-                                  ? column.render(formattedTask[column.key as keyof typeof formattedTask], formattedTask)
-                                  : (formattedTask[column.key as keyof typeof formattedTask] || '-')}
-                              </TableCell>
-                            ))}
-                          </TableRow>
-                        )
-                      })
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={taskColumns.length} className="h-24 text-center">
-                          No tasks found.
-                        </TableCell>
+                        {taskColumns.map((column) => (
+                          <TableHead key={column.key} className="whitespace-nowrap">
+                            {column.header}
+                          </TableHead>
+                        ))}
                       </TableRow>
-                    )}
-                  </TableBody>
+                    </TableHeader>
+                    <TableBody>
+                      {loading ? (
+                        <TableRow>
+                          <TableCell colSpan={taskColumns.length} className="h-24 text-center">
+                            Loading tasks...
+                          </TableCell>
+                        </TableRow>
+                      ) : error ? (
+                        <TableRow>
+                          <TableCell colSpan={taskColumns.length} className="h-24 text-center text-destructive">
+                            {error}
+                          </TableCell>
+                        </TableRow>
+                      ) : tasks.length > 0 ? (
+                        tasks.map((task) => {
+                          const formattedTask = formatTaskData(task)
+                          return (
+                            <TableRow key={task.id}>
+                              {taskColumns.map((column) => (
+                                <TableCell key={`${task.id}-${column.key}`} className="whitespace-nowrap">
+                                  {column.render 
+                                    ? column.render(formattedTask[column.key as keyof typeof formattedTask], formattedTask)
+                                    : (formattedTask[column.key as keyof typeof formattedTask] || '-')}
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          )
+                        })
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={taskColumns.length} className="h-24 text-center">
+                            No tasks found.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
                   </Table>
                 </div>
               </div>
-          </CardContent>
-        </Card>
-      </TabsContent>
-
+            </CardContent>
+          </Card>
+        </TabsContent>
         <TabsContent value="overdue" className="space-y-4">
           <Card>
             <CardHeader>
@@ -529,8 +457,11 @@ export default function TasksPage() {
               }
               
               // Refresh tasks
-              await fetchTasks()
-              setTransitionDialogOpen(false)
+              const [tasksData] = await Promise.all([
+                getTasks()
+              ])
+              setTasks(tasksData)
+              setStageTransitionDialogOpen(false)
             } catch (err) {
               console.error("Error updating stage:", err)
             }
