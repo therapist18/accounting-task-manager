@@ -561,16 +561,16 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                 required
               >
                 <SelectTrigger>
-  <SelectValue>
-    {formData.subdepartment_id ? (
-      subdepartments.find(s => s.id === formData.subdepartment_id)?.name || 'Select subdepartment'
-    ) : formData.department_id ? (
-      'Select subdepartment'
-    ) : (
-      'Select department first'
-    )}
-  </SelectValue>
-</SelectTrigger>
+                  <SelectValue>
+                    {formData.subdepartment_id ? (
+                      subdepartments.find(s => s.id === formData.subdepartment_id)?.name || 'Select subdepartment'
+                    ) : formData.department_id ? (
+                      'Select subdepartment'
+                    ) : (
+                      'Select department first'
+                    )}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {subdepartments.map((sub) => (
                     <SelectItem key={sub.id} value={sub.id}>
