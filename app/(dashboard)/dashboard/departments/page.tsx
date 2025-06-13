@@ -486,6 +486,27 @@ export default function DepartmentsPage() {
     setIsAddStageOpen(true)
   }
 
+  const handleEditSubdepartment = (deptId: string, subdept: Subdepartment) => {
+    setCurrentDepartmentId(deptId)
+    setDepartmentForm({
+      name: departments.find(d => d.id === deptId)?.name || '',
+      description: '',
+      subdepartments: [{
+        ...subdept,
+        // Convert stages to the format expected by the form
+        stages: globalStages.reduce((acc, stage) => ({
+          ...acc,
+          [stage.name]: {
+            applies: subdept.stages.some(s => s.name === stage.name),
+            estimatedTime: 8, // Default value, adjust as needed
+            reminderDays: 1   // Default value, adjust as needed
+          }
+        }), {} as any)
+      }]
+    })
+    setIsAddDepartmentOpen(true)
+  }
+
   const handleAddSubdepartment = (deptId: string, deptName: string) => {
     // If we're already in the dialog, just add a new subdepartment
     if (isAddDepartmentOpen) {

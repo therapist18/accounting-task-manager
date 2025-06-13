@@ -7,6 +7,7 @@ import { UserButton, useUser, SignInButton } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import DashboardPage from "./(dashboard)/dashboard/page";
+import DashboardLayout from "./(dashboard)/layout";
 
 export default function Home() {
   const { isLoaded, isSignedIn, user } = useUser();
@@ -23,6 +24,8 @@ export default function Home() {
   }
 
   return (
-    <DashboardPage />
+    <DashboardLayout>
+      <DashboardPage />
+    </DashboardLayout>
   )
 }
