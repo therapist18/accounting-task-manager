@@ -180,10 +180,23 @@ export default function TasksPage() {
     return filtered
   }
 
-  // Get current subdepartment details
-  const getCurrentSubdepartment = () => {
+  // Get current subdepartment details with proper typing
+  const getCurrentSubdepartment = (): Subdepartment | undefined => {
     const dept = departments.find(d => d.id === selectedDepartment)
-    return dept?.subdepartments.find(s => s.id === selectedSubdepartment)
+    const subdept = dept?.subdepartments?.find(s => s.id === selectedSubdepartment)
+    
+    // If subdepartment has classes but no display_stages, use the first class's display_stages as fallback
+    if (subdept?.classes?.length && (!subdept.display_stages || subdept.display_stages.length === 0)) {
+      const firstClassWithStages = subdept.classes.find(c => c.display_stages?.length)
+      if (firstClassWithStages?.display_stages) {
+        return {
+          ...subdept,
+          display_stages: firstClassWithStages.display_stages
+        }
+      }
+    }
+    
+    return subdept
   }
 
   // Format task data for display
@@ -227,7 +240,24 @@ export default function TasksPage() {
     const subdept = getCurrentSubdepartment()
     if (!subdept?.stages) return stageColumns
 
-    const dynamicStageColumns = subdept.stages.map(stage => ({
+    // Get all displayable stages (either from subdepartment or its classes)
+    let displayStages = [...(subdept.display_stages || [])]
+    
+    // If subdepartment has classes and a task has a class, use that class's display_stages
+    if (subdept.classes?.length) {
+      const taskClass = subdept.classes.find(c => c.name === tasks[0]?.class_name)
+      if (taskClass?.display_stages?.length) {
+        displayStages = taskClass.display_stages
+      }
+    }
+
+    // Only show stages that are both in stages and display_stages
+    const visibleStages = subdept.stages.filter(stage => 
+      displayStages.includes(stage.id) || 
+      subdept.stages?.includes(stage.id) // Fallback to all allocated stages if no display_stages
+    )
+
+    const dynamicStageColumns = visibleStages.map(stage => ({
       key: `stage_${stage.id}`,
       header: stage.name,
       width: '120px',
@@ -245,6 +275,7 @@ export default function TasksPage() {
         }
       }
     }))
+
 
     // Insert stage columns before account_used
     const baseColumns = stageColumns.slice(0, -3) // Remove last 3 columns
@@ -440,13 +471,16 @@ export default function TasksPage() {
 
         {departments.map((dept) => (
           <TabsContent key={dept.id} value={dept.id} className="space-y-4">
-            <Tabs defaultValue={dept.subdepartments[0]?.id || 'default'} className="space-y-4">
+            <Tabs 
+              defaultValue={dept.subdepartments[0]?.id || 'default'} 
+              className="space-y-4"
+              onValueChange={(value) => setSelectedSubdepartment(value)}
+            >
               <TabsList>
                 {dept.subdepartments.map((subdept) => (
                   <TabsTrigger 
                     key={subdept.id} 
                     value={subdept.id}
-                    onClick={() => setSelectedSubdepartment(subdept.id)}
                   >
                     {subdept.name}
                   </TabsTrigger>
@@ -455,56 +489,68 @@ export default function TasksPage() {
 
               {dept.subdepartments.map((subdept) => (
                 <TabsContent key={subdept.id} value={subdept.id} className="space-y-4">
-                  <Tabs defaultValue="work-in-progress" className="space-y-4">
-                    <TabsList>
-                      <TabsTrigger value="work-in-progress">Work in Progress</TabsTrigger>
-                      <TabsTrigger value="completed">Completed</TabsTrigger>
-                    </TabsList>
-
-                    <TabsContent value="work-in-progress" className="space-y-4">
-                      <Tabs defaultValue="stages" className="space-y-4">
-                        <TabsList>
-                          <TabsTrigger value="stages">
-                            <FileText className="h-4 w-4 mr-2" />
-                            Stages
+                  {/* Show classes tabs if they exist, otherwise show direct WIP/Completed tabs */}
+                  {subdept.classes && subdept.classes.length > 0 ? (
+                    <Tabs 
+                      defaultValue={subdept.classes[0]?.name || ''} 
+                      className="space-y-4"
+                    >
+                      <TabsList>
+                        {subdept.classes.map((cls) => (
+                          <TabsTrigger key={cls.name} value={cls.name}>
+                            {cls.name}
                           </TabsTrigger>
-                          <TabsTrigger value="upload-requirements">
-                            <Upload className="h-4 w-4 mr-2" />
-                            Upload Requirements
-                          </TabsTrigger>
-                          <TabsTrigger value="webdata">
-                            <Upload className="h-4 w-4 mr-2" />
-                            Web Data
-                          </TabsTrigger>
-                        </TabsList>
+                        ))}
+                      </TabsList>
 
-                        <TabsContent value="stages" className="space-y-4">
-                          <Card>
-                            <CardHeader>
-                              <CardTitle>Stages Progress - {subdept.name}</CardTitle>
-                              <CardDescription>
-                                Track tasks through various stages of completion
-                              </CardDescription>
-                            </CardHeader>
-                            <CardContent className="p-4">
-                              {renderTaskTable(getFilteredTasks('in_progress'), stageColumns, false)}
-                            </CardContent>
-                          </Card>
-                        </TabsContent>
+                      {subdept.classes.map((cls) => (
+                        <TabsContent key={cls.name} value={cls.name} className="space-y-4">
+                          <Tabs defaultValue="work-in-progress" className="space-y-4">
+                            <TabsList>
+                              <TabsTrigger value="work-in-progress">Work in Progress</TabsTrigger>
+                              <TabsTrigger value="completed">Completed</TabsTrigger>
+                            </TabsList>
 
-                        <TabsContent value="upload-requirements" className="space-y-4">
-                          {subdept.classes && subdept.classes.length > 0 ? (
-                            <Tabs defaultValue={subdept.classes[0].name} className="space-y-4">
-                              <TabsList>
-                                {subdept.classes.map((cls) => (
-                                  <TabsTrigger key={cls.name} value={cls.name}>
-                                    {cls.name}
+                            <TabsContent value="work-in-progress" className="space-y-4">
+                              <Tabs defaultValue="stages" className="space-y-4">
+                                <TabsList>
+                                  <TabsTrigger value="stages">
+                                    <FileText className="h-4 w-4 mr-2" />
+                                    Stages
                                   </TabsTrigger>
-                                ))}
-                              </TabsList>
+                                  <TabsTrigger value="upload-requirements">
+                                    <Upload className="h-4 w-4 mr-2" />
+                                    Upload Requirements
+                                  </TabsTrigger>
+                                  <TabsTrigger value="webdata">
+                                    <Upload className="h-4 w-4 mr-2" />
+                                    Web Data
+                                  </TabsTrigger>
+                                </TabsList>
 
-                              {subdept.classes.map((cls) => (
-                                <TabsContent key={cls.name} value={cls.name} className="space-y-4">
+                                <TabsContent value="stages" className="space-y-4">
+                                  <Card>
+                                    <CardHeader>
+                                      <CardTitle>Stages Progress - {subdept.name} - {cls.name}</CardTitle>
+                                      <CardDescription>
+                                        Track tasks through various stages of completion
+                                      </CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="p-4">
+                                      {renderTaskTable(
+                                        tasks.filter(task => 
+                                          task.status === 'in_progress' && 
+                                          task.class_name === cls.name &&
+                                          task.subdepartment_id === subdept.id
+                                        ), 
+                                        stageColumns, 
+                                        false
+                                      )}
+                                    </CardContent>
+                                  </Card>
+                                </TabsContent>
+
+                                <TabsContent value="upload-requirements" className="space-y-4">
                                   <Card>
                                     <CardHeader>
                                       <CardTitle>Upload Requirements - {cls.name}</CardTitle>
@@ -514,7 +560,11 @@ export default function TasksPage() {
                                     </CardHeader>
                                     <CardContent className="p-4">
                                       {renderTaskTable(
-                                        getFilteredTasks('in_progress').filter(task => task.class_name === cls.name), 
+                                        tasks.filter(task => 
+                                          task.status === 'in_progress' && 
+                                          task.class_name === cls.name &&
+                                          task.subdepartment_id === subdept.id
+                                        ), 
                                         requirementColumns, 
                                         true, 
                                         cls.name
@@ -522,43 +572,22 @@ export default function TasksPage() {
                                     </CardContent>
                                   </Card>
                                 </TabsContent>
-                              ))}
-                            </Tabs>
-                          ) : (
-                            <Card>
-                              <CardHeader>
-                                <CardTitle>Upload Requirements</CardTitle>
-                                <CardDescription>No classes defined for this subdepartment</CardDescription>
-                              </CardHeader>
-                              <CardContent>
-                                <p className="text-muted-foreground">Please define classes for this subdepartment to view requirements.</p>
-                              </CardContent>
-                            </Card>
-                          )}
-                        </TabsContent>
-                        <TabsContent value="webdata" className="space-y-4">
-                          {subdept.classes && subdept.classes.length > 0 ? (
-                            <Tabs defaultValue={subdept.classes[0].name} className="space-y-4">
-                              <TabsList>
-                                {subdept.classes.map((cls) => (
-                                  <TabsTrigger key={cls.name} value={cls.name}>
-                                    {cls.name}
-                                  </TabsTrigger>
-                                ))}
-                              </TabsList>
 
-                              {subdept.classes.map((cls) => (
-                                <TabsContent key={cls.name} value={cls.name} className="space-y-4">
+                                <TabsContent value="webdata" className="space-y-4">
                                   <Card>
                                     <CardHeader>
                                       <CardTitle>Web Data - {cls.name}</CardTitle>
                                       <CardDescription>
-                                        {cls.description || `Manage document requirements for ${cls.name}`}
+                                        {cls.description || `Web data for ${cls.name}`}
                                       </CardDescription>
                                     </CardHeader>
                                     <CardContent className="p-4">
                                       {renderTaskTable(
-                                        getFilteredTasks('in_progress').filter(task => task.class_name === cls.name), 
+                                        tasks.filter(task => 
+                                          task.status === 'in_progress' && 
+                                          task.class_name === cls.name &&
+                                          task.subdepartment_id === subdept.id
+                                        ), 
                                         requirementColumns, 
                                         true, 
                                         cls.name
@@ -566,42 +595,147 @@ export default function TasksPage() {
                                     </CardContent>
                                   </Card>
                                 </TabsContent>
-                              ))}
-                            </Tabs>
-                          ) : (
+                              </Tabs>
+                            </TabsContent>
+
+                            <TabsContent value="completed" className="space-y-4">
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle>Completed Tasks - {subdept.name} - {cls.name}</CardTitle>
+                                  <CardDescription>Successfully completed tasks with performance metrics</CardDescription>
+                                </CardHeader>
+                                <CardContent className="p-4">
+                                  {renderTaskTable(
+                                    tasks.filter(task => 
+                                      task.status === 'completed' && 
+                                      task.class_name === cls.name &&
+                                      task.subdepartment_id === subdept.id
+                                    ), 
+                                    stageColumns, 
+                                    false
+                                  )}
+                                </CardContent>
+                              </Card>
+                            </TabsContent>
+                          </Tabs>
+                        </TabsContent>
+                      ))}
+                    </Tabs>
+                  ) : (
+                    <Tabs defaultValue="work-in-progress" className="space-y-4">
+                      <TabsList>
+                        <TabsTrigger value="work-in-progress">Work in Progress</TabsTrigger>
+                        <TabsTrigger value="completed">Completed</TabsTrigger>
+                      </TabsList>
+
+                      <TabsContent value="work-in-progress" className="space-y-4">
+                        <Tabs defaultValue="stages" className="space-y-4">
+                          <TabsList>
+                            <TabsTrigger value="stages">
+                              <FileText className="h-4 w-4 mr-2" />
+                              Stages
+                            </TabsTrigger>
+                            <TabsTrigger value="upload-requirements">
+                              <Upload className="h-4 w-4 mr-2" />
+                              Upload Requirements
+                            </TabsTrigger>
+                            <TabsTrigger value="webdata">
+                              <Upload className="h-4 w-4 mr-2" />
+                              Web Data
+                            </TabsTrigger>
+                          </TabsList>
+
+                          <TabsContent value="stages" className="space-y-4">
+                            <Card>
+                              <CardHeader>
+                                <CardTitle>Stages Progress - {subdept.name}</CardTitle>
+                                <CardDescription>
+                                  Track tasks through various stages of completion
+                                </CardDescription>
+                              </CardHeader>
+                              <CardContent className="p-4">
+                                {renderTaskTable(
+                                  tasks.filter(task => 
+                                    task.status === 'in_progress' &&
+                                    task.subdepartment_id === subdept.id
+                                  ), 
+                                  stageColumns, 
+                                  false
+                                )}
+                              </CardContent>
+                            </Card>
+                          </TabsContent>
+
+                          <TabsContent value="upload-requirements" className="space-y-4">
+                            <Card>
+                              <CardHeader>
+                                <CardTitle>Upload Requirements</CardTitle>
+                                <CardDescription>
+                                  Manage document requirements for this subdepartment
+                                </CardDescription>
+                              </CardHeader>
+                              <CardContent className="p-4">
+                                {renderTaskTable(
+                                  tasks.filter(task => 
+                                    task.status === 'in_progress' &&
+                                    task.subdepartment_id === subdept.id
+                                  ), 
+                                  requirementColumns, 
+                                  true
+                                )}
+                              </CardContent>
+                            </Card>
+                          </TabsContent>
+
+                          <TabsContent value="webdata" className="space-y-4">
                             <Card>
                               <CardHeader>
                                 <CardTitle>Web Data</CardTitle>
-                                <CardDescription>No classes defined for this subdepartment</CardDescription>
+                                <CardDescription>
+                                  Web data for this subdepartment
+                                </CardDescription>
                               </CardHeader>
-                              <CardContent>
-                                <p className="text-muted-foreground">Please define classes for this subdepartment to view requirements.</p>
+                              <CardContent className="p-4">
+                                {renderTaskTable(
+                                  tasks.filter(task => 
+                                    task.status === 'in_progress' &&
+                                    task.subdepartment_id === subdept.id
+                                  ), 
+                                  requirementColumns, 
+                                  true
+                                )}
                               </CardContent>
                             </Card>
-                          )}
-                        </TabsContent>
-                      </Tabs>
-                    </TabsContent>
+                          </TabsContent>
+                        </Tabs>
+                      </TabsContent>
 
-                    <TabsContent value="completed" className="space-y-4">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Completed Tasks - {subdept.name}</CardTitle>
-                          <CardDescription>Successfully completed tasks with performance metrics</CardDescription>
-                        </CardHeader>
-                        <CardContent className="p-4">
-                          {renderTaskTable(getFilteredTasks('completed'), stageColumns, false)}
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-                  </Tabs>
+                      <TabsContent value="completed" className="space-y-4">
+                        <Card>
+                          <CardHeader>
+                            <CardTitle>Completed Tasks - {subdept.name}</CardTitle>
+                            <CardDescription>Successfully completed tasks with performance metrics</CardDescription>
+                          </CardHeader>
+                          <CardContent className="p-4">
+                            {renderTaskTable(
+                              tasks.filter(task => 
+                                task.status === 'completed' &&
+                                task.subdepartment_id === subdept.id
+                              ), 
+                              stageColumns, 
+                              false
+                            )}
+                          </CardContent>
+                        </Card>
+                      </TabsContent>
+                    </Tabs>
+                  )}
                 </TabsContent>
               ))}
             </Tabs>
           </TabsContent>
         ))}
       </Tabs>
-
       {/* Dialogs */}
       <NewTaskDialog
         open={newTaskDialogOpen}

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Plus, Pencil } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { useToast } from "@/components/ui/use-toast"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
@@ -31,6 +32,8 @@ type SubdepartmentClass = {
   name: string
   description: string | null
   requirements: ClassRequirement[]
+  stages?: number[]
+  display_stages?: number[]
 }
 
 type Subdepartment = {
@@ -38,8 +41,10 @@ type Subdepartment = {
   name: string
   department_id: number
   stages?: number[]
+  display_stages?: number[]
   classes?: SubdepartmentClass[]
   tm_subdepartments?: any // For the raw data from Supabase
+  hasClasses: boolean
 }
 
 type Department = {
@@ -56,13 +61,14 @@ export default function Stages() {
   const [error, setError] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingStage, setEditingStage] = useState<Stage | null>(null)
-  const [newStage, setNewStage] = useState<{name: string, estimated_time: number}>({name: '', estimated_time: 0})
+  const [newStage, setNewStage] = useState<{ name: string, estimated_time: number }>({ name: '', estimated_time: 0 })
+  const { toast } = useToast()
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true)
-        
+
         // Fetch departments with their subdepartments
         const { data: deptsData, error: deptsError } = await supabase
           .from('tm_departments')
@@ -74,15 +80,15 @@ export default function Stages() {
             )
           `)
           .order('name')
-          
+
         if (deptsError) throw deptsError
-        
+
         // Fetch all stages
         const { data: stagesData, error: stagesError } = await supabase
           .from('tm_stages')
           .select('*')
           .order('order_num')
-          
+
         if (stagesError) throw stagesError
 
         // Transform the data to ensure consistent structure
@@ -94,7 +100,7 @@ export default function Stages() {
             classes: Array.isArray(subdept.classes) ? subdept.classes : []
           }))
         }))
-        
+
         setDepartments(transformedDepartments)
         setStages(stagesData || [])
       } catch (err) {
@@ -104,7 +110,7 @@ export default function Stages() {
         setLoading(false)
       }
     }
-    
+
     fetchData()
   }, [])
 
@@ -112,28 +118,328 @@ export default function Stages() {
   const stagesMap = new Map(stages.map(stage => [stage.id, stage]))
 
   // Handle allocation change
-  const handleAllocationChange = (subdeptId: number, stageId: number, shouldAllocate: boolean) => {
-    setDepartments(prevDepartments => 
-      prevDepartments.map(dept => ({
-        ...dept,
-        subdepartments: dept.subdepartments?.map(subdept => 
-          subdept.id === subdeptId
-            ? {
-                ...subdept,
-                stages: shouldAllocate 
-                  ? [...new Set([...(subdept.stages || []), stageId])] // Ensure unique
-                  : (subdept.stages || []).filter(id => id !== stageId)
-              }
-            : subdept
-        ) || []
-      }))
-    )
+  const handleAllocationChange = async (subdeptId: number, stageId: number, shouldAllocate: boolean, classIndex: number | null = null) => {
+    try {
+      let updateData;
+      let subdeptName = '';
+      let className = '';
+      let stageName = stages.find(s => s.id === stageId)?.name || 'this stage';
+
+      if (classIndex !== null) {
+        // Handle class allocation
+        const subdept = departments
+          .flatMap(d => d.subdepartments || [])
+          .find(sd => sd.id === subdeptId);
+
+        if (!subdept?.classes?.[classIndex]) {
+          toast({
+            title: "Error",
+            description: "Class not found",
+            variant: "destructive"
+          });
+          return;
+        }
+
+        subdeptName = subdept.name;
+        className = subdept.classes[classIndex].name;
+        
+        // Create a deep copy of the classes array
+        const updatedClasses = JSON.parse(JSON.stringify(subdept.classes));
+        
+        // Update the specific class
+        if (shouldAllocate) {
+          // Add to stages if not already present
+          if (!updatedClasses[classIndex].stages) {
+            updatedClasses[classIndex].stages = [];
+          }
+          if (!updatedClasses[classIndex].stages.includes(stageId)) {
+            updatedClasses[classIndex].stages.push(stageId);
+          }
+          // Also add to display_stages if not already present
+          if (!updatedClasses[classIndex].display_stages) {
+            updatedClasses[classIndex].display_stages = [];
+          }
+          if (!updatedClasses[classIndex].display_stages.includes(stageId)) {
+            updatedClasses[classIndex].display_stages.push(stageId);
+          }
+        } else {
+          // Remove from stages and display_stages
+          updatedClasses[classIndex].stages = (updatedClasses[classIndex].stages || []).filter((id: number) => id !== stageId);
+          updatedClasses[classIndex].display_stages = (updatedClasses[classIndex].display_stages || []).filter((id: number) => id !== stageId);
+        }
+
+        // Prepare the update data for Supabase
+        updateData = { 
+          classes: updatedClasses,
+          // Also update the subdepartment's stages to keep them in sync
+          stages: shouldAllocate
+            ? [...new Set([...(subdept.stages || []), stageId])]
+            : (subdept.stages || []).filter(id => id !== stageId)
+        };
+      } else {
+        // Handle subdepartment allocation
+        const subdept = departments
+          .flatMap(d => d.subdepartments || [])
+          .find(sd => sd.id === subdeptId);
+
+        if (!subdept) {
+          toast({
+            title: "Error",
+            description: "Subdepartment not found",
+            variant: "destructive"
+          });
+          return;
+        }
+
+        subdeptName = subdept.name;
+        
+        // Create a deep copy of the subdepartment
+        const updatedSubdept = JSON.parse(JSON.stringify(subdept));
+        
+        if (shouldAllocate) {
+          // Add to stages if not already present
+          if (!updatedSubdept.stages) {
+            updatedSubdept.stages = [];
+          }
+          if (!updatedSubdept.stages.includes(stageId)) {
+            updatedSubdept.stages.push(stageId);
+          }
+          // Also add to display_stages if not already present
+          if (!updatedSubdept.display_stages) {
+            updatedSubdept.display_stages = [];
+          }
+          if (!updatedSubdept.display_stages.includes(stageId)) {
+            updatedSubdept.display_stages.push(stageId);
+          }
+        } else {
+          // Remove from stages and display_stages
+          updatedSubdept.stages = (updatedSubdept.stages || []).filter((id: number) => id !== stageId);
+          updatedSubdept.display_stages = (updatedSubdept.display_stages || []).filter((id: number) => id !== stageId);
+        }
+        
+        updateData = {
+          stages: updatedSubdept.stages,
+          display_stages: updatedSubdept.display_stages
+        };
+      }
+
+      // Update in Supabase
+      const { error } = await supabase
+        .from('tm_subdepartments')
+        .update(updateData)
+        .eq('id', subdeptId);
+
+      if (error) throw error;
+
+      // Update local state
+      setDepartments(prevDepartments =>
+        prevDepartments.map(dept => ({
+          ...dept,
+          subdepartments: dept.subdepartments?.map(subdept => {
+            if (subdept.id !== subdeptId) return subdept;
+
+            if (classIndex !== null) {
+              const updatedClasses = [...(subdept.classes || [])];
+              const updatedStages = shouldAllocate
+                ? [...new Set([...(updatedClasses[classIndex]?.stages || []), stageId])]
+                : (updatedClasses[classIndex]?.stages || []).filter(id => id !== stageId);
+                
+              updatedClasses[classIndex] = {
+                ...updatedClasses[classIndex],
+                stages: updatedStages,
+                // If we're allocating, also add to display_stages by default
+                ...(shouldAllocate && {
+                  display_stages: [...new Set([...(updatedClasses[classIndex]?.display_stages || []), stageId])]
+                })
+              };
+              
+              return { 
+                ...subdept, 
+                classes: updatedClasses,
+                // Also update the subdepartment's stages to keep them in sync
+                stages: [...new Set([
+                  ...(subdept.stages || []),
+                  ...(shouldAllocate ? [stageId] : [])
+                ])].filter(id => shouldAllocate || id !== stageId)
+              };
+            }
+
+            const updatedStages = shouldAllocate
+              ? [...new Set([...(subdept.stages || []), stageId])]
+              : (subdept.stages || []).filter(id => id !== stageId);
+              
+            return {
+              ...subdept,
+              stages: updatedStages,
+              // If we're allocating, also add to display_stages by default
+              ...(shouldAllocate && {
+                display_stages: [...new Set([...(subdept.display_stages || []), stageId])]
+              })
+            };
+          }) || []
+        }))
+      );
+
+      // Show success toast
+      toast({
+        title: "Success",
+        description: `${stageName} has been ${shouldAllocate ? 'allocated to' : 'removed from'} ${className ? `${className} in ${subdeptName}` : subdeptName}`,
+      });
+    } catch (err) {
+      console.error('Error updating allocation:', err);
+      toast({
+        title: "Error",
+        description: "Failed to update allocation. Please try again.",
+        variant: "destructive"
+      });
+    }
   }
 
   // Handle display toggle
-  const handleDisplayToggle = (subdeptId: number, stageId: number, checked: boolean) => {
-    // This is a placeholder - implement the actual logic based on your requirements
-    console.log(`Display toggled for subdept ${subdeptId}, stage ${stageId}: ${checked}`)
+  const handleDisplayToggle = async (subdeptId: number, stageId: number, checked: boolean, classIndex: number | null = null) => {
+    try {
+      let updateData;
+      let subdeptName = '';
+      let className = '';
+      let stageName = stages.find(s => s.id === stageId)?.name || 'this stage';
+
+      if (classIndex !== null) {
+        // Handle class display toggle
+        const subdept = departments
+          .flatMap(d => d.subdepartments || [])
+          .find(sd => sd.id === subdeptId);
+
+        if (!subdept?.classes?.[classIndex]) {
+          toast({
+            title: "Error",
+            description: "Class not found",
+            variant: "destructive"
+          });
+          return;
+        }
+
+        subdeptName = subdept.name;
+        className = subdept.classes[classIndex].name;
+        
+        // Create a deep copy of the classes array
+        const updatedClasses = JSON.parse(JSON.stringify(subdept.classes));
+        
+        // Update the specific class's display_stages
+        if (checked) {
+          if (!updatedClasses[classIndex].display_stages) {
+            updatedClasses[classIndex].display_stages = [];
+          }
+          if (!updatedClasses[classIndex].display_stages.includes(stageId)) {
+            updatedClasses[classIndex].display_stages.push(stageId);
+          }
+        } else {
+          updatedClasses[classIndex].display_stages = 
+            (updatedClasses[classIndex].display_stages || []).filter((id: number) => id !== stageId);
+        }
+
+        updateData = { 
+          classes: updatedClasses,
+          // Also update the subdepartment's display_stages to keep them in sync
+          display_stages: checked
+            ? [...new Set([...(subdept.display_stages || []), stageId])]
+            : (subdept.display_stages || []).filter(id => id !== stageId)
+        };
+      } else {
+        // Handle subdepartment display toggle
+        const subdept = departments
+          .flatMap(d => d.subdepartments || [])
+          .find(sd => sd.id === subdeptId);
+
+        if (!subdept) {
+          toast({
+            title: "Error",
+            description: "Subdepartment not found",
+            variant: "destructive"
+          });
+          return;
+        }
+
+        subdeptName = subdept.name;
+        
+        // Create a deep copy of the subdepartment
+        const updatedSubdept = JSON.parse(JSON.stringify(subdept));
+        
+        // Update display_stages
+        if (checked) {
+          if (!updatedSubdept.display_stages) {
+            updatedSubdept.display_stages = [];
+          }
+          if (!updatedSubdept.display_stages.includes(stageId)) {
+            updatedSubdept.display_stages.push(stageId);
+          }
+        } else {
+          updatedSubdept.display_stages = 
+            (updatedSubdept.display_stages || []).filter((id: number) => id !== stageId);
+        }
+        
+        updateData = {
+          display_stages: updatedSubdept.display_stages
+        };
+      }
+
+      // Update in Supabase
+      const { error } = await supabase
+        .from('tm_subdepartments')
+        .update(updateData)
+        .eq('id', subdeptId);
+
+      if (error) throw error;
+
+      // Update local state
+      setDepartments(prevDepartments =>
+        prevDepartments.map(dept => ({
+          ...dept,
+          subdepartments: dept.subdepartments?.map(subdept => {
+            if (subdept.id !== subdeptId) return subdept;
+
+            if (classIndex !== null) {
+              const updatedClasses = [...(subdept.classes || [])];
+              updatedClasses[classIndex] = {
+                ...updatedClasses[classIndex],
+                display_stages: checked
+                  ? [...new Set([...(updatedClasses[classIndex]?.display_stages || []), stageId])]
+                  : (updatedClasses[classIndex]?.display_stages || []).filter(id => id !== stageId)
+              };
+              
+              return { 
+                ...subdept, 
+                classes: updatedClasses,
+                // Also update the subdepartment's display_stages to keep them in sync
+                display_stages: [...new Set([
+                  ...(subdept.display_stages || []),
+                  ...(checked ? [stageId] : [])
+                ])].filter(id => checked || id !== stageId)
+              };
+            }
+
+            return {
+              ...subdept,
+              display_stages: checked
+                ? [...new Set([...(subdept.display_stages || []), stageId])]
+                : (subdept.display_stages || []).filter(id => id !== stageId)
+            };
+          }) || []
+        }))
+      );
+
+      // Show success toast
+      toast({
+        title: "Success",
+        description: `Display setting updated for ${stageName} in ${className ? `${className} (${subdeptName})` : subdeptName}`,
+      });
+    } catch (err) {
+      console.error('Error updating display setting:', err);
+      toast({
+        title: "Error",
+        description: "Failed to update display setting. Please try again.",
+        variant: "destructive"
+      });
+    }
   }
 
   if (loading) return <div>Loading...</div>
@@ -154,11 +460,11 @@ export default function Stages() {
   const handleAddStage = async () => {
     try {
       if (!newStage.name.trim()) return
-      
+
       const { data: addedStage, error } = await supabase
         .from('tm_stages')
         .insert([
-          { 
+          {
             name: newStage.name,
             estimated_time: newStage.estimated_time,
             order_num: stages.length > 0 ? Math.max(...stages.map(s => s.order_num)) + 1 : 1
@@ -166,11 +472,11 @@ export default function Stages() {
         ])
         .select()
         .single()
-      
+
       if (error) throw error
-      
+
       setStages(prev => [...prev, addedStage])
-      setNewStage({name: '', estimated_time: 0})
+      setNewStage({ name: '', estimated_time: 0 })
       setIsDialogOpen(false)
     } catch (err) {
       console.error('Error adding stage:', err)
@@ -187,9 +493,9 @@ export default function Stages() {
         .eq('id', stage.id)
         .select()
         .single()
-      
+
       if (error) throw error
-      
+
       setStages(prev => prev.map(s => s.id === stage.id ? updatedStage : s))
     } catch (err) {
       console.error('Error updating stage:', err)
@@ -201,21 +507,23 @@ export default function Stages() {
   const normalizedDepartments = departments.map(dept => {
     // If no subdepartments, create a default one
     const hasSubdepartments = dept.subdepartments && dept.subdepartments.length > 0;
-    const subdepartments = hasSubdepartments 
-      ? dept.subdepartments 
+    const subdepartments = hasSubdepartments
+      ? dept.subdepartments
       : [{
-          id: dept.id * -1, // Use negative ID to avoid conflicts
-          name: 'N/A',
-          department_id: dept.id,
-          stages: [],
-          classes: [{ name: 'N/A', description: null, requirements: [] }]
-        }];
+        id: dept.id * -1, // Use negative ID to avoid conflicts
+        name: 'N/A',
+        department_id: dept.id,
+        stages: [],
+        hasClasses: false,
+        classes: []
+      }];
 
     return {
       ...dept,
       subdepartments: subdepartments.map(sd => ({
         ...sd,
-        classes: sd.classes?.length ? sd.classes : [{ name: 'N/A', description: null, requirements: [] }]
+        hasClasses: (sd.classes?.length || 0) > 0,
+        classes: sd.classes?.length ? sd.classes : []
       }))
     };
   });
@@ -243,7 +551,7 @@ export default function Stages() {
                 <Input
                   id="name"
                   value={newStage.name}
-                  onChange={(e) => setNewStage({...newStage, name: e.target.value})}
+                  onChange={(e) => setNewStage({ ...newStage, name: e.target.value })}
                   className="col-span-3"
                 />
               </div>
@@ -255,7 +563,7 @@ export default function Stages() {
                   id="time"
                   type="number"
                   value={newStage.estimated_time || ''}
-                  onChange={(e) => setNewStage({...newStage, estimated_time: parseInt(e.target.value) || 0})}
+                  onChange={(e) => setNewStage({ ...newStage, estimated_time: parseInt(e.target.value) || 0 })}
                   className="col-span-3"
                 />
               </div>
@@ -271,7 +579,7 @@ export default function Stages() {
           </DialogContent>
         </Dialog>
       </div>
-      
+
       <div className="relative overflow-auto max-h-[calc(100vh-200px)]">
         <Table className="border min-w-max">
           <TableHeader className="sticky top-0 bg-background z-10">
@@ -282,7 +590,7 @@ export default function Stages() {
               {normalizedDepartments.map(dept => {
                 const colSpan = getDepartmentColSpan(dept) * 2; // *2 for allocated/display columns
                 return (
-                  <TableHead 
+                  <TableHead
                     key={`dept-${dept.id}`}
                     colSpan={colSpan}
                     className="border-l border-r text-center font-bold bg-muted/30"
@@ -292,14 +600,14 @@ export default function Stages() {
                 );
               })}
             </TableRow>
-            
+
             {/* Subdepartment Header Row */}
             <TableRow className="bg-muted/20">
-              {normalizedDepartments.flatMap(dept => 
+              {normalizedDepartments.flatMap(dept =>
                 dept.subdepartments.flatMap((subdept, subIndex) => {
                   const colSpan = getSubdepartmentColSpan(subdept) * 2; // *2 for allocated/display
                   return (
-                    <TableHead 
+                    <TableHead
                       key={`subdept-${subdept.id}-${subIndex}`}
                       colSpan={colSpan}
                       className={`${subIndex === 0 ? 'border-l' : ''} border-r text-center`}
@@ -310,20 +618,28 @@ export default function Stages() {
                 })
               )}
             </TableRow>
-            
+
             {/* Class Header Row */}
             <TableRow className="bg-muted/10">
-              {normalizedDepartments.flatMap(dept => 
-                dept.subdepartments.flatMap(subdept => 
-                  subdept.classes.map((cls, clsIndex) => (
-                    <TableHead 
-                      key={`class-${subdept.id}-${clsIndex}`}
+              {normalizedDepartments.flatMap(dept =>
+                dept.subdepartments.flatMap(subdept =>
+                  subdept.hasClasses
+                    ? subdept.classes.map((cls, clsIndex) => (
+                      <TableHead
+                        key={`class-${subdept.id}-${clsIndex}`}
+                        className="border text-center"
+                        colSpan={2} // Allocate + Display columns
+                      >
+                        {cls.name}
+                      </TableHead>
+                    ))
+                    : <TableHead
+                      key={`subdept-${subdept.id}-direct`}
                       className="border text-center"
                       colSpan={2} // Allocate + Display columns
                     >
-                      {cls.name}
+                      {subdept.name}
                     </TableHead>
-                  ))
                 )
               )}
             </TableRow>
@@ -339,100 +655,151 @@ export default function Stages() {
               <TableHead className="sticky left-60 bg-background border-r z-20">
                 <div className="text-center">Time (mins)</div>
               </TableHead>
-              {normalizedDepartments.flatMap(dept => 
-                dept.subdepartments.flatMap(subdept => 
-                  subdept.classes.map((cls, clsIndex) => (
-                    <React.Fragment key={`alloc-display-${subdept.id}-${clsIndex}`}>
-                      <TableHead className="border text-center">
-                        Allocate
-                      </TableHead>
-                      <TableHead className="border text-center">
-                        Display
-                      </TableHead>
-                    </React.Fragment>
-                  ))
+              {normalizedDepartments.flatMap(dept =>
+                dept.subdepartments.flatMap(subdept =>
+                  subdept.hasClasses
+                    ? subdept.classes.map((cls, clsIndex) => (
+                      <React.Fragment key={`alloc-display-${subdept.id}-${clsIndex}`}>
+                        <TableHead className="border text-center">
+                          Allocate
+                        </TableHead>
+                        <TableHead className="border text-center">
+                          Display
+                        </TableHead>
+                      </React.Fragment>
+                    ))
+                    : (
+                      <React.Fragment key={`alloc-display-${subdept.id}-direct`}>
+                        <TableHead className="border text-center">
+                          Allocate
+                        </TableHead>
+                        <TableHead className="border text-center">
+                          Display
+                        </TableHead>
+                      </React.Fragment>
+                    )
                 )
               )}
             </TableRow>
           </TableHeader>
-        
-        <TableBody>
-          {stages.map((stage, index) => (
-            <TableRow key={stage.id}>
-              <TableCell className="sticky left-0 bg-background border-r z-10 text-center w-12">
-                {index + 1}
-              </TableCell>
-              <TableCell className="sticky left-12 bg-background border-r p-0 z-10 w-48">
-                <div className="flex items-center gap-2 p-2">
-                  <input
-                    type="text"
-                    className="w-full bg-transparent border-none focus:ring-1 focus:ring-ring rounded px-2 py-1"
-                    value={stage.name}
-                    onChange={(e) => handleUpdateStage(stage, { name: e.target.value })}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => setEditingStage(stage)}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </TableCell>
-              <TableCell className="sticky left-60 bg-background border-r z-10 p-0 w-24">
-                <div className="flex items-center justify-center p-2">
-                  <input
-                    type="number"
-                    className="w-full bg-transparent border-none focus:ring-1 focus:ring-ring rounded px-2 py-1 text-center"
-                    value={stage.estimated_time || ''}
-                    onChange={(e) => handleUpdateStage(stage, { estimated_time: Number(e.target.value) })}
-                    placeholder="Mins"
-                  />
-                </div>
-              </TableCell>
-              {normalizedDepartments.flatMap(dept => 
-                dept.subdepartments.flatMap(subdept => 
-                  subdept.classes.map((cls, clsIndex) => {
-                    const hasAllocation = subdept.stages?.includes(stage.id) || false;
-                    
-                    return (
-                      <React.Fragment key={`cell-${subdept.id}-${clsIndex}-${stage.id}`}>
-                        <TableCell className="border p-0">
-                          <Select
-                            value={hasAllocation ? 'allocated' : 'not-allocated'}
-                            onValueChange={(value) => 
-                              handleAllocationChange(subdept.id, stage.id, value === 'allocated')
-                            }
-                          >
-                            <SelectTrigger className="h-8 w-full border-0 shadow-none focus:ring-1 focus:ring-ring">
-                              <SelectValue placeholder="Select" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="allocated">Allocated</SelectItem>
-                              <SelectItem value="not-allocated">Not Allocated</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell className="border p-0">
-                          <div className="flex items-center justify-center p-2">
-                            <Checkbox 
-                              checked={hasAllocation}
-                              onCheckedChange={(checked) => 
-                                handleDisplayChange(subdept.id, stage.id, checked as boolean)
+
+          <TableBody>
+            {stages.map((stage, index) => (
+              <TableRow key={stage.id}>
+                <TableCell className="sticky left-0 bg-background border-r z-10 text-center w-12">
+                  {index + 1}
+                </TableCell>
+                <TableCell className="sticky left-12 bg-background border-r p-0 z-10 w-48">
+                  <div className="flex items-center gap-2 p-2">
+                    <input
+                      type="text"
+                      className="w-full bg-transparent border-none focus:ring-1 focus:ring-ring rounded px-2 py-1"
+                      value={stage.name}
+                      onChange={(e) => handleUpdateStage(stage, { name: e.target.value })}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => setEditingStage(stage)}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </TableCell>
+                <TableCell className="sticky left-60 bg-background border-r z-10 p-0 w-24">
+                  <div className="flex items-center justify-center p-2">
+                    <input
+                      type="number"
+                      className="w-full bg-transparent border-none focus:ring-1 focus:ring-ring rounded px-2 py-1 text-center"
+                      value={stage.estimated_time || ''}
+                      onChange={(e) => handleUpdateStage(stage, { estimated_time: Number(e.target.value) })}
+                      placeholder="Mins"
+                    />
+                  </div>
+                </TableCell>
+                {normalizedDepartments.flatMap(dept =>
+                  dept.subdepartments.flatMap(subdept => {
+                    if (subdept.hasClasses) {
+                      return subdept.classes.map((cls, clsIndex) => {
+                        const hasAllocation = cls.stages?.includes(stage.id) || false;
+
+                        return (
+                          <React.Fragment key={`cell-${subdept.id}-${clsIndex}-${stage.id}`}>
+                            <TableCell className="border p-0">
+                              <Select
+                                value={hasAllocation ? 'allocated' : 'not-allocated'}
+                                onValueChange={(value) =>
+                                  handleAllocationChange(subdept.id, stage.id, value === 'allocated', clsIndex)
+                                }
+                              >
+                                <SelectTrigger className="h-8 w-full border-0 shadow-none focus:ring-1 focus:ring-ring">
+                                  <SelectValue placeholder="Select" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="allocated">Allocated</SelectItem>
+                                  <SelectItem value="not-allocated">Not Allocated</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell className="border p-0">
+                              <div className="flex items-center justify-center p-2">
+                                <Checkbox
+                                  checked={cls.display_stages?.includes(stage.id) || false}
+                                  onCheckedChange={(checked) =>
+                                    handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex)
+                                  }
+                                  disabled={!hasAllocation}
+                                  className="h-4 w-4"
+                                />
+                              </div>
+                            </TableCell>
+                          </React.Fragment>
+                        );
+                      });
+                    } else {
+                      // For subdepartments without classes
+                      const hasAllocation = subdept.stages?.includes(stage.id) || false;
+
+                      return (
+                        <React.Fragment key={`cell-${subdept.id}-direct-${stage.id}`}>
+                          <TableCell className="border p-0">
+                            <Select
+                              value={hasAllocation ? 'allocated' : 'not-allocated'}
+                              onValueChange={(value) =>
+                                handleAllocationChange(subdept.id, stage.id, value === 'allocated')
                               }
-                            />
-                          </div>
-                        </TableCell>
-                      </React.Fragment>
-                    );
+                            >
+                              <SelectTrigger className="h-8 w-full border-0 shadow-none focus:ring-1 focus:ring-ring">
+                                <SelectValue placeholder="Select" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="allocated">Allocated</SelectItem>
+                                <SelectItem value="not-allocated">Not Allocated</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell className="border p-0">
+                            <div className="flex items-center justify-center p-2">
+                              <Checkbox
+                                checked={subdept.display_stages?.includes(stage.id) || false}
+                                onCheckedChange={(checked) =>
+                                  handleDisplayToggle(subdept.id, stage.id, checked as boolean)
+                                }
+                                disabled={!hasAllocation}
+                                className="h-4 w-4"
+                              />
+                            </div>
+                          </TableCell>
+                        </React.Fragment>
+                      );
+                    }
                   })
-                )
-              )}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </div>
     </div>
   );
