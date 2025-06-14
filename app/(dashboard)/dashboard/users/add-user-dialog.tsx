@@ -42,7 +42,7 @@ const userFormSchema = z.object({
     message: 'Name must be at least 2 characters.',
   }),
   email: z.string().optional(),
-  role: z.enum(['admin', 'task_manager', 'task_assistant', 'officer']),
+  role: z.enum(['user', 'admin', 'task_manager', 'task_assistant', 'officer']),
   start_date: z.string().optional(),
 })
 
@@ -163,6 +163,7 @@ export function AddUserDialog({ defaultRole = 'task_assistant', onUserAdded }: A
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
+                      <SelectItem value="user">User</SelectItem>
                       <SelectItem value="admin">Admin</SelectItem>
                       <SelectItem value="task_manager">Task Manager</SelectItem>
                       <SelectItem value="task_assistant">Task Assistant</SelectItem>

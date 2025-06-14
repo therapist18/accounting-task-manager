@@ -8,6 +8,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { User, Building2, Users } from "lucide-react"
 import supabase from "@/lib/supabase/client"
 
 interface Department {
@@ -67,7 +71,15 @@ interface Client {
     company_address?: string
     contact_person?: string
   } | null
+  dependents?: Array<{
+    id: string
+    full_name: string
+    relationship: string
+    date_of_birth?: string
+  }> | null
 }
+
+type ApplicationType = 'principal' | 'dependent'
 
 interface FormData {
   job_description: string
@@ -85,6 +97,8 @@ interface FormData {
   applied_by: string
   batch: string
   dependent_name: string
+  application_type: ApplicationType
+  principal_member_id: string // For dependent applications
 }
 
 interface NewTaskDialogProps {
@@ -99,6 +113,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   const [officers, setOfficers] = useState<Officer[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [selectedClient, setSelectedClient] = useState<Client | null>(null)
+  const [selectedPrincipalMember, setSelectedPrincipalMember] = useState<Client | null>(null)
   const [allUsers, setAllUsers] = useState<Officer[]>([])
   const [loading, setLoading] = useState(false)
   const [initialLoad, setInitialLoad] = useState(true)
@@ -118,7 +133,9 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     account_used: '',
     applied_by: '',
     batch: '',
-    dependent_name: ''
+    dependent_name: '',
+    application_type: 'principal',
+    principal_member_id: ''
   }))
 
   // Optimized data fetching with proper error handling
@@ -143,7 +160,8 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
             full_name, 
             alternative_email, 
             contact_details,
-            bill_to
+            bill_to,
+            dependents
           `)
           .order('full_name')
       ])
@@ -229,6 +247,17 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     console.log(`Changing ${field} to:`, value);
 
     setFormData(prev => {
+      // If changing application type, reset related fields
+      if (field === 'application_type') {
+        return {
+          ...prev,
+          application_type: value,
+          client_id: '',
+          principal_member_id: '',
+          dependent_name: ''
+        };
+      }
+
       // If changing department, reset subdepartment and its dependent fields
       if (field === 'department_id') {
         return {
@@ -261,6 +290,12 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         setSelectedClient(client);
       }
 
+      // If changing principal member, update the selected principal member
+      if (field === 'principal_member_id') {
+        const principal = clients.find(c => c.id === value) || null;
+        setSelectedPrincipalMember(principal);
+      }
+
       // For all other fields, update normally
       const newState = {
         ...prev,
@@ -282,6 +317,11 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
       console.log('Submitting form data:', formData)
 
+      // Determine the actual client ID based on application type
+      const actualClientId = formData.application_type === 'dependent' 
+        ? formData.principal_member_id 
+        : formData.client_id;
+
       const { data, error } = await supabase
         .from('tm_tasks')
         .insert([{
@@ -291,7 +331,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
           task_manager_id: formData.task_manager_id || null,
           task_assistant_id: formData.task_assistant_id || null,
           officer_id: formData.officer_id || null,
-          client_id: formData.client_id,
+          client_id: actualClientId,
           status: 'registered',
           date_initiated: new Date(formData.date_initiated).toISOString(),
           class_name: formData.class_id || null,
@@ -299,7 +339,8 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
           account_used: formData.account_used,
           applied_by: formData.applied_by,
           batch: formData.batch,
-          dependent_name: formData.dependent_name,
+          dependent_name: formData.application_type === 'dependent' ? formData.dependent_name : null,
+          application_type: formData.application_type,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         }])
@@ -336,9 +377,12 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         account_used: '',
         applied_by: '',
         batch: '',
-        dependent_name: ''
+        dependent_name: '',
+        application_type: 'principal',
+        principal_member_id: ''
       })
       setSelectedClient(null)
+      setSelectedPrincipalMember(null)
     } catch (error) {
       console.error('Error creating task:', error)
     } finally {
@@ -377,18 +421,6 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
     console.log('Found manager:', manager);
 
-    // If no manager found, try to find by email as fallback
-    if (!manager && selectedSubdepartment.task_manager.email) {
-      const email = selectedSubdepartment.task_manager.email.toLowerCase();
-      const fallbackManager = allUsers.find(user =>
-        user.email.toLowerCase() === email
-      );
-      if (fallbackManager) {
-        console.log('Found manager by email fallback:', fallbackManager);
-        return [fallbackManager];
-      }
-    }
-
     return manager ? [manager] : [];
   }, [selectedSubdepartment, allUsers])
 
@@ -413,18 +445,6 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
     console.log('Found assistant:', assistant);
 
-    // If no assistant found, try to find by email as fallback
-    if (!assistant && selectedSubdepartment.task_assistant.email) {
-      const email = selectedSubdepartment.task_assistant.email.toLowerCase();
-      const fallbackAssistant = allUsers.find(user =>
-        user.email.toLowerCase() === email
-      );
-      if (fallbackAssistant) {
-        console.log('Found assistant by email fallback:', fallbackAssistant);
-        return [fallbackAssistant];
-      }
-    }
-
     return assistant ? [assistant] : [];
   }, [selectedSubdepartment, allUsers])
 
@@ -443,29 +463,60 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     return classes;
   }, [selectedSubdepartment])
 
+  // Get dependents for the selected principal member
+  const availableDependents = useMemo(() => {
+    if (formData.application_type !== 'dependent' || !selectedPrincipalMember) return [];
+    
+    return Array.isArray(selectedPrincipalMember.dependents) 
+      ? selectedPrincipalMember.dependents 
+      : [];
+  }, [formData.application_type, selectedPrincipalMember]);
+
   const clientDetails = useMemo(() => {
-    if (!selectedClient) return null
+    const client = formData.application_type === 'dependent' ? selectedPrincipalMember : selectedClient;
+    if (!client) return null
 
     return (
-      <div className="mt-2 p-3 bg-gray-50 rounded-md text-sm space-y-1">
-        {selectedClient.bill_to?.company_name && (
-          <div><strong>Company:</strong> {selectedClient.bill_to.company_name}</div>
-        )}
-        {selectedClient.alternative_email && (
-          <div><strong>Email:</strong> {selectedClient.alternative_email}</div>
-        )}
-        {selectedClient.contact_details?.email?.primary && (
-          <div><strong>Primary Email:</strong> {selectedClient.contact_details.email.primary}</div>
-        )}
-        {selectedClient.contact_details?.phone?.kenyan?.primary && (
-          <div><strong>Phone:</strong> {selectedClient.contact_details.phone.kenyan.primary}</div>
-        )}
-        {selectedClient.contact_details?.phone?.whatsapp && (
-          <div><strong>WhatsApp:</strong> {selectedClient.contact_details.phone.whatsapp}</div>
-        )}
-      </div>
+      <Card className="mt-2">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            {formData.application_type === 'dependent' ? (
+              <>
+                <User className="h-4 w-4" />
+                Principal Member Details
+              </>
+            ) : (
+              <>
+                <Building2 className="h-4 w-4" />
+                Client Details
+              </>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm space-y-2">
+          <div><strong>Name:</strong> {client.full_name || 'N/A'}</div>
+          {client.bill_to?.company_name && (
+            <div><strong>Company:</strong> {client.bill_to.company_name}</div>
+          )}
+          {client.alternative_email && (
+            <div><strong>Email:</strong> {client.alternative_email}</div>
+          )}
+          {client.contact_details?.email?.primary && (
+            <div><strong>Primary Email:</strong> {client.contact_details.email.primary}</div>
+          )}
+          {client.contact_details?.phone?.kenyan?.primary && (
+            <div><strong>Phone:</strong> {client.contact_details.phone.kenyan.primary}</div>
+          )}
+          {client.contact_details?.phone?.whatsapp && (
+            <div><strong>WhatsApp:</strong> {client.contact_details.phone.whatsapp}</div>
+          )}
+          {client.bill_to?.company_address && (
+            <div><strong>Address:</strong> {client.bill_to.company_address}</div>
+          )}
+        </CardContent>
+      </Card>
     )
-  }, [selectedClient])
+  }, [selectedClient, selectedPrincipalMember, formData.application_type])
 
   // Debug logging
   useEffect(() => {
@@ -478,7 +529,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[800px]">
+      <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create New Task</DialogTitle>
           <DialogDescription>
@@ -527,6 +578,32 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
             </div>
           </div>
 
+          {/* Application Type Selection */}
+          <div className="space-y-3">
+            <Label className="text-base font-medium">Application Type *</Label>
+            <RadioGroup
+              value={formData.application_type}
+              onValueChange={(value: ApplicationType) => handleChange('application_type', value)}
+              className="flex gap-6"
+            >
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="principal" id="principal" />
+                <Label htmlFor="principal" className="flex items-center gap-2 cursor-pointer">
+                  <User className="h-4 w-4" />
+                  Principal Member
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="dependent" id="dependent" />
+                <Label htmlFor="dependent" className="flex items-center gap-2 cursor-pointer">
+                  <Users className="h-4 w-4" />
+                  Dependent
+                </Label>
+              </div>
+            </RadioGroup>
+          </div>
+
+          {/* Department and Subdepartment Selection */}
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">
               <Label htmlFor="department">Department *</Label>
@@ -536,11 +613,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                 required
               >
                 <SelectTrigger>
-                  <SelectValue>
-                    {formData.department_id ? (
-                      departments.find(d => d.id === formData.department_id)?.name || 'Select department'
-                    ) : 'Select department'}
-                  </SelectValue>
+                  <SelectValue placeholder="Select department" />
                 </SelectTrigger>
                 <SelectContent>
                   {departments.map((dept) => (
@@ -582,6 +655,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
             </div>
           </div>
 
+          {/* Task Assignment - Auto-populated from subdepartment */}
           <div className="space-y-4">
             <h3 className="text-sm font-medium">Task Assignment</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg">
@@ -711,128 +785,223 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
             </div>
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="client">Applicant Name (Client) *</Label>
-            <Select
-              value={formData.client_id}
-              onValueChange={(value: string) => handleChange('client_id', value)}
-              required
-            >
-              <SelectTrigger>
-                <SelectValue>
-                  {formData.client_id ? (
-                    <div className="flex flex-col">
-                      <span>{clients.find(c => c.id === formData.client_id)?.full_name || 'Unnamed Client'}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {clients.find(c => c.id === formData.client_id)?.alternative_email}
-                      </span>
-                    </div>
-                  ) : (
-                    'Select client'
-                  )}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {clients.map((client) => (
-                  <SelectItem key={client.id} value={client.id}>
-                    <div className="flex flex-col">
-                      <span>{client.full_name || client.alternative_email || 'Unnamed Client'}</span>
-                      {client.alternative_email && <span className="text-xs text-muted-foreground">{client.alternative_email}</span>}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {clientDetails}
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
+          {/* Client/Principal Member Selection */}
+          {formData.application_type === 'principal' ? (
             <div className="grid gap-2">
-              <Label htmlFor="class">Class</Label>
+              <Label htmlFor="client">Applicant Name (Client) *</Label>
               <Select
-                value={formData.class_id}
-                onValueChange={(value: string) => handleChange('class_id', value)}
-                disabled={!formData.subdepartment_id}
+                value={formData.client_id}
+                onValueChange={(value: string) => handleChange('client_id', value)}
+                required
               >
                 <SelectTrigger>
-                  <SelectValue placeholder={
-                    !formData.subdepartment_id ? 'Select subdepartment first' :
-                      availableClasses.length === 0 ? 'No classes available' : 'Select class'
-                  } />
+                  <SelectValue placeholder="Select client" />
                 </SelectTrigger>
                 <SelectContent>
-                  {availableClasses.map((cls) => (
-                    <SelectItem key={cls.name} value={cls.name}>
+                  {clients.map((client) => (
+                    <SelectItem key={client.id} value={client.id}>
                       <div className="flex flex-col">
-                        <span>{cls.name}</span>
-                        {cls.description && (
-                          <span className="text-xs text-muted-foreground">{cls.description}</span>
-                        )}
+                        <span>{client.full_name || client.alternative_email || 'Unnamed Client'}</span>
+                        {client.alternative_email && <span className="text-xs text-muted-foreground">{client.alternative_email}</span>}
                       </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {availableClasses.length === 0 && formData.subdepartment_id && (
-                <p className="text-xs text-amber-600">
-                  No classes configured for this subdepartment
-                </p>
-              )}
+              {clientDetails}
             </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid gap-2">
+                <Label htmlFor="principal-member">Principal Member *</Label>
+                <Select
+                  value={formData.principal_member_id}
+                  onValueChange={(value: string) => handleChange('principal_member_id', value)}
+                  required
+                >
+                 <SelectTrigger>
+                   <SelectValue placeholder="Select principal member" />
+                 </SelectTrigger>
+                 <SelectContent>
+                   {clients.map((client) => (
+                     <SelectItem key={client.id} value={client.id}>
+                       <div className="flex flex-col">
+                         <span>{client.full_name || client.alternative_email || 'Unnamed Client'}</span>
+                         {client.alternative_email && <span className="text-xs text-muted-foreground">{client.alternative_email}</span>}
+                       </div>
+                     </SelectItem>
+                   ))}
+                 </SelectContent>
+               </Select>
+             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="dependent-name">Dependent Name</Label>
-              <Input
-                id="dependent-name"
-                value={formData.dependent_name}
-                onChange={(e) => handleChange('dependent_name', e.target.value)}
-                placeholder="Enter dependent name"
-              />
-            </div>
-          </div>
+             {selectedPrincipalMember && (
+               <div className="grid gap-2">
+                 <Label htmlFor="dependent-selection">Select Dependent *</Label>
+                 <Select
+                   value={formData.dependent_name}
+                   onValueChange={(value: string) => handleChange('dependent_name', value)}
+                   required
+                 >
+                   <SelectTrigger>
+                     <SelectValue placeholder={
+                       availableDependents.length === 0 
+                         ? "No dependents found for this principal member" 
+                         : "Select dependent"
+                     } />
+                   </SelectTrigger>
+                   <SelectContent>
+                     {availableDependents.map((dependent) => (
+                       <SelectItem key={dependent.id} value={dependent.full_name}>
+                         <div className="flex flex-col">
+                           <span>{dependent.full_name}</span>
+                           <span className="text-xs text-muted-foreground">
+                             {dependent.relationship}
+                             {dependent.date_of_birth && ` • DOB: ${dependent.date_of_birth}`}
+                           </span>
+                         </div>
+                       </SelectItem>
+                     ))}
+                     {availableDependents.length === 0 && (
+                       <SelectItem value="manual-entry" className="text-amber-600">
+                         Enter dependent name manually
+                       </SelectItem>
+                     )}
+                   </SelectContent>
+                 </Select>
+                 
+                 {(availableDependents.length === 0 || formData.dependent_name === 'manual-entry') && (
+                   <div className="mt-2">
+                     <Label htmlFor="manual-dependent-name">Dependent Name</Label>
+                     <Input
+                       id="manual-dependent-name"
+                       value={formData.dependent_name === 'manual-entry' ? '' : formData.dependent_name}
+                       onChange={(e) => handleChange('dependent_name', e.target.value)}
+                       placeholder="Enter dependent's full name"
+                       required
+                     />
+                   </div>
+                 )}
+               </div>
+             )}
 
-          <div className="grid grid-cols-3 gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="account-used">Account Used</Label>
-              <Input
-                id="account-used"
-                value={formData.account_used}
-                onChange={(e) => handleChange('account_used', e.target.value)}
-                placeholder="Enter account used"
-              />
-            </div>
+             {clientDetails}
+           </div>
+         )}
 
-            <div className="grid gap-2">
-              <Label htmlFor="applied-by">Applied by Who</Label>
-              <Input
-                id="applied-by"
-                value={formData.applied_by}
-                onChange={(e) => handleChange('applied_by', e.target.value)}
-                placeholder="Enter who applied"
-              />
-            </div>
+         {/* Class Selection */}
+         <div className="grid gap-2">
+           <Label htmlFor="class">Class</Label>
+           <Select
+             value={formData.class_id}
+             onValueChange={(value: string) => handleChange('class_id', value)}
+             disabled={!formData.subdepartment_id}
+           >
+             <SelectTrigger>
+               <SelectValue placeholder={
+                 !formData.subdepartment_id ? 'Select subdepartment first' :
+                   availableClasses.length === 0 ? 'No classes available' : 'Select class'
+               } />
+             </SelectTrigger>
+             <SelectContent>
+               {availableClasses.map((cls) => (
+                 <SelectItem key={cls.name} value={cls.name}>
+                   <div className="flex flex-col">
+                     <span>{cls.name}</span>
+                     {cls.description && (
+                       <span className="text-xs text-muted-foreground">{cls.description}</span>
+                     )}
+                     {cls.requirements && cls.requirements.length > 0 && (
+                       <Badge variant="outline" className="text-xs mt-1 w-fit">
+                         {cls.requirements.length} requirements
+                       </Badge>
+                     )}
+                   </div>
+                 </SelectItem>
+               ))}
+             </SelectContent>
+           </Select>
+           {availableClasses.length === 0 && formData.subdepartment_id && (
+             <p className="text-xs text-amber-600">
+               No classes configured for this subdepartment
+             </p>
+           )}
+         </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="batch">Batch</Label>
-              <Input
-                id="batch"
-                value={formData.batch}
-                onChange={(e) => handleChange('batch', e.target.value)}
-                placeholder="Enter batch number"
-              />
-            </div>
-          </div>
+         {/* Additional Fields */}
+         <div className="grid grid-cols-3 gap-4">
+           <div className="grid gap-2">
+             <Label htmlFor="account-used">Account Used</Label>
+             <Input
+               id="account-used"
+               value={formData.account_used}
+               onChange={(e) => handleChange('account_used', e.target.value)}
+               placeholder="Enter account used"
+             />
+           </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? 'Creating...' : 'Create Task'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
+           <div className="grid gap-2">
+             <Label htmlFor="applied-by">Applied by Who</Label>
+             <Input
+               id="applied-by"
+               value={formData.applied_by}
+               onChange={(e) => handleChange('applied_by', e.target.value)}
+               placeholder="Enter who applied"
+             />
+           </div>
+
+           <div className="grid gap-2">
+             <Label htmlFor="batch">Batch</Label>
+             <Input
+               id="batch"
+               value={formData.batch}
+               onChange={(e) => handleChange('batch', e.target.value)}
+               placeholder="Enter batch number"
+             />
+           </div>
+         </div>
+
+         {/* Form Summary */}
+         {(formData.application_type && formData.subdepartment_id) && (
+           <Card className="bg-blue-50 border-blue-200">
+             <CardHeader className="pb-2">
+               <CardTitle className="text-sm text-blue-800">Task Summary</CardTitle>
+             </CardHeader>
+             <CardContent className="text-sm space-y-1">
+               <div><strong>Application Type:</strong> {formData.application_type === 'principal' ? 'Principal Member' : 'Dependent'}</div>
+               <div><strong>Department:</strong> {departments.find(d => d.id === formData.department_id)?.name || 'Not selected'}</div>
+               <div><strong>Subdepartment:</strong> {subdepartments.find(s => s.id === formData.subdepartment_id)?.name || 'Not selected'}</div>
+               {formData.task_manager_id && (
+                 <div><strong>Task Manager:</strong> {allUsers.find(u => u.id === formData.task_manager_id)?.name || 'Unknown'}</div>
+               )}
+               {formData.task_assistant_id && (
+                 <div><strong>Task Assistant:</strong> {allUsers.find(u => u.id === formData.task_assistant_id)?.name || 'Unknown'}</div>
+               )}
+               {formData.class_id && (
+                 <div><strong>Class:</strong> {formData.class_id}</div>
+               )}
+               {formData.application_type === 'dependent' && formData.dependent_name && (
+                 <div><strong>Dependent:</strong> {formData.dependent_name}</div>
+               )}
+             </CardContent>
+           </Card>
+         )}
+
+         <DialogFooter>
+           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+             Cancel
+           </Button>
+           <Button 
+             type="submit" 
+             disabled={loading || !formData.job_description || !formData.department_id || !formData.subdepartment_id || 
+               (formData.application_type === 'principal' && !formData.client_id) ||
+               (formData.application_type === 'dependent' && (!formData.principal_member_id || !formData.dependent_name))}
+           >
+             {loading ? 'Creating...' : 'Create Task'}
+           </Button>
+         </DialogFooter>
+       </form>
+     </DialogContent>
+   </Dialog>
+ )
 }

@@ -197,8 +197,31 @@ export default function Stages() {
     }
   }
 
+  // Ensure we always have at least one subdepartment for each department
+  const normalizedDepartments = departments.map(dept => {
+    // If no subdepartments, create a default one
+    const hasSubdepartments = dept.subdepartments && dept.subdepartments.length > 0;
+    const subdepartments = hasSubdepartments 
+      ? dept.subdepartments 
+      : [{
+          id: dept.id * -1, // Use negative ID to avoid conflicts
+          name: 'N/A',
+          department_id: dept.id,
+          stages: [],
+          classes: [{ name: 'N/A', description: null, requirements: [] }]
+        }];
+
+    return {
+      ...dept,
+      subdepartments: subdepartments.map(sd => ({
+        ...sd,
+        classes: sd.classes?.length ? sd.classes : [{ name: 'N/A', description: null, requirements: [] }]
+      }))
+    };
+  });
+
   return (
-    <div className="w-full overflow-auto">
+    <div className="w-full">
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-semibold">Stages Configuration</h3>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -249,173 +272,168 @@ export default function Stages() {
         </Dialog>
       </div>
       
-      <div className="overflow-x-auto">
+      <div className="relative overflow-auto max-h-[calc(100vh-200px)]">
         <Table className="border min-w-max">
           <TableHeader className="sticky top-0 bg-background z-10">
             {/* Department Header Row */}
             <TableRow className="bg-muted/50">
-              <TableHead rowSpan={3} className="border-r font-bold w-12">#</TableHead>
-              <TableHead rowSpan={3} className="border-r font-bold">Stage Details</TableHead>
-              {departments.map(dept => (
-                <TableHead 
-                  key={`dept-${dept.id}`}
-                  colSpan={getDepartmentColSpan(dept) * 2} // *2 for allocated/display columns
-                  className="border-l border-r text-center font-bold bg-muted/30"
-                >
-                  {dept.name}
-                </TableHead>
-              ))}
+              <TableHead rowSpan={3} className="sticky left-0 bg-background border-r font-bold w-12 z-20">#</TableHead>
+              <TableHead rowSpan={3} colSpan={2} className="sticky left-12 bg-background border-r font-bold w-48 z-20 text-center">Stage Details</TableHead>
+              {normalizedDepartments.map(dept => {
+                const colSpan = getDepartmentColSpan(dept) * 2; // *2 for allocated/display columns
+                return (
+                  <TableHead 
+                    key={`dept-${dept.id}`}
+                    colSpan={colSpan}
+                    className="border-l border-r text-center font-bold bg-muted/30"
+                  >
+                    {dept.name}
+                  </TableHead>
+                );
+              })}
             </TableRow>
             
             {/* Subdepartment Header Row */}
             <TableRow className="bg-muted/20">
-              {departments.flatMap(dept => 
-                (dept.subdepartments || []).flatMap(subdept => 
-                  Array(getSubdepartmentColSpan(subdept)).fill(0).map((_, i) => (
+              {normalizedDepartments.flatMap(dept => 
+                dept.subdepartments.flatMap((subdept, subIndex) => {
+                  const colSpan = getSubdepartmentColSpan(subdept) * 2; // *2 for allocated/display
+                  return (
                     <TableHead 
-                      key={`subdept-${subdept.id}-${i}`} 
-                      colSpan={2} // *2 for allocated/display columns
-                      className={`${i === 0 ? 'border-l' : ''} border-r text-center`}
+                      key={`subdept-${subdept.id}-${subIndex}`}
+                      colSpan={colSpan}
+                      className={`${subIndex === 0 ? 'border-l' : ''} border-r text-center`}
                     >
-                      {i === 0 ? subdept.name : ''}
+                      {subdept.name}
                     </TableHead>
-                  ))
-                )
+                  );
+                })
               )}
             </TableRow>
             
             {/* Class Header Row */}
             <TableRow className="bg-muted/10">
-              {departments.flatMap(dept => 
-                (dept.subdepartments || []).flatMap(subdept => 
-                  (subdept.classes && subdept.classes.length > 0 
-                    ? subdept.classes 
-                    : [{}] // Default empty class if none exist
-                  ).map((cls, i) => (
-                    <React.Fragment key={`class-${subdept.id}-${i}`}>
-                      <TableHead className="border text-center" colSpan={2}>
-                        {cls.name || 'N/A'}
+              {normalizedDepartments.flatMap(dept => 
+                dept.subdepartments.flatMap(subdept => 
+                  subdept.classes.map((cls, clsIndex) => (
+                    <TableHead 
+                      key={`class-${subdept.id}-${clsIndex}`}
+                      className="border text-center"
+                      colSpan={2} // Allocate + Display columns
+                    >
+                      {cls.name}
+                    </TableHead>
+                  ))
+                )
+              )}
+            </TableRow>
+
+            {/* Allocate/Display Header Row */}
+            <TableRow>
+              <TableHead className="sticky left-0 bg-background border-r z-20">
+                <div className="text-center">#</div>
+              </TableHead>
+              <TableHead className="sticky left-12 bg-background border-r z-20">
+                <div className="text-center">Stage Name</div>
+              </TableHead>
+              <TableHead className="sticky left-60 bg-background border-r z-20">
+                <div className="text-center">Time (mins)</div>
+              </TableHead>
+              {normalizedDepartments.flatMap(dept => 
+                dept.subdepartments.flatMap(subdept => 
+                  subdept.classes.map((cls, clsIndex) => (
+                    <React.Fragment key={`alloc-display-${subdept.id}-${clsIndex}`}>
+                      <TableHead className="border text-center">
+                        Allocate
+                      </TableHead>
+                      <TableHead className="border text-center">
+                        Display
                       </TableHead>
                     </React.Fragment>
                   ))
                 )
               )}
             </TableRow>
-
-            {/* Allocated/Display Header Row */}
-            <TableRow>
-              <TableHead className="border-r" rowSpan={2}>
-                <div className="text-center">#</div>
-              </TableHead>
-              <TableHead className="border-r" colSpan={1}>
-                <div className="text-center">Stage Details</div>
-              </TableHead>
-              {departments.map(dept => (
-                <React.Fragment key={`dept-${dept.id}`}>
-                  <TableHead className="border text-center">
-                    Allocate
-                  </TableHead>
-                  <TableHead className="border text-center">
-                    Display
-                  </TableHead>
-                </React.Fragment>
-              ))}
-            </TableRow>
-            <TableRow>
-              <TableHead className="border-r text-center" colSpan={1}>
-                Name
-              </TableHead>
-              <TableHead className="border-r text-center" colSpan={1}>
-                Time (mins)
-              </TableHead>
-              {departments.map(dept => (
-                <React.Fragment key={`dept2-${dept.id}`}>
-                  <TableHead className="border text-center"></TableHead>
-                  <TableHead className="border text-center"></TableHead>
-                </React.Fragment>
-              ))}
-            </TableRow>
           </TableHeader>
         
         <TableBody>
           {stages.map((stage, index) => (
             <TableRow key={stage.id}>
-              <TableCell className="border-r text-center">
+              <TableCell className="sticky left-0 bg-background border-r z-10 text-center w-12">
                 {index + 1}
               </TableCell>
-              <TableCell className="border-r p-0">
-                <div className="grid grid-cols-2 divide-x divide-border">
-                  <div className="p-2">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        className="w-full bg-transparent border-none focus:ring-1 focus:ring-ring rounded px-2 py-1"
-                        value={stage.name}
-                        onChange={(e) => handleUpdateStage(stage, { name: e.target.value })}
-                      />
-                      <Pencil className="h-3 w-3 text-muted-foreground" />
-                    </div>
-                  </div>
-                  <div className="p-2">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        className="w-full bg-transparent border-none focus:ring-1 focus:ring-ring rounded px-2 py-1"
-                        value={stage.estimated_time || ''}
-                        onChange={(e) => handleUpdateStage(stage, { estimated_time: parseInt(e.target.value) || 0 })}
-                        placeholder="0"
-                      />
-                      <span className="text-xs text-muted-foreground">mins</span>
-                    </div>
-                  </div>
+              <TableCell className="sticky left-12 bg-background border-r p-0 z-10 w-48">
+                <div className="flex items-center gap-2 p-2">
+                  <input
+                    type="text"
+                    className="w-full bg-transparent border-none focus:ring-1 focus:ring-ring rounded px-2 py-1"
+                    value={stage.name}
+                    onChange={(e) => handleUpdateStage(stage, { name: e.target.value })}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => setEditingStage(stage)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </TableCell>
-              
-              {departments.map(dept => {
-                // Check if any subdepartment has this stage allocated
-                const hasAllocation = dept.subdepartments?.some(
-                  subdept => subdept.stages?.includes(stage.id)
-                ) || false;
-                
-                // Get the first subdepartment ID for this department (for the handler)
-                const subdeptId = dept.subdepartments?.[0]?.id || 0;
-                
-                return (
-                  <React.Fragment key={`cell-${dept.id}-${stage.id}`}>
-                    <TableCell className="border p-0">
-                      <Select
-                        value={hasAllocation ? 'allocated' : 'not-allocated'}
-                        onValueChange={(value) => 
-                          handleAllocationChange(subdeptId, stage.id, value === 'allocated')
-                        }
-                      >
-                        <SelectTrigger className="h-8 w-full border-0 shadow-none focus:ring-1 focus:ring-ring">
-                          <SelectValue placeholder="Select" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="allocated">Allocated</SelectItem>
-                          <SelectItem value="not-allocated">Not Allocated</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell className="border p-0">
-                      <div className="flex items-center justify-center p-2">
-                        <Checkbox 
-                          checked={hasAllocation}
-                          onCheckedChange={(checked) => 
-                            handleDisplayChange(subdeptId, stage.id, checked as boolean)
-                          }
-                        />
-                      </div>
-                    </TableCell>
-                  </React.Fragment>
-                );
-              })}
+              <TableCell className="sticky left-60 bg-background border-r z-10 p-0 w-24">
+                <div className="flex items-center justify-center p-2">
+                  <input
+                    type="number"
+                    className="w-full bg-transparent border-none focus:ring-1 focus:ring-ring rounded px-2 py-1 text-center"
+                    value={stage.estimated_time || ''}
+                    onChange={(e) => handleUpdateStage(stage, { estimated_time: Number(e.target.value) })}
+                    placeholder="Mins"
+                  />
+                </div>
+              </TableCell>
+              {normalizedDepartments.flatMap(dept => 
+                dept.subdepartments.flatMap(subdept => 
+                  subdept.classes.map((cls, clsIndex) => {
+                    const hasAllocation = subdept.stages?.includes(stage.id) || false;
+                    
+                    return (
+                      <React.Fragment key={`cell-${subdept.id}-${clsIndex}-${stage.id}`}>
+                        <TableCell className="border p-0">
+                          <Select
+                            value={hasAllocation ? 'allocated' : 'not-allocated'}
+                            onValueChange={(value) => 
+                              handleAllocationChange(subdept.id, stage.id, value === 'allocated')
+                            }
+                          >
+                            <SelectTrigger className="h-8 w-full border-0 shadow-none focus:ring-1 focus:ring-ring">
+                              <SelectValue placeholder="Select" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="allocated">Allocated</SelectItem>
+                              <SelectItem value="not-allocated">Not Allocated</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell className="border p-0">
+                          <div className="flex items-center justify-center p-2">
+                            <Checkbox 
+                              checked={hasAllocation}
+                              onCheckedChange={(checked) => 
+                                handleDisplayChange(subdept.id, stage.id, checked as boolean)
+                              }
+                            />
+                          </div>
+                        </TableCell>
+                      </React.Fragment>
+                    );
+                  })
+                )
+              )}
             </TableRow>
           ))}
         </TableBody>
       </Table>
       </div>
     </div>
-  )
-}
+  );
+};
