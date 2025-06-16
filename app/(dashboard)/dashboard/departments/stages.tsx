@@ -3,27 +3,33 @@
 
 import React, { useState, useEffect, useMemo } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Plus, Pencil, GripVertical, ArrowUp, ArrowDown, X } from "lucide-react"
-import { supabase } from "@/lib/supabase/client"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { useToast } from "@/components/ui/use-toast"
+import { ArrowUp, ArrowDown, Pencil, Plus, X, Info } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { closestCenter, DndContext, DragEndEvent, KeyboardSensor, PointerSensor, useSensor, useSensors, DragStartEvent } from '@dnd-kit/core'
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
+import { useToast } from "@/components/ui/use-toast"
+import { supabase } from "@/lib/supabase/client"
+import { AddStageDialog } from "./add-stage-dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 // Simple UUID generator for client-side use
 const generateId = () => {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = Math.random() * 16 | 0
     const v = c === 'x' ? r : (r & 0x3 | 0x8)
     return v.toString(16)
   })
+}
+
+type TimeConfig = {
+  applicationType: string
+  days: number
+  hours: number
+  minutes: number
 }
 
 type Stage = {
@@ -32,6 +38,8 @@ type Stage = {
   order_num: number
   estimated_time: number | null
   follow_up?: 'Client' | 'Officer' | 'BCL' | null
+  isSpecial: boolean
+  timeConfigs?: TimeConfig[]
   allocations?: {
     [key: string]: {
       allocated: boolean
@@ -47,19 +55,19 @@ const minutesToTimeString = (minutes: number | null): string => {
   const days = Math.floor(minutes / (60 * 24))
   const hours = Math.floor((minutes % (60 * 24)) / 60)
   const mins = minutes % 60
-  
+
   const parts = []
   if (days > 0) parts.push(`${days}d`)
   if (hours > 0) parts.push(`${hours}h`)
   if (mins > 0 || parts.length === 0) parts.push(`${mins}m`)
-  
+
   return parts.join(' ')
 }
 
 const timeStringToMinutes = (timeString: string): number => {
   let totalMinutes = 0
   const parts = timeString.trim().split(/\s+/)
-  
+
   for (const part of parts) {
     const value = parseInt(part)
     if (part.endsWith('d')) {
@@ -70,7 +78,7 @@ const timeStringToMinutes = (timeString: string): number => {
       totalMinutes += value
     }
   }
-  
+
   return totalMinutes
 }
 
@@ -118,32 +126,6 @@ export default function Stages() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingStage, setEditingStage] = useState<Stage | null>(null)
   const [isReordering, setIsReordering] = useState(false)
-  const [newStages, setNewStages] = useState<Array<{
-    id: string
-    name: string
-    days: number
-    hours: number
-    minutes: number
-    followUp: string
-  }>>([{
-    id: generateId(),
-    name: '',
-    days: 0,
-    hours: 0,
-    minutes: 0,
-    followUp: 'none',
-  }])
-  
-  const addNewStageRow = () => {
-    setNewStages(prev => [...prev, {
-      id: generateId(),
-      name: '',
-      days: 0,
-      hours: 0,
-      minutes: 0,
-      followUp: 'none',
-    }])
-  }
 
   const removeStageRow = (id: string) => {
     if (newStages.length <= 1) return
@@ -158,8 +140,8 @@ export default function Stages() {
     minutes: number
     followUp: string
   }>) => {
-    setNewStages(prev => 
-      prev.map(stage => 
+    setNewStages(prev =>
+      prev.map(stage =>
         stage.id === id ? { ...stage, ...updates } : stage
       )
     )
@@ -544,21 +526,45 @@ export default function Stages() {
     }
   }
 
-  // Function to add a new stage to current department
-  const handleAddStages = async () => {
+  // Function to add new stages from the AddStageDialog
+  const handleAddStages = async (stages: Array<{
+    id: string
+    name: string
+    days: number
+    hours: number
+    minutes: number
+    followUp: string
+    isSpecial: boolean
+    timeConfigs: Array<{
+      applicationType: string
+      days: number
+      hours: number
+      minutes: number
+    }>
+  }>) => {
     try {
       const currentDept = getCurrentDepartment()
       if (!currentDept) return
 
-      const newStagesData = newStages
+      const newStagesData = stages
         .filter(stage => stage.name.trim() !== '')
         .map((stage, index) => {
-          const totalMinutes = (stage.days * 24 * 60) + (stage.hours * 60) + stage.minutes
+          // For special stages, we'll store the time configs and calculate time based on application type
+          // For non-special stages, we'll use the direct time input
+          const timeConfig = stage.isSpecial && stage.timeConfigs?.length > 0
+            ? stage.timeConfigs[0] // Default to first config for now
+            : { days: stage.days, hours: stage.hours, minutes: stage.minutes }
+
+
+          const totalMinutes = (timeConfig.days * 24 * 60) + (timeConfig.hours * 60) + timeConfig.minutes
+
           return {
             name: stage.name,
             estimated_time: totalMinutes,
             order_num: currentDept.stages.length + index + 1,
             follow_up: stage.followUp === 'none' ? null : stage.followUp as 'Client' | 'Officer' | 'BCL',
+            isSpecial: stage.isSpecial,
+            timeConfigs: stage.isSpecial ? stage.timeConfigs : undefined,
             allocations: {}
           }
         })
@@ -572,14 +578,11 @@ export default function Stages() {
         return
       }
 
-      const updatedStages = [...currentDept.stages, ...newStagesData]
-
-      // Update department stages in Supabase
-      // First, update the department with new stages
+      // Update department with new stages
       const { data: updatedDept, error: updateError } = await supabase
         .from('tm_departments')
-        .update({ 
-          stages: updatedStages,
+        .update({
+          stages: [...currentDept.stages, ...newStagesData],
           updated_at: new Date().toISOString()
         })
         .eq('id', currentDept.id)
@@ -588,31 +591,18 @@ export default function Stages() {
 
       if (updateError) throw updateError
 
-      // Update allocations in the tm_subdepartments table if needed
-      // This will be handled by the existing allocation change handlers
-      // when the user interacts with the allocation checkboxes
-
       // Update local state
-      setDepartments(departments.map(dept => 
-        dept.id === currentDept.id 
-          ? { ...dept, stages: updatedStages } 
+      setDepartments(departments.map(dept =>
+        dept.id === currentDept.id
+          ? { ...dept, stages: [...dept.stages, ...newStagesData] }
           : dept
       ))
 
-      // Reset form
-      setNewStages([{
-        id: crypto.randomUUID(),
-        name: '',
-        days: 0,
-        hours: 0,
-        minutes: 0,
-        followUp: 'none'
-      }])
       setIsDialogOpen(false)
 
       toast({
         title: "Success",
-        description: `${newStagesData.length} stage(s) added successfully`,
+        description: `Added ${newStagesData.length} stage${newStagesData.length > 1 ? 's' : ''} successfully.`,
       })
     } catch (err) {
       console.error('Error adding stages:', err)
@@ -658,53 +648,7 @@ export default function Stages() {
     }
   }
 
-  // Function to reorder stages
-  const handleDragEnd = async (event: any) => {
-    const { active, over } = event
-    if (!active || !over || active.id === over.id) return
-
-    const currentDept = getCurrentDepartment()
-    if (!currentDept) return
-
-    const oldIndex = currentDept.stages.findIndex(s => s.id === active.id)
-    const newIndex = currentDept.stages.findIndex(s => s.id === over.id)
-
-    if (oldIndex === -1 || newIndex === -1) return
-
-    const newStages = arrayMove(currentDept.stages, oldIndex, newIndex)
-    
-    // Update order numbers
-    const updatedStages = newStages.map((stage, index) => ({
-      ...stage,
-      order_num: index + 1
-    }))
-
-    try {
-      // Update in Supabase
-      const { error } = await supabase
-        .from('tm_departments')
-        .update({ stages: updatedStages })
-        .eq('id', activeTab)
-
-      if (error) throw error
-
-      // Update local state
-      setDepartments(prev => prev.map(dept =>
-        dept.id === activeTab
-          ? { ...dept, stages: updatedStages }
-          : dept
-      ))
-    } catch (err) {
-      console.error('Error reordering stages:', err)
-      toast({
-        title: "Error",
-        description: "Failed to reorder stages. Please try again.",
-        variant: "destructive"
-      })
-    }
-  }
-
-  // Move stage up or down
+  // Function to move a stage up or down
   const moveStage = async (stageId: string, direction: 'up' | 'down') => {
     const currentDept = getCurrentDepartment()
     if (!currentDept) return
@@ -749,21 +693,7 @@ export default function Stages() {
       })
     }
   }
-
-  // Set up sensors for drag and drop
-  const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  )
-
   const currentDept = getCurrentDepartment()
-  
-  // Memoize the sortable context items to prevent unnecessary re-renders
-  const sortableItems = useMemo(() => {
-    return currentDept?.stages?.map(stage => stage.id) || []
-  }, [currentDept?.stages])
 
   if (loading) return <div>Loading...</div>
   if (error) return <div className="text-red-500">{error}</div>
@@ -780,12 +710,12 @@ export default function Stages() {
     const days = Math.floor(minutes / (60 * 24))
     const hours = Math.floor((minutes % (60 * 24)) / 60)
     const mins = minutes % 60
-    
+
     const parts = []
     if (days > 0) parts.push(`${days}d`)
     if (hours > 0) parts.push(`${hours}h`)
     if (mins > 0 || parts.length === 0) parts.push(`${mins}m`)
-    
+
     return parts.join(' ')
   }
 
@@ -838,157 +768,11 @@ export default function Stages() {
     <div className="w-full">
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-semibold">Stages Configuration</h3>
-        <div className="flex gap-2">
-          <Button 
-            variant={isReordering ? "default" : "outline"} 
-            size="sm"
-            onClick={() => setIsReordering(!isReordering)}
-          >
-            {isReordering ? 'Done Reordering' : 'Reorder Stages'}
-          </Button>
-        </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm">
-              <Plus className="h-4 w-4 mr-2" />
-              Add Stage
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add New Stage to {currentDept.name}</DialogTitle>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
-                {newStages.map((stage, index) => (
-                  <div key={stage.id} className="space-y-4 p-4 border rounded-lg relative">
-                    {newStages.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeStageRow(stage.id)}
-                        className="absolute top-2 right-2 p-1 rounded-full hover:bg-muted"
-                      >
-                        <X className="h-4 w-4 text-muted-foreground" />
-                      </button>
-                    )}
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor={`name-${stage.id}`} className="text-right">
-                        Stage Name
-                      </Label>
-                      <Input
-                        id={`name-${stage.id}`}
-                        value={stage.name}
-                        onChange={(e) => updateNewStage(stage.id, { name: e.target.value })}
-                        className="col-span-3"
-                        placeholder="Enter stage name"
-                      />
-                    </div>
-                    
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label className="text-right">
-                        Estimated Time
-                      </Label>
-                      <div className="col-span-3 grid grid-cols-3 gap-2">
-                        <div className="space-y-1">
-                          <Label htmlFor={`days-${stage.id}`} className="text-xs text-muted-foreground">Days</Label>
-                          <Input
-                            id={`days-${stage.id}`}
-                            type="number"
-                            min="0"
-                            value={stage.days}
-                            onChange={(e) => updateNewStage(stage.id, { days: parseInt(e.target.value) || 0 })}
-                            className="w-full"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor={`hours-${stage.id}`} className="text-xs text-muted-foreground">Hours</Label>
-                          <Input
-                            id={`hours-${stage.id}`}
-                            type="number"
-                            min="0"
-                            max="23"
-                            value={stage.hours}
-                            onChange={(e) => updateNewStage(stage.id, { hours: Math.min(23, parseInt(e.target.value) || 0) })}
-                            className="w-full"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor={`minutes-${stage.id}`} className="text-xs text-muted-foreground">Minutes</Label>
-                          <Input
-                            id={`minutes-${stage.id}`}
-                            type="number"
-                            min="0"
-                            max="59"
-                            value={stage.minutes}
-                            onChange={(e) => updateNewStage(stage.id, { minutes: Math.min(59, parseInt(e.target.value) || 0) })}
-                            className="w-full"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor={`followUp-${stage.id}`} className="text-right">
-                        Follow Up
-                      </Label>
-                      <Select
-                        value={stage.followUp}
-                        onValueChange={(value) => updateNewStage(stage.id, { followUp: value })}
-                      >
-                        <SelectTrigger className="col-span-3">
-                          <SelectValue placeholder="Select follow-up" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">None</SelectItem>
-                          <SelectItem value="Client">Client</SelectItem>
-                          <SelectItem value="Officer">Officer</SelectItem>
-                          <SelectItem value="BCL">BCL</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex justify-between items-center pt-2">
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  size="sm"
-                  onClick={addNewStageRow}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Another Stage
-                </Button>
-                <div className="flex gap-2">
-                  <Button 
-                    type="button"
-                    variant="outline" 
-                    onClick={() => {
-                      setIsDialogOpen(false)
-                      setNewStages([{
-                        id: crypto.randomUUID(),
-                        name: '',
-                        days: 0,
-                        hours: 0,
-                        minutes: 0,
-                        followUp: 'none'
-                      }])
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button 
-                    type="button"
-                    onClick={handleAddStages}
-                  >
-                    Add {newStages.length} Stage{newStages.length !== 1 ? 's' : ''}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <AddStageDialog
+          open={isDialogOpen}
+          onOpenChange={setIsDialogOpen}
+          onAddStages={handleAddStages}
+        />
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -1009,7 +793,7 @@ export default function Stages() {
                   <TableRow className="bg-muted/50">
                     {isReordering && <TableHead rowSpan={2} className="sticky left-0 bg-background border-r font-bold w-12 z-20">Move</TableHead>}
                     <TableHead rowSpan={2} className={`sticky ${isReordering ? 'left-12' : 'left-0'} bg-background border-r font-bold w-12 z-20`}>#</TableHead>
-                    <TableHead rowSpan={2} colSpan={2} className={`sticky ${isReordering ? 'left-24' : 'left-12'} bg-background border-r font-bold w-48 z-20 text-center`}>Stage Details</TableHead>
+                    <TableHead rowSpan={2} colSpan={4} className={`sticky ${isReordering ? 'left-24' : 'left-12'} bg-background border-r font-bold w-48 z-20 text-center`}>Stage Details</TableHead>
                     {normalizedSubdepartments.map((subdept, subIndex) => {
                       const colSpan = getSubdepartmentColSpan(subdept) * 2; // *2 for allocated/display
                       return (
@@ -1049,22 +833,20 @@ export default function Stages() {
 
                   {/* Allocate/Display Header Row */}
                   <TableRow>
-                    {isReordering && (
-                      <TableHead className="sticky left-0 bg-background border-r z-20">
-                        <div className="text-center">Move</div>
-                      </TableHead>
-                    )}
-                    <TableHead className={`sticky ${isReordering ? 'left-12' : 'left-0'} bg-background border-r z-20`}>
+                    <TableHead className="sticky left-0 bg-background border-r z-20">
                       <div className="text-center">#</div>
                     </TableHead>
-                    <TableHead className={`sticky ${isReordering ? 'left-64' : 'left-52'} bg-background border-r z-20`}>
+                    <TableHead className="sticky left-5 bg-background border-r z-20">
                       <div className="text-center">Stage Name</div>
                     </TableHead>
-                    <TableHead className="sticky left-80 bg-background border-r z-20">
+                    <TableHead className="sticky left-15 bg-background border-r z-20">
                       <div className="text-center">Time</div>
                     </TableHead>
-                    <TableHead className="sticky left-96 bg-background border-r z-20">
+                    <TableHead className="sticky left-25 bg-background border-r z-20">
                       <div className="text-center">Follow Up</div>
+                    </TableHead>
+                    <TableHead className="sticky left-40 bg-background border-r z-20">
+                      <div className="text-center">Order</div>
                     </TableHead>
                     {normalizedSubdepartments.map(subdept =>
                       subdept.hasClasses
@@ -1093,70 +875,102 @@ export default function Stages() {
                 </TableHeader>
 
                 <TableBody>
-                  <DndContext
-                    sensors={sensors}
-                    collisionDetection={closestCenter}
-                    onDragEnd={handleDragEnd}
-                  >
-                    <SortableContext
-                      items={dept.stages.map(stage => stage.id)}
-                      strategy={verticalListSortingStrategy}
-                    >
-                      {dept.stages.map((stage, index) => (
-                        <SortableRow key={stage.id} id={stage.id} isReordering={isReordering}>
-                          <TableCell className="sticky left-0 bg-background border-r z-10 text-center w-12">
-                            {index + 1}
-                          </TableCell>
-                          <TableCell className="sticky left-12 bg-background border-r p-0 z-10 w-48">
-                            <div className="flex items-center gap-2 p-2">
-                              <input
-                                type="text"
-                                className="w-full bg-transparent border-none focus:ring-1 focus:ring-ring rounded px-2 py-1"
-                                value={stage.name}
-                                onChange={(e) => handleUpdateStage(stage, { name: e.target.value })}
-                              />
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6"
-                                onClick={() => setEditingStage(stage)}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                          <TableCell className="sticky left-60 bg-background border-r z-10 p-0 w-24">
-                            <div className="flex items-center justify-center p-2">
-                              <div className="text-sm">
-                                {formatTime(stage.estimated_time)}
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="sticky left-84 bg-background border-r z-10 p-0 w-24">
-                            <div className="flex items-center justify-center p-2">
-                              <div className="text-sm">
-                                {stage.follow_up || 'None'}
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="p-0 w-12">
-                            <div className="flex flex-col items-center">
-                              <button
-                                onClick={() => moveStage(stage.id, 'up')}
-                                disabled={index === 0}
-                                className="p-1 disabled:opacity-30"
-                              >
-                                <ArrowUp className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                onClick={() => moveStage(stage.id, 'down')}
-                                disabled={index === dept.stages.length - 1}
-                                className="p-1 disabled:opacity-30"
-                              >
-                                <ArrowDown className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </TableCell>
+                  {dept.stages.map((stage, index) => (
+                    <TableRow key={stage.id}>
+                      <TableCell className="sticky left-0 bg-background border-r z-10 text-center w-12">
+                        {index + 1}
+                      </TableCell>
+                      <TableCell className="sticky left-12 bg-background border-r p-0 z-10 w-48">
+                        <div className="flex items-center gap-2 p-2">
+                          {editingStage?.id === stage.id ? (
+                            <input
+                              type="text"
+                              className="w-full bg-transparent border-none focus:ring-1 focus:ring-ring rounded px-2 py-1"
+                              value={stage.name}
+                              onChange={(e) => handleUpdateStage(stage, { name: e.target.value })}
+                            />
+                          ) : (
+                            <span className="font-medium">{stage.name}</span>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 ml-auto"
+                            onClick={() => setEditingStage(editingStage?.id === stage.id ? null : stage)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                      <TableCell className="sticky left-60 bg-background border-r p-0 z-10 w-24">
+                        <div className="flex items-center justify-center p-2">
+                          <div className="text-sm">
+                            {stage.isSpecial ? (
+                               <Popover>
+                               <PopoverTrigger asChild>
+                                 <Button variant="ghost" size="icon" className="h-6 w-6 p-0">
+                                   <Info className="h-4 w-4 text-blue-500" />
+                                 </Button>
+                               </PopoverTrigger>
+                               <PopoverContent className="w-80">
+                                 <div className="space-y-2">
+                                   <h4 className="font-medium">Special Stage Requirements</h4>
+                                   <div className="text-sm text-muted-foreground">
+                                     This stage has special time requirements based on application type:
+                                   </div>
+                                   <div className="space-y-2 mt-2">
+                                     {stage.timeConfigs?.map((config, i) => (
+                                       <div key={i} className="bg-muted/50 p-2 rounded text-sm">
+                                         <div className="font-medium">{config.applicationType || 'Default'}</div>
+                                         <div className="text-muted-foreground">
+                                           {config.days > 0 && `${config.days}d `}
+                                           {config.hours > 0 && `${config.hours}h `}
+                                           {config.minutes > 0 ? `${config.minutes}m` : ''}
+                                           {!config.days && !config.hours && !config.minutes ? '0m' : ''}
+                                         </div>
+                                       </div>
+                                     ))}
+                                   </div>
+                                 </div>
+                               </PopoverContent>
+                             </Popover>
+                            ) : (
+                              <div className="text-sm">{formatTime(stage.estimated_time)}</div>
+                            )}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="sticky left-84 bg-background border-r p-0 z-10 w-24">
+                        <div className="flex p-2">
+                          {stage.follow_up && (
+                            <span className="text-sm">
+                              {stage.follow_up}
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="p-0 w-12">
+                        <div className="flex flex-col gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 p-0"
+                            onClick={() => moveStage(stage.id, 'up')}
+                            disabled={index === 0}
+                          >
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 p-0"
+                            onClick={() => moveStage(stage.id, 'down')}
+                            disabled={index === dept.stages.length - 1}
+                          >
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
                       {normalizedSubdepartments.map(subdept => {
                         if (subdept.hasClasses) {
                           return subdept.classes?.map((cls, clsIndex) => {
@@ -1199,9 +1013,9 @@ export default function Stages() {
                           });
                         } else {
                           // For subdepartments without classes
-                          const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id)
-                          const hasAllocation = stageAllocation?.allocated || false
-                          const hasDisplay = stageAllocation?.display || false
+                          const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id);
+                          const hasAllocation = stageAllocation?.allocated || false;
+                          const hasDisplay = stageAllocation?.display || false;
 
                           return (
                             <React.Fragment key={`cell-${subdept.id}-direct-${stage.id}`}>
@@ -1237,10 +1051,8 @@ export default function Stages() {
                           );
                         }
                       })}
-                        </SortableRow>
-                      ))}
-                    </SortableContext>
-                  </DndContext>
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             </div>
