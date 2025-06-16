@@ -78,11 +78,14 @@ export async function updateUserStatus(
     changedBy: string = 'system',
     reason?: string
 ): Promise<void> {
+    // Convert userId to string for consistency
+    const userIdStr = userId.toString()
+    
     // First, get the current user to check their status history
     const { data: currentUser, error: fetchError } = await supabase
         .from('tm_users')
         .select('status_history')
-        .eq('id', userId)
+        .eq('id', userIdStr)
         .single()
 
     if (fetchError) {
@@ -116,7 +119,7 @@ export async function updateUserStatus(
             status_history: [...currentHistory, newStatusEntry],
             updated_at: now
         })
-        .eq('id', userId)
+        .eq('id', userIdStr)
 
     if (error) {
         console.error('Error updating user status:', error)
@@ -130,8 +133,6 @@ export async function createUser(userData: {
     role: string
     clerk_id: string
     password?: string
-    start_date?: string
-    end_date?: string | null
     department_history?: Array<{
         department_id: string
         start_date: string
@@ -148,7 +149,7 @@ export async function createUser(userData: {
         name: userData.name,
         role: userData.role,
         clerk_id: userData.clerk_id,
-        password: userData.password || 'TusharT5500',
+        password: userData.password || '',
         status_history: [{
             status: 'active',
             changed_at: now,
@@ -157,8 +158,6 @@ export async function createUser(userData: {
             start_date: startDate,
             end_date: userData.end_date || null
         }],
-        start_date: startDate,
-        end_date: userData.end_date || null
     }
     
     // Add department history if provided
@@ -184,17 +183,80 @@ export async function createUser(userData: {
     }
 }
 
-export async function getUserStatusHistory(userId: string): Promise<StatusHistoryEntry[]> {
-    const { data, error } = await supabase
-        .from('tm_users')
-        .select('status_history')
-        .eq('id', userId)
-        .single()
+export async function getUserStatusHistory(userId: string | number): Promise<StatusHistoryEntry[]> {
+    try {
+        const { data, error } = await supabase
+            .from('tm_users')
+            .select('status_history')
+            .eq('id', userId.toString())
+            .single()
 
-    if (error) {
-        console.error('Error fetching user status history:', error)
+        if (error) {
+            console.error('Error fetching user status history:', error)
+            return []
+        }
+
+        return Array.isArray(data?.status_history) ? data.status_history : []
+    } catch (error) {
+        console.error('Error in getUserStatusHistory:', error)
         return []
     }
+}
 
-    return Array.isArray(data.status_history) ? data.status_history : []
+export async function updateOfficerDepartment(
+    officerId: string | number,
+    departmentId: string,
+    assignedBy: string = 'system',
+    startDate?: string,
+    endDate?: string | null
+): Promise<void> {
+    const now = new Date().toISOString()
+    const today = startDate || now.split('T')[0]
+
+    // First, get the current department history
+    const { data: currentUser, error: fetchError } = await supabase
+        .from('tm_users')
+        .select('department_history')
+        .eq('id', officerId)
+        .single()
+
+    if (fetchError) {
+        console.error('Error fetching officer data:', fetchError)
+        throw fetchError
+    }
+
+    // Initialize department history if it doesn't exist
+    const currentHistory: DepartmentHistoryEntry[] = Array.isArray(currentUser.department_history) 
+        ? currentUser.department_history 
+        : []
+
+
+    // Close any open department assignments
+    const updatedHistory = currentHistory.map(entry => ({
+        ...entry,
+        end_date: entry.end_date || today
+    }))
+
+    // Add the new department assignment
+    const newDepartmentEntry: DepartmentHistoryEntry = {
+        department_id: departmentId,
+        start_date: today,
+        end_date: endDate || null,
+        assigned_at: now,
+        assigned_by: assignedBy
+    }
+
+    // Update the department_history array with the new entry
+    const { error } = await supabase
+        .from('tm_users')
+        .update({
+            department_history: [...updatedHistory, newDepartmentEntry],
+            updated_at: now
+        })
+        .eq('id', officerId)
+
+    if (error) {
+        console.error('Error updating officer department:', error)
+        throw error
+    }
 }

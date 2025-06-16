@@ -7,13 +7,14 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { ArrowUp, ArrowDown, Pencil, Plus, X, Info } from "lucide-react"
+import { ArrowUp, ArrowDown, Pencil, Plus, X, Info, ChevronUp, ChevronDown } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { AddStageDialog } from "./add-stage-dialog"
+import { EditStageDialog } from "./edit-stage-dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 // Simple UUID generator for client-side use
@@ -126,6 +127,7 @@ export default function Stages() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingStage, setEditingStage] = useState<Stage | null>(null)
   const [isReordering, setIsReordering] = useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
 
   const removeStageRow = (id: string) => {
     if (newStages.length <= 1) return
@@ -197,8 +199,17 @@ export default function Stages() {
   }, [])
 
   const getCurrentDepartment = () => {
-    return departments.find(dept => dept.id === activeTab)
+    return departments.find(d => d.id === activeTab)
   }
+
+  // Get simplified department list for the dropdown
+  const departmentList = useMemo(() =>
+    departments.map(dept => ({
+      id: dept.id,
+      name: dept.name
+    })),
+    [departments]
+  )
 
   // Handle allocation change
   const handleAllocationChange = async (subdeptId: number, stageId: string, shouldAllocate: boolean, classIndex: number | null = null) => {
@@ -309,18 +320,25 @@ export default function Stages() {
               if (subdept.id !== subdeptId) return subdept
 
               if (classIndex !== null) {
-                const updatedClasses = [...(subdept.classes || [])]
+                const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
+
+                // Ensure stages array exists
                 if (!updatedClasses[classIndex].stages) {
                   updatedClasses[classIndex].stages = []
                 }
 
+                // Find or create stage allocation
                 let stageAllocation = updatedClasses[classIndex].stages.find((s: StageAllocation) => s.stage_id === stageId)
                 if (!stageAllocation) {
                   stageAllocation = { stage_id: stageId, allocated: false, display: false }
                   updatedClasses[classIndex].stages.push(stageAllocation)
                 }
+
+                // Update allocation
                 stageAllocation.allocated = shouldAllocate
-                if (!shouldAllocate) stageAllocation.display = false
+                if (!shouldAllocate) {
+                  stageAllocation.display = false // If not allocated, can't display
+                }
 
                 // Update subdepartment stages as well
                 const subdeptStages = [...(subdept.stages || [])]
@@ -344,8 +362,12 @@ export default function Stages() {
                 stageAllocation = { stage_id: stageId, allocated: false, display: false }
                 subdeptStages.push(stageAllocation)
               }
+
+              // Update allocation
               stageAllocation.allocated = shouldAllocate
-              if (!shouldAllocate) stageAllocation.display = false
+              if (!shouldAllocate) {
+                stageAllocation.display = false // If not allocated, can't display
+              }
 
               return {
                 ...subdept,
@@ -541,7 +563,16 @@ export default function Stages() {
       hours: number
       minutes: number
     }>
-  }>) => {
+  }>, departmentId: string) => {
+    const currentDept = departments.find(d => d.id === departmentId)
+    if (!currentDept) {
+      toast({
+        title: "Error",
+        description: "Department not found. Please try again.",
+        variant: "destructive"
+      })
+      return
+    }
     try {
       const currentDept = getCurrentDepartment()
       if (!currentDept) return
@@ -615,19 +646,22 @@ export default function Stages() {
   }
 
   // Function to update a stage
-  const handleUpdateStage = async (stage: Stage, updates: Partial<Stage>) => {
+  const handleUpdateStage = async (updatedStage: Stage) => {
     try {
       const currentDept = getCurrentDepartment()
       if (!currentDept) return
 
       const updatedStages = currentDept.stages.map(s =>
-        s.id === stage.id ? { ...s, ...updates } : s
+        s.id === updatedStage.id ? updatedStage : s
       )
 
       // Update department stages in Supabase
       const { error } = await supabase
         .from('tm_departments')
-        .update({ stages: updatedStages })
+        .update({
+          stages: updatedStages,
+          updated_at: new Date().toISOString()
+        })
         .eq('id', activeTab)
 
       if (error) throw error
@@ -638,6 +672,14 @@ export default function Stages() {
           ? { ...dept, stages: updatedStages }
           : dept
       ))
+
+      toast({
+        title: "Success",
+        description: "Stage updated successfully",
+      })
+
+      setIsEditDialogOpen(false)
+      setEditingStage(null)
     } catch (err) {
       console.error('Error updating stage:', err)
       toast({
@@ -653,27 +695,44 @@ export default function Stages() {
     const currentDept = getCurrentDepartment()
     if (!currentDept) return
 
-    const currentIndex = currentDept.stages.findIndex(s => s.id === stageId)
+    // Create a deep copy of the stages array to avoid reference issues
+    const currentStages = JSON.parse(JSON.stringify(currentDept.stages))
+    const currentIndex = currentStages.findIndex((s: Stage) => s.id === stageId)
+
     if (currentIndex === -1) return
 
     const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
-    if (newIndex < 0 || newIndex >= currentDept.stages.length) return
+    if (newIndex < 0 || newIndex >= currentStages.length) return
 
-    const newStages = [...currentDept.stages]
+    // Create a new array with the stage moved to its new position
+    const newStages = [...currentStages]
     const [movedStage] = newStages.splice(currentIndex, 1)
     newStages.splice(newIndex, 0, movedStage)
 
-    // Update order numbers
-    const updatedStages = newStages.map((stage, index) => ({
-      ...stage,
-      order_num: index + 1
+    // Update order numbers while preserving all other properties
+    const updatedStages = newStages.map((stage: Stage, index: number) => ({
+      ...stage, // Spread all existing properties
+      order_num: index + 1 // Update just the order_num
     }))
 
     try {
-      // Update in Supabase
+      // First, get the current department data to preserve all fields
+      const { data: currentDeptData, error: fetchError } = await supabase
+        .from('tm_departments')
+        .select('*')
+        .eq('id', activeTab)
+        .single()
+
+      if (fetchError) throw fetchError
+
+      // Update the department with the new stages array
       const { error } = await supabase
         .from('tm_departments')
-        .update({ stages: updatedStages })
+        .update({
+          ...currentDeptData, // Preserve all other fields
+          stages: updatedStages,
+          updated_at: new Date().toISOString()
+        })
         .eq('id', activeTab)
 
       if (error) throw error
@@ -766,17 +825,25 @@ export default function Stages() {
 
   return (
     <div className="w-full">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-semibold">Stages Configuration</h3>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold">Stages</h2>
         <AddStageDialog
           open={isDialogOpen}
           onOpenChange={setIsDialogOpen}
           onAddStages={handleAddStages}
-        />
+          departments={departmentList}
+          />
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="w-full mb-4">
+        {/* Edit Stage Dialog */}
+        <EditStageDialog
+          open={!!editingStage}
+          onOpenChange={(open) => !open && setEditingStage(null)}
+          stage={editingStage}
+          onSave={handleUpdateStage}
+        />
+        <TabsList className="w-full mb-4 items-start justify-start">
           {departments.map(dept => (
             <TabsTrigger key={dept.id} value={dept.id}>
               {dept.name}
@@ -876,64 +943,48 @@ export default function Stages() {
 
                 <TableBody>
                   {dept.stages.map((stage, index) => (
-                    <TableRow key={stage.id}>
+                    <TableRow key={stage.id} className="group">
                       <TableCell className="sticky left-0 bg-background border-r z-10 text-center w-12">
                         {index + 1}
                       </TableCell>
                       <TableCell className="sticky left-12 bg-background border-r p-0 z-10 w-48">
                         <div className="flex items-center gap-2 p-2">
-                          {editingStage?.id === stage.id ? (
-                            <input
-                              type="text"
-                              className="w-full bg-transparent border-none focus:ring-1 focus:ring-ring rounded px-2 py-1"
-                              value={stage.name}
-                              onChange={(e) => handleUpdateStage(stage, { name: e.target.value })}
-                            />
-                          ) : (
-                            <span className="font-medium">{stage.name}</span>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 ml-auto"
-                            onClick={() => setEditingStage(editingStage?.id === stage.id ? null : stage)}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
+                          <span className="font-medium">{stage.name}</span>
+
                         </div>
                       </TableCell>
                       <TableCell className="sticky left-60 bg-background border-r p-0 z-10 w-24">
                         <div className="flex items-center justify-center p-2">
                           <div className="text-sm">
                             {stage.isSpecial ? (
-                               <Popover>
-                               <PopoverTrigger asChild>
-                                 <Button variant="ghost" size="icon" className="h-6 w-6 p-0">
-                                   <Info className="h-4 w-4 text-blue-500" />
-                                 </Button>
-                               </PopoverTrigger>
-                               <PopoverContent className="w-80">
-                                 <div className="space-y-2">
-                                   <h4 className="font-medium">Special Stage Requirements</h4>
-                                   <div className="text-sm text-muted-foreground">
-                                     This stage has special time requirements based on application type:
-                                   </div>
-                                   <div className="space-y-2 mt-2">
-                                     {stage.timeConfigs?.map((config, i) => (
-                                       <div key={i} className="bg-muted/50 p-2 rounded text-sm">
-                                         <div className="font-medium">{config.applicationType || 'Default'}</div>
-                                         <div className="text-muted-foreground">
-                                           {config.days > 0 && `${config.days}d `}
-                                           {config.hours > 0 && `${config.hours}h `}
-                                           {config.minutes > 0 ? `${config.minutes}m` : ''}
-                                           {!config.days && !config.hours && !config.minutes ? '0m' : ''}
-                                         </div>
-                                       </div>
-                                     ))}
-                                   </div>
-                                 </div>
-                               </PopoverContent>
-                             </Popover>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 p-0">
+                                    <Info className="h-4 w-4 text-blue-500" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-80">
+                                  <div className="space-y-2">
+                                    <h4 className="font-medium">Special Stage Requirements</h4>
+                                    <div className="text-sm text-muted-foreground">
+                                      This stage has special time requirements based on application type:
+                                    </div>
+                                    <div className="space-y-2 mt-2">
+                                      {stage.timeConfigs?.map((config, i) => (
+                                        <div key={i} className="bg-muted/50 p-2 rounded text-sm">
+                                          <div className="font-medium">{config.applicationType || 'Default'}</div>
+                                          <div className="text-muted-foreground">
+                                            {config.days > 0 && `${config.days}d `}
+                                            {config.hours > 0 && `${config.hours}h `}
+                                            {config.minutes > 0 ? `${config.minutes}m` : ''}
+                                            {!config.days && !config.hours && !config.minutes ? '0m' : ''}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
                             ) : (
                               <div className="text-sm">{formatTime(stage.estimated_time)}</div>
                             )}
@@ -950,24 +1001,39 @@ export default function Stages() {
                         </div>
                       </TableCell>
                       <TableCell className="p-0 w-12">
-                        <div className="flex flex-col gap-1">
+                        <div className="flex items-center justify-center">
+                          <div className="flex flex-col items-center">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                moveStage(stage.id, 'up');
+                              }}
+                              disabled={index === 0}
+                              className={`p-1 rounded hover:bg-muted ${index === 0 ? 'opacity-30' : 'hover:bg-muted'}`}
+                            >
+                              <ChevronUp className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                moveStage(stage.id, 'down');
+                              }}
+                              disabled={index === dept.stages.length - 1}
+                              className={`p-1 rounded hover:bg-muted ${index === dept.stages.length - 1 ? 'opacity-30' : 'hover:bg-muted'}`}
+                            >
+                              <ChevronDown className="h-4 w-4" />
+                            </button>
+                          </div>
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-6 w-6 p-0"
-                            onClick={() => moveStage(stage.id, 'up')}
-                            disabled={index === 0}
+                            className="h-8 w-8 p-0"
+                            onClick={() => {
+                              setEditingStage(stage);
+                              setIsEditDialogOpen(true);
+                            }}
                           >
-                            <ArrowUp className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 p-0"
-                            onClick={() => moveStage(stage.id, 'down')}
-                            disabled={index === dept.stages.length - 1}
-                          >
-                            <ArrowDown className="h-3.5 w-3.5" />
+                            <Pencil className="h-4 w-4" />
                           </Button>
                         </div>
                       </TableCell>

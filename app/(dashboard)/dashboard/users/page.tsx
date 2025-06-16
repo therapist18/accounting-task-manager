@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { UserCheck, UserX, Users, History, Briefcase, ChevronRight, Pencil } from "lucide-react"
+import { Users, Briefcase } from "lucide-react"
 import { TaskAssignmentDialog } from "@/components/task-assignment-dialog"
 import {
   fetchUsers,
@@ -14,10 +14,12 @@ import {
   type User,
   type StatusHistoryEntry,
   getUserStatusHistory,
-  type UserRole
+  type UserRole,
+  type DepartmentHistoryEntry
 } from './database'
+import { OfficersTable, type Officer } from "./officers-table"
+import { UsersTable } from "./users-table"
 import { fetchDepartments } from '../departments/database'
-import { UserAssignmentsDialog } from "./user-assignments-dialog"
 import {
   Dialog,
   DialogContent,
@@ -31,13 +33,22 @@ import { AddOfficerDialog } from "./add-officer-dialog"
 export default function UsersPage() {
   const [activeUsers, setActiveUsers] = useState<User[]>([])
   const [inactiveUsers, setInactiveUsers] = useState<User[]>([])
-  const [activeOfficers, setActiveOfficers] = useState<User[]>([])
-  const [inactiveOfficers, setInactiveOfficers] = useState<User[]>([])
+  const [activeOfficers, setActiveOfficers] = useState<Officer[]>([])
+  const [inactiveOfficers, setInactiveOfficers] = useState<Officer[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
   const [statusHistory, setStatusHistory] = useState<StatusHistoryEntry[]>([])
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
-  const [departments, setDepartments] = useState<any[]>([])
+  const [departments, setDepartments] = useState<Array<{
+    id: string
+    name: string
+    subdepartments: Array<{
+      id: string
+      name: string
+      taskManagerId?: string
+      taskAssistantId?: string
+    }>
+  }>>([])
   const [userAssignments, setUserAssignments] = useState<{ [key: string]: { departments: string[], subdepartments: string[] } }>({})
   const [assignmentsDialogOpen, setAssignmentsDialogOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
@@ -54,8 +65,13 @@ export default function UsersPage() {
       ])
       setActiveUsers(active.filter(user => user.role !== 'officer'))
       setInactiveUsers(inactive.filter(user => user.role !== 'officer'))
-      setActiveOfficers(active.filter(user => user.role === 'officer'))
-      setInactiveOfficers(inactive.filter(user => user.role === 'officer'))
+      
+      // Cast to Officer type for TypeScript
+      const activeOfficers = active.filter(user => user.role === 'officer') as Officer[]
+      const inactiveOfficers = inactive.filter(user => user.role === 'officer') as Officer[]
+      
+      setActiveOfficers(activeOfficers)
+      setInactiveOfficers(inactiveOfficers)
       setRefreshKey(prev => prev + 1)
     } catch (error) {
       console.error('Failed to refresh users:', error)
@@ -74,11 +90,11 @@ export default function UsersPage() {
 
         setDepartments(depts)
 
-        // Separate users and officers
+        // Separate users and officers with proper typing
         const active = allActive.filter(user => user.role !== 'officer')
         const inactive = allInactive.filter(user => user.role !== 'officer')
-        const activeOfficers = allActive.filter(user => user.role === 'officer')
-        const inactiveOfficers = allInactive.filter(user => user.role === 'officer')
+        const activeOfficers = allActive.filter(user => user.role === 'officer') as Officer[]
+        const inactiveOfficers = allInactive.filter(user => user.role === 'officer') as Officer[]
 
         // Process user assignments
         const assignments: { [key: string]: { departments: string[], subdepartments: string[] } } = {}
@@ -125,11 +141,16 @@ export default function UsersPage() {
     loadData()
   }, [])
 
-  const handleStatusChange = async (userId: string, makeActive: boolean) => {
+  const handleStatusChange = async (userId: string | number, makeActive: boolean) => {
     try {
       // In a real app, you would get the current user's ID from your auth context
       const currentUserId = 'system' // Replace with actual user ID from auth
-      await updateUserStatus(userId, makeActive, currentUserId, makeActive ? 'User reactivated by admin' : 'User deactivated by admin')
+      await updateUserStatus(
+        userId.toString(), 
+        makeActive, 
+        currentUserId, 
+        makeActive ? 'User reactivated by admin' : 'User deactivated by admin'
+      )
 
       // Refresh the user lists
       await refreshUsers()
@@ -138,9 +159,9 @@ export default function UsersPage() {
     }
   }
 
-  const handleViewHistory = async (userId: string) => {
+  const handleViewHistory = async (userId: string | number) => {
     try {
-      const history = await getUserStatusHistory(userId)
+      const history = await getUserStatusHistory(userId.toString())
       setStatusHistory(history)
       setHistoryDialogOpen(true)
     } catch (error) {
@@ -151,12 +172,15 @@ export default function UsersPage() {
   const [editingUser, setEditingUser] = useState<User | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
 
-  const handleEditUser = (user: User) => {
+  const handleEditUser = (user: User | Officer) => {
     // Ensure we have a fresh copy of the user with their status history
     setEditingUser({
       ...user,
       status_history: Array.isArray(user.status_history)
         ? [...user.status_history]
+        : [],
+      department_history: 'department_history' in user 
+        ? [...(user as Officer).department_history]
         : []
     })
     setIsEditDialogOpen(true)
@@ -389,23 +413,27 @@ export default function UsersPage() {
                   <CardDescription>Manage your active {activeTab} accounts.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12">#</TableHead>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead>Start Date</TableHead>
-                        <TableHead>End Date</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="w-32">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(activeTab === 'users' ? activeUsers : activeOfficers).map((user, index) => renderUserRow(user, true, index))}
-                    </TableBody>
-                  </Table>
+                  {activeTab === 'users' ? (
+                    <UsersTable
+                      users={activeUsers}
+                      isActive={true}
+                      onStatusChange={handleStatusChange}
+                      onViewHistory={handleViewHistory}
+                      onEditUser={handleEditUser}
+                      refreshKey={refreshKey}
+                    />
+                  ) : (
+                    <OfficersTable
+                      officers={activeOfficers}
+                      isActive={true}
+                      departments={departments}
+                      onStatusChange={handleStatusChange}
+                      onViewHistory={handleViewHistory}
+                      onEditUser={handleEditUser}
+                      selectedDepartment={selectedDepartment}
+                      refreshKey={refreshKey}
+                    />
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -417,25 +445,27 @@ export default function UsersPage() {
                   <CardDescription>View and manage inactive {activeTab} accounts.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12">#</TableHead>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead>Start Date</TableHead>
-                        <TableHead>End Date</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="w-32">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(activeTab === 'users' ? inactiveUsers : inactiveOfficers).map((user, index) => (
-                        renderUserRow(user, false, index)
-                      ))}
-                    </TableBody>
-                  </Table>
+                  {activeTab === 'users' ? (
+                    <UsersTable
+                      users={inactiveUsers}
+                      isActive={false}
+                      onStatusChange={handleStatusChange}
+                      onViewHistory={handleViewHistory}
+                      onEditUser={handleEditUser}
+                      refreshKey={refreshKey}
+                    />
+                  ) : (
+                    <OfficersTable
+                      officers={inactiveOfficers}
+                      isActive={false}
+                      departments={departments}
+                      onStatusChange={handleStatusChange}
+                      onViewHistory={handleViewHistory}
+                      onEditUser={handleEditUser}
+                      selectedDepartment={selectedDepartment}
+                      refreshKey={refreshKey}
+                    />
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -452,23 +482,6 @@ export default function UsersPage() {
           />
         )}
       </div>
-
-      {/* Task Assignment Dialog */}
-      {selectedUser && (
-        <TaskAssignmentDialog
-          open={assignmentDialogOpen}
-          onOpenChange={setAssignmentDialogOpen}
-          task={{
-            id: "new-task",
-            jobDescription: "New Task Assignment",
-            currentAssignments: {},
-          }}
-          users={activeTab === 'users' ? activeUsers : activeOfficers}
-          onAssign={(assignments) => {
-            console.log("User task assigned:", assignments)
-          }}
-        />
-      )}
 
       {/* Edit User Dialog */}
       {editingUser && (
@@ -531,13 +544,6 @@ export default function UsersPage() {
           </div>
         </DialogContent>
       </Dialog>
-
-      <UserAssignmentsDialog
-        open={assignmentsDialogOpen}
-        onOpenChange={setAssignmentsDialogOpen}
-        user={selectedUser}
-        departments={departments}
-      />
     </div>
   )
 }

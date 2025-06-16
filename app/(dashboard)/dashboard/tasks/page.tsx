@@ -11,7 +11,6 @@ import { Plus, Users, AlertTriangle, CheckCircle, ArrowRight, Calendar, Upload, 
 import { format, parseISO } from "date-fns"
 import { taskColumns } from "./components/tasksfields"
 import { StageTimer } from "@/components/stage-timer"
-import { TaskAssignmentDialog } from "@/components/task-assignment-dialog"
 import { StageTransitionDialog } from "@/components/stage-transition-dialog"
 import { StageTimeline } from "@/components/stage-timeline"
 import { StageAutomation } from "@/lib/stage-automation"

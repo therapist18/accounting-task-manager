@@ -31,11 +31,21 @@ export type Subdepartment = {
   deliveryTime: number
 }
 
+export type Officer = {
+  id: string
+  name: string | null
+  email: string | null
+  phone_number?: string | null
+  assignment_start: string
+  assignment_end: string | null
+}
+
 export type Department = {
   id: string
   name: string
   description?: string
   subdepartments: Subdepartment[]
+  officers: Officer[]
 }
 
 // Database functions
@@ -67,14 +77,41 @@ export async function fetchDepartments(): Promise<Department[]> {
     // Create a map of stage IDs to stage details for quick lookup
     const stagesMap = new Map(allStages?.map(stage => [stage.id, stage]) || [])
 
-    // First, fetch all users for quick lookup
+    // Fetch all users for quick lookup
     const { data: allUsers, error: usersError } = await supabase
       .from('tm_users')
-      .select('id, name, email, phone_number, role')
+      .select('id, name, email, phone_number, role, department_history')
       
     if (usersError) throw usersError
     
     const usersMap = new Map(allUsers?.map(user => [user.id, user]) || []);
+    
+    // Create a map of department IDs to their officers
+    const departmentOfficersMap = new Map<string, any[]>();
+    
+    // Process users to map officers to their departments
+    allUsers?.forEach(user => {
+      if (user.role === 'officer' && Array.isArray(user.department_history)) {
+        // Get the most recent department assignment
+        const latestAssignment = user.department_history
+          .sort((a, b) => new Date(b.assigned_at).getTime() - new Date(a.assigned_at).getTime())[0];
+        
+        if (latestAssignment && !latestAssignment.end_date) {
+          const departmentId = latestAssignment.department_id;
+          if (!departmentOfficersMap.has(departmentId)) {
+            departmentOfficersMap.set(departmentId, []);
+          }
+          departmentOfficersMap.get(departmentId)?.push({
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            phone_number: user.phone_number,
+            assignment_start: latestAssignment.start_date,
+            assignment_end: latestAssignment.end_date
+          });
+        }
+      }
+    });
 
     // Fetch departments with their subdepartments
     const { data: departmentsData, error: deptError } = await supabase
@@ -87,8 +124,11 @@ export async function fetchDepartments(): Promise<Department[]> {
 
     if (deptError) throw deptError
 
-    // Transform the data to include stage details
+    // Transform the data to include stage details and officers
     return (departmentsData || []).map((dept: any) => {
+      // Get officers assigned to this department
+      const departmentOfficers = departmentOfficersMap.get(dept.id) || [];
+      
       const subdepartments = (dept.tm_subdepartments || []).map((subdept: any) => {
         // Get the stage IDs for this subdepartment
         const stageIds: number[] = subdept.stages || [];
@@ -139,7 +179,8 @@ export async function fetchDepartments(): Promise<Department[]> {
 
       return {
         ...dept,
-        subdepartments
+        subdepartments,
+        officers: departmentOfficers
       }
     })
   } catch (error) {
@@ -245,6 +286,7 @@ export async function createDepartment(departmentData: {
 }
 export async function fetchDepartmentById(id: string): Promise<Department> {
   try {
+    // First, fetch the department with its subdepartments and stages
     const { data, error } = await supabase
       .from('tm_departments')
       .select(`
@@ -270,6 +312,34 @@ export async function fetchDepartmentById(id: string): Promise<Department> {
 
     if (error) throw error
 
+    // Fetch all users to find officers assigned to this department
+    const { data: allUsers } = await supabase
+      .from('tm_users')
+      .select('id, name, email, phone_number, department_history')
+      .eq('role', 'officer')
+      .not('department_history', 'is', null)
+
+    // Process officers to find those assigned to this department
+    const officers: Officer[] = [];
+    allUsers?.forEach(user => {
+      if (Array.isArray(user.department_history)) {
+        // Get the most recent department assignment
+        const latestAssignment = user.department_history
+          .sort((a: any, b: any) => new Date(b.assigned_at).getTime() - new Date(a.assigned_at).getTime())[0];
+        
+        if (latestAssignment && latestAssignment.department_id === id && !latestAssignment.end_date) {
+          officers.push({
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            phone_number: user.phone_number,
+            assignment_start: latestAssignment.start_date,
+            assignment_end: latestAssignment.end_date
+          });
+        }
+      }
+    });
+
     // Transform the data
     const department: Department = {
       id: data.id,
@@ -294,7 +364,8 @@ export async function fetchDepartmentById(id: string): Promise<Department> {
           status: 'yes' as const,
           subdepartmentId: stage.subdepartment_id
         })).sort((a: Stage, b: Stage) => a.order - b.order)
-      }))
+      })),
+      officers
     }
 
     return department
