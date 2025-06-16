@@ -1,6 +1,6 @@
 "use client"
 
-import { SidebarTrigger } from "@/components/ui/sidebar"
+import { SidebarTrigger } from "@/components/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { NotificationCenter } from "@/components/notification-center"
 import { Button } from "@/components/ui/button"

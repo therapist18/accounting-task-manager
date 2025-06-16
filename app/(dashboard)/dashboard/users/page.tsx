@@ -6,15 +6,15 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { UserCheck, UserX, Users, History, Briefcase, ChevronRight } from "lucide-react"
+import { UserCheck, UserX, Users, History, Briefcase, ChevronRight, Pencil } from "lucide-react"
 import { TaskAssignmentDialog } from "@/components/task-assignment-dialog"
-import { 
-  fetchUsers, 
-  updateUserStatus, 
-  type User, 
+import {
+  fetchUsers,
+  updateUserStatus,
+  type User,
   type StatusHistoryEntry,
   getUserStatusHistory,
-  type UserRole 
+  type UserRole
 } from './database'
 import { fetchDepartments } from '../departments/database'
 import { UserAssignmentsDialog } from "./user-assignments-dialog"
@@ -37,7 +37,7 @@ export default function UsersPage() {
   const [statusHistory, setStatusHistory] = useState<StatusHistoryEntry[]>([])
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
   const [departments, setDepartments] = useState<any[]>([])
-  const [userAssignments, setUserAssignments] = useState<{[key: string]: {departments: string[], subdepartments: string[]}}>({})
+  const [userAssignments, setUserAssignments] = useState<{ [key: string]: { departments: string[], subdepartments: string[] } }>({})
   const [assignmentsDialogOpen, setAssignmentsDialogOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [activeTab, setActiveTab] = useState<'users' | 'officers'>('users')
@@ -69,23 +69,23 @@ export default function UsersPage() {
           fetchUsers(false),
           fetchDepartments()
         ])
-        
+
         setDepartments(depts)
-        
+
         // Separate users and officers
         const active = allActive.filter(user => user.role !== 'officer')
         const inactive = allInactive.filter(user => user.role !== 'officer')
         const activeOfficers = allActive.filter(user => user.role === 'officer')
         const inactiveOfficers = allInactive.filter(user => user.role === 'officer')
-        
+
         // Process user assignments
-        const assignments: {[key: string]: {departments: string[], subdepartments: string[]}} = {}
-        
-        // Initialize assignments for all users and officers
-        ;[...allActive, ...allInactive].forEach(user => {
-          assignments[user.id] = { departments: [], subdepartments: [] }
-        })
-        
+        const assignments: { [key: string]: { departments: string[], subdepartments: string[] } } = {}
+
+          // Initialize assignments for all users and officers
+          ;[...allActive, ...allInactive].forEach(user => {
+            assignments[user.id] = { departments: [], subdepartments: [] }
+          })
+
         // Process department assignments
         depts.forEach(dept => {
           dept.subdepartments.forEach(subdept => {
@@ -107,7 +107,7 @@ export default function UsersPage() {
             }
           })
         })
-        
+
         setUserAssignments(assignments)
         setActiveUsers(active)
         setInactiveUsers(inactive)
@@ -128,7 +128,7 @@ export default function UsersPage() {
       // In a real app, you would get the current user's ID from your auth context
       const currentUserId = 'system' // Replace with actual user ID from auth
       await updateUserStatus(userId, makeActive, currentUserId, makeActive ? 'User reactivated by admin' : 'User deactivated by admin')
-      
+
       // Refresh the user lists
       await refreshUsers()
     } catch (error) {
@@ -146,15 +146,59 @@ export default function UsersPage() {
     }
   }
 
+  const [editingUser, setEditingUser] = useState<User | null>(null)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+
+  const handleEditUser = (user: User) => {
+    // Ensure we have a fresh copy of the user with their status history
+    setEditingUser({
+      ...user,
+      status_history: Array.isArray(user.status_history)
+        ? [...user.status_history]
+        : []
+    })
+    setIsEditDialogOpen(true)
+  }
+
+  const handleUserUpdated = () => {
+    refreshUsers()
+    setEditingUser(null)
+    setIsEditDialogOpen(false)
+  }
+
   const renderUserRow = (user: User, isActive: boolean, index: number) => {
-    const lastStatusChange = user.status_history?.[user.status_history.length - 1]
+    const statusHistory = Array.isArray(user.status_history) ? user.status_history : []
+    const lastStatusChange = statusHistory[statusHistory.length - 1]
     const assignments = userAssignments[user.id] || { departments: [], subdepartments: [] }
-    
+
+    // Format dates for display
+    const formatDate = (dateString: string | null | undefined) => {
+      if (!dateString) return 'N/A'
+      try {
+        const date = new Date(dateString)
+        return date.toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        })
+      } catch (e) {
+        return 'Invalid Date'
+      }
+    }
+
+    // Get the current status dates
+    const currentStatus = statusHistory.length > 0
+      ? statusHistory[statusHistory.length - 1]
+      : null
+
+    const startDate = currentStatus?.start_date || user.start_date
+    const endDate = currentStatus?.end_date || user.end_date
+
     const getDepartmentName = (id: string) => {
       const dept = departments.find(d => d.id === id)
       return dept?.name || 'Unknown Department'
     }
-    
+
     const getSubdepartmentName = (id: string) => {
       for (const dept of departments) {
         const subdept = dept.subdepartments?.find((s: any) => s.id === id)
@@ -162,34 +206,24 @@ export default function UsersPage() {
       }
       return 'Unknown Subdepartment'
     }
-    
+
     return (
       <TableRow key={`${user.id}-${refreshKey}`} className="border-b">
         <TableCell className="font-medium w-12 text-center">{index + 1}</TableCell>
         <TableCell className="font-medium">
-          <div className="flex flex-col">
-            <span>{user.name || `User ${user.id}`}</span>
-            {user.email && <span className="text-xs text-muted-foreground">{user.email}</span>}
-          </div>
+          {user.name || `User ${user.id}`}
+        </TableCell>
+        <TableCell className="text-muted-foreground">
+          {user.email || 'N/A'}
         </TableCell>
         <TableCell className="capitalize">
-          <div className="flex flex-col">
-            <span>{user.role.replace(/_/g, ' ')}</span>
-            {assignments.departments.length > 0 && (
-              <div 
-                className="flex items-center text-xs text-muted-foreground hover:text-primary cursor-pointer transition-colors"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setSelectedUser(user)
-                  setAssignmentsDialogOpen(true)
-                }}
-              >
-                <Briefcase className="h-3 w-3 mr-1 flex-shrink-0" />
-                <span className="truncate">{assignments.departments.length} department(s)</span>
-                <ChevronRight className="h-3 w-3 ml-1" />
-              </div>
-            )}
-          </div>
+          {user.role.replace(/_/g, ' ')}
+        </TableCell>
+        <TableCell>
+          {lastStatusChange?.start_date ? new Date(lastStatusChange.start_date).toLocaleDateString() : 'N/A'}
+        </TableCell>
+        <TableCell>
+          {lastStatusChange?.end_date ? new Date(lastStatusChange.end_date).toLocaleDateString() : 'N/A'}
         </TableCell>
         <TableCell>
           <div className="flex items-center gap-2">
@@ -197,64 +231,48 @@ export default function UsersPage() {
             {isActive ? 'Active' : 'Inactive'}
           </div>
         </TableCell>
-        <TableCell>{new Date(user.created_at).toLocaleDateString()}</TableCell>
-        {isActive && (
-          <TableCell>
-            {lastStatusChange ? (
-              <div className="flex flex-col">
-                <span>{new Date(lastStatusChange.changed_at).toLocaleDateString()}</span>
-                <span className="text-xs text-muted-foreground">
-                  by {lastStatusChange.changed_by}
-                </span>
-              </div>
-            ) : 'N/A'}
-          </TableCell>
-        )}
-        <TableCell className="space-x-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => handleViewHistory(user.id)}
-            title="View history"
-            className="h-8 w-8 p-0"
-          >
-            <History className="h-4 w-4" />
-          </Button>
-          {isActive ? (
-            <>
+        <TableCell className="space-x-1">
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => handleEditUser(user)}
+              title="Edit user"
+              className="h-8 w-8 p-0"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => handleViewHistory(user.id)}
+              title="View history"
+              className="h-8 w-8 p-0"
+            >
+              <History className="h-4 w-4" />
+            </Button>
+            {isActive ? (
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => handleStatusChange(user.id, false)}
                 title="Deactivate user"
-                className="h-8 w-8 p-0"
+                className="h-8 w-8 p-0 text-destructive hover:text-destructive"
               >
                 <UserX className="h-4 w-4" />
               </Button>
+            ) : (
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => {
-                  setSelectedUser(user)
-                  setAssignmentDialogOpen(true)
-                }}
-                title="Assign departments"
-                className="h-8 w-8 p-0"
+                onClick={() => handleStatusChange(user.id, true)}
+                title="Reactivate user"
+                className="h-8 w-8 p-0 text-green-600 hover:text-green-700"
               >
-                <Users className="h-4 w-4" />
+                <UserCheck className="h-4 w-4" />
               </Button>
-            </>
-          ) : (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleStatusChange(user.id, true)}
-              title="Reactivate user"
-              className="h-8 w-8 p-0"
-            >
-              <UserCheck className="h-4 w-4" />
-            </Button>
-          )}
+            )}
+          </div>
         </TableCell>
       </TableRow>
     )
@@ -269,25 +287,26 @@ export default function UsersPage() {
       <div className="flex items-center justify-between space-y-2">
         <h2 className="text-3xl font-bold tracking-tight">User Management</h2>
         <div className="flex items-center space-x-2">
-          <AddUserDialog 
-            defaultRole={activeTab === 'officers' ? 'officer' : 'user'} 
-            onUserAdded={refreshUsers} 
+          <AddUserDialog
+            defaultRole={activeTab === 'officers' ? 'officer' : 'user'}
+            onUserAdded={refreshUsers}
+            isEditMode={false}
           />
         </div>
       </div>
-      
+
       <div className="space-y-4">
-        <Tabs 
-          value={activeTab} 
-          onValueChange={(value) => setActiveTab(value as 'users' | 'officers')} 
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as 'users' | 'officers')}
           className="space-y-4"
         >
           <TabsList>
             <TabsTrigger value="users">Users</TabsTrigger>
             <TabsTrigger value="officers">Officers</TabsTrigger>
           </TabsList>
-          
-          <Tabs 
+
+          <Tabs
             value={activeStatusTab}
             onValueChange={(value) => setActiveStatusTab(value as 'active' | 'inactive')}
             className="space-y-4"
@@ -296,7 +315,7 @@ export default function UsersPage() {
               <TabsTrigger value="active">Active {activeTab === 'users' ? 'Users' : 'Officers'}</TabsTrigger>
               <TabsTrigger value="inactive">Inactive {activeTab === 'users' ? 'Users' : 'Officers'}</TabsTrigger>
             </TabsList>
-            
+
             <TabsContent value="active" className="space-y-4">
               <Card>
                 <CardHeader>
@@ -309,11 +328,12 @@ export default function UsersPage() {
                       <TableRow>
                         <TableHead className="w-12">#</TableHead>
                         <TableHead>Name</TableHead>
-                        <TableHead>Role & Assignments</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>Start Date</TableHead>
+                        <TableHead>End Date</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead>Created Date</TableHead>
-                        {activeStatusTab === 'active' && <TableHead>Last Active</TableHead>}
-                        <TableHead className="w-48">Actions</TableHead>
+                        <TableHead className="w-32">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -323,7 +343,7 @@ export default function UsersPage() {
                 </CardContent>
               </Card>
             </TabsContent>
-            
+
             <TabsContent value="inactive" className="space-y-4">
               <Card>
                 <CardHeader>
@@ -336,14 +356,18 @@ export default function UsersPage() {
                       <TableRow>
                         <TableHead className="w-12">#</TableHead>
                         <TableHead>Name</TableHead>
+                        <TableHead>Email</TableHead>
                         <TableHead>Role</TableHead>
+                        <TableHead>Start Date</TableHead>
+                        <TableHead>End Date</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead>Deactivated Date</TableHead>
-                        <TableHead>Actions</TableHead>
+                        <TableHead className="w-32">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {(activeTab === 'users' ? inactiveUsers : inactiveOfficers).map((user, index) => renderUserRow(user, false, index))}
+                      {(activeTab === 'users' ? inactiveUsers : inactiveOfficers).map((user, index) => (
+                        renderUserRow(user, false, index)
+                      ))}
                     </TableBody>
                   </Table>
                 </CardContent>
@@ -351,8 +375,18 @@ export default function UsersPage() {
             </TabsContent>
           </Tabs>
         </Tabs>
+
+        {/* Edit User Dialog */}
+        {editingUser && (
+          <AddUserDialog
+            user={editingUser}
+            isEditMode={true}
+            onUserAdded={handleUserUpdated}
+            defaultRole={editingUser.role as UserRole}
+          />
+        )}
       </div>
-      
+
       {/* Task Assignment Dialog */}
       {selectedUser && (
         <TaskAssignmentDialog
@@ -366,6 +400,21 @@ export default function UsersPage() {
           users={activeTab === 'users' ? activeUsers : activeOfficers}
           onAssign={(assignments) => {
             console.log("User task assigned:", assignments)
+          }}
+        />
+      )}
+
+      {/* Edit User Dialog */}
+      {editingUser && (
+        <AddUserDialog
+          open={isEditDialogOpen}
+          onOpenChange={setIsEditDialogOpen}
+          user={editingUser}
+          isEditMode={true}
+          onUserAdded={() => {
+            refreshUsers()
+            setEditingUser(null)
+            setIsEditDialogOpen(false)
           }}
         />
       )}
@@ -417,9 +466,9 @@ export default function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      <UserAssignmentsDialog 
-        open={assignmentsDialogOpen} 
-        onOpenChange={setAssignmentsDialogOpen} 
+      <UserAssignmentsDialog
+        open={assignmentsDialogOpen}
+        onOpenChange={setAssignmentsDialogOpen}
         user={selectedUser}
         departments={departments}
       />

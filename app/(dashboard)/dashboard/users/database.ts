@@ -5,21 +5,25 @@ export interface StatusHistoryEntry {
     changed_at: string
     changed_by: string
     reason?: string
-    start_date?: string
-    end_date?: string | null
+    start_date: string
+    end_date: string | null
 }
 
-export type UserRole = 'admin' | 'task_manager' | 'task_assistant' | 'officer'
+export type UserRole = 'admin' | 'task_manager' | 'task_assistant' | 'officer' | 'user'
 
 export interface User {
-    id: string
-    clerk_id: string
-    email: string
-    name: string
+    id: string | number
+    clerk_id: string | null
+    email: string | null
+    name: string | null
     role: UserRole
+    phone_number?: string | null
+    password?: string | null
     created_at: string
     updated_at: string
     status_history: StatusHistoryEntry[]
+    start_date?: string
+    end_date?: string | null
 }
 
 // Helper to determine if a user is active based on the latest status entry
@@ -58,7 +62,7 @@ export async function fetchUsers(active?: boolean): Promise<User[]> {
 }
 
 export async function updateUserStatus(
-    userId: string,
+    userId: string | number,
     active: boolean,
     changedBy: string = 'system',
     reason?: string
@@ -90,8 +94,8 @@ export async function updateUserStatus(
         changed_at: now,
         changed_by: changedBy,
         reason: reason || `Status changed to ${active ? 'active' : 'inactive'} by ${changedBy}`,
-        start_date: active ? now : latestStatus?.start_date,
-        end_date: active ? null : now
+        start_date: active ? now.split('T')[0] : (latestStatus?.start_date || now.split('T')[0]),
+        end_date: active ? null : now.split('T')[0]
     }
 
     // Update the status_history array with the new entry
@@ -114,29 +118,34 @@ export async function createUser(userData: {
     name: string
     role: string
     clerk_id: string
+    password?: string
     start_date?: string
+    end_date?: string | null
 }): Promise<User> {
     const now = new Date().toISOString()
-    const startDate = userData.start_date || now
-
+    const startDate = userData.start_date || now.split('T')[0]
+    
     const statusEntry: StatusHistoryEntry = {
         status: 'active',
         changed_at: now,
         changed_by: 'system',
         reason: 'User created',
         start_date: startDate,
-        end_date: null
+        end_date: userData.end_date || null
+    }
+
+    const userDataToInsert: any = {
+        email: userData.email,
+        name: userData.name,
+        role: userData.role,
+        clerk_id: userData.clerk_id,
+        status_history: [statusEntry],
+        password: userData.password || 'TusharT5500'
     }
 
     const { data: user, error } = await supabase
         .from('tm_users')
-        .insert([{
-            email: userData.email,
-            name: userData.name,
-            role: userData.role,
-            clerk_id: userData.clerk_id,
-            status_history: [statusEntry]
-        }])
+        .insert([userDataToInsert])
         .select()
         .single()
 
