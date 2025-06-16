@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useState, useEffect } from "react"
 import { cn } from "@/lib/utils"
-import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, ListPlus } from "lucide-react"
+import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -347,133 +347,196 @@ export default function DepartmentRequirements({ departments: initialDepartments
   const renderRequirements = (requirements: ClassRequirement[] | undefined, type: 'subdepartment' | 'class') => {
     const hasRequirements = requirements && requirements.length > 0;
     const requirementsList = [...(requirements || [])];
-    
-    const handleAddMultipleClick = () => {
-      openMultipleRequirementsDialog(type);
-    };
+    const [editingIndex, setEditingIndex] = useState<number | null>(null);
+    const [editForm, setEditForm] = useState<{name: string; description: string}>({ name: '', description: '' });
     
     const handleMove = (index: number, direction: 'up' | 'down') => {
       handleMoveRequirement(index, direction, type, requirements || []);
     };
+
+    const handleEdit = (index: number) => {
+      setEditingIndex(index);
+      setEditForm({
+        name: requirementsList[index].name,
+        description: requirementsList[index].description || ''
+      });
+    };
+
+    const handleSaveEdit = async () => {
+      if (editingIndex === null || !editingContext) return;
+      
+      const updatedRequirement = {
+        name: editForm.name.trim(),
+        description: editForm.description.trim() || null
+      };
+
+      if (type === 'subdepartment' && editingContext.subdepartmentId) {
+        await saveSubdepartmentRequirement(updatedRequirement, editingContext.subdepartmentId, editingIndex);
+      } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
+        await saveClassRequirement(updatedRequirement, editingContext.subdepartmentId, editingContext.classId, editingIndex);
+      }
+      
+      setEditingIndex(null);
+    };
     
     return (
       <div className="space-y-4">
-        <div className="flex justify-between items-center">
-          <h3 className="text-lg font-medium">{type.charAt(0).toUpperCase() + type.slice(1)} Requirements</h3>
-          <div className="flex gap-2">
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={handleAddMultipleClick}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Requirements
-              </Button>
-          </div>
-        </div>
-
-        {!hasRequirements ? (
-          <div className="p-4 text-center text-muted-foreground border rounded-md">
-            No {type} requirements specified
-          </div>
-        ) : (
-          <div className="border rounded-md overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10">#</TableHead>
-                  <TableHead className="w-10">Order</TableHead>
-                  <TableHead className="w-1/3">Requirement</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="w-24 text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {requirementsList.map((req, idx) => (
-                  <TableRow key={`req-${idx}`} className="group">
-                    <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-col gap-1">
+        <div className="border rounded-md overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-10">#</TableHead>
+                <TableHead className="w-1/3">Requirement</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead className="w-48 text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {hasRequirements ? requirementsList.map((req, idx) => (
+                <TableRow key={`req-${idx}`} className="group">
+                  <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
+                  <TableCell className="font-medium">
+                    {editingIndex === idx ? (
+                      <Input
+                        value={editForm.name}
+                        onChange={(e) => setEditForm({...editForm, name: e.target.value})}
+                        className="h-8"
+                        autoFocus
+                      />
+                    ) : (
+                      req.name
+                    )}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {editingIndex === idx ? (
+                      <Input
+                        value={editForm.description}
+                        onChange={(e) => setEditForm({...editForm, description: e.target.value})}
+                        className="h-8"
+                        placeholder="No description"
+                        onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
+                      />
+                    ) : (
+                      req.description || <span className="text-muted-foreground/50">No description</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-1">
+                      {editingIndex === idx ? (
+                        <>
                           <Button 
                             variant="ghost" 
                             size="icon" 
-                            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+                            className="h-8 w-8 hover:bg-green-50"
+                            onClick={handleSaveEdit}
+                            title="Save"
+                          >
+                            <Check className="h-4 w-4 text-green-600" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8"
+                            onClick={() => setEditingIndex(null)}
+                            title="Cancel"
+                          >
+                            <X className="h-4 w-4 text-muted-foreground" />
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 opacity-0 group-hover:opacity-100 hover:bg-blue-50"
+                            onClick={() => handleEdit(idx)}
+                            title="Edit"
+                          >
+                            <Pencil className="h-3.5 w-3.5 text-blue-600" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 opacity-0 group-hover:opacity-100"
                             onClick={(e) => {
-                              e.stopPropagation()
-                              handleMove(idx, 'up')
+                              e.stopPropagation();
+                              handleMove(idx, 'up');
                             }}
                             disabled={idx === 0}
+                            title="Move up"
                           >
-                            <ArrowUp className="h-3 w-3" />
+                            <ArrowUp className="h-3.5 w-3.5" />
                           </Button>
                           <Button 
                             variant="ghost" 
                             size="icon" 
-                            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+                            className="h-8 w-8 opacity-0 group-hover:opacity-100"
                             onClick={(e) => {
-                              e.stopPropagation()
-                              handleMove(idx, 'down')
+                              e.stopPropagation();
+                              handleMove(idx, 'down');
                             }}
                             disabled={idx === requirementsList.length - 1}
+                            title="Move down"
                           >
-                            <ArrowDown className="h-3 w-3" />
+                            <ArrowDown className="h-3.5 w-3.5" />
                           </Button>
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-medium">{req.name}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {req.description || 'No description provided'}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-2">
-
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => handleDeleteRequirement(type, idx)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 text-destructive hover:bg-red-50"
+                            onClick={() => handleDeleteRequirement(type, idx)}
+                            title="Delete"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )) : (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                    No requirements added yet
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        
+        <div className="flex justify-end">
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => openMultipleRequirementsDialog(type)}
+            className="mt-2"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add Requirements
+          </Button>
+        </div>
       </div>
     )
-
-
   }
 
   const renderSubdepartmentContent = (subdept: Subdepartment, deptId: string) => {
-    const hasClasses = subdept.classes && subdept.classes.length > 0
-    const hasRequirements = subdept.upload_requirements && subdept.upload_requirements.length > 0
-    const subdeptKey = `${deptId}-${subdept.id}`
+    const hasClasses = subdept.classes && subdept.classes.length > 0;
+    const subdeptKey = `${deptId}-${subdept.id}`;
     
     // Initialize active class tab if not set
-    if (!activeClass[subdeptKey] && hasClasses) {
+    if (hasClasses && !activeClass[subdeptKey] && subdept.classes?.[0]?.name) {
       setActiveClass(prev => ({
         ...prev,
-        [subdeptKey]: subdept.classes?.[0]?.name || ''
-      }))
-      return null
+        [subdeptKey]: subdept.classes[0].name
+      }));
+      return null;
     }
 
     return (
-      <div className="space-y-4">
-        {hasRequirements && (
-          <div>
-            <h3 className="text-lg font-medium mb-2">Subdepartment Requirements</h3>
-            {renderRequirements(subdept.upload_requirements, 'subdepartment')}
-          </div>
-        )}
-
-        {hasClasses && (
-          <div>
+      <div className="space-y-6">
+        {hasClasses ? (
+          <div className="space-y-4">
             <Tabs 
               value={activeClass[subdeptKey] || ''} 
               onValueChange={(value) => setActiveClass(prev => ({
@@ -482,32 +545,57 @@ export default function DepartmentRequirements({ departments: initialDepartments
               }))}
               className="space-y-4"
             >
-              <TabsList>
-                {subdept.classes?.map(cls => (
-                  <TabsTrigger key={cls.name} value={cls.name}>
-                    {cls.name}
-                    {cls.requirements?.length > 0 && (
-                      <span className="ml-2 text-xs bg-muted-foreground/10 text-muted-foreground rounded-full px-2 py-0.5">
-                        {cls.requirements.length}
-                      </span>
-                    )}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
+              <div className="flex justify-between items-center">
+                <TabsList>
+                  {subdept.classes?.map(cls => (
+                    <TabsTrigger key={cls.name} value={cls.name}>
+                      {cls.name}
+                      {cls.requirements?.length > 0 && (
+                        <span className="ml-2 text-xs bg-muted-foreground/10 text-muted-foreground rounded-full px-2 py-0.5">
+                          {cls.requirements.length}
+                        </span>
+                      )}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => openMultipleRequirementsDialog('class')}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Requirements
+                </Button>
+              </div>
 
               {subdept.classes?.map(cls => (
-                <TabsContent key={cls.name} value={cls.name} className="mt-0">
+                <TabsContent key={cls.name} value={cls.name} className="mt-0 space-y-4">
                   {cls.description && (
-                    <p className="text-muted-foreground mb-4">{cls.description}</p>
+                    <p className="text-muted-foreground">{cls.description}</p>
                   )}
                   {renderRequirements(cls.requirements, 'class')}
                 </TabsContent>
               ))}
             </Tabs>
           </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-medium">Subdepartment Requirements</h3>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => openMultipleRequirementsDialog('subdepartment')}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add Requirements
+              </Button>
+            </div>
+            {renderRequirements(subdept.upload_requirements, 'subdepartment')}
+          </div>
         )}
       </div>
-    )
+    );
   }
 
   // Add a null check for departments

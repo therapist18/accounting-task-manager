@@ -214,9 +214,6 @@ export async function createDepartment(departmentData: {
       start_date: string
       end_date: string | null
     } | null
-    stages: Array<{
-      id: number
-    }>
   }>
 }): Promise<Department> {
   try {
@@ -235,9 +232,6 @@ export async function createDepartment(departmentData: {
 
     // Process each subdepartment
     for (const subdept of departmentData.subdepartments) {
-      // Prepare stages data - only store the IDs
-      const stageIds = subdept.stages.map(stage => stage.id)
-
       // Insert subdepartment with stages as JSONB
       const { data: subdepartment, error: subdeptError } = await supabase
         .from('tm_subdepartments')
@@ -246,7 +240,6 @@ export async function createDepartment(departmentData: {
           description: subdept.description,
           department_id: department.id,
           classes: subdept.classes || [],
-          stages: stageIds, // Only store stage IDs
           task_manager: subdept.task_manager ? {
             id: subdept.task_manager.id,
             start_date: subdept.task_manager.start_date,

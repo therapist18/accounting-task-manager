@@ -366,14 +366,15 @@ export default function Departments() {
       return
     }
 
-    const isAddingSubdepartment = !!currentDepartmentId
     const isEditingSubdepartment = departmentForm.subdepartments[0]?.id !== undefined
+    const isAddingSingleSubdepartment = !!currentDepartmentId && departmentForm.subdepartments.length === 1
+    const isAddingMultipleSubdepartments = !currentDepartmentId && departmentForm.subdepartments.length > 0
 
     try {
       setSaving(true)
 
-      // For subdepartments, we only need to process the first subdepartment in the form
-      if (isAddingSubdepartment) {
+      // Process a single subdepartment (when adding/editing a subdepartment)
+      if (isAddingSingleSubdepartment) {
         const subdept = departmentForm.subdepartments[0]
         if (!subdept.name.trim()) {
           toast.error('Please enter a subdepartment name')
@@ -430,7 +431,6 @@ export default function Departments() {
             start_date: new Date().toISOString(),
             end_date: null
           } : null,
-          stages: selectedStages.data?.map(stage => stage.id) || []
         }
 
         if (isEditingSubdepartment) {
@@ -462,11 +462,16 @@ export default function Departments() {
       }
 
 
-      // Original department creation logic here...
+      // Prepare department data with all subdepartments
       const departmentData = {
         name: departmentForm.name.trim(),
         description: departmentForm.description ? departmentForm.description.trim() : null,
         subdepartments: departmentForm.subdepartments.map(subdept => {
+          // Validate subdepartment name
+          if (!subdept.name.trim()) {
+            throw new Error('Subdepartment name is required')
+          }
+
           // Prepare task manager data if selected
           const taskManager = subdept.taskManagerId && subdept.taskManagerId !== 'none'
             ? users.find(u => u.id === subdept.taskManagerId)
@@ -477,18 +482,34 @@ export default function Departments() {
             ? users.find(u => u.id === subdept.taskAssistantId)
             : null
 
+          // Get stages data
+          let stagesData: any[] = []
+          if (subdept.stages) {
+            stagesData = Object.entries(subdept.stages)
+              .filter(([_, stage]) => stage && stage.applies)
+              .map(([name]) => ({
+                name,
+                estimated_time: 8 * 60, // Default 8 hours in minutes
+                order_num: globalStages.findIndex(s => s.name === name) + 1
+              }))
+          }
+
+
           return {
+            id: subdept.id, // Include ID for updates if it exists
             name: subdept.name.trim(),
             description: subdept.description ? subdept.description.trim() : null,
-            classes: subdept.classes.map(cls => ({
+            classes: subdept.classes?.map(cls => ({
+              id: cls.id, // Include ID for updates if it exists
               name: cls.name,
               description: cls.description ? cls.description : null,
-              requirements: cls.requirements.map(req => ({
+              requirements: cls.requirements?.map(req => ({
+                id: req.id, // Include ID for updates if it exists
                 name: req.name,
                 description: req.description ? req.description : null,
                 is_required: req.isRequired
-              }))
-            })),
+              })) || []
+            })) || [],
             task_manager: taskManager ? {
               id: taskManager.id,
               start_date: new Date().toISOString(),
@@ -499,13 +520,7 @@ export default function Departments() {
               start_date: new Date().toISOString(),
               end_date: null
             } : null,
-            stages: Object.entries(subdept.stages)
-              .filter(([_, stage]) => stage && stage.applies)
-              .map(([name]) => ({
-                name,
-                estimated_time: 8 * 60, // Default 8 hours in minutes
-                order_num: globalStages.findIndex(s => s.name === name) + 1
-              }))
+            stages: stagesData
           }
         })
       }
@@ -819,9 +834,6 @@ export default function Departments() {
                               <TableHead className="border-r">Classes</TableHead>
                               <TableHead className="border-r">Task Manager</TableHead>
                               <TableHead className="border-r">Task Assistant</TableHead>
-                              <TableHead className="border-r">Processing Time</TableHead>
-                              <TableHead className="border-r">Delivery Time</TableHead>
-                              <TableHead className="border-r">Stages</TableHead>
                               <TableHead>Actions</TableHead>
                             </TableRow>
                           </TableHeader>
@@ -908,7 +920,7 @@ export default function Departments() {
                                     )}
                                   </div>
                                 </TableCell>
-                                <TableCell className="border-r text-center">
+                                {/* <TableCell className="border-r text-center">
                                   <Badge variant="outline">{subdept.processingTime} days</Badge>
                                 </TableCell>
                                 <TableCell className="border-r text-center">
@@ -958,7 +970,7 @@ export default function Departments() {
                                       </PopoverContent>
                                     </Popover>
                                   </div>
-                                </TableCell>
+                                </TableCell> */}
                                 <TableCell className="w-[180px]">
                                   <div className="flex space-x-2">
                                     <Button
