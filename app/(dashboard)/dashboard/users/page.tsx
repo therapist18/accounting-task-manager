@@ -25,7 +25,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { AddUserDialog } from "@/app/(dashboard)/dashboard/users/add-user-dialog"
+import { AddUserDialog } from "./add-user-dialog"
+import { AddOfficerDialog } from "./add-officer-dialog"
 
 export default function UsersPage() {
   const [activeUsers, setActiveUsers] = useState<User[]>([])
@@ -42,6 +43,7 @@ export default function UsersPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [activeTab, setActiveTab] = useState<'users' | 'officers'>('users')
   const [activeStatusTab, setActiveStatusTab] = useState<'active' | 'inactive'>('active')
+  const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
   const refreshUsers = async () => {
@@ -170,6 +172,20 @@ export default function UsersPage() {
     const statusHistory = Array.isArray(user.status_history) ? user.status_history : []
     const lastStatusChange = statusHistory[statusHistory.length - 1]
     const assignments = userAssignments[user.id] || { departments: [], subdepartments: [] }
+    const departmentHistory = Array.isArray(user.department_history) ? user.department_history : []
+    
+    // Filter by selected department if viewing officers
+    if (activeTab === 'officers' && selectedDepartment) {
+      const userDepartments = departmentHistory.map(d => d.department_id)
+      if (!userDepartments.includes(selectedDepartment)) {
+        return null
+      }
+    }
+
+    // Get current department assignment for officers
+    const currentDepartment = departmentHistory.length > 0 
+      ? departments.find(d => d.id === departmentHistory[0].department_id)
+      : null
 
     // Format dates for display
     const formatDate = (dateString: string | null | undefined) => {
@@ -216,15 +232,31 @@ export default function UsersPage() {
         <TableCell className="text-muted-foreground">
           {user.email || 'N/A'}
         </TableCell>
-        <TableCell className="capitalize">
-          {user.role.replace(/_/g, ' ')}
-        </TableCell>
-        <TableCell>
-          {lastStatusChange?.start_date ? new Date(lastStatusChange.start_date).toLocaleDateString() : 'N/A'}
-        </TableCell>
-        <TableCell>
-          {lastStatusChange?.end_date ? new Date(lastStatusChange.end_date).toLocaleDateString() : 'N/A'}
-        </TableCell>
+        {activeTab === 'officers' ? (
+          <>
+            <TableCell>
+              {currentDepartment?.name || 'N/A'}
+            </TableCell>
+            <TableCell>
+              {departmentHistory[0]?.start_date ? formatDate(departmentHistory[0].start_date) : 'N/A'}
+            </TableCell>
+            <TableCell>
+              {departmentHistory[0]?.end_date ? formatDate(departmentHistory[0].end_date) : 'Present'}
+            </TableCell>
+          </>
+        ) : (
+          <>
+            <TableCell className="capitalize">
+              {user.role.replace(/_/g, ' ')}
+            </TableCell>
+            <TableCell>
+              {lastStatusChange?.start_date ? new Date(lastStatusChange.start_date).toLocaleDateString() : 'N/A'}
+            </TableCell>
+            <TableCell>
+              {lastStatusChange?.end_date ? new Date(lastStatusChange.end_date).toLocaleDateString() : 'N/A'}
+            </TableCell>
+          </>
+        )}
         <TableCell>
           <div className="flex items-center gap-2">
             <span className={`h-2 w-2 rounded-full ${isActive ? 'bg-green-500' : 'bg-gray-400'}`} />
@@ -287,24 +319,58 @@ export default function UsersPage() {
       <div className="flex items-center justify-between space-y-2">
         <h2 className="text-3xl font-bold tracking-tight">User Management</h2>
         <div className="flex items-center space-x-2">
-          <AddUserDialog
-            defaultRole={activeTab === 'officers' ? 'officer' : 'user'}
-            onUserAdded={refreshUsers}
-            isEditMode={false}
-          />
+          <div className="flex items-center space-x-2">
+            {activeTab === 'officers' ? (
+              <AddOfficerDialog onOfficerAdded={refreshUsers} />
+            ) : (
+              <AddUserDialog
+                defaultRole="user"
+                onUserAdded={refreshUsers}
+                isEditMode={false}
+              />
+            )}
+          </div>
         </div>
       </div>
 
       <div className="space-y-4">
         <Tabs
           value={activeTab}
-          onValueChange={(value) => setActiveTab(value as 'users' | 'officers')}
+          onValueChange={(value) => {
+            setActiveTab(value as 'users' | 'officers')
+            setSelectedDepartment(null)
+          }}
           className="space-y-4"
         >
           <TabsList>
             <TabsTrigger value="users">Users</TabsTrigger>
             <TabsTrigger value="officers">Officers</TabsTrigger>
           </TabsList>
+          
+          {activeTab === 'officers' && departments.length > 0 && (
+            <div className="mt-4">
+              <h3 className="text-sm font-medium mb-2">Departments</h3>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant={!selectedDepartment ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setSelectedDepartment(null)}
+                >
+                  All Departments
+                </Button>
+                {departments.map((dept) => (
+                  <Button
+                    key={dept.id}
+                    variant={selectedDepartment === dept.id ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setSelectedDepartment(dept.id)}
+                  >
+                    {dept.name}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <Tabs
             value={activeStatusTab}
