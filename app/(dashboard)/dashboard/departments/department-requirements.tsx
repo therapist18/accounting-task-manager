@@ -9,18 +9,12 @@ import { Button } from "@/components/ui/button"
 import { useState, useEffect } from "react"
 import { cn } from "@/lib/utils"
 import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check } from "lucide-react"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import supabase from "@/lib/supabase/client"
+import { toast } from "@/hooks/use-toast"
 
 type ClassRequirement = {
   name: string
@@ -68,11 +62,30 @@ export default function DepartmentRequirements({ departments: initialDepartments
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<{name: string; description: string}>({ name: '', description: '' });
+  const [selectedDept, setSelectedDept] = useState<string>('');
+  const [selectedSubdept, setSelectedSubdept] = useState<string>('');
+  const [selectedClass, setSelectedClass] = useState<string>('');
+  
+  // Initialize selected department when departments change
+  useEffect(() => {
+    if (departments.length > 0 && !selectedDept) {
+      const deptId = departments[0].id;
+      setSelectedDept(deptId);
+      
+      // Also set the first subdepartment if available
+      const firstSubdept = departments[0].tm_subdepartments?.[0];
+      if (firstSubdept) {
+        setSelectedSubdept(firstSubdept.id.toString());
+      }
+    }
+  }, [departments]);
   
   // Initialize active subdepartment and editing context
   useEffect(() => {
     const currentDept = departments.find(d => d.id === activeDept) || departments[0];
-    if (!currentDept) return;
+    if (!currentDept) {
+      return;
+    }
     
     let subdeptId = activeSubdept[currentDept.id];
     let classId = '';
@@ -188,7 +201,11 @@ export default function DepartmentRequirements({ departments: initialDepartments
       if (error) throw error;
       
       // Show success message
-      // toast.success('Requirements updated successfully');
+      toast({
+        title: "Success",
+        description: "Requirements updated successfully",
+        variant: "default"
+      });
       
     } catch (error) {
       console.error('Error saving subdepartment requirement:', error);
@@ -200,7 +217,11 @@ export default function DepartmentRequirements({ departments: initialDepartments
         updateSubdepartmentRequirements(subdepartmentId, subdept.upload_requirements || []);
       }
       // Show error message
-      // toast.error('Failed to update requirements');
+      toast({
+        title: "Error",
+        description: "Failed to update requirements. Please try again.",
+        variant: "destructive"
+      });
     }
   }
   
@@ -256,7 +277,11 @@ export default function DepartmentRequirements({ departments: initialDepartments
       if (updateError) throw updateError;
       
       // Show success message
-      // toast.success('Class requirements updated successfully');
+      toast({
+        title: "Success",
+        description: "Class requirements updated successfully",
+        variant: "default"
+      });
       
     } catch (error) {
       console.error('Error saving class requirement:', error);
@@ -272,7 +297,11 @@ export default function DepartmentRequirements({ departments: initialDepartments
         }
       }
       // Show error message
-      // toast.error('Failed to update class requirements');
+      toast({
+        title: "Error",
+        description: "Failed to update class requirements. Please try again.",
+        variant: "destructive"
+      });
     }
   }
   
@@ -298,13 +327,12 @@ export default function DepartmentRequirements({ departments: initialDepartments
         const updatedRequirements = subdept.upload_requirements.filter((_, i) => i !== index)
         updateSubdepartmentRequirements(editingContext.subdepartmentId, updatedRequirements)
         
-        // TODO: Implement actual API call to delete from database
-        // const { error } = await supabase
-        //   .from('tm_subdepartments')
-        //   .update({ upload_requirements: updatedRequirements })
-        //   .eq('id', editingContext.subdepartmentId)
-        // 
-        // if (error) throw error
+        const { error } = await supabase
+          .from('tm_subdepartments')
+          .update({ upload_requirements: updatedRequirements })
+          .eq('id', editingContext.subdepartmentId)
+        
+        if (error) throw error
         
       } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
         const subdept = departments
@@ -317,12 +345,21 @@ export default function DepartmentRequirements({ departments: initialDepartments
         const updatedRequirements = targetClass.requirements.filter((_, i) => i !== index)
         updateClassRequirements(editingContext.subdepartmentId, editingContext.classId, updatedRequirements)
         
-        // TODO: Implement actual API call to delete from database
+        const { error } = await supabase
+          .from('tm_subdepartments')
+          .update({ classes: updatedRequirements })
+          .eq('id', editingContext.subdepartmentId)
+        
+        if (error) throw error
       }
       
     } catch (error) {
       console.error('Error deleting requirement:', error)
-      // TODO: Show error toast
+      toast({
+        title: "Error",
+        description: "Failed to delete requirement. Please try again.",
+        variant: "destructive"
+      });
     }
   }
 
@@ -343,46 +380,175 @@ export default function DepartmentRequirements({ departments: initialDepartments
   }
 
   const handleAddMultipleRequirements = async () => {
-    if (!editingContext) return
-    
+    if (!selectedDept || !selectedSubdept) {
+      toast({
+        title: "Error",
+        description: "Please select a department and subdepartment",
+        variant: "destructive"
+      });
+      return;
+    }
+
     // Filter out empty requirements
-    const validRequirements = newRequirements.filter(req => req.name.trim() !== '')
+    const validRequirements = newRequirements.filter(req => req.name.trim() !== '');
     
     if (validRequirements.length === 0) {
-      handleCloseDialog()
-      return
+      handleCloseDialog();
+      return;
     }
-    
+
     try {
-      setIsSubmitting(true)
-      
-      if (editingContext.type === 'subdepartment' && editingContext.subdepartmentId) {
-        await Promise.all(
-          validRequirements.map(req => 
-            saveSubdepartmentRequirement(
-              { name: req.name, description: req.description || null },
-              editingContext.subdepartmentId
-            )
-          )
-        )
-      } else if (editingContext.type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
-        await Promise.all(
-          validRequirements.map(req => 
-            saveClassRequirement(
-              { name: req.name, description: req.description || null },
-              editingContext.subdepartmentId,
-              editingContext.classId
-            )
-          )
-        )
+      setIsSubmitting(true);
+
+      // Get the selected department and subdepartment
+      const currentDept = departments.find(d => d.id === selectedDept);
+      const subdept = currentDept?.tm_subdepartments?.find(sd => sd.id.toString() === selectedSubdept);
+
+      if (!currentDept || !subdept) {
+        throw new Error('Department or subdepartment not found');
       }
+
+      // Update local state immediately for better UX
+      if (editingContext.type === 'subdepartment' || !subdept.classes?.length) {
+        const currentRequirements = subdept.upload_requirements || [];
+        const updatedRequirements = [...currentRequirements, ...validRequirements.map(req => ({
+          name: req.name.trim(),
+          description: req.description?.trim() || null
+        }))];
+        updateSubdepartmentRequirements(editingContext.subdepartmentId, updatedRequirements);
+      } else if (editingContext.type === 'class') {
+        // If classId is empty, use the first class
+        const targetClass = selectedClass 
+          ? subdept.classes?.find(cls => cls.name === selectedClass)
+          : subdept.classes?.[0];
+        
+        if (!targetClass) {
+          throw new Error('No valid class found');
+        }
+
+        const currentRequirements = targetClass.requirements || [];
+        const updatedRequirements = [...currentRequirements, ...validRequirements.map(req => ({
+          name: req.name.trim(),
+          description: req.description?.trim() || null
+        }))];
+        
+        updateClassRequirements(editingContext.subdepartmentId, targetClass.name, updatedRequirements);
+      }
+
+      // Update database
+      const { data: subdeptData, error: fetchError } = await supabase
+        .from('tm_subdepartments')
+        .select('*')
+        .eq('id', editingContext.subdepartmentId)
+        .single();
+
+      if (fetchError) {
+        throw fetchError;
+      }
+
+      // Prepare the update data
+      let updateData: any = {};
       
-      handleCloseDialog()
+      if (editingContext.type === 'subdepartment' || !subdept.classes?.length) {
+        // Handle subdepartment requirements
+        const currentRequirements = subdeptData.upload_requirements || [];
+        const newRequirements = validRequirements.map(req => ({
+          name: req.name.trim(),
+          description: req.description?.trim() || null
+        }));
+        updateData.upload_requirements = [...currentRequirements, ...newRequirements];
+      } else {
+        // Handle class requirements
+        const targetClassName = selectedClass || (subdept.classes?.[0]?.name);
+        if (!targetClassName) {
+          throw new Error('No valid class found');
+        }
+        
+        // Get current classes or initialize if not exists
+        const currentClasses = Array.isArray(subdeptData.classes) ? [...subdeptData.classes] : [];
+        const classIndex = currentClasses.findIndex(cls => cls.name === targetClassName);
+        
+        const newRequirements = validRequirements.map(req => ({
+          name: req.name.trim(),
+          description: req.description?.trim() || null
+        }));
+        
+        if (classIndex >= 0) {
+          // Update existing class
+          const existingClass = currentClasses[classIndex];
+          currentClasses[classIndex] = {
+            ...existingClass,
+            requirements: [...(existingClass.requirements || []), ...newRequirements]
+          };
+        } else {
+          // Add new class with requirements
+          currentClasses.push({
+            name: targetClassName,
+            description: null,
+            requirements: newRequirements
+          });
+        }
+        
+        updateData.classes = currentClasses;
+      }
+
+      // Update the database
+      const { error: updateError } = await supabase
+        .from('tm_subdepartments')
+        .update(updateData)
+        .eq('id', editingContext.subdepartmentId)
+        .select('*');
+        
+      // Refresh the data after successful update
+      if (!updateError) {
+        const { data: updatedData, error: refreshError } = await supabase
+          .from('tm_subdepartments')
+          .select('*')
+          .eq('id', editingContext.subdepartmentId)
+          .single();
+          
+        if (!refreshError && updatedData) {
+          // Update local state with fresh data from database
+          const updatedDepartments = departments.map(dept => ({
+            ...dept,
+            tm_subdepartments: dept.tm_subdepartments?.map(sd => 
+              sd.id.toString() === editingContext.subdepartmentId ? updatedData : sd
+            ) || []
+          }));
+          setDepartments(updatedDepartments);
+        }
+      }
+
+      if (updateError) {
+        // Revert local state on error
+        if (editingContext.type === 'subdepartment') {
+          updateSubdepartmentRequirements(editingContext.subdepartmentId, subdept.upload_requirements || []);
+        } else if (editingContext.type === 'class' && editingContext.classId) {
+          const targetClass = subdept.classes?.find(cls => cls.name === editingContext.classId);
+          if (targetClass) {
+            updateClassRequirements(editingContext.subdepartmentId, editingContext.classId, targetClass.requirements || []);
+          }
+        }
+        throw updateError;
+      }
+
+      // Show success message
+      toast({
+        title: "Success",
+        description: `Added ${validRequirements.length} requirement${validRequirements.length > 1 ? 's' : ''} successfully`,
+        variant: "default"
+      });
+
+      handleCloseDialog();
     } catch (error) {
-      console.error('Error adding requirements:', error)
-      // TODO: Show error toast
+      console.error('Error adding requirements:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add requirements. Please try again.",
+        variant: "destructive"
+      });
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
   }
 
@@ -711,6 +877,11 @@ export default function DepartmentRequirements({ departments: initialDepartments
     } catch (error) {
       console.error('Error moving requirement:', error);
       // TODO: Show error toast to user
+      toast({
+        title: "Error",
+        description: "Failed to move requirement. Please try again.",
+        variant: "destructive"
+      });
       // Revert local state on error
       if (type === 'subdepartment' && editingContext.subdepartmentId) {
         updateSubdepartmentRequirements(editingContext.subdepartmentId, requirements);
@@ -719,7 +890,6 @@ export default function DepartmentRequirements({ departments: initialDepartments
       }
     }
   };
-
 
   return (
     <div className="space-y-6">
@@ -803,6 +973,91 @@ export default function DepartmentRequirements({ departments: initialDepartments
           </DialogHeader>
           
           <div className="space-y-4">
+            {/* Department Selection */}
+            <div>
+              <Label htmlFor="department">Department</Label>
+              <select
+                id="department"
+                value={selectedDept}
+                onChange={(e) => {
+                  setSelectedDept(e.target.value);
+                  setSelectedSubdept('');
+                  setSelectedClass('');
+                }}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="">Select Department</option>
+                {departments.map((dept) => (
+                  <option key={dept.id} value={dept.id}>
+                    {dept.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Subdepartment Selection */}
+            {selectedDept && (
+              <div>
+                <Label htmlFor="subdepartment">Subdepartment</Label>
+                <select
+                  id="subdepartment"
+                  value={selectedSubdept}
+                  onChange={(e) => {
+                    setSelectedSubdept(e.target.value);
+                    setSelectedClass('');
+                  }}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">Select Subdepartment</option>
+                  {(() => {
+                    if (!selectedDept) return null;
+                    const dept = departments.find(d => d.id === selectedDept);
+                    if (!dept?.tm_subdepartments?.length) {
+                      return <option value="">No subdepartments available</option>;
+                    }
+                    return dept.tm_subdepartments.map((subdept) => (
+                      <option key={subdept.id} value={subdept.id.toString()}>
+                        {subdept.name}
+                      </option>
+                    ));
+                  })()}
+                </select>
+              </div>
+            )}
+
+            {/* Class Selection */}
+            {selectedSubdept && (() => {
+              // Find the selected subdepartment
+              const dept = departments.find(d => d.id === selectedDept);
+              if (!dept?.tm_subdepartments) return null;
+              
+              const subdept = dept.tm_subdepartments.find(sd => sd.id.toString() === selectedSubdept);
+              if (!subdept) return null;
+              
+              // Only show class selection if the subdepartment has classes
+              if (!subdept.classes?.length) return null;
+              
+              return (
+                <div>
+                  <Label htmlFor="class">Class</Label>
+                  <select
+                    id="class"
+                    value={selectedClass}
+                    onChange={(e) => setSelectedClass(e.target.value)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <option value="">Select Class</option>
+                    {subdept.classes.map((cls) => (
+                      <option key={cls.name} value={cls.name}>
+                        {cls.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })()}
+
+            {/* Requirements */}
             <div className="space-y-2">
               {newRequirements.map((req, idx) => (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-end">
@@ -862,7 +1117,7 @@ export default function DepartmentRequirements({ departments: initialDepartments
             </Button>
             <Button 
               onClick={handleAddMultipleRequirements}
-              disabled={!newRequirements.some(req => req.name.trim() !== '') || isSubmitting}
+              disabled={!selectedDept || !selectedSubdept || (!selectedClass && departments.find(d => d.id === selectedDept)?.tm_subdepartments?.find(sd => sd.id.toString() === selectedSubdept)?.classes?.length > 0) || !newRequirements.some(req => req.name.trim() !== '') || isSubmitting}
             >
               {isSubmitting ? (
                 <>
@@ -882,4 +1137,3 @@ export default function DepartmentRequirements({ departments: initialDepartments
     </div>
   );
 }
-    

@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase/client"
 import Stages from "./stages"
 import Departments from "./departments"
 import DepartmentRequirements from "./department-requirements"
+import WebData from "./webdata"
+import Rates from "./rates"
 
 type Department = {
   id: string
@@ -16,6 +18,14 @@ type Department = {
     name: string
     description: string | null
     upload_requirements?: Array<{
+      name: string
+      description: string | null
+    }>
+    rates?: Array<{
+      name: string
+      description: string | null
+    }>
+    webdata?: Array<{
       name: string
       description: string | null
     }>
@@ -35,6 +45,13 @@ export default function DepartmentsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Get simplified department list for the WebData and Rates components
+  const departmentList = departments.map(dept => ({
+    id: dept.id,
+    name: dept.name,
+    description: dept.description
+  }))
+
   useEffect(() => {
     const fetchDepartments = async () => {
       try {
@@ -45,7 +62,9 @@ export default function DepartmentsPage() {
             *,
             tm_subdepartments (
               *,
-              classes
+              classes,
+              rates,
+              webdata
             )
           `)
           .order('name')
@@ -59,6 +78,7 @@ export default function DepartmentsPage() {
         setLoading(false)
       }
     }
+
 
     fetchDepartments()
   }, [])
@@ -77,7 +97,7 @@ export default function DepartmentsPage() {
         <TabsTrigger value="departments">Departments</TabsTrigger>
         <TabsTrigger value="stages">Stages</TabsTrigger>
         <TabsTrigger value="requirements">Requirements</TabsTrigger>
-        <TabsTrigger value="webdata">Webdata</TabsTrigger>
+        <TabsTrigger value="webdata">Web Data</TabsTrigger>  
         <TabsTrigger value="rates">Rates</TabsTrigger>  
       </TabsList>
       <TabsContent value="departments">
@@ -90,10 +110,10 @@ export default function DepartmentsPage() {
         <DepartmentRequirements departments={departments} />
       </TabsContent>
       <TabsContent value="webdata">
-        <h1>Webdata</h1>
+        <WebData departments={departments} />
       </TabsContent>
       <TabsContent value="rates">
-        <h1>Rates</h1>
+        <Rates departments={departments} />
       </TabsContent>
     </Tabs>
   )
