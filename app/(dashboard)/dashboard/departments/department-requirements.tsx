@@ -52,6 +52,11 @@ export default function DepartmentRequirements({ departments: initialDepartments
   const [activeSubdept, setActiveSubdept] = useState<Record<string, string>>({})
   const [activeClass, setActiveClass] = useState<Record<string, string>>({})
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [deleteContext, setDeleteContext] = useState<{
+    type: 'subdepartment' | 'class'
+    index: number
+  } | null>(null)
   const [editingContext, setEditingContext] = useState<{
     type: 'subdepartment' | 'class'
     departmentId: string
@@ -311,8 +316,20 @@ export default function DepartmentRequirements({ departments: initialDepartments
     setNewRequirements([{ name: '', description: '' }])
   }
 
-  const handleDeleteRequirement = async (type: 'subdepartment' | 'class', index: number) => {
-    if (!confirm(`Are you sure you want to delete this ${type} requirement?`)) return
+  const handleCloseDeleteDialog = () => {
+    setIsDeleteDialogOpen(false)
+    setDeleteContext(null)
+  }
+
+  const handleDeleteClick = (type: 'subdepartment' | 'class', index: number) => {
+    setDeleteContext({ type, index })
+    setIsDeleteDialogOpen(true)
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteContext) return
+    
+    const { type, index } = deleteContext
     
     try {
       if (!editingContext) return
@@ -339,19 +356,49 @@ export default function DepartmentRequirements({ departments: initialDepartments
           .flatMap(dept => dept.tm_subdepartments || [])
           .find(sd => sd.id.toString() === editingContext.subdepartmentId)
         
-        const targetClass = subdept?.classes?.find(cls => cls.name === editingContext.classId)
+        if (!subdept) return
+        
+        const targetClass = subdept.classes?.find(cls => cls.name === editingContext.classId)
         if (!targetClass?.requirements) return
         
+        // Update local state first for better UX
         const updatedRequirements = targetClass.requirements.filter((_, i) => i !== index)
         updateClassRequirements(editingContext.subdepartmentId, editingContext.classId, updatedRequirements)
         
+        // Get current classes from the subdepartment
+        const { data: currentData, error: fetchError } = await supabase
+          .from('tm_subdepartments')
+          .select('classes')
+          .eq('id', editingContext.subdepartmentId)
+          .single()
+        
+        if (fetchError) throw fetchError
+        
+        // Update only the requirements for the target class
+        const updatedClasses = currentData.classes.map((cls: any) => 
+          cls.name === editingContext.classId
+            ? { ...cls, requirements: updatedRequirements }
+            : cls
+        )
+        
+        // Update the database with the modified classes array
         const { error } = await supabase
           .from('tm_subdepartments')
-          .update({ classes: updatedRequirements })
+          .update({ classes: updatedClasses })
           .eq('id', editingContext.subdepartmentId)
         
         if (error) throw error
+        
+        // Show success message
+        toast({
+          title: "Success",
+          description: "Requirement deleted successfully",
+          variant: "default"
+        })
       }
+      
+      setIsDeleteDialogOpen(false)
+      setDeleteContext(null)
       
     } catch (error) {
       console.error('Error deleting requirement:', error)
@@ -359,7 +406,9 @@ export default function DepartmentRequirements({ departments: initialDepartments
         title: "Error",
         description: "Failed to delete requirement. Please try again.",
         variant: "destructive"
-      });
+      })
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -553,6 +602,10 @@ export default function DepartmentRequirements({ departments: initialDepartments
   }
 
   const renderRequirements = (requirements: ClassRequirement[] | undefined, type: 'subdepartment' | 'class', context: typeof editingContext) => {
+    const handleDeleteClickWrapper = (e: React.MouseEvent, index: number) => {
+      e.stopPropagation()
+      handleDeleteClick(type, index)
+    }
     const hasRequirements = requirements && requirements.length > 0;
     const requirementsList = [...(requirements || [])];
     
@@ -691,7 +744,7 @@ export default function DepartmentRequirements({ departments: initialDepartments
                             variant="ghost" 
                             size="icon" 
                             className="h-8 w-8 text-destructive hover:bg-red-50"
-                            onClick={() => handleDeleteRequirement(type, idx)}
+                            onClick={(e) => handleDeleteClickWrapper(e, idx)}
                             title="Delete"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -963,6 +1016,33 @@ export default function DepartmentRequirements({ departments: initialDepartments
           </TabsContent>
         ))}
       </Tabs>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Requirement</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this {deleteContext?.type} requirement? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={handleCloseDeleteDialog}
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDeleteConfirm}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Requirements Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
