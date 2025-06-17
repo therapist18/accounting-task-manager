@@ -9,18 +9,12 @@ import { Button } from "@/components/ui/button"
 import { useState, useEffect } from "react"
 import { cn } from "@/lib/utils"
 import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check } from "lucide-react"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import supabase from "@/lib/supabase/client"
+import { toast } from "@/hooks/use-toast"
 
 type ClassRate = {
   name: string
@@ -58,6 +52,11 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
   const [activeSubdept, setActiveSubdept] = useState<Record<string, string>>({})
   const [activeClass, setActiveClass] = useState<Record<string, string>>({})
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [deleteContext, setDeleteContext] = useState<{
+    type: 'subdepartment' | 'class'
+    index: number
+  } | null>(null)
   const [editingContext, setEditingContext] = useState<{
     type: 'subdepartment' | 'class'
     departmentId: string
@@ -68,11 +67,30 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<{name: string; description: string}>({ name: '', description: '' });
+  const [selectedDept, setSelectedDept] = useState<string>('');
+  const [selectedSubdept, setSelectedSubdept] = useState<string>('');
+  const [selectedClass, setSelectedClass] = useState<string>('');
+  
+  // Initialize selected department when departments change
+  useEffect(() => {
+    if (departments.length > 0 && !selectedDept) {
+      const deptId = departments[0].id;
+      setSelectedDept(deptId);
+      
+      // Also set the first subdepartment if available
+      const firstSubdept = departments[0].tm_subdepartments?.[0];
+      if (firstSubdept) {
+        setSelectedSubdept(firstSubdept.id.toString());
+      }
+    }
+  }, [departments]);
   
   // Initialize active subdepartment and editing context
   useEffect(() => {
     const currentDept = departments.find(d => d.id === activeDept) || departments[0];
-    if (!currentDept) return;
+    if (!currentDept) {
+      return;
+    }
     
     let subdeptId = activeSubdept[currentDept.id];
     let classId = '';
@@ -188,7 +206,11 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
       if (error) throw error;
       
       // Show success message
-      // toast.success('Rates updated successfully');
+      toast({
+        title: "Success",
+        description: "Rates updated successfully",
+        variant: "default"
+      });
       
     } catch (error) {
       console.error('Error saving subdepartment rate:', error);
@@ -200,7 +222,11 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
         updateSubdepartmentRates(subdepartmentId, subdept.upload_rates || []);
       }
       // Show error message
-      // toast.error('Failed to update rates');
+      toast({
+        title: "Error",
+        description: "Failed to update rates. Please try again.",
+        variant: "destructive"
+      });
     }
   }
   
@@ -256,7 +282,11 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
       if (updateError) throw updateError;
       
       // Show success message
-      // toast.success('Class rates updated successfully');
+      toast({
+        title: "Success",
+        description: "Class rates updated successfully",
+        variant: "default"
+      });
       
     } catch (error) {
       console.error('Error saving class rate:', error);
@@ -272,7 +302,11 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
         }
       }
       // Show error message
-      // toast.error('Failed to update class rates');
+      toast({
+        title: "Error",
+        description: "Failed to update class rates. Please try again.",
+        variant: "destructive"
+      });
     }
   }
   
@@ -282,8 +316,20 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
     setNewRates([{ name: '', description: '' }])
   }
 
-  const handleDeleteRate = async (type: 'subdepartment' | 'class', index: number) => {
-    if (!confirm(`Are you sure you want to delete this ${type} rate?`)) return
+  const handleCloseDeleteDialog = () => {
+    setIsDeleteDialogOpen(false)
+    setDeleteContext(null)
+  }
+
+  const handleDeleteClick = (type: 'subdepartment' | 'class', index: number) => {
+    setDeleteContext({ type, index })
+    setIsDeleteDialogOpen(true)
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteContext) return
+    
+    const { type, index } = deleteContext
     
     try {
       if (!editingContext) return
@@ -298,31 +344,71 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
         const updatedRates = subdept.upload_rates.filter((_, i) => i !== index)
         updateSubdepartmentRates(editingContext.subdepartmentId, updatedRates)
         
-        // TODO: Implement actual API call to delete from database
-        // const { error } = await supabase
-        //   .from('tm_subdepartments')
-        //   .update({ upload_rates: updatedRates })
-        //   .eq('id', editingContext.subdepartmentId)
-        // 
-        // if (error) throw error
+        const { error } = await supabase
+          .from('tm_subdepartments')
+          .update({ upload_rates: updatedRates })
+          .eq('id', editingContext.subdepartmentId)
+        
+        if (error) throw error
         
       } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
         const subdept = departments
           .flatMap(dept => dept.tm_subdepartments || [])
           .find(sd => sd.id.toString() === editingContext.subdepartmentId)
         
-        const targetClass = subdept?.classes?.find(cls => cls.name === editingContext.classId)
+        if (!subdept) return
+        
+        const targetClass = subdept.classes?.find(cls => cls.name === editingContext.classId)
         if (!targetClass?.rates) return
         
+        // Update local state first for better UX
         const updatedRates = targetClass.rates.filter((_, i) => i !== index)
         updateClassRates(editingContext.subdepartmentId, editingContext.classId, updatedRates)
         
-        // TODO: Implement actual API call to delete from database
+        // Get current classes from the subdepartment
+        const { data: currentData, error: fetchError } = await supabase
+          .from('tm_subdepartments')
+          .select('classes')
+          .eq('id', editingContext.subdepartmentId)
+          .single()
+        
+        if (fetchError) throw fetchError
+        
+        // Update only the rates for the target class
+        const updatedClasses = currentData.classes.map((cls: any) => 
+          cls.name === editingContext.classId
+            ? { ...cls, rates: updatedRates }
+            : cls
+        )
+        
+        // Update the database with the modified classes array
+        const { error } = await supabase
+          .from('tm_subdepartments')
+          .update({ classes: updatedClasses })
+          .eq('id', editingContext.subdepartmentId)
+        
+        if (error) throw error
+        
+        // Show success message
+        toast({
+          title: "Success",
+          description: "Rate deleted successfully",
+          variant: "default"
+        })
       }
+      
+      setIsDeleteDialogOpen(false)
+      setDeleteContext(null)
       
     } catch (error) {
       console.error('Error deleting rate:', error)
-      // TODO: Show error toast
+      toast({
+        title: "Error",
+        description: "Failed to delete rate. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -343,50 +429,183 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
   }
 
   const handleAddMultipleRates = async () => {
-    if (!editingContext) return
-    
+    if (!selectedDept || !selectedSubdept) {
+      toast({
+        title: "Error",
+        description: "Please select a department and subdepartment",
+        variant: "destructive"
+      });
+      return;
+    }
+
     // Filter out empty rates
-    const validRates = newRates.filter(req => req.name.trim() !== '')
+    const validRates = newRates.filter(req => req.name.trim() !== '');
     
     if (validRates.length === 0) {
-      handleCloseDialog()
-      return
+      handleCloseDialog();
+      return;
     }
-    
+
     try {
-      setIsSubmitting(true)
-      
-      if (editingContext.type === 'subdepartment' && editingContext.subdepartmentId) {
-        await Promise.all(
-          validRates.map(req => 
-            saveSubdepartmentRate(
-              { name: req.name, description: req.description || null },
-              editingContext.subdepartmentId
-            )
-          )
-        )
-      } else if (editingContext.type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
-        await Promise.all(
-          validRates.map(req => 
-            saveClassRate(
-              { name: req.name, description: req.description || null },
-              editingContext.subdepartmentId,
-              editingContext.classId
-            )
-          )
-        )
+      setIsSubmitting(true);
+
+      // Get the selected department and subdepartment
+      const currentDept = departments.find(d => d.id === selectedDept);
+      const subdept = currentDept?.tm_subdepartments?.find(sd => sd.id.toString() === selectedSubdept);
+
+      if (!currentDept || !subdept) {
+        throw new Error('Department or subdepartment not found');
       }
+
+      // Update local state immediately for better UX
+      if (editingContext.type === 'subdepartment' || !subdept.classes?.length) {
+        const currentRates = subdept.upload_rates || [];
+        const updatedRates = [...currentRates, ...validRates.map(req => ({
+          name: req.name.trim(),
+          description: req.description?.trim() || null
+        }))];
+        updateSubdepartmentRates(editingContext.subdepartmentId, updatedRates);
+      } else if (editingContext.type === 'class') {
+        // If classId is empty, use the first class
+        const targetClass = selectedClass 
+          ? subdept.classes?.find(cls => cls.name === selectedClass)
+          : subdept.classes?.[0];
+        
+        if (!targetClass) {
+          throw new Error('No valid class found');
+        }
+
+        const currentRates = targetClass.rates || [];
+        const updatedRates = [...currentRates, ...validRates.map(req => ({
+          name: req.name.trim(),
+          description: req.description?.trim() || null
+        }))];
+        
+        updateClassRates(editingContext.subdepartmentId, targetClass.name, updatedRates);
+      }
+
+      // Update database
+      const { data: subdeptData, error: fetchError } = await supabase
+        .from('tm_subdepartments')
+        .select('*')
+        .eq('id', editingContext.subdepartmentId)
+        .single();
+
+      if (fetchError) {
+        throw fetchError;
+      }
+
+      // Prepare the update data
+      let updateData: any = {};
       
-      handleCloseDialog()
+      if (editingContext.type === 'subdepartment' || !subdept.classes?.length) {
+        // Handle subdepartment rates
+        const currentRates = subdeptData.upload_rates || [];
+        const newRates = validRates.map(req => ({
+          name: req.name.trim(),
+          description: req.description?.trim() || null
+        }));
+        updateData.upload_rates = [...currentRates, ...newRates];
+      } else {
+        // Handle class rates
+        const targetClassName = selectedClass || (subdept.classes?.[0]?.name);
+        if (!targetClassName) {
+          throw new Error('No valid class found');
+        }
+        
+        // Get current classes or initialize if not exists
+        const currentClasses = Array.isArray(subdeptData.classes) ? [...subdeptData.classes] : [];
+        const classIndex = currentClasses.findIndex(cls => cls.name === targetClassName);
+        
+        const newRates = validRates.map(req => ({
+          name: req.name.trim(),
+          description: req.description?.trim() || null
+        }));
+        
+        if (classIndex >= 0) {
+          // Update existing class
+          const existingClass = currentClasses[classIndex];
+          currentClasses[classIndex] = {
+            ...existingClass,
+            rates: [...(existingClass.rates || []), ...newRates]
+          };
+        } else {
+          // Add new class with rates
+          currentClasses.push({
+            name: targetClassName,
+            description: null,
+            rates: newRates
+          });
+        }
+        
+        updateData.classes = currentClasses;
+      }
+
+      // Update the database
+      const { error: updateError } = await supabase
+        .from('tm_subdepartments')
+        .update(updateData)
+        .eq('id', editingContext.subdepartmentId)
+        .select('*');
+        
+      // Refresh the data after successful update
+      if (!updateError) {
+        const { data: updatedData, error: refreshError } = await supabase
+          .from('tm_subdepartments')
+          .select('*')
+          .eq('id', editingContext.subdepartmentId)
+          .single();
+          
+        if (!refreshError && updatedData) {
+          // Update local state with fresh data from database
+          const updatedDepartments = departments.map(dept => ({
+            ...dept,
+            tm_subdepartments: dept.tm_subdepartments?.map(sd => 
+              sd.id.toString() === editingContext.subdepartmentId ? updatedData : sd
+            ) || []
+          }));
+          setDepartments(updatedDepartments);
+        }
+      }
+
+      if (updateError) {
+        // Revert local state on error
+        if (editingContext.type === 'subdepartment') {
+          updateSubdepartmentRates(editingContext.subdepartmentId, subdept.upload_rates || []);
+        } else if (editingContext.type === 'class' && editingContext.classId) {
+          const targetClass = subdept.classes?.find(cls => cls.name === editingContext.classId);
+          if (targetClass) {
+            updateClassRates(editingContext.subdepartmentId, editingContext.classId, targetClass.rates || []);
+          }
+        }
+        throw updateError;
+      }
+
+      // Show success message
+      toast({
+        title: "Success",
+        description: `Added ${validRates.length} rate${validRates.length > 1 ? 's' : ''} successfully`,
+        variant: "default"
+      });
+
+      handleCloseDialog();
     } catch (error) {
-      console.error('Error adding rates:', error)
-      // TODO: Show error toast
+      console.error('Error adding rates:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add rates. Please try again.",
+        variant: "destructive"
+      });
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
   }
 
   const renderRates = (rates: ClassRate[] | undefined, type: 'subdepartment' | 'class', context: typeof editingContext) => {
+    const handleDeleteClickWrapper = (e: React.MouseEvent, index: number) => {
+      e.stopPropagation()
+      handleDeleteClick(type, index)
+    }
     const hasRates = rates && rates.length > 0;
     const ratesList = [...(rates || [])];
     
@@ -525,7 +744,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
                             variant="ghost" 
                             size="icon" 
                             className="h-8 w-8 text-destructive hover:bg-red-50"
-                            onClick={() => handleDeleteRate(type, idx)}
+                            onClick={(e) => handleDeleteClickWrapper(e, idx)}
                             title="Delete"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -711,6 +930,11 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
     } catch (error) {
       console.error('Error moving rate:', error);
       // TODO: Show error toast to user
+      toast({
+        title: "Error",
+        description: "Failed to move rate. Please try again.",
+        variant: "destructive"
+      });
       // Revert local state on error
       if (type === 'subdepartment' && editingContext.subdepartmentId) {
         updateSubdepartmentRates(editingContext.subdepartmentId, rates);
@@ -719,7 +943,6 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
       }
     }
   };
-
 
   return (
     <div className="space-y-6">
@@ -794,6 +1017,33 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
         ))}
       </Tabs>
 
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Rate</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this {deleteContext?.type} rate? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={handleCloseDeleteDialog}
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDeleteConfirm}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Rates Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent>
@@ -803,6 +1053,91 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
           </DialogHeader>
           
           <div className="space-y-4">
+            {/* Department Selection */}
+            <div>
+              <Label htmlFor="department">Department</Label>
+              <select
+                id="department"
+                value={selectedDept}
+                onChange={(e) => {
+                  setSelectedDept(e.target.value);
+                  setSelectedSubdept('');
+                  setSelectedClass('');
+                }}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="">Select Department</option>
+                {departments.map((dept) => (
+                  <option key={dept.id} value={dept.id}>
+                    {dept.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Subdepartment Selection */}
+            {selectedDept && (
+              <div>
+                <Label htmlFor="subdepartment">Subdepartment</Label>
+                <select
+                  id="subdepartment"
+                  value={selectedSubdept}
+                  onChange={(e) => {
+                    setSelectedSubdept(e.target.value);
+                    setSelectedClass('');
+                  }}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">Select Subdepartment</option>
+                  {(() => {
+                    if (!selectedDept) return null;
+                    const dept = departments.find(d => d.id === selectedDept);
+                    if (!dept?.tm_subdepartments?.length) {
+                      return <option value="">No subdepartments available</option>;
+                    }
+                    return dept.tm_subdepartments.map((subdept) => (
+                      <option key={subdept.id} value={subdept.id.toString()}>
+                        {subdept.name}
+                      </option>
+                    ));
+                  })()}
+                </select>
+              </div>
+            )}
+
+            {/* Class Selection */}
+            {selectedSubdept && (() => {
+              // Find the selected subdepartment
+              const dept = departments.find(d => d.id === selectedDept);
+              if (!dept?.tm_subdepartments) return null;
+              
+              const subdept = dept.tm_subdepartments.find(sd => sd.id.toString() === selectedSubdept);
+              if (!subdept) return null;
+              
+              // Only show class selection if the subdepartment has classes
+              if (!subdept.classes?.length) return null;
+              
+              return (
+                <div>
+                  <Label htmlFor="class">Class</Label>
+                  <select
+                    id="class"
+                    value={selectedClass}
+                    onChange={(e) => setSelectedClass(e.target.value)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <option value="">Select Class</option>
+                    {subdept.classes.map((cls) => (
+                      <option key={cls.name} value={cls.name}>
+                        {cls.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })()}
+
+            {/* Rates */}
             <div className="space-y-2">
               {newRates.map((req, idx) => (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-end">
@@ -862,7 +1197,7 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
             </Button>
             <Button 
               onClick={handleAddMultipleRates}
-              disabled={!newRates.some(req => req.name.trim() !== '') || isSubmitting}
+              disabled={!selectedDept || !selectedSubdept || (!selectedClass && departments.find(d => d.id === selectedDept)?.tm_subdepartments?.find(sd => sd.id.toString() === selectedSubdept)?.classes?.length > 0) || !newRates.some(req => req.name.trim() !== '') || isSubmitting}
             >
               {isSubmitting ? (
                 <>
@@ -882,4 +1217,3 @@ export default function Rates({ departments: initialDepartments }: RatesProps) {
     </div>
   );
 }
-    
