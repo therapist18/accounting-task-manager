@@ -102,12 +102,10 @@ const requirementColumns = [
   { key: 'job_description', header: 'Job', width: '150px' },
   { key: 'job_head', header: 'Job Head', width: '120px' },
   { key: 'class', header: 'Class', width: '100px' },
-  { key: 'documents', header: 'All Submitted Documents', width: '180px' },
   { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
   { key: 'company_name', header: 'Company Name', width: '150px' },
   { key: 'dependent_name', header: 'Dependent Name', width: '150px' },
   { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
-  // Dynamic requirement columns will be added here
   { key: 'account_used', header: 'Account Used', width: '120px' },
   { key: 'applied_by', header: 'Applied by Who', width: '120px' },
   { key: 'batch', header: 'Batch', width: '100px' },
@@ -184,6 +182,9 @@ export default function TasksPage() {
     const dept = departments.find(d => d.id === selectedDepartment)
     const subdept = dept?.subdepartments?.find(s => s.id === selectedSubdepartment)
     
+    console.log('Current Department:', dept?.name, 'Subdepartment:', subdept?.name)
+    console.log('Subdepartment classes:', subdept?.classes)
+    
     // If subdepartment has classes but no display_stages, use the first class's display_stages as fallback
     if (subdept?.classes?.length && (!subdept.display_stages || subdept.display_stages.length === 0)) {
       const firstClassWithStages = subdept.classes.find(c => c.display_stages?.length)
@@ -216,6 +217,45 @@ export default function TasksPage() {
       return task.client?.full_name || 'N/A'
     }
 
+    // Get requirements for the current task
+    const getRequirements = () => {
+      const subdept = getCurrentSubdepartment()
+      console.log('Getting requirements for subdepartment:', subdept?.name)
+      
+      if (!subdept?.classes) {
+        console.log('No classes found in subdepartment')
+        return {}
+      }
+      
+      // Get the class name from the task or use the selected class
+      const className = task.class_name || task.class
+      console.log('Looking for class:', className, 'in classes:', subdept.classes.map(c => c.name))
+      
+      const taskClass = subdept.classes.find(c => c.name === className)
+      
+      if (!taskClass?.requirements || taskClass.requirements.length === 0) {
+        console.log('No requirements found for class:', className)
+        return {}
+      }
+      
+      console.log('Found requirements for class:', className, ':', taskClass.requirements)
+      
+      const requirements = taskClass.requirements.reduce((acc, req) => {
+        if (!req.name) return acc; // Skip if requirement has no name
+        const key = req.name.replace(/\s+/g, '_').toLowerCase()
+        acc[key] = {
+          status: req.is_required ? 'Required' : 'Optional',
+          description: req.description || ''
+        }
+        return acc
+      }, {} as Record<string, { status: string; description: string }>)
+      
+      console.log('Processed requirements:', requirements)
+      return requirements
+    }
+
+    const requirements = getRequirements()
+
     return {
       ...task,
       index: index + 1,
@@ -223,7 +263,7 @@ export default function TasksPage() {
       job_description: task.job_description || '',
       job_head: task.task_manager?.full_name || 'Unassigned',
       class: task.class_name || 'N/A',
-      documents: 'View Documents', // Placeholder - could be a button/link
+      documents: 'View Documents',
       applicant_name: task.client?.full_name || 'N/A',
       company_name: getCompanyName(),
       dependent_name: task.dependent_name || '',
@@ -231,39 +271,32 @@ export default function TasksPage() {
       account_used: task.account_used || '',
       applied_by: task.applied_by || 'System',
       batch: task.batch || '',
+      ...requirements
     }
   }
 
   // Generate dynamic stage columns based on current subdepartment
   const generateStageColumns = () => {
-    const subdept = getCurrentSubdepartment()
-    if (!subdept?.stages) return stageColumns
-
-    // Get all displayable stages (either from subdepartment or its classes)
-    let displayStages = [...(subdept.display_stages || [])]
+    const dept = departments.find(d => d.id === selectedDepartment)
+    const subdept = dept?.subdepartments?.find(s => s.id === selectedSubdepartment)
     
-    // If subdepartment has classes and a task has a class, use that class's display_stages
-    if (subdept.classes?.length) {
-      const taskClass = subdept.classes.find(c => c.name === tasks[0]?.class_name)
-      if (taskClass?.display_stages?.length) {
-        displayStages = taskClass.display_stages
-      }
-    }
+    // Get stages from department and subdepartment
+    const allStages = [...(dept?.stages || []), ...(subdept?.stages || [])]
+    
+    // Remove duplicates by id
+    const uniqueStages = Array.from(new Map(allStages.map(stage => [stage.id, stage])).values())
+    
+    // Sort stages by order_num
+    uniqueStages.sort((a, b) => a.order_num - b.order_num)
 
-    // Only show stages that are both in stages and display_stages
-    const visibleStages = subdept.stages.filter(stage => 
-      displayStages.includes(stage.id) || 
-      subdept.stages?.includes(stage.id) // Fallback to all allocated stages if no display_stages
-    )
-
-    const dynamicStageColumns = visibleStages.map(stage => ({
+    const dynamicStageColumns = uniqueStages.map(stage => ({
       key: `stage_${stage.id}`,
       header: stage.name,
       width: '120px',
       render: (value: any, task: Task) => {
         // Check if task is in this stage
         const isCurrentStage = task.current_stage?.id === stage.id
-        const isCompleted = task.current_stage && task.current_stage.order > stage.order
+        const isCompleted = task.current_stage && task.current_stage.order > stage.order_num
         
         if (isCurrentStage) {
           return <Badge variant="default">In Progress</Badge>
@@ -275,7 +308,6 @@ export default function TasksPage() {
       }
     }))
 
-
     // Insert stage columns before account_used
     const baseColumns = stageColumns.slice(0, -3) // Remove last 3 columns
     const endColumns = stageColumns.slice(-3) // Get last 3 columns
@@ -285,35 +317,53 @@ export default function TasksPage() {
 
   // Generate dynamic requirement columns based on current subdepartment and class
   const generateRequirementColumns = (className?: string) => {
+    console.log('Generating requirement columns for class:', className)
     const subdept = getCurrentSubdepartment()
-    if (!subdept?.classes) return requirementColumns
-
-    const selectedClass = subdept.classes.find(c => c.name === className)
-    if (!selectedClass?.requirements) return requirementColumns
-
-    const dynamicRequirementColumns = selectedClass.requirements.map(req => ({
-      key: `req_${req.name.replace(/\s+/g, '_').toLowerCase()}`,
-      header: req.name,
-      width: '150px',
-      render: (value: any, task: Task) => {
-        // Check if requirement is fulfilled - this would need to be tracked in your task data
-        // For now, showing placeholder status
-        return (
-          <div className="flex items-center gap-2">
-            <Badge variant="outline">Pending</Badge>
-            <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
-              <Upload className="h-3 w-3" />
-            </Button>
-          </div>
-        )
-      }
-    }))
-
-    // Insert requirement columns before account_used
-    const baseColumns = requirementColumns.slice(0, -3) // Remove last 3 columns
-    const endColumns = requirementColumns.slice(-3) // Get last 3 columns
     
-    return [...baseColumns, ...dynamicRequirementColumns, ...endColumns]
+    if (!subdept?.classes) {
+      console.log('No classes found in subdepartment')
+      return requirementColumns
+    }
+
+    console.log('Looking for class:', className, 'in:', subdept.classes.map(c => c.name))
+    const selectedClass = subdept.classes.find(c => c.name === className)
+    
+    if (!selectedClass?.requirements) {
+      console.log('No requirements found for class:', className)
+      return requirementColumns
+    }
+
+    console.log('Found requirements for class:', className, ':', selectedClass.requirements)
+    
+    const dynamicRequirementColumns = selectedClass.requirements.map(req => {
+      const column = {
+        key: `req_${req.name.replace(/\s+/g, '_').toLowerCase()}`,
+        header: req.name,
+        width: '150px',
+        render: (value: any, task: Task) => {
+          console.log('Rendering requirement:', req.name, 'for task:', task.id)
+          return (
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">Pending</Badge>
+              <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
+                <Upload className="h-3 w-3" />
+              </Button>
+            </div>
+          )
+        }
+      }
+      console.log('Created column for requirement:', req.name, column)
+      return column
+    })
+
+    console.log('Generated requirement columns:', dynamicRequirementColumns)
+    
+    // Insert requirement columns after the base columns
+    const baseColumns = requirementColumns
+    const result = [...baseColumns, ...dynamicRequirementColumns]
+    
+    console.log('Final columns:', result)
+    return result
   }
 
   const handleTaskAssignment = (taskId: string) => {
@@ -351,7 +401,15 @@ export default function TasksPage() {
   }
 
   const renderTaskTable = (tasks: Task[], columns: any[], showRequirements = false, selectedClass?: string) => {
-    const finalColumns = showRequirements ? generateRequirementColumns(selectedClass) : generateStageColumns()
+    console.log('Rendering task table. Show requirements:', showRequirements, 'Selected class:', selectedClass)
+    
+    // Get the class from the first task if not provided
+    const effectiveClass = selectedClass || (tasks.length > 0 ? tasks[0].class_name || tasks[0].class : undefined)
+    console.log('Effective class for requirements:', effectiveClass)
+    
+    const finalColumns = showRequirements ? generateRequirementColumns(effectiveClass) : generateStageColumns()
+    
+    console.log('Final columns for table:', finalColumns)
     
     return (
       <div className="rounded-md border w-full overflow-hidden">

@@ -102,16 +102,14 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
 
   const updateTimeConfig = (stageId: string, index: number, updates: Partial<TimeConfig>) => {
     setNewStages(prev =>
-      prev.map(stage =>
-        stage.id === stageId
-          ? {
-              ...stage,
-              timeConfigs: stage.timeConfigs.map((config, i) =>
-                i === index ? { ...config, ...updates } : config
-              )
-            }
-          : stage
-      )
+      prev.map(stage => {
+        if (stage.id === stageId) {
+          const newTimeConfigs = [...stage.timeConfigs];
+          newTimeConfigs[index] = { ...newTimeConfigs[index], ...updates };
+          return { ...stage, timeConfigs: newTimeConfigs };
+        }
+        return stage;
+      })
     )
   }
 

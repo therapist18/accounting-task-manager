@@ -577,28 +577,54 @@ export default function Stages() {
       const currentDept = getCurrentDepartment()
       if (!currentDept) return
 
+      // Process each stage to ensure proper time configurations
       const newStagesData = stages
         .filter(stage => stage.name.trim() !== '')
         .map((stage, index) => {
-          // For special stages, we'll store the time configs and calculate time based on application type
-          // For non-special stages, we'll use the direct time input
-          const timeConfig = stage.isSpecial && stage.timeConfigs?.length > 0
-            ? stage.timeConfigs[0] // Default to first config for now
-            : { days: stage.days, hours: stage.hours, minutes: stage.minutes }
+          // For special stages, we need to ensure timeConfigs are properly formatted
+          if (stage.isSpecial) {
+            const timeConfigs = Array.isArray(stage.timeConfigs) 
+              ? stage.timeConfigs.map(config => ({
+                  applicationType: config.applicationType || 'Default',
+                  days: Number(config.days) || 0,
+                  hours: Number(config.hours) || 0,
+                  minutes: Number(config.minutes) || 0
+                }))
+              : [];
 
+            // Calculate total minutes from the first config (or default to 0)
+            const firstConfig = timeConfigs[0] || { days: 0, hours: 0, minutes: 0 };
+            const totalMinutes = (firstConfig.days * 24 * 60) + (firstConfig.hours * 60) + firstConfig.minutes;
 
-          const totalMinutes = (timeConfig.days * 24 * 60) + (timeConfig.hours * 60) + timeConfig.minutes
+            return {
+              id: generateId(),
+              name: stage.name.trim(),
+              estimated_time: totalMinutes,
+              order_num: currentDept.stages.length + index + 1,
+              follow_up: stage.followUp === 'none' ? null : stage.followUp as 'Client' | 'Officer' | 'BCL',
+              isSpecial: true,
+              timeConfigs: timeConfigs.length > 0 ? timeConfigs : undefined,
+              allocations: {}
+            };
+          }
+          
+          // For regular stages, use direct time input
+          const days = Number(stage.days) || 0;
+          const hours = Number(stage.hours) || 0;
+          const minutes = Number(stage.minutes) || 0;
+          const totalMinutes = (days * 24 * 60) + (hours * 60) + minutes;
 
           return {
-            name: stage.name,
+            id: generateId(),
+            name: stage.name.trim(),
             estimated_time: totalMinutes,
             order_num: currentDept.stages.length + index + 1,
             follow_up: stage.followUp === 'none' ? null : stage.followUp as 'Client' | 'Officer' | 'BCL',
-            isSpecial: stage.isSpecial,
-            timeConfigs: stage.isSpecial ? stage.timeConfigs : undefined,
+            isSpecial: false,
+            timeConfigs: undefined,
             allocations: {}
-          }
-        })
+          };
+        });
 
       if (newStagesData.length === 0) {
         toast({
@@ -609,11 +635,28 @@ export default function Stages() {
         return
       }
 
-      // Update department with new stages
+      // Prepare stages for database update
+      const updatedStages = [
+        ...currentDept.stages,
+        ...newStagesData.map(stage => ({
+          ...stage,
+          // Ensure timeConfigs is properly formatted for the database
+          timeConfigs: stage.isSpecial && stage.timeConfigs
+            ? stage.timeConfigs.map(config => ({
+                applicationType: config.applicationType,
+                days: Number(config.days) || 0,
+                hours: Number(config.hours) || 0,
+                minutes: Number(config.minutes) || 0
+              }))
+            : undefined
+        }))
+      ];
+
+      // Update department with new stages in the database
       const { data: updatedDept, error: updateError } = await supabase
         .from('tm_departments')
         .update({
-          stages: [...currentDept.stages, ...newStagesData],
+          stages: updatedStages,
           updated_at: new Date().toISOString()
         })
         .eq('id', currentDept.id)
@@ -622,13 +665,14 @@ export default function Stages() {
 
       if (updateError) throw updateError
 
-      // Update local state
+      // Update local state with the new stages
       setDepartments(departments.map(dept =>
         dept.id === currentDept.id
-          ? { ...dept, stages: [...dept.stages, ...newStagesData] }
+          ? { ...dept, stages: updatedStages }
           : dept
       ))
 
+      // Close the dialog
       setIsDialogOpen(false)
 
       toast({
