@@ -20,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import supabase from "@/lib/supabase/client"
 
 type ClassRequirement = {
   name: string
@@ -64,18 +65,52 @@ export default function DepartmentRequirements({ departments: initialDepartments
     classId?: string
   } | null>(null)
   const [newRequirements, setNewRequirements] = useState<Array<{ name: string; description: string }>>([{ name: '', description: '' }])
-  const [isSubmitting, setIsSubmitting] = useState(false) 
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<{name: string; description: string}>({ name: '', description: '' });
   
-  // Initialize active subdepartment if not set
+  // Initialize active subdepartment and editing context
   useEffect(() => {
-    const currentDept = departments.find(d => d.id === activeDept) || departments[0]
-    if (currentDept && !activeSubdept[currentDept.id] && currentDept.tm_subdepartments?.length) {
-      setActiveSubdept(prev => ({
-        ...prev,
-        [currentDept.id]: currentDept.tm_subdepartments[0].id.toString()
-      }))
+    const currentDept = departments.find(d => d.id === activeDept) || departments[0];
+    if (!currentDept) return;
+    
+    let subdeptId = activeSubdept[currentDept.id];
+    let classId = '';
+    
+    // Set active subdepartment if not set
+    if (currentDept.tm_subdepartments?.length) {
+      if (!subdeptId) {
+        subdeptId = currentDept.tm_subdepartments[0].id.toString();
+        setActiveSubdept(prev => ({
+          ...prev,
+          [currentDept.id]: subdeptId
+        }));
+      }
+      
+      // Set active class if not set
+      const currentSubdept = currentDept.tm_subdepartments.find(sd => sd.id.toString() === subdeptId);
+      if (currentSubdept?.classes?.length) {
+        const subdeptKey = `${currentDept.id}-${subdeptId}`;
+        if (!activeClass[subdeptKey]) {
+          classId = currentSubdept.classes[0].name;
+          setActiveClass(prev => ({
+            ...prev,
+            [subdeptKey]: classId
+          }));
+        } else {
+          classId = activeClass[subdeptKey];
+        }
+      }
+      
+      // Set editing context
+      setEditingContext({
+        type: currentSubdept?.classes?.length ? 'class' : 'subdepartment',
+        departmentId: currentDept.id,
+        subdepartmentId: subdeptId,
+        classId: classId || undefined
+      });
     }
-  }, [activeDept, departments, activeSubdept])
+  }, [activeDept, departments, activeSubdept, activeClass]);
 
   const openMultipleRequirementsDialog = (
     type: 'subdepartment' | 'class'
@@ -126,37 +161,46 @@ export default function DepartmentRequirements({ departments: initialDepartments
     subdepartmentId?: string, 
     index?: number
   ) => {
-    if (!subdepartmentId) return
+    if (!subdepartmentId) return;
     
     try {
       const subdept = departments
         .flatMap(dept => dept.tm_subdepartments || [])
-        .find(sd => sd.id.toString() === subdepartmentId)
+        .find(sd => sd.id.toString() === subdepartmentId);
       
-      if (!subdept) return
+      if (!subdept) return;
       
-      const currentRequirements = subdept.upload_requirements || []
+      const currentRequirements = subdept.upload_requirements || [];
       const updatedRequirements = 
         index !== undefined && index >= 0
           ? currentRequirements.map((r, i) => (i === index ? requirement : r))
-          : [...currentRequirements, requirement]
+          : [...currentRequirements, requirement];
       
       // Update local state immediately for better UX
-      updateSubdepartmentRequirements(subdepartmentId, updatedRequirements)
+      updateSubdepartmentRequirements(subdepartmentId, updatedRequirements);
       
-      // TODO: Uncomment and implement actual API call
-      // const { error } = await supabase
-      //   .from('tm_subdepartments')
-      //   .update({ upload_requirements: updatedRequirements })
-      //   .eq('id', subdepartmentId)
-      // 
-      // if (error) throw error
+      // Update database
+      const { error } = await supabase
+        .from('tm_subdepartments')
+        .update({ upload_requirements: updatedRequirements })
+        .eq('id', subdepartmentId);
+      
+      if (error) throw error;
+      
+      // Show success message
+      // toast.success('Requirements updated successfully');
       
     } catch (error) {
-      console.error('Error saving subdepartment requirement:', error)
-      // TODO: Show error toast and revert local state on error
+      console.error('Error saving subdepartment requirement:', error);
       // Revert local state on error
-      // updateSubdepartmentRequirements(subdepartmentId, currentRequirements)
+      const subdept = departments
+        .flatMap(dept => dept.tm_subdepartments || [])
+        .find(sd => sd.id.toString() === subdepartmentId);
+      if (subdept) {
+        updateSubdepartmentRequirements(subdepartmentId, subdept.upload_requirements || []);
+      }
+      // Show error message
+      // toast.error('Failed to update requirements');
     }
   }
   
@@ -166,55 +210,69 @@ export default function DepartmentRequirements({ departments: initialDepartments
     className?: string, 
     index?: number
   ) => {
-    if (!subdepartmentId || !className) return
+    if (!subdepartmentId || !className) return;
     
     try {
       const subdept = departments
         .flatMap(dept => dept.tm_subdepartments || [])
-        .find(sd => sd.id.toString() === subdepartmentId)
+        .find(sd => sd.id.toString() === subdepartmentId);
       
-      if (!subdept) return
+      if (!subdept) return;
       
-      const targetClass = subdept.classes?.find(cls => cls.name === className)
-      if (!targetClass) return
+      const targetClass = subdept.classes?.find(cls => cls.name === className);
+      if (!targetClass) return;
       
-      const currentRequirements = targetClass.requirements || []
+      const currentRequirements = targetClass.requirements || [];
       const updatedRequirements = 
         index !== undefined && index >= 0
           ? currentRequirements.map((r, i) => (i === index ? requirement : r))
-          : [...currentRequirements, requirement]
+          : [...currentRequirements, requirement];
       
       // Update local state immediately for better UX
-      updateClassRequirements(subdepartmentId, className, updatedRequirements)
+      updateClassRequirements(subdepartmentId, className, updatedRequirements);
       
-      // TODO: Uncomment and implement actual API call
-      // 1. Get the current subdepartment
-      // const { data: subdeptData, error: fetchError } = await supabase
-      //   .from('tm_subdepartments')
-      //   .select('classes')
-      //   .eq('id', subdepartmentId)
-      //   .single()
-      // 
-      // if (fetchError) throw fetchError
-      // 
-      // 2. Update the class requirements
-      // const updatedClasses = subdeptData.classes.map((cls: any) => 
-      //   cls.name === className 
-      //     ? { ...cls, requirements: updatedRequirements }
-      //     : cls
-      // )
-      // 
-      // 3. Save back to database
-      // const { error: updateError } = await supabase
-      //   .from('tm_subdepartments')
-      //   .update({ classes: updatedClasses })
-      //   .eq('id', subdepartmentId)
-      // 
-      // if (updateError) throw updateError
+      // Get current subdepartment data
+      const { data: subdeptData, error: fetchError } = await supabase
+        .from('tm_subdepartments')
+        .select('classes')
+        .eq('id', subdepartmentId)
+        .single();
+      
+      if (fetchError) throw fetchError;
+      
+      // Update the class requirements in the classes array
+      const updatedClasses = subdeptData.classes.map((cls: any) => 
+        cls.name === className 
+          ? { ...cls, requirements: updatedRequirements }
+          : cls
+      );
+      
+      // Save back to database
+      const { error: updateError } = await supabase
+        .from('tm_subdepartments')
+        .update({ classes: updatedClasses })
+        .eq('id', subdepartmentId);
+      
+      if (updateError) throw updateError;
+      
+      // Show success message
+      // toast.success('Class requirements updated successfully');
       
     } catch (error) {
-      console.error('Error saving class requirement:', error)
-      // TODO: Show error toast and revert local state on error
+      console.error('Error saving class requirement:', error);
+      // Revert local state on error
+      const subdept = departments
+        .flatMap(dept => dept.tm_subdepartments || [])
+        .find(sd => sd.id.toString() === subdepartmentId);
+      
+      if (subdept) {
+        const targetClass = subdept.classes?.find(cls => cls.name === className);
+        if (targetClass) {
+          updateClassRequirements(subdepartmentId, className, targetClass.requirements || []);
+        }
+      }
+      // Show error message
+      // toast.error('Failed to update class requirements');
     }
   }
   
@@ -266,22 +324,6 @@ export default function DepartmentRequirements({ departments: initialDepartments
       console.error('Error deleting requirement:', error)
       // TODO: Show error toast
     }
-  }
-
-  const moveRequirement = (requirements: ClassRequirement[], currentIndex: number, direction: 'up' | 'down'): ClassRequirement[] => {
-    const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
-    
-    // Check if the move is valid
-    if (newIndex < 0 || newIndex >= requirements.length) {
-      return requirements
-    }
-    
-    // Create a new array with the items swapped
-    const newRequirements = [...requirements]
-    const [movedItem] = newRequirements.splice(currentIndex, 1)
-    newRequirements.splice(newIndex, 0, movedItem)
-    
-    return newRequirements
   }
 
   const addNewRequirement = () => {
@@ -344,14 +386,13 @@ export default function DepartmentRequirements({ departments: initialDepartments
     }
   }
 
-  const renderRequirements = (requirements: ClassRequirement[] | undefined, type: 'subdepartment' | 'class') => {
+  const renderRequirements = (requirements: ClassRequirement[] | undefined, type: 'subdepartment' | 'class', context: typeof editingContext) => {
     const hasRequirements = requirements && requirements.length > 0;
     const requirementsList = [...(requirements || [])];
-    const [editingIndex, setEditingIndex] = useState<number | null>(null);
-    const [editForm, setEditForm] = useState<{name: string; description: string}>({ name: '', description: '' });
     
     const handleMove = (index: number, direction: 'up' | 'down') => {
-      handleMoveRequirement(index, direction, type, requirements || []);
+      if (!requirements || !context) return;
+      handleMoveRequirement(index, direction, type, requirements);
     };
 
     const handleEdit = (index: number) => {
@@ -363,17 +404,17 @@ export default function DepartmentRequirements({ departments: initialDepartments
     };
 
     const handleSaveEdit = async () => {
-      if (editingIndex === null || !editingContext) return;
+      if (editingIndex === null || !context) return;
       
       const updatedRequirement = {
         name: editForm.name.trim(),
         description: editForm.description.trim() || null
       };
 
-      if (type === 'subdepartment' && editingContext.subdepartmentId) {
-        await saveSubdepartmentRequirement(updatedRequirement, editingContext.subdepartmentId, editingIndex);
-      } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
-        await saveClassRequirement(updatedRequirement, editingContext.subdepartmentId, editingContext.classId, editingIndex);
+      if (type === 'subdepartment' && context.subdepartmentId) {
+        await saveSubdepartmentRequirement(updatedRequirement, context.subdepartmentId, editingIndex);
+      } else if (type === 'class' && context.subdepartmentId && context.classId) {
+        await saveClassRequirement(updatedRequirement, context.subdepartmentId, context.classId, editingIndex);
       }
       
       setEditingIndex(null);
@@ -448,7 +489,7 @@ export default function DepartmentRequirements({ departments: initialDepartments
                           <Button 
                             variant="ghost" 
                             size="icon" 
-                            className="h-8 w-8 opacity-0 group-hover:opacity-100 hover:bg-blue-50"
+                            className="h-8 w-8 hover:bg-blue-50"
                             onClick={() => handleEdit(idx)}
                             title="Edit"
                           >
@@ -457,7 +498,7 @@ export default function DepartmentRequirements({ departments: initialDepartments
                           <Button 
                             variant="ghost" 
                             size="icon" 
-                            className="h-8 w-8 opacity-0 group-hover:opacity-100"
+                            className="h-8 w-8"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleMove(idx, 'up');
@@ -470,7 +511,7 @@ export default function DepartmentRequirements({ departments: initialDepartments
                           <Button 
                             variant="ghost" 
                             size="icon" 
-                            className="h-8 w-8 opacity-0 group-hover:opacity-100"
+                            className="h-8 w-8"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleMove(idx, 'down');
@@ -504,18 +545,6 @@ export default function DepartmentRequirements({ departments: initialDepartments
             </TableBody>
           </Table>
         </div>
-        
-        <div className="flex justify-end">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => openMultipleRequirementsDialog(type)}
-            className="mt-2"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Add Requirements
-          </Button>
-        </div>
       </div>
     )
   }
@@ -523,15 +552,25 @@ export default function DepartmentRequirements({ departments: initialDepartments
   const renderSubdepartmentContent = (subdept: Subdepartment, deptId: string) => {
     const hasClasses = subdept.classes && subdept.classes.length > 0;
     const subdeptKey = `${deptId}-${subdept.id}`;
+    const currentClass = activeClass[subdeptKey];
     
-    // Initialize active class tab if not set
-    if (hasClasses && !activeClass[subdeptKey] && subdept.classes?.[0]?.name) {
-      setActiveClass(prev => ({
-        ...prev,
-        [subdeptKey]: subdept.classes[0].name
-      }));
-      return null;
-    }
+    // Update editing context when subdepartment or class changes
+    useEffect(() => {
+      setEditingContext({
+        type: hasClasses ? 'class' : 'subdepartment',
+        departmentId: deptId,
+        subdepartmentId: subdept.id.toString(),
+        classId: hasClasses ? currentClass : undefined
+      });
+    }, [deptId, subdept.id, hasClasses, currentClass]);
+    
+    // Create context for requirements rendering
+    const context = {
+      type: hasClasses ? 'class' as const : 'subdepartment' as const,
+      departmentId: deptId,
+      subdepartmentId: subdept.id.toString(),
+      classId: hasClasses ? activeClass[subdeptKey] : undefined
+    };
 
     return (
       <div className="space-y-6">
@@ -573,7 +612,7 @@ export default function DepartmentRequirements({ departments: initialDepartments
                   {cls.description && (
                     <p className="text-muted-foreground">{cls.description}</p>
                   )}
-                  {renderRequirements(cls.requirements, 'class')}
+                  {renderRequirements(cls.requirements, 'class', context)}
                 </TabsContent>
               ))}
             </Tabs>
@@ -591,7 +630,7 @@ export default function DepartmentRequirements({ departments: initialDepartments
                 Add Requirements
               </Button>
             </div>
-            {renderRequirements(subdept.upload_requirements, 'subdepartment')}
+            {renderRequirements(subdept.upload_requirements, 'subdepartment', context)}
           </div>
         )}
       </div>
@@ -607,15 +646,77 @@ export default function DepartmentRequirements({ departments: initialDepartments
     )
   }
 
-  const handleMoveRequirement = (index: number, direction: 'up' | 'down', type: 'subdepartment' | 'class', requirements: ClassRequirement[] = []) => {
+  const moveRequirement = (requirements: ClassRequirement[], currentIndex: number, direction: 'up' | 'down'): ClassRequirement[] => {
+    const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    
+    // Check if the move is valid
+    if (newIndex < 0 || newIndex >= requirements.length) {
+      return requirements;
+    }
+    
+    // Create a new array with the items swapped
+    const newRequirements = [...requirements];
+    [newRequirements[currentIndex], newRequirements[newIndex]] = 
+      [newRequirements[newIndex], newRequirements[currentIndex]];
+    
+    return newRequirements;
+  };
+
+  const handleMoveRequirement = async (index: number, direction: 'up' | 'down', type: 'subdepartment' | 'class', requirements: ClassRequirement[] = []) => {
     if (!editingContext) return;
     
     const updatedRequirements = moveRequirement(requirements, index, direction);
     
-    if (type === 'subdepartment' && editingContext.subdepartmentId) {
-      updateSubdepartmentRequirements(editingContext.subdepartmentId, updatedRequirements);
-    } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
-      updateClassRequirements(editingContext.subdepartmentId, editingContext.classId, updatedRequirements);
+    try {
+      if (type === 'subdepartment' && editingContext.subdepartmentId) {
+        // Update local state immediately for better UX
+        updateSubdepartmentRequirements(editingContext.subdepartmentId, updatedRequirements);
+        
+        // Update database
+        const { error } = await supabase
+          .from('tm_subdepartments')
+          .update({ upload_requirements: updatedRequirements })
+          .eq('id', editingContext.subdepartmentId);
+          
+        if (error) throw error;
+        
+      } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
+        // Update local state immediately for better UX
+        updateClassRequirements(editingContext.subdepartmentId, editingContext.classId, updatedRequirements);
+        
+        // Get current subdepartment data
+        const { data: subdeptData, error: fetchError } = await supabase
+          .from('tm_subdepartments')
+          .select('classes')
+          .eq('id', editingContext.subdepartmentId)
+          .single();
+          
+        if (fetchError) throw fetchError;
+        
+        // Update the class requirements in the classes array
+        const updatedClasses = subdeptData.classes.map((cls: any) => 
+          cls.name === editingContext.classId 
+            ? { ...cls, requirements: updatedRequirements }
+            : cls
+        );
+        
+        // Save back to database
+        const { error: updateError } = await supabase
+          .from('tm_subdepartments')
+          .update({ classes: updatedClasses })
+          .eq('id', editingContext.subdepartmentId);
+          
+        if (updateError) throw updateError;
+      }
+    } catch (error) {
+      console.error('Error moving requirement:', error);
+      // TODO: Show error toast to user
+      // Revert local state on error
+      if (type === 'subdepartment' && editingContext.subdepartmentId) {
+        updateSubdepartmentRequirements(editingContext.subdepartmentId, requirements);
+      } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
+        updateClassRequirements(editingContext.subdepartmentId, editingContext.classId, requirements);
+      }
     }
   };
 
