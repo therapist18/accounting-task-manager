@@ -637,24 +637,26 @@ export default function DepartmentRequirements({ departments: initialDepartments
     };
 
     return (
-            <Table className="space-y-4 relative h-[calc(80vh-200px)] overflow-auto border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm">
-              <TableHeader className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800">
-                <TableRow className="border-b border-gray-200 dark:border-gray-700">
-                  <TableHead className="w-12 px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-gray-700">
-                    #
-                  </TableHead>
-                  <TableHead className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-gray-700">
-                    Requirement
-                  </TableHead>
-                  <TableHead className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-gray-700">
-                    Description
-                  </TableHead>
-                  <TableHead className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-48">
-                    Actions
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody className="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-900">
+      <div className="relative h-[calc(80vh-200px)] border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm flex flex-col">
+        <div className="flex-1 overflow-auto">
+          <Table className="w-full border-collapse">
+            <TableHeader className="sticky top-0 z-10">
+              <TableRow className="bg-gray-50 dark:bg-gray-800">
+                <TableHead className="sticky left-0 z-20 w-12 px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                  #
+                </TableHead>
+                <TableHead className="sticky left-12 z-20 px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                  Requirement
+                </TableHead>
+                <TableHead className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                  Description
+                </TableHead>
+                <TableHead className="sticky right-0 z-20 px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-48 bg-gray-50 dark:bg-gray-800">
+                  Actions
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                 {hasRequirements ? requirementsWithIndex.map((req, idx) => (
                   <TableRow 
                     key={`req-${idx}`} 
@@ -791,6 +793,8 @@ export default function DepartmentRequirements({ departments: initialDepartments
                 )}
               </TableBody>
             </Table>
+          </div>
+      </div>
     )
   }
 
