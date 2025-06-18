@@ -1,1219 +1,825 @@
-// @ts-nocheck
-'use client'
+"use client"
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { useState, useEffect } from "react"
-import { cn } from "@/lib/utils"
-import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check } from "lucide-react"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import supabase from "@/lib/supabase/client"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Badge } from "@/components/ui/badge"
+import { Settings, ChevronDown, Calculator, Plus, Minus } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
+import { fetchDepartments, type DepartmentWithSubdepartments } from "./database"
 
-type ClassRate = {
-  name: string
-  description: string | null
+interface RateData {
+  usd: number
+  ksh: number
 }
 
-type SubdepartmentClass = {
-  name: string
-  description: string | null
-  rates: ClassRate[]
+interface RateRow {
+  id: string
+  departmentId: string
+  subdepartmentId: string
+  classId?: string
+  subdepartment: string
+  class: string
+  processingFeeAmount: string
+  processingFeeCurrency: string
+  processingFeeRate: string
+  issuanceFeeAmount: string
+  issuanceFeeCurrency: string
+  issuanceFeeRate: string
+  issuancePeriodDenomination: string[]
+  noOfIssuancePeriod: string[]
+  bclTier1: string
+  bclTier2: string
+  bclTier3: string
+  officer1: string
+  officer2: string
+  officer3: string
 }
 
-type Subdepartment = {
+interface GroupedData {
+  subdepartment: string
+  classes: RateRow[]
+  isExpanded: boolean
+}
+
+// Define the type for subdepartments (matching what's used in requirements component)
+interface Subdepartment {
   id: number
   name: string
-  description: string | null
-  classes?: SubdepartmentClass[]
-  upload_rates?: ClassRate[]
+  description?: string
+  classes?: Array<{
+    name: string
+    description: string | null
+    requirements: Array<{
+      name: string
+      description: string | null
+    }>
+  }>
 }
 
-type Department = {
+// Define the type for departments (matching what's used in requirements component)
+interface Department {
   id: string
   name: string
-  description: string
+  description?: string
   tm_subdepartments?: Subdepartment[]
 }
 
-interface RatesProps {
-  departments: Department[]
+interface RatesPageProps {
+  departments?: Department[]
 }
 
-export default function Rates({ departments: initialDepartments }: RatesProps) {
+export default function RatesPage({ departments: initialDepartments }: RatesPageProps) {
+  const [rates, setRates] = useState<RateData>({ usd: 150, ksh: 1 })
+  const [tempRates, setTempRates] = useState<RateData>({ usd: 150, ksh: 1 })
+  const [isRateDialogOpen, setIsRateDialogOpen] = useState(false)
   const [departments, setDepartments] = useState<Department[]>(initialDepartments || [])
-  const [activeDept, setActiveDept] = useState(initialDepartments?.[0]?.id || '')
-  const [activeSubdept, setActiveSubdept] = useState<Record<string, string>>({})
-  const [activeClass, setActiveClass] = useState<Record<string, string>>({})
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [deleteContext, setDeleteContext] = useState<{
-    type: 'subdepartment' | 'class'
-    index: number
-  } | null>(null)
-  const [editingContext, setEditingContext] = useState<{
-    type: 'subdepartment' | 'class'
-    departmentId: string
-    subdepartmentId?: string
-    classId?: string
-  } | null>(null)
-  const [newRates, setNewRates] = useState<Array<{ name: string; description: string }>>([{ name: '', description: '' }])
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<{name: string; description: string}>({ name: '', description: '' });
-  const [selectedDept, setSelectedDept] = useState<string>('');
-  const [selectedSubdept, setSelectedSubdept] = useState<string>('');
-  const [selectedClass, setSelectedClass] = useState<string>('');
-  
-  // Initialize selected department when departments change
+  const [isLoading, setIsLoading] = useState(!initialDepartments)
+  const [selectedDepartment, setSelectedDepartment] = useState<string>('')
+
+  // Initialize table data from departments
+  const [tableData, setTableData] = useState<RateRow[]>([])
+  const [expandedSubdepartments, setExpandedSubdepartments] = useState<Set<string>>(new Set())
+
+  // Fetch departments if not provided as props
   useEffect(() => {
-    if (departments.length > 0 && !selectedDept) {
-      const deptId = departments[0].id;
-      setSelectedDept(deptId);
-      
-      // Also set the first subdepartment if available
-      const firstSubdept = departments[0].tm_subdepartments?.[0];
-      if (firstSubdept) {
-        setSelectedSubdept(firstSubdept.id.toString());
-      }
-    }
-  }, [departments]);
-  
-  // Initialize active subdepartment and editing context
-  useEffect(() => {
-    const currentDept = departments.find(d => d.id === activeDept) || departments[0];
-    if (!currentDept) {
-      return;
-    }
-    
-    let subdeptId = activeSubdept[currentDept.id];
-    let classId = '';
-    
-    // Set active subdepartment if not set
-    if (currentDept.tm_subdepartments?.length) {
-      if (!subdeptId) {
-        subdeptId = currentDept.tm_subdepartments[0].id.toString();
-        setActiveSubdept(prev => ({
-          ...prev,
-          [currentDept.id]: subdeptId
-        }));
-      }
-      
-      // Set active class if not set
-      const currentSubdept = currentDept.tm_subdepartments.find(sd => sd.id.toString() === subdeptId);
-      if (currentSubdept?.classes?.length) {
-        const subdeptKey = `${currentDept.id}-${subdeptId}`;
-        if (!activeClass[subdeptKey]) {
-          classId = currentSubdept.classes[0].name;
-          setActiveClass(prev => ({
-            ...prev,
-            [subdeptKey]: classId
-          }));
-        } else {
-          classId = activeClass[subdeptKey];
+    if (!initialDepartments) {
+      const loadDepartments = async () => {
+        try {
+          setIsLoading(true)
+          const fetchedDepartments = await fetchDepartments()
+          // Transform the fetched departments to match our expected structure
+          const transformedDepartments = fetchedDepartments.map(dept => ({
+            id: dept.id,
+            name: dept.name,
+            description: dept.description,
+            tm_subdepartments: dept.subdepartments?.map(subdept => ({
+              id: typeof subdept.id === 'string' ? parseInt(subdept.id) : subdept.id,
+              name: subdept.name,
+              description: subdept.description,
+              classes: (subdept as any).classes || []
+            }))
+          }))
+          setDepartments(transformedDepartments)
+          if (transformedDepartments.length > 0) {
+            setSelectedDepartment(transformedDepartments[0].id)
+          }
+        } catch (error) {
+          console.error('Error fetching departments:', error)
+          toast({
+            title: "Error",
+            description: "Failed to load departments. Please refresh the page.",
+            variant: "destructive"
+          })
+        } finally {
+          setIsLoading(false)
         }
       }
-      
-      // Set editing context
-      setEditingContext({
-        type: currentSubdept?.classes?.length ? 'class' : 'subdepartment',
-        departmentId: currentDept.id,
-        subdepartmentId: subdeptId,
-        classId: classId || undefined
-      });
+      loadDepartments()
+    } else if (initialDepartments.length > 0) {
+      setSelectedDepartment(initialDepartments[0].id)
     }
-  }, [activeDept, departments, activeSubdept, activeClass]);
+  }, [initialDepartments])
 
-  const openMultipleRatesDialog = (
-    type: 'subdepartment' | 'class'
-  ) => {
-    setEditingContext({
-      type,
-      departmentId: activeDept,
-      subdepartmentId: activeSubdept[activeDept],
-      classId: activeClass[activeSubdept[activeDept] || ''] || ''
-    })
-    
-    // Initialize with one empty rate
-    setNewRates([{ name: '', description: '' }])
-    setIsDialogOpen(true)
-  }
+  // Generate table data from departments
+  useEffect(() => {
+    if (!selectedDepartment || departments.length === 0) return
 
-  const updateSubdepartmentRates = (subdepartmentId: string, updatedRates: ClassRate[]) => {
-    setDepartments(prevDepartments => 
-      prevDepartments.map(dept => ({
-        ...dept,
-        tm_subdepartments: dept.tm_subdepartments?.map(subdept => 
-          subdept.id.toString() === subdepartmentId 
-            ? { ...subdept, upload_rates: updatedRates }
-            : subdept
-        ) || []
-      }))
-    )
-  }
+    const currentDepartment = departments.find(dept => dept.id === selectedDepartment)
+    if (!currentDepartment) return
 
-  const updateClassRates = (subdepartmentId: string, className: string, updatedRates: ClassRate[]) => {
-    setDepartments(prevDepartments => 
-      prevDepartments.map(dept => ({
-        ...dept,
-        tm_subdepartments: dept.tm_subdepartments?.map(subdept => ({
-          ...subdept,
-          classes: subdept.classes?.map(cls => 
-            cls.name === className 
-              ? { ...cls, rates: updatedRates }
-              : cls
-          ) || []
-        })) || []
-      }))
-    )
-  }
+    const generatedTableData: RateRow[] = []
+    const expandedSubdepts = new Set<string>()
 
-  const saveSubdepartmentRate = async (
-    rate: { name: string; description: string | null }, 
-    subdepartmentId?: string, 
-    index?: number
-  ) => {
-    if (!subdepartmentId) return;
-    
-    try {
-      const subdept = departments
-        .flatMap(dept => dept.tm_subdepartments || [])
-        .find(sd => sd.id.toString() === subdepartmentId);
-      
-      if (!subdept) return;
-      
-      const currentRates = subdept.upload_rates || [];
-      const updatedRates = 
-        index !== undefined && index >= 0
-          ? currentRates.map((r, i) => (i === index ? rate : r))
-          : [...currentRates, rate];
-      
-      // Update local state immediately for better UX
-      updateSubdepartmentRates(subdepartmentId, updatedRates);
-      
-      // Update database
-      const { error } = await supabase
-        .from('tm_subdepartments')
-        .update({ upload_rates: updatedRates })
-        .eq('id', subdepartmentId);
-      
-      if (error) throw error;
-      
-      // Show success message
-      toast({
-        title: "Success",
-        description: "Rates updated successfully",
-        variant: "default"
-      });
-      
-    } catch (error) {
-      console.error('Error saving subdepartment rate:', error);
-      // Revert local state on error
-      const subdept = departments
-        .flatMap(dept => dept.tm_subdepartments || [])
-        .find(sd => sd.id.toString() === subdepartmentId);
-      if (subdept) {
-        updateSubdepartmentRates(subdepartmentId, subdept.upload_rates || []);
-      }
-      // Show error message
-      toast({
-        title: "Error",
-        description: "Failed to update rates. Please try again.",
-        variant: "destructive"
-      });
-    }
-  }
-  
-  const saveClassRate = async (
-    rate: { name: string; description: string | null }, 
-    subdepartmentId?: string, 
-    className?: string, 
-    index?: number
-  ) => {
-    if (!subdepartmentId || !className) return;
-    
-    try {
-      const subdept = departments
-        .flatMap(dept => dept.tm_subdepartments || [])
-        .find(sd => sd.id.toString() === subdepartmentId);
-      
-      if (!subdept) return;
-      
-      const targetClass = subdept.classes?.find(cls => cls.name === className);
-      if (!targetClass) return;
-      
-      const currentRates = targetClass.rates || [];
-      const updatedRates = 
-        index !== undefined && index >= 0
-          ? currentRates.map((r, i) => (i === index ? rate : r))
-          : [...currentRates, rate];
-      
-      // Update local state immediately for better UX
-      updateClassRates(subdepartmentId, className, updatedRates);
-      
-      // Get current subdepartment data
-      const { data: subdeptData, error: fetchError } = await supabase
-        .from('tm_subdepartments')
-        .select('classes')
-        .eq('id', subdepartmentId)
-        .single();
-      
-      if (fetchError) throw fetchError;
-      
-      // Update the class rates in the classes array
-      const updatedClasses = subdeptData.classes.map((cls: any) => 
-        cls.name === className 
-          ? { ...cls, rates: updatedRates }
-          : cls
-      );
-      
-      // Save back to database
-      const { error: updateError } = await supabase
-        .from('tm_subdepartments')
-        .update({ classes: updatedClasses })
-        .eq('id', subdepartmentId);
-      
-      if (updateError) throw updateError;
-      
-      // Show success message
-      toast({
-        title: "Success",
-        description: "Class rates updated successfully",
-        variant: "default"
-      });
-      
-    } catch (error) {
-      console.error('Error saving class rate:', error);
-      // Revert local state on error
-      const subdept = departments
-        .flatMap(dept => dept.tm_subdepartments || [])
-        .find(sd => sd.id.toString() === subdepartmentId);
-      
-      if (subdept) {
-        const targetClass = subdept.classes?.find(cls => cls.name === className);
-        if (targetClass) {
-          updateClassRates(subdepartmentId, className, targetClass.rates || []);
+    currentDepartment.tm_subdepartments?.forEach((subdept) => {
+      // If subdepartment has classes, create rows for each class
+      if (subdept.classes && subdept.classes.length > 0) {
+        subdept.classes.forEach((cls, classIndex) => {
+          generatedTableData.push({
+            id: `${subdept.id}-${cls.name}-${classIndex}`,
+            departmentId: currentDepartment.id,
+            subdepartmentId: subdept.id.toString(),
+            classId: cls.name,
+            subdepartment: subdept.name,
+            class: cls.name,
+            processingFeeAmount: "5000", // Default values - these should come from database
+            processingFeeCurrency: "ksh",
+            processingFeeRate: "5000",
+            issuanceFeeAmount: "10000",
+            issuanceFeeCurrency: "usd",
+            issuanceFeeRate: "1500000",
+            issuancePeriodDenomination: ["years"],
+            noOfIssuancePeriod: ["1", "2"],
+            bclTier1: "2000",
+            bclTier2: "3000",
+            bclTier3: "4000",
+            officer1: "1000",
+            officer2: "1500",
+            officer3: "2000",
+          })
+        })
+        // Expand subdepartments with multiple classes by default
+        if (subdept.classes.length > 1) {
+          expandedSubdepts.add(subdept.name)
         }
-      }
-      // Show error message
-      toast({
-        title: "Error",
-        description: "Failed to update class rates. Please try again.",
-        variant: "destructive"
-      });
-    }
-  }
-  
-  const handleCloseDialog = () => {
-    setIsDialogOpen(false)
-    setEditingContext(null)
-    setNewRates([{ name: '', description: '' }])
-  }
-
-  const handleCloseDeleteDialog = () => {
-    setIsDeleteDialogOpen(false)
-    setDeleteContext(null)
-  }
-
-  const handleDeleteClick = (type: 'subdepartment' | 'class', index: number) => {
-    setDeleteContext({ type, index })
-    setIsDeleteDialogOpen(true)
-  }
-
-  const handleDeleteConfirm = async () => {
-    if (!deleteContext) return
-    
-    const { type, index } = deleteContext
-    
-    try {
-      if (!editingContext) return
-      
-      if (type === 'subdepartment' && editingContext.subdepartmentId) {
-        const subdept = departments
-          .flatMap(dept => dept.tm_subdepartments || [])
-          .find(sd => sd.id.toString() === editingContext.subdepartmentId)
-        
-        if (!subdept?.upload_rates) return
-        
-        const updatedRates = subdept.upload_rates.filter((_, i) => i !== index)
-        updateSubdepartmentRates(editingContext.subdepartmentId, updatedRates)
-        
-        const { error } = await supabase
-          .from('tm_subdepartments')
-          .update({ upload_rates: updatedRates })
-          .eq('id', editingContext.subdepartmentId)
-        
-        if (error) throw error
-        
-      } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
-        const subdept = departments
-          .flatMap(dept => dept.tm_subdepartments || [])
-          .find(sd => sd.id.toString() === editingContext.subdepartmentId)
-        
-        if (!subdept) return
-        
-        const targetClass = subdept.classes?.find(cls => cls.name === editingContext.classId)
-        if (!targetClass?.rates) return
-        
-        // Update local state first for better UX
-        const updatedRates = targetClass.rates.filter((_, i) => i !== index)
-        updateClassRates(editingContext.subdepartmentId, editingContext.classId, updatedRates)
-        
-        // Get current classes from the subdepartment
-        const { data: currentData, error: fetchError } = await supabase
-          .from('tm_subdepartments')
-          .select('classes')
-          .eq('id', editingContext.subdepartmentId)
-          .single()
-        
-        if (fetchError) throw fetchError
-        
-        // Update only the rates for the target class
-        const updatedClasses = currentData.classes.map((cls: any) => 
-          cls.name === editingContext.classId
-            ? { ...cls, rates: updatedRates }
-            : cls
-        )
-        
-        // Update the database with the modified classes array
-        const { error } = await supabase
-          .from('tm_subdepartments')
-          .update({ classes: updatedClasses })
-          .eq('id', editingContext.subdepartmentId)
-        
-        if (error) throw error
-        
-        // Show success message
-        toast({
-          title: "Success",
-          description: "Rate deleted successfully",
-          variant: "default"
+      } else {
+        // Create a single row for subdepartment without classes
+        generatedTableData.push({
+          id: `${subdept.id}-general`,
+          departmentId: currentDepartment.id,
+          subdepartmentId: subdept.id.toString(),
+          subdepartment: subdept.name,
+          class: "General",
+          processingFeeAmount: "3000",
+          processingFeeCurrency: "ksh",
+          processingFeeRate: "3000",
+          issuanceFeeAmount: "8000",
+          issuanceFeeCurrency: "ksh",
+          issuanceFeeRate: "8000",
+          issuancePeriodDenomination: ["months"],
+          noOfIssuancePeriod: ["1"],
+          bclTier1: "1500",
+          bclTier2: "2500",
+          bclTier3: "3500",
+          officer1: "800",
+          officer2: "1200",
+          officer3: "1800",
         })
       }
-      
-      setIsDeleteDialogOpen(false)
-      setDeleteContext(null)
-      
-    } catch (error) {
-      console.error('Error deleting rate:', error)
-      toast({
-        title: "Error",
-        description: "Failed to delete rate. Please try again.",
-        variant: "destructive"
+    })
+
+    setTableData(generatedTableData)
+    setExpandedSubdepartments(expandedSubdepts)
+  }, [selectedDepartment, departments])
+
+  // Group data by subdepartment
+  const groupedData: GroupedData[] = tableData.reduce((acc, row) => {
+    const existingGroup = acc.find((group) => group.subdepartment === row.subdepartment)
+    if (existingGroup) {
+      existingGroup.classes.push(row)
+    } else {
+      acc.push({
+        subdepartment: row.subdepartment,
+        classes: [row],
+        isExpanded: expandedSubdepartments.has(row.subdepartment),
       })
-    } finally {
-      setIsSubmitting(false)
     }
-  }
+    return acc
+  }, [] as GroupedData[])
 
-  const addNewRate = () => {
-    setNewRates([...newRates, { name: '', description: '' }])
-  }
-
-  const removeNewRate = (index: number) => {
-    const updated = [...newRates]
-    updated.splice(index, 1)
-    setNewRates(updated)
-  }
-
-  const handleNewRateChange = (index: number, field: 'name' | 'description', value: string) => {
-    const updated = [...newRates]
-    updated[index] = { ...updated[index], [field]: value }
-    setNewRates(updated)
-  }
-
-  const handleAddMultipleRates = async () => {
-    if (!selectedDept || !selectedSubdept) {
-      toast({
-        title: "Error",
-        description: "Please select a department and subdepartment",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    // Filter out empty rates
-    const validRates = newRates.filter(req => req.name.trim() !== '');
-    
-    if (validRates.length === 0) {
-      handleCloseDialog();
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-
-      // Get the selected department and subdepartment
-      const currentDept = departments.find(d => d.id === selectedDept);
-      const subdept = currentDept?.tm_subdepartments?.find(sd => sd.id.toString() === selectedSubdept);
-
-      if (!currentDept || !subdept) {
-        throw new Error('Department or subdepartment not found');
-      }
-
-      // Update local state immediately for better UX
-      if (editingContext.type === 'subdepartment' || !subdept.classes?.length) {
-        const currentRates = subdept.upload_rates || [];
-        const updatedRates = [...currentRates, ...validRates.map(req => ({
-          name: req.name.trim(),
-          description: req.description?.trim() || null
-        }))];
-        updateSubdepartmentRates(editingContext.subdepartmentId, updatedRates);
-      } else if (editingContext.type === 'class') {
-        // If classId is empty, use the first class
-        const targetClass = selectedClass 
-          ? subdept.classes?.find(cls => cls.name === selectedClass)
-          : subdept.classes?.[0];
-        
-        if (!targetClass) {
-          throw new Error('No valid class found');
-        }
-
-        const currentRates = targetClass.rates || [];
-        const updatedRates = [...currentRates, ...validRates.map(req => ({
-          name: req.name.trim(),
-          description: req.description?.trim() || null
-        }))];
-        
-        updateClassRates(editingContext.subdepartmentId, targetClass.name, updatedRates);
-      }
-
-      // Update database
-      const { data: subdeptData, error: fetchError } = await supabase
-        .from('tm_subdepartments')
-        .select('*')
-        .eq('id', editingContext.subdepartmentId)
-        .single();
-
-      if (fetchError) {
-        throw fetchError;
-      }
-
-      // Prepare the update data
-      let updateData: any = {};
-      
-      if (editingContext.type === 'subdepartment' || !subdept.classes?.length) {
-        // Handle subdepartment rates
-        const currentRates = subdeptData.upload_rates || [];
-        const newRates = validRates.map(req => ({
-          name: req.name.trim(),
-          description: req.description?.trim() || null
-        }));
-        updateData.upload_rates = [...currentRates, ...newRates];
+  const toggleSubdepartment = (subdepartment: string) => {
+    setExpandedSubdepartments((prev) => {
+      const newSet = new Set(prev)
+      if (newSet.has(subdepartment)) {
+        newSet.delete(subdepartment)
       } else {
-        // Handle class rates
-        const targetClassName = selectedClass || (subdept.classes?.[0]?.name);
-        if (!targetClassName) {
-          throw new Error('No valid class found');
-        }
-        
-        // Get current classes or initialize if not exists
-        const currentClasses = Array.isArray(subdeptData.classes) ? [...subdeptData.classes] : [];
-        const classIndex = currentClasses.findIndex(cls => cls.name === targetClassName);
-        
-        const newRates = validRates.map(req => ({
-          name: req.name.trim(),
-          description: req.description?.trim() || null
-        }));
-        
-        if (classIndex >= 0) {
-          // Update existing class
-          const existingClass = currentClasses[classIndex];
-          currentClasses[classIndex] = {
-            ...existingClass,
-            rates: [...(existingClass.rates || []), ...newRates]
-          };
-        } else {
-          // Add new class with rates
-          currentClasses.push({
-            name: targetClassName,
-            description: null,
-            rates: newRates
-          });
-        }
-        
-        updateData.classes = currentClasses;
+        newSet.add(subdepartment)
       }
+      return newSet
+    })
+  }
 
-      // Update the database
-      const { error: updateError } = await supabase
-        .from('tm_subdepartments')
-        .update(updateData)
-        .eq('id', editingContext.subdepartmentId)
-        .select('*');
-        
-      // Refresh the data after successful update
-      if (!updateError) {
-        const { data: updatedData, error: refreshError } = await supabase
-          .from('tm_subdepartments')
-          .select('*')
-          .eq('id', editingContext.subdepartmentId)
-          .single();
-          
-        if (!refreshError && updatedData) {
-          // Update local state with fresh data from database
-          const updatedDepartments = departments.map(dept => ({
-            ...dept,
-            tm_subdepartments: dept.tm_subdepartments?.map(sd => 
-              sd.id.toString() === editingContext.subdepartmentId ? updatedData : sd
-            ) || []
-          }));
-          setDepartments(updatedDepartments);
-        }
-      }
+  const updateRate = (rowId: string, field: string, currency: string) => {
+    setTableData((prev) =>
+      prev.map((row) => {
+        if (row.id === rowId) {
+          const amount = field === "processingFeeRate" ? row.processingFeeAmount : row.issuanceFeeAmount
+          const rate = currency === "usd" ? rates.usd : rates.ksh
+          const calculatedRate = currency === "usd" ? (Number.parseFloat(amount) * rate).toString() : amount
 
-      if (updateError) {
-        // Revert local state on error
-        if (editingContext.type === 'subdepartment') {
-          updateSubdepartmentRates(editingContext.subdepartmentId, subdept.upload_rates || []);
-        } else if (editingContext.type === 'class' && editingContext.classId) {
-          const targetClass = subdept.classes?.find(cls => cls.name === editingContext.classId);
-          if (targetClass) {
-            updateClassRates(editingContext.subdepartmentId, editingContext.classId, targetClass.rates || []);
+          return {
+            ...row,
+            [field]: calculatedRate,
           }
         }
-        throw updateError;
-      }
-
-      // Show success message
-      toast({
-        title: "Success",
-        description: `Added ${validRates.length} rate${validRates.length > 1 ? 's' : ''} successfully`,
-        variant: "default"
-      });
-
-      handleCloseDialog();
-    } catch (error) {
-      console.error('Error adding rates:', error);
-      toast({
-        title: "Error",
-        description: "Failed to add rates. Please try again.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
+        return row
+      }),
+    )
   }
 
-  const renderRates = (rates: ClassRate[] | undefined, type: 'subdepartment' | 'class', context: typeof editingContext) => {
-    const handleDeleteClickWrapper = (e: React.MouseEvent, index: number) => {
-      e.stopPropagation()
-      handleDeleteClick(type, index)
-    }
-    const hasRates = rates && rates.length > 0;
-    const ratesList = [...(rates || [])];
-    
-    const handleMove = (index: number, direction: 'up' | 'down') => {
-      if (!rates || !context) return;
-      handleMoveRate(index, direction, type, rates);
-    };
+  const handleCurrencyChange = (rowId: string, field: string, currency: string) => {
+    setTableData((prev) =>
+      prev.map((row) => {
+        if (row.id === rowId) {
+          const rateField = field === "processingFeeCurrency" ? "processingFeeRate" : "issuanceFeeRate"
+          const amountField = field === "processingFeeCurrency" ? "processingFeeAmount" : "issuanceFeeAmount"
+          const amount = row[amountField as keyof RateRow] as string
+          const rate = currency === "usd" ? rates.usd : rates.ksh
+          const calculatedRate = currency === "usd" ? (Number.parseFloat(amount) * rate).toString() : amount
 
-    const handleEdit = (index: number) => {
-      setEditingIndex(index);
-      setEditForm({
-        name: ratesList[index].name,
-        description: ratesList[index].description || ''
-      });
-    };
+          return {
+            ...row,
+            [field]: currency,
+            [rateField]: calculatedRate,
+          }
+        }
+        return row
+      }),
+    )
+  }
 
-    const handleSaveEdit = async () => {
-      if (editingIndex === null || !context) return;
-      
-      const updatedRate = {
-        name: editForm.name.trim(),
-        description: editForm.description.trim() || null
-      };
+  const handleMultiSelectChange = (rowId: string, field: string, value: string, checked: boolean) => {
+    setTableData((prev) =>
+      prev.map((row) => {
+        if (row.id === rowId) {
+          const currentValues = row[field as keyof RateRow] as string[]
+          const newValues = checked ? [...currentValues, value] : currentValues.filter((v) => v !== value)
 
-      if (type === 'subdepartment' && context.subdepartmentId) {
-        await saveSubdepartmentRate(updatedRate, context.subdepartmentId, editingIndex);
-      } else if (type === 'class' && context.subdepartmentId && context.classId) {
-        await saveClassRate(updatedRate, context.subdepartmentId, context.classId, editingIndex);
-      }
-      
-      setEditingIndex(null);
-    };
-    
+          return {
+            ...row,
+            [field]: newValues,
+          }
+        }
+        return row
+      }),
+    )
+  }
+
+  const handleSaveRates = () => {
+    setRates(tempRates)
+    setIsRateDialogOpen(false)
+    setTableData((prev) =>
+      prev.map((row) => ({
+        ...row,
+        processingFeeRate:
+          row.processingFeeCurrency === "usd"
+            ? (Number.parseFloat(row.processingFeeAmount) * tempRates.usd).toString()
+            : row.processingFeeAmount,
+        issuanceFeeRate:
+          row.issuanceFeeCurrency === "usd"
+            ? (Number.parseFloat(row.issuanceFeeAmount) * tempRates.usd).toString()
+            : row.issuanceFeeAmount,
+      })),
+    )
+  }
+
+  const MultiSelectPopover = ({
+    rowId,
+    field,
+    options,
+    values,
+    placeholder,
+  }: {
+    rowId: string
+    field: string
+    options: string[]
+    values: string[]
+    placeholder: string
+  }) => (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" className="w-full justify-between text-left font-normal h-12">
+          <span className="truncate">
+            {values.length === 0 ? (
+              <span className="text-gray-400">{placeholder}</span>
+            ) : values.length === 1 ? (
+              values[0]
+            ) : (
+              `${values.length} selected`
+            )}
+          </span>
+          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-4">
+        <div className="space-y-3">
+          <div className="text-sm font-medium text-gray-700 mb-3">Select Options</div>
+          {options.map((option) => (
+            <div key={option} className="flex items-center space-x-3">
+              <Checkbox
+                id={`${rowId}-${field}-${option}`}
+                checked={values.includes(option)}
+                onCheckedChange={(checked) => handleMultiSelectChange(rowId, field, option, checked as boolean)}
+              />
+              <Label
+                htmlFor={`${rowId}-${field}-${option}`}
+                className="text-sm font-medium leading-none cursor-pointer text-gray-700 capitalize"
+              >
+                {option}
+              </Label>
+            </div>
+          ))}
+        </div>
+        {values.length > 0 && (
+          <div className="border-t border-gray-200 pt-3 mt-3">
+            <div className="text-xs font-medium text-gray-500 mb-2">Selected:</div>
+            <div className="flex flex-wrap gap-1">
+              {values.map((value) => (
+                <Badge key={value} variant="secondary" className="text-xs">
+                  {value}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  )
+
+  if (isLoading) {
     return (
-      <div className="space-y-4">
-        <div className="border rounded-md overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10">#</TableHead>
-                <TableHead className="w-1/3">Rate</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead className="w-48 text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {hasRates ? ratesList.map((req, idx) => (
-                <TableRow key={`req-${idx}`} className="group">
-                  <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
-                  <TableCell className="font-medium">
-                    {editingIndex === idx ? (
-                      <Input
-                        value={editForm.name}
-                        onChange={(e) => setEditForm({...editForm, name: e.target.value})}
-                        className="h-8"
-                        autoFocus
-                      />
-                    ) : (
-                      req.name
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {editingIndex === idx ? (
-                      <Input
-                        value={editForm.description}
-                        onChange={(e) => setEditForm({...editForm, description: e.target.value})}
-                        className="h-8"
-                        placeholder="No description"
-                        onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
-                      />
-                    ) : (
-                      req.description || <span className="text-muted-foreground/50">No description</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-1">
-                      {editingIndex === idx ? (
-                        <>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-8 w-8 hover:bg-green-50"
-                            onClick={handleSaveEdit}
-                            title="Save"
-                          >
-                            <Check className="h-4 w-4 text-green-600" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-8 w-8"
-                            onClick={() => setEditingIndex(null)}
-                            title="Cancel"
-                          >
-                            <X className="h-4 w-4 text-muted-foreground" />
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-8 w-8 hover:bg-blue-50"
-                            onClick={() => handleEdit(idx)}
-                            title="Edit"
-                          >
-                            <Pencil className="h-3.5 w-3.5 text-blue-600" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-8 w-8"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleMove(idx, 'up');
-                            }}
-                            disabled={idx === 0}
-                            title="Move up"
-                          >
-                            <ArrowUp className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-8 w-8"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleMove(idx, 'down');
-                            }}
-                            disabled={idx === ratesList.length - 1}
-                            title="Move down"
-                          >
-                            <ArrowDown className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-8 w-8 text-destructive hover:bg-red-50"
-                            onClick={(e) => handleDeleteClickWrapper(e, idx)}
-                            title="Delete"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )) : (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                    No rates added yet
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="container mx-auto space-y-6">
+          <div className="flex items-center justify-center h-64">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
+              <p className="text-gray-600">Loading departments...</p>
+            </div>
+          </div>
         </div>
       </div>
     )
   }
 
-  const renderSubdepartmentContent = (subdept: Subdepartment, deptId: string) => {
-    const hasClasses = subdept.classes && subdept.classes.length > 0;
-    const subdeptKey = `${deptId}-${subdept.id}`;
-    const currentClass = activeClass[subdeptKey];
-    
-    // Update editing context when subdepartment or class changes
-    useEffect(() => {
-      setEditingContext({
-        type: hasClasses ? 'class' : 'subdepartment',
-        departmentId: deptId,
-        subdepartmentId: subdept.id.toString(),
-        classId: hasClasses ? currentClass : undefined
-      });
-    }, [deptId, subdept.id, hasClasses, currentClass]);
-    
-    // Create context for rates rendering
-    const context = {
-      type: hasClasses ? 'class' as const : 'subdepartment' as const,
-      departmentId: deptId,
-      subdepartmentId: subdept.id.toString(),
-      classId: hasClasses ? activeClass[subdeptKey] : undefined
-    };
-
+  if (departments.length === 0) {
     return (
-      <div className="space-y-6">
-        {hasClasses ? (
-          <div className="space-y-4">
-            <Tabs 
-              value={activeClass[subdeptKey] || ''} 
-              onValueChange={(value) => setActiveClass(prev => ({
-                ...prev,
-                [subdeptKey]: value
-              }))}
-              className="space-y-4"
-            >
-              <div className="flex justify-between items-center">
-                <TabsList>
-                  {subdept.classes?.map(cls => (
-                    <TabsTrigger key={cls.name} value={cls.name}>
-                      {cls.name}
-                      {cls.rates?.length > 0 && (
-                        <span className="ml-2 text-xs bg-muted-foreground/10 text-muted-foreground rounded-full px-2 py-0.5">
-                          {cls.rates.length}
-                        </span>
-                      )}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => openMultipleRatesDialog('class')}
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Rates
-                </Button>
-              </div>
-
-              {subdept.classes?.map(cls => (
-                <TabsContent key={cls.name} value={cls.name} className="mt-0 space-y-4">
-                  {cls.description && (
-                    <p className="text-muted-foreground">{cls.description}</p>
-                  )}
-                  {renderRates(cls.rates, 'class', context)}
-                </TabsContent>
-              ))}
-            </Tabs>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-medium">Subdepartment Rates</h3>
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => openMultipleRatesDialog('subdepartment')}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Rates
-              </Button>
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="container mx-auto space-y-6">
+          <div className="flex items-center justify-center h-64">
+            <div className="text-center">
+              <p className="text-gray-600">No departments found. Please create departments first.</p>
             </div>
-            {renderRates(subdept.upload_rates, 'subdepartment', context)}
           </div>
-        )}
-      </div>
-    );
-  }
-
-  // Add a null check for departments
-  if (!departments || departments.length === 0) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <p className="text-muted-foreground">No departments found</p>
+        </div>
       </div>
     )
   }
 
-  const moveRate = (rates: ClassRate[], currentIndex: number, direction: 'up' | 'down'): ClassRate[] => {
-    const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
-    
-    // Check if the move is valid
-    if (newIndex < 0 || newIndex >= rates.length) {
-      return rates;
-    }
-    
-    // Create a new array with the items swapped
-    const newRates = [...rates];
-    [newRates[currentIndex], newRates[newIndex]] = 
-      [newRates[newIndex], newRates[currentIndex]];
-    
-    return newRates;
-  };
-
-  const handleMoveRate = async (index: number, direction: 'up' | 'down', type: 'subdepartment' | 'class', rates: ClassRate[] = []) => {
-    if (!editingContext) return;
-    
-    const updatedRates = moveRate(rates, index, direction);
-    
-    try {
-      if (type === 'subdepartment' && editingContext.subdepartmentId) {
-        // Update local state immediately for better UX
-        updateSubdepartmentRates(editingContext.subdepartmentId, updatedRates);
-        
-        // Update database
-        const { error } = await supabase
-          .from('tm_subdepartments')
-          .update({ upload_rates: updatedRates })
-          .eq('id', editingContext.subdepartmentId);
-          
-        if (error) throw error;
-        
-      } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
-        // Update local state immediately for better UX
-        updateClassRates(editingContext.subdepartmentId, editingContext.classId, updatedRates);
-        
-        // Get current subdepartment data
-        const { data: subdeptData, error: fetchError } = await supabase
-          .from('tm_subdepartments')
-          .select('classes')
-          .eq('id', editingContext.subdepartmentId)
-          .single();
-          
-        if (fetchError) throw fetchError;
-        
-        // Update the class rates in the classes array
-        const updatedClasses = subdeptData.classes.map((cls: any) => 
-          cls.name === editingContext.classId 
-            ? { ...cls, rates: updatedRates }
-            : cls
-        );
-        
-        // Save back to database
-        const { error: updateError } = await supabase
-          .from('tm_subdepartments')
-          .update({ classes: updatedClasses })
-          .eq('id', editingContext.subdepartmentId);
-          
-        if (updateError) throw updateError;
-      }
-    } catch (error) {
-      console.error('Error moving rate:', error);
-      // TODO: Show error toast to user
-      toast({
-        title: "Error",
-        description: "Failed to move rate. Please try again.",
-        variant: "destructive"
-      });
-      // Revert local state on error
-      if (type === 'subdepartment' && editingContext.subdepartmentId) {
-        updateSubdepartmentRates(editingContext.subdepartmentId, rates);
-      } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
-        updateClassRates(editingContext.subdepartmentId, editingContext.classId, rates);
-      }
-    }
-  };
-
   return (
-    <div className="space-y-6">
-      {/* Department Tabs */}
-      <Tabs 
-        value={activeDept} 
-        onValueChange={setActiveDept}
-        className="space-y-4"
-      >
-        <TabsList className="w-full justify-start overflow-x-auto">
-          {departments.map((dept) => (
-            <TabsTrigger key={dept.id} value={dept.id}>
-              {dept.name}
-              {dept.tm_subdepartments && dept.tm_subdepartments.length > 0 && (
-                <span className="ml-2 text-xs bg-muted-foreground/10 text-muted-foreground rounded-full px-2 py-0.5">
-                  {dept.tm_subdepartments.length}
-                </span>
-              )}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        {departments.map((dept) => (
-          <TabsContent key={dept.id} value={dept.id} className="mt-0 space-y-4">
-            {dept.tm_subdepartments && dept.tm_subdepartments.length > 0 ? (
-              <div className="space-y-6">
-                {/* Subdepartment Tabs */}
-                <Tabs 
-                  value={activeSubdept[dept.id] || ''} 
-                  onValueChange={(value) => setActiveSubdept(prev => ({
-                    ...prev,
-                    [dept.id]: value
-                  }))}
-                >
-                  <TabsList className="mb-4">
-                    {dept.tm_subdepartments.map((subdept) => (
-                      <TabsTrigger 
-                        key={subdept.id} 
-                        value={subdept.id.toString()}
-                        className="flex items-center gap-2"
-                      >
-                        {subdept.name}
-                        {(subdept.upload_rates?.length || 0) > 0 && (
-                          <span className="text-xs bg-muted-foreground/10 text-muted-foreground rounded-full px-1.5">
-                            {subdept.upload_rates?.length}
-                          </span>
-                        )}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-
-                  {dept.tm_subdepartments.map((subdept) => (
-                    <TabsContent 
-                      key={subdept.id} 
-                      value={subdept.id.toString()}
-                      className="mt-0"
-                    >
-                      {subdept.description && (
-                        <p className="text-muted-foreground mb-4">{subdept.description}</p>
-                      )}
-                      {renderSubdepartmentContent(subdept, dept.id)}
-                    </TabsContent>
-                  ))}
-                </Tabs>
-              </div>
-            ) : (
-              <div className="text-muted-foreground p-4 border rounded-md">
-                No subdepartments found for this department.
-              </div>
-            )}
-          </TabsContent>
-        ))}
-      </Tabs>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Rate</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this {deleteContext?.type} rate? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button 
-              variant="outline" 
-              onClick={handleCloseDeleteDialog}
-            >
-              Cancel
-            </Button>
-            <Button 
-              variant="destructive" 
-              onClick={handleDeleteConfirm}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? 'Deleting...' : 'Delete'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Rates Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add Multiple Rates</DialogTitle>
-            <DialogDescription>Add multiple rates at once.</DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4">
-            {/* Department Selection */}
-            <div>
-              <Label htmlFor="department">Department</Label>
-              <select
-                id="department"
-                value={selectedDept}
-                onChange={(e) => {
-                  setSelectedDept(e.target.value);
-                  setSelectedSubdept('');
-                  setSelectedClass('');
-                }}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value="">Select Department</option>
-                {departments.map((dept) => (
-                  <option key={dept.id} value={dept.id}>
-                    {dept.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Subdepartment Selection */}
-            {selectedDept && (
-              <div>
-                <Label htmlFor="subdepartment">Subdepartment</Label>
-                <select
-                  id="subdepartment"
-                  value={selectedSubdept}
-                  onChange={(e) => {
-                    setSelectedSubdept(e.target.value);
-                    setSelectedClass('');
-                  }}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <option value="">Select Subdepartment</option>
-                  {(() => {
-                    if (!selectedDept) return null;
-                    const dept = departments.find(d => d.id === selectedDept);
-                    if (!dept?.tm_subdepartments?.length) {
-                      return <option value="">No subdepartments available</option>;
-                    }
-                    return dept.tm_subdepartments.map((subdept) => (
-                      <option key={subdept.id} value={subdept.id.toString()}>
-                        {subdept.name}
-                      </option>
-                    ));
-                  })()}
-                </select>
-              </div>
-            )}
-
-            {/* Class Selection */}
-            {selectedSubdept && (() => {
-              // Find the selected subdepartment
-              const dept = departments.find(d => d.id === selectedDept);
-              if (!dept?.tm_subdepartments) return null;
-              
-              const subdept = dept.tm_subdepartments.find(sd => sd.id.toString() === selectedSubdept);
-              if (!subdept) return null;
-              
-              // Only show class selection if the subdepartment has classes
-              if (!subdept.classes?.length) return null;
-              
-              return (
-                <div>
-                  <Label htmlFor="class">Class</Label>
-                  <select
-                    id="class"
-                    value={selectedClass}
-                    onChange={(e) => setSelectedClass(e.target.value)}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <option value="">Select Class</option>
-                    {subdept.classes.map((cls) => (
-                      <option key={cls.name} value={cls.name}>
-                        {cls.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              );
-            })()}
-
-            {/* Rates */}
-            <div className="space-y-2">
-              {newRates.map((req, idx) => (
-                <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-5">
-                    <Label htmlFor={`name-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
-                      Name {idx > 0 ? idx + 1 : ''}
-                    </Label>
-                    <Input
-                      id={`name-${idx}`}
-                      value={req.name}
-                      onChange={(e) => handleNewRateChange(idx, 'name', e.target.value)}
-                      placeholder="Rate name"
-                    />
-                  </div>
-                  <div className="col-span-6">
-                    <Label htmlFor={`desc-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
-                      Description {idx > 0 ? idx + 1 : ''}
-                    </Label>
-                    <Input
-                      id={`desc-${idx}`}
-                      value={req.description}
-                      onChange={(e) => handleNewRateChange(idx, 'description', e.target.value)}
-                      placeholder="Description (optional)"
-                    />
-                  </div>
-                  <div className="col-span-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9"
-                      onClick={() => removeNewRate(idx)}
-                      disabled={newRates.length <= 1}
-                    >
-                      <X className="h-4 w-4" />
-                      <span className="sr-only">Remove rate {idx + 1}</span>
-                    </Button>
-                  </div>
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-2"
-                onClick={() => addNewRate()}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Another
-              </Button>
-            </div>
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="px-4 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Rates Management</h1>
+            <p className="text-gray-600 mt-1">Configure and manage department rates and fees</p>
           </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={handleCloseDialog}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleAddMultipleRates}
-              disabled={!selectedDept || !selectedSubdept || (!selectedClass && departments.find(d => d.id === selectedDept)?.tm_subdepartments?.find(sd => sd.id.toString() === selectedSubdept)?.classes?.length > 0) || !newRates.some(req => req.name.trim() !== '') || isSubmitting}
-            >
-              {isSubmitting ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Adding...
-                </>
-              ) : (
-                `Add ${newRates.filter(req => req.name.trim() !== '').length} Rates`
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <Dialog open={isRateDialogOpen} onOpenChange={setIsRateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="bg-gray-800 hover:bg-gray-900 text-white">
+                <Settings className="h-4 w-4 mr-2" />
+                Manage Rates
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-gray-800">
+                  <Calculator className="h-5 w-5" />
+                  Configure Exchange Rates
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="usd-rate" className="text-sm font-medium text-gray-700">
+                    USD to KSH Rate
+                  </Label>
+                  <Input
+                    id="usd-rate"
+                    type="number"
+                    value={tempRates.usd}
+                    onChange={(e) => setTempRates((prev) => ({ ...prev, usd: Number.parseFloat(e.target.value) || 0 }))}
+                    placeholder="Enter USD to KSH rate"
+                    className="h-10"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ksh-rate" className="text-sm font-medium text-gray-700">
+                    KSH Rate (Base)
+                  </Label>
+                  <Input
+                    id="ksh-rate"
+                    type="number"
+                    value={tempRates.ksh}
+                    onChange={(e) => setTempRates((prev) => ({ ...prev, ksh: Number.parseFloat(e.target.value) || 1 }))}
+                    placeholder="Enter KSH base rate"
+                    className="h-10"
+                  />
+                </div>
+                <div className="flex justify-end gap-3 pt-4">
+                  <Button variant="outline" onClick={() => setIsRateDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSaveRates} className="bg-gray-800 hover:bg-gray-900">
+                    Save Rates
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        {/* Tabs */}
+        <Tabs value={selectedDepartment} onValueChange={setSelectedDepartment} className="w-full">
+          <TabsList className="grid w-full bg-white border" style={{ gridTemplateColumns: `repeat(${Math.min(departments.length, 6)}, 1fr)` }}>
+            {departments.slice(0, 6).map((dept) => (
+              <TabsTrigger
+                key={dept.id}
+                value={dept.id}
+                className="data-[state=active]:bg-gray-100 data-[state=active]:text-gray-900 font-medium text-gray-600"
+              >
+                {dept.name}
+                {dept.tm_subdepartments && dept.tm_subdepartments.length > 0 && (
+                  <span className="ml-2 text-xs bg-muted-foreground/10 text-muted-foreground rounded-full px-2 py-0.5">
+                    {dept.tm_subdepartments.length}
+                  </span>
+                )}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+
+          {departments.map((dept) => (
+            <TabsContent key={dept.id} value={dept.id}>
+              <Card className="border">
+                <CardHeader className="bg-gray-100 border-b">
+                  <CardTitle className="text-xl font-semibold text-gray-800">{dept.name} Rates</CardTitle>
+                  {dept.description && (
+                    <p className="text-sm text-gray-600">{dept.description}</p>
+                  )}
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <Table className="relative h-[calc(90vh-200px)]">
+                      {/* Table headers remain the same */}
+                      <TableHeader className="sticky top-0 z-10">
+                        <TableRow className="bg-blue-800 hover:bg-blue-800">
+                          <TableHead className="sticky left-0 z-20 bg-blue-800 text-white font-semibold border-r border-blue-600 min-w-[60px] h-16 px-4 text-center">
+                            #
+                          </TableHead>
+                          <TableHead
+                            rowSpan={2}
+                            className="sticky left-[60px] z-20 bg-blue-800 text-white font-semibold border-r border-blue-600 min-w-[160px] h-16 px-4 text-center"
+                          >
+                            Subdepartment
+                          </TableHead>
+                          <TableHead
+                            rowSpan={2}
+                            className="text-white font-semibold border-r border-gray-600 min-w-[120px] h-16 px-4 text-center"
+                          >
+                            Class
+                          </TableHead>
+                          <TableHead
+                            colSpan={3}
+                            className="text-center text-white font-semibold border-r border-gray-600 px-4"
+                          >
+                            Processing Fee Website Efns
+                          </TableHead>
+                          <TableHead
+                            colSpan={5}
+                            className="text-center text-white font-semibold border-r border-gray-600 px-4"
+                          >
+                            Issuance Fee Website Efns
+                          </TableHead>
+                          <TableHead
+                            colSpan={3}
+                            className="text-center text-white font-semibold border-r border-gray-600 px-4"
+                          >
+                            BCL Consultancy
+                          </TableHead>
+                          <TableHead colSpan={3} className="text-center text-white font-semibold px-4">
+                            Officer
+                          </TableHead>
+                        </TableRow>
+                        <TableRow className="bg-blue-700 hover:bg-blue-700">
+                          <TableHead className="text-white text-sm font-medium min-w-[100px] h-12 px-4 border-r border-gray-500 text-center">
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[100px] h-12 px-4 border-r border-gray-500 text-center">
+                            Amount
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
+                            Currency
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium border-r border-gray-600 min-w-[140px] h-12 px-4 text-center">
+                            Rate
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[100px] h-12 px-4 border-r border-gray-500 text-center">
+                            Amount
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
+                            Currency
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[140px] h-12 px-4 border-r border-gray-500 text-center">
+                            Rate
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[130px] h-12 px-4 border-r border-gray-500 text-center">
+                            Period Type
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium border-r border-gray-600 min-w-[130px] h-12 px-4 text-center">
+                            No. of Periods
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
+                            Tier 1
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
+                            Tier 2
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium border-r border-gray-600 min-w-[90px] h-12 px-4 text-center">
+                            Tier 3
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
+                            Officer 1
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
+                            Officer 2
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 text-center">
+                            Officer 3
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {groupedData.length > 0 ? groupedData.map((group, groupIndex) => (
+                          <>
+                            {/* Subdepartment header row */}
+                            <TableRow
+                              key={`header-${group.subdepartment}`}
+                              className="bg-blue-50 hover:bg-blue-50 border-b border-blue-200"
+                            >
+                              <TableCell className="sticky left-0 z-10 bg-blue-50 border-r border-blue-200 font-semibold text-blue-900 h-14 px-4">
+                                {groupIndex + 1}
+                              </TableCell>
+                              <TableCell className="sticky left-[60px] z-10 bg-blue-50 border-r border-blue-200 font-semibold text-blue-900 h-14 px-4">
+                                <div className="flex items-center gap-2">
+
+                                  {group.subdepartment}
+                                  {group.classes.length > 1 && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => toggleSubdepartment(group.subdepartment)}
+                                      className="h-6 w-6 p-0"
+                                    >
+                                      {expandedSubdepartments.has(group.subdepartment) ? (
+                                        <Minus className="h-4 w-4" />
+                                      ) : (
+                                        <Plus className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                  )}
+                                  <Badge variant="secondary" className="text-xs">
+                                    {group.classes.length}
+                                  </Badge>
+                                </div>
+                              </TableCell>
+                              <TableCell colSpan={13} className="text-gray-500 italic h-14 px-4">
+                                {group.classes.length === 1
+                                  ? ""
+                                  : `${group.classes.length} classes available`}
+                              </TableCell>
+                            </TableRow>
+
+                            {/* Class rows */}
+                            {(expandedSubdepartments.has(group.subdepartment) || group.classes.length === 1) &&
+                              group.classes.map((row, rowIndex) => (
+                                <TableRow
+                                  key={row.id}
+                                  className={`hover:bg-blue-50 border-b border-blue-200 ${rowIndex % 2 === 0 ? "bg-white" : "bg-blue-25"
+                                    }`}
+                                >
+                                  <TableCell className="sticky left-0 z-10 bg-white border-r border-blue-200 text-blue-900 h-16 px-4">
+                                    {groupIndex + 1}.{rowIndex + 1}
+                                  </TableCell>
+                                  <TableCell className="sticky left-[60px] z-10 bg-white border-r border-blue-200 font-medium text-blue-900 h-16 px-4">
+                                    <div className="pl-6 text-sm">↳ {row.subdepartment}</div>
+                                  </TableCell>
+                                  <TableCell className="border-r border-blue-200 font-medium text-blue-800 h-16 px-4 text-center">
+                                    {row.class}
+                                  </TableCell>
+
+                                  {/* All the form cells remain the same - Processing Fee, Issuance Fee, BCL, Officer sections */}
+                                  {/* Processing Fee Section */}
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      value={row.processingFeeAmount}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, processingFeeAmount: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Select
+                                      value={row.processingFeeCurrency}
+                                      onValueChange={(value) =>
+                                        handleCurrencyChange(row.id, "processingFeeCurrency", value)
+                                      }
+                                    >
+                                      <SelectTrigger className="h-10">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="ksh">KSH</SelectItem>
+                                        <SelectItem value="usd">USD</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </TableCell>
+                                  <TableCell className="border-r border-gray-300 h-16 px-4">
+                                    <div className="flex items-center gap-2">
+                                      <Input
+                                        value={row.processingFeeRate}
+                                        readOnly
+                                        className="bg-gray-50 h-10 text-center"
+                                      />
+                                    </div>
+                                  </TableCell>
+
+                                  {/* Issuance Fee Section */}
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      value={row.issuanceFeeAmount}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, issuanceFeeAmount: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Select
+                                      value={row.issuanceFeeCurrency}
+                                      onValueChange={(value) =>
+                                        handleCurrencyChange(row.id, "issuanceFeeCurrency", value)
+                                      }
+                                    >
+                                      <SelectTrigger className="h-10">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="ksh">KSH</SelectItem>
+                                        <SelectItem value="usd">USD</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <div className="flex items-center gap-2">
+                                      <Input
+                                        value={row.issuanceFeeRate}
+                                        readOnly
+                                        className="h-10 text-center"
+                                      />
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <MultiSelectPopover
+                                      rowId={row.id}
+                                      field="issuancePeriodDenomination"
+                                      options={["months", "years"]}
+                                      values={row.issuancePeriodDenomination}
+                                      placeholder="Select period type"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="border-r border-gray-300 h-16 px-4">
+                                    <MultiSelectPopover
+                                      rowId={row.id}
+                                      field="noOfIssuancePeriod"
+                                      options={["1", "2", "3"]}
+                                      values={row.noOfIssuancePeriod}
+                                      placeholder="Select periods"
+                                    />
+                                  </TableCell>
+
+                                  {/* BCL Consultancy Section */}
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      value={row.bclTier1}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, bclTier1: e.target.value } : r)),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      value={row.bclTier2}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, bclTier2: e.target.value } : r)),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="border-r border-gray-300 h-16 px-4">
+                                    <Input
+                                      value={row.bclTier3}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, bclTier3: e.target.value } : r)),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+
+                                  {/* Officer Section */}
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      value={row.officer1}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, officer1: e.target.value } : r)),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      value={row.officer2}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, officer2: e.target.value } : r)),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4">
+                                    <Input
+                                      value={row.officer3}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, officer3: e.target.value } : r)),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                          </>
+                        )) : (
+                          <TableRow>
+                            <TableCell colSpan={14} className="h-32 text-center text-gray-500">
+                              No subdepartments or classes found for this department.
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          ))}
+        </Tabs>
+      </div>
     </div>
-  );
+  )
 }

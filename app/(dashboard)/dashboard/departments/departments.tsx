@@ -197,6 +197,7 @@ export default function Departments() {
         .from('tm_users')
         .select('id, name, email, phone_number, role, created_at, updated_at')
         .order('name')
+        .eq('role', 'user')
 
       if (error) throw error
       setUsers(users || [])
@@ -385,8 +386,9 @@ export default function Departments() {
         const taskManager = subdept.taskManagerId && subdept.taskManagerId !== 'none'
           ? await supabase
               .from('tm_users')
-              .select('id, name, email')
+              .select('id, name, email, role')
               .eq('id', subdept.taskManagerId)
+              .eq('role', 'user')
               .single()
           : { data: null }
 
@@ -394,8 +396,9 @@ export default function Departments() {
         const taskAssistant = subdept.taskAssistantId && subdept.taskAssistantId !== 'none'
           ? await supabase
               .from('tm_users')
-              .select('id, name, email')
+              .select('id, name, email, role')
               .eq('id', subdept.taskAssistantId)
+              .eq('role', 'user')
               .single()
           : { data: null }
 
@@ -900,9 +903,9 @@ export default function Departments() {
                                 </TableCell>
                                 <TableCell className="border-r">
                                   <div className="min-w-[120px]">
-                                    {subdept.task_manager ? (
+                                    {subdept.task_manager?.id ? (
                                       <UserDetailsPopover userId={subdept.task_manager.id} users={users} role="manager">
-                                        <span className="text-sm">{subdept.task_manager.name || 'Unassigned'}</span>
+                                        <span className="text-sm">{getUserName(subdept.task_manager)}</span>
                                       </UserDetailsPopover>
                                     ) : (
                                       <span className="text-sm text-muted-foreground">Unassigned</span>
@@ -911,9 +914,9 @@ export default function Departments() {
                                 </TableCell>
                                 <TableCell className="border-r">
                                   <div className="min-w-[120px]">
-                                    {subdept.task_assistant ? (
+                                    {subdept.task_assistant?.id ? (
                                       <UserDetailsPopover userId={subdept.task_assistant.id} users={users} role="assistant">
-                                        <span className="text-sm">{subdept.task_assistant.name || 'Unassigned'}</span>
+                                        <span className="text-sm">{getUserName(subdept.task_assistant)}</span>
                                       </UserDetailsPopover>
                                     ) : (
                                       <span className="text-sm text-muted-foreground">Unassigned</span>

@@ -4,11 +4,11 @@
 import { useEffect, useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { supabase } from "@/lib/supabase/client"
-import Stages from "./stages"
 import Departments from "./departments"
 import DepartmentRequirements from "./department-requirements"
 import WebData from "./webdata"
 import Rates from "./rates"
+import Stages from "./stages"
 
 type Department = {
   id: string

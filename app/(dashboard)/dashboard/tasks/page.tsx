@@ -435,7 +435,7 @@ export default function TasksPage() {
     console.log('Final columns for table:', finalColumns)
     
     return (
-      <div className="rounded-md border w-full flex flex-col bg-background" style={{ height: 'calc(100vh - 200px)' }}>
+      <div className="rounded-md border w-full flex flex-col bg-background" style={{ maxHeight: '70vh', maxWidth: '90vw' }}>
         <div className="overflow-hidden flex-1 flex flex-col">
           <div className="overflow-auto flex-1 relative">
             <Table className="min-w-[1400px] w-full border-collapse">
