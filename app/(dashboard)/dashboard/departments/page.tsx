@@ -46,13 +46,6 @@ export default function DepartmentsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Get simplified department list for the WebData and Rates components
-  const departmentList = departments.map(dept => ({
-    id: dept.id,
-    name: dept.name,
-    description: dept.description
-  }))
-
   useEffect(() => {
     const fetchDepartments = async () => {
       try {
@@ -97,7 +90,7 @@ export default function DepartmentsPage() {
       <TabsList>
         <TabsTrigger value="departments">Departments</TabsTrigger>
         <TabsTrigger value="stages">Stages</TabsTrigger>
-        <TabsTrigger value="requirements">Requirements</TabsTrigger>
+        <TabsTrigger value="requirements">Upload Processing Requirements</TabsTrigger>
         <TabsTrigger value="webdata">Web Data</TabsTrigger>  
         <TabsTrigger value="rates">Rates</TabsTrigger>  
       </TabsList>

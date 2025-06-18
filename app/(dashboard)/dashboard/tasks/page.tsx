@@ -275,42 +275,65 @@ export default function TasksPage() {
     }
   }
 
-  // Generate dynamic stage columns based on current subdepartment
+  // Generate dynamic stage columns based on current department and subdepartment
   const generateStageColumns = () => {
     const dept = departments.find(d => d.id === selectedDepartment)
     const subdept = dept?.subdepartments?.find(s => s.id === selectedSubdepartment)
     
     // Get stages from department and subdepartment
-    const allStages = [...(dept?.stages || []), ...(subdept?.stages || [])]
+    const deptStages = dept?.stages || []
+    const subdeptStages = subdept?.stages || []
     
-    // Remove duplicates by id
-    const uniqueStages = Array.from(new Map(allStages.map(stage => [stage.id, stage])).values())
+    // Combine and remove duplicates by name (since we might have the same stage name in both)
+    const allStages = [...deptStages, ...subdeptStages]
+    const uniqueStages = Array.from(new Map(allStages.map(stage => [stage.name, stage])).values())
     
     // Sort stages by order_num
-    uniqueStages.sort((a, b) => a.order_num - b.order_num)
+    uniqueStages.sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
 
+    // Create stage columns with proper rendering
     const dynamicStageColumns = uniqueStages.map(stage => ({
-      key: `stage_${stage.id}`,
+      key: `stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`,
       header: stage.name,
-      width: '120px',
+      width: '150px',
       render: (value: any, task: Task) => {
-        // Check if task is in this stage
-        const isCurrentStage = task.current_stage?.id === stage.id
-        const isCompleted = task.current_stage && task.current_stage.order > stage.order_num
+        const isCurrentStage = task.current_stage?.name === stage.name
+        const isCompleted = task.current_stage && 
+          (task.current_stage.order_num || 0) > (stage.order_num || 0)
+        const isPending = !isCurrentStage && !isCompleted
+        
+        // Calculate status based on task's current stage
+        let status = 'Pending'
+        let variant: 'default' | 'secondary' | 'outline' = 'outline'
         
         if (isCurrentStage) {
-          return <Badge variant="default">In Progress</Badge>
+          status = 'In Progress'
+          variant = 'default'
+          // Add timer for current stage
+          return (
+            <div className="flex flex-col gap-1">
+              <Badge variant={variant} className="w-fit">{status}</Badge>
+              {task.current_stage_started_at && (
+                <StageTimer 
+                  startTime={task.current_stage_started_at} 
+                  estimatedTime={stage.estimated_time}
+                />
+              )}
+            </div>
+          )
         } else if (isCompleted) {
-          return <Badge variant="secondary">Completed</Badge>
-        } else {
-          return <Badge variant="outline">Pending</Badge>
+          status = 'Completed'
+          variant = 'secondary'
         }
+        
+        return <Badge variant={variant} className="w-fit">{status}</Badge>
       }
     }))
 
-    // Insert stage columns before account_used
-    const baseColumns = stageColumns.slice(0, -3) // Remove last 3 columns
-    const endColumns = stageColumns.slice(-3) // Get last 3 columns
+    // Insert stage columns after the renewal_status column
+    const renewalStatusIndex = stageColumns.findIndex(col => col.key === 'renewal_status')
+    const baseColumns = stageColumns.slice(0, renewalStatusIndex + 1)
+    const endColumns = stageColumns.slice(renewalStatusIndex + 1)
     
     return [...baseColumns, ...dynamicStageColumns, ...endColumns]
   }
@@ -412,23 +435,35 @@ export default function TasksPage() {
     console.log('Final columns for table:', finalColumns)
     
     return (
-      <div className="rounded-md border w-full overflow-hidden">
-        <div className="w-full overflow-auto" style={{ maxHeight: '70vh', maxWidth: '90vw' }}>
-          <Table className="min-w-[1400px] w-full">
-            <TableHeader className="sticky top-0 z-10 bg-background">
-              <TableRow>
-                {finalColumns.map((column) => (
-                  <TableHead 
-                    key={column.key} 
-                    className="whitespace-nowrap border-r border-border last:border-r-0 bg-muted/50 font-semibold"
-                    style={{ width: column.width }}
-                  >
-                    {column.header}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+      <div className="rounded-md border w-full flex flex-col bg-background" style={{ height: 'calc(100vh - 200px)' }}>
+        <div className="overflow-hidden flex-1 flex flex-col">
+          <div className="overflow-auto flex-1 relative">
+            <Table className="min-w-[1400px] w-full border-collapse">
+              <TableHeader className="sticky top-0 z-10">
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  {finalColumns.map((column) => (
+                    <TableHead 
+                      key={column.key} 
+                      className="whitespace-nowrap border-r border-border last:border-r-0 font-semibold text-foreground"
+                      style={{ 
+                        width: column.width,
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 10,
+                        backgroundColor: 'hsl(var(--background))',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                        height: '40px',
+                        verticalAlign: 'middle'
+                      }}
+                    >
+                      <div className="flex items-center h-full px-2">
+                        {column.header}
+                      </div>
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
               {loading ? (
                 <TableRow>
                   <TableCell colSpan={finalColumns.length} className="h-24 text-center">
@@ -473,8 +508,9 @@ export default function TasksPage() {
                   </TableCell>
                 </TableRow>
               )}
-            </TableBody>
-          </Table>
+              </TableBody>
+            </Table>
+          </div>
         </div>
       </div>
     )
