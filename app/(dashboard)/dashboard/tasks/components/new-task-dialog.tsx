@@ -435,7 +435,8 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
       // If changing class
       if (field === 'class_id') {
-        const selectedClass = selectedSubdepartment?.classes?.find(c => c.name === value);
+        const selectedSubdept = subdepartments.find(s => s.id.toString() === prev.subdepartment_id.toString());
+        const selectedClass = selectedSubdept?.classes?.find(c => c.name === value);
         return {
           ...prev,
           class_id: value,
@@ -452,7 +453,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       console.log('Updated form data:', newState);
       return newState;
     });
-  }, [clients, subdepartments, allUsers, officers, selectedSubdepartment, departments]);
+  }, [clients, subdepartments, allUsers, officers, departments]);
 
   // Optimized submit handler
   const handleSubmit = useCallback(async (e: React.FormEvent) => {

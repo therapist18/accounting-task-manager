@@ -25,45 +25,10 @@ interface DepartmentRequirementsProps {
 }
 
 export default function DepartmentRequirements({ departments: initialDepartments }: DepartmentRequirementsProps) {
-  const {
-    departments,
-    setDepartments,
-    activeDept,
-    setActiveDept,
-    activeSubdept,
-    setActiveSubdept,
-    activeClass,
-    setActiveClass,
-    isDialogOpen,
-    setIsDialogOpen,
-    isDeleteDialogOpen,
-    setIsDeleteDialogOpen,
-    deleteContext,
-    setDeleteContext,
-    editingContext,
-    setEditingContext,
-    newRequirements,
-    setNewRequirements,
-    isSubmitting,
-    setIsSubmitting,
-    editingIndex,
-    setEditingIndex,
-    editForm,
-    setEditForm,
-    selectedDept,
-    setSelectedDept,
-    selectedSubdept,
-    setSelectedSubdept,
-    selectedClass,
-    setSelectedClass,
-    viewMode,
-    setViewMode,
-    isReady,
-    setIsReady
-  } = useDepartmentState(initialDepartments);
+  const { departments, setDepartments, activeDept, setActiveDept, activeSubdept, setActiveSubdept, activeClass, setActiveClass, isDialogOpen, setIsDialogOpen, isDeleteDialogOpen, setIsDeleteDialogOpen, deleteContext, setDeleteContext, editingContext, setEditingContext, newRequirements, setNewRequirements, isSubmitting, setIsSubmitting, editingIndex, setEditingIndex, editForm, setEditForm, selectedDept, setSelectedDept, selectedSubdept, setSelectedSubdept, selectedClass, setSelectedClass, viewMode, setViewMode, isReady, setIsReady } = useDepartmentState(initialDepartments);
 
   // Initialize component when departments are loaded
-  useEffect(() => {
+  useEffect(() => { 
     if (departments.length === 0 || isReady) return;
 
     // Set initial selected department
@@ -1187,33 +1152,8 @@ export default function DepartmentRequirements({ departments: initialDepartments
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <div className="inline-flex items-center p-1 rounded-md bg-muted">
-          <button
-            onClick={() => setViewMode('tabs')}
-            className={cn(
-              "p-2 rounded-md",
-              viewMode === 'tabs' ? "bg-background shadow" : "hover:bg-muted-foreground/10"
-            )}
-            title="Tabs View"
-          >
-            <LayoutGrid className={cn("h-4 w-4", viewMode === 'tabs' ? "text-primary" : "text-muted-foreground")} />
-          </button>
-          <button
-            onClick={() => setViewMode('sidebar')}
-            className={cn(
-              "p-2 rounded-md",
-              viewMode === 'sidebar' ? "bg-background shadow" : "hover:bg-muted-foreground/10"
-            )}
-            title="Sidebar View"
-          >
-            <PanelLeft className={cn("h-4 w-4", viewMode === 'sidebar' ? "text-primary" : "text-muted-foreground")} />
-          </button>
-        </div>
-      </div>
-
-      {viewMode === 'tabs' ? renderTabsView() : renderSidebarView()}
+    <div className="space-y-4"> 
+    <div>{renderSidebarView()}</div>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>

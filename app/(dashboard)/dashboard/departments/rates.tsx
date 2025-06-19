@@ -39,9 +39,21 @@ interface RateRow {
   bclTier1: string
   bclTier2: string
   bclTier3: string
-  officer1: string
-  officer2: string
-  officer3: string
+  officerBossFixed: string
+  officerPaTier1: string
+  officerPaEditable: string
+  // Extra Consideration
+  extraConsiderationApplicable: string
+  tccCompanyIgnore: string
+  tccIndividualIgnore: string
+  auditorsFee: string
+  degree: string
+  tfFile: string
+  // Convenience Fee
+  convenienceFeeApplicable: string
+  alienAssistance: string
+  reEntryApproval: string
+  passportEndorsement: string
 }
 
 interface GroupedData {
@@ -88,6 +100,9 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
   // Initialize table data from departments
   const [tableData, setTableData] = useState<RateRow[]>([])
   const [expandedSubdepartments, setExpandedSubdepartments] = useState<Set<string>>(new Set())
+  
+  // Options for dropdowns
+  const yesNoOptions = ["Applicable", "Not Applicable"]
 
   // Fetch departments if not provided as props
   useEffect(() => {
@@ -158,12 +173,24 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
             issuanceFeeRate: "1500000",
             issuancePeriodDenomination: ["years"],
             noOfIssuancePeriod: ["1", "2"],
-            bclTier1: "2000",
-            bclTier2: "3000",
-            bclTier3: "4000",
-            officer1: "1000",
-            officer2: "1500",
-            officer3: "2000",
+            bclTier1: "10,000",
+            bclTier2: "20,000",
+            bclTier3: "0",
+            officerBossFixed: "5,000",
+            officerPaTier1: "6,000",
+            officerPaEditable: "0",
+            // Extra Consideration
+            extraConsiderationApplicable: "Not Applicable",
+            tccCompanyIgnore: "5,000",
+            tccIndividualIgnore: "5,000",
+            auditorsFee: "5,000",
+            degree: "5,000",
+            tfFile: "5,000",
+            // Convenience Fee
+            convenienceFeeApplicable: "Not Applicable",
+            alienAssistance: "1,000",
+            reEntryApproval: "1,000",
+            passportEndorsement: "1,000",
           })
         })
         // Expand subdepartments with multiple classes by default
@@ -186,12 +213,24 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
           issuanceFeeRate: "8000",
           issuancePeriodDenomination: ["months"],
           noOfIssuancePeriod: ["1"],
-          bclTier1: "1500",
-          bclTier2: "2500",
-          bclTier3: "3500",
-          officer1: "800",
-          officer2: "1200",
-          officer3: "1800",
+          bclTier1: "10,000",
+          bclTier2: "20,000",
+          bclTier3: "0",
+          officerBossFixed: "5,000",
+          officerPaTier1: "6,000",
+          officerPaEditable: "0",
+          // Extra Consideration
+          extraConsiderationApplicable: "Not Applicable",
+          tccCompanyIgnore: "5,000",
+          tccIndividualIgnore: "5,000",
+          auditorsFee: "5,000",
+          degree: "5,000",
+          tfFile: "5,000",
+          // Convenience Fee
+          convenienceFeeApplicable: "Not Applicable",
+          alienAssistance: "1,000",
+          reEntryApproval: "1,000",
+          passportEndorsement: "1,000",
         })
       }
     })
@@ -485,18 +524,21 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                   )}
                 </CardHeader>
                 <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    <Table className="relative h-[calc(90vh-200px)]">
-                      {/* Table headers remain the same */}
-                      <TableHeader className="sticky top-0 z-10">
+                    <div className="relative h-[calc(80vh-200px)] overflow-auto">
+                      <Table className="relative border-collapse w-full">
+                        <TableHeader className="sticky top-0 z-20 bg-blue-800">
                         <TableRow className="bg-blue-800 hover:bg-blue-800">
-                          <TableHead className="sticky left-0 z-20 bg-blue-800 text-white font-semibold border-r border-blue-600 min-w-[60px] h-16 px-4 text-center">
-                            #
-                          </TableHead>
-                          <TableHead
-                            rowSpan={2}
-                            className="sticky left-[60px] z-20 bg-blue-800 text-white font-semibold border-r border-blue-600 min-w-[160px] h-16 px-4 text-center"
-                          >
+                            <TableHead 
+                              className="sticky left-0 z-30 bg-blue-800 text-white font-semibold border-r border-blue-600 min-w-[60px] h-16 px-4 text-center" 
+                              style={{ position: 'sticky', left: 0, top: 0 }}
+                            >
+                              #
+                            </TableHead>
+                            <TableHead
+                              rowSpan={2}
+                              className="sticky left-[60px] z-30 bg-blue-800 text-white font-semibold border-r border-blue-600 min-w-[160px] h-16 px-4 text-center"
+                              style={{ position: 'sticky', left: '60px', top: 0 }}
+                            >
                             Subdepartment
                           </TableHead>
                           <TableHead
@@ -523,11 +565,17 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                           >
                             BCL Consultancy
                           </TableHead>
-                          <TableHead colSpan={3} className="text-center text-white font-semibold px-4">
+                          <TableHead colSpan={3} className="text-center text-white font-semibold border-r border-gray-600 px-4">
                             Officer
                           </TableHead>
+                          <TableHead colSpan={6} className="text-center text-white font-semibold border-r border-gray-600 px-4">
+                            Extra Consideration
+                          </TableHead>
+                          <TableHead colSpan={4} className="text-center text-white font-semibold px-4">
+                            Convenience Fee
+                          </TableHead>
                         </TableRow>
-                        <TableRow className="bg-blue-700 hover:bg-blue-700">
+                        <TableRow className="bg-blue-700 hover:bg-blue-700 sticky top-16 z-20">
                           <TableHead className="text-white text-sm font-medium min-w-[100px] h-12 px-4 border-r border-gray-500 text-center">
                           </TableHead>
                           <TableHead className="text-white text-sm font-medium min-w-[100px] h-12 px-4 border-r border-gray-500 text-center">
@@ -561,233 +609,459 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                             Tier 2
                           </TableHead>
                           <TableHead className="text-white text-sm font-medium border-r border-gray-600 min-w-[90px] h-12 px-4 text-center">
-                            Tier 3
+                            Tier 3 Editable
                           </TableHead>
                           <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
-                            Officer 1
+                          Officer Boss Fixed
                           </TableHead>
                           <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
-                            Officer 2
+                            Officer PA Tier 1
                           </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 text-center">
-                            Officer 3
+                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
+                          Officer PA Editable
+                          </TableHead>
+                          {/* Extra Consideration Headers */}
+                          <TableHead className="text-white text-sm font-medium min-w-[120px] h-12 px-4 border-r border-gray-500 text-center">
+                            Applicable/Not Applicable
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[140px] h-12 px-4 border-r border-gray-500 text-center">
+                            TCC Company Ignore
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[140px] h-12 px-4 border-r border-gray-500 text-center">
+                            TCC Individual Ignore
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[120px] h-12 px-4 border-r border-gray-500 text-center">
+                            Auditors Fee Balance Sheet
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[140px] h-12 px-4 border-r border-gray-500 text-center">
+                            Degree
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[100px] h-12 px-4 border-r border-gray-600 text-center">
+                            TF File
+                          </TableHead>
+                          {/* Convenience Fee Headers */}
+                          <TableHead className="text-white text-sm font-medium min-w-[120px] h-12 px-4 border-r border-gray-500 text-center">
+                            Applicable/Not Applicable
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[180px] h-12 px-4 border-r border-gray-500 text-center">
+                            Alien Assistance & To attend Without Appointment
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[140px] h-12 px-4 border-r border-gray-500 text-center">
+                            Re-Entry Early Approval
+                          </TableHead>
+                          <TableHead className="text-white text-sm font-medium min-w-[200px] h-12 px-4 text-center">
+                            Passport Endorsement (in Absence of Applicant)
                           </TableHead>
                         </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {tableData.length > 0 ? tableData.map((row, index) => (
-                          <TableRow
-                            key={row.id}
-                            className={`hover:bg-blue-50 border-b border-blue-200 ${index % 2 === 0 ? 'bg-white' : 'bg-blue-25'}`}
-                          >
-                            <TableCell className="sticky left-0 z-10 border-r border-blue-200 text-blue-900 h-12 px-2 text-center">
-                              {index + 1}
-                            </TableCell>
-                            <TableCell className="sticky left-[40px] z-10 border-r border-blue-200 font-medium text-blue-900 h-12 px-3">
-                              {row.subdepartment}
-                            </TableCell>
-                            <TableCell className="border-r border-blue-200 font-medium text-blue-800 h-12 px-2 text-center">
-                              {row.class}
-                            </TableCell>
+                        </TableHeader>
+                        <TableBody>
+                        {groupedData.length > 0 ? groupedData.map((group, groupIndex) => (
+                          <>
+                            {/* Subdepartment header row */}
+                            <TableRow
+                              key={`header-${group.subdepartment}`}
+                              className="bg-blue-50 hover:bg-blue-50 border-b border-blue-200"
+                            >
+                              <TableCell className="sticky left-0 z-10 bg-blue-50 border-r border-blue-200 font-semibold text-blue-900 h-14 px-4">
+                                {groupIndex + 1}
+                              </TableCell>
+                              <TableCell className="sticky left-[60px] z-10 bg-blue-50 border-r border-blue-200 font-semibold text-blue-900 h-14 px-4">
+                                <div className="flex items-center gap-2">
 
-                            {/* All the form cells remain the same - Processing Fee, Issuance Fee, BCL, Officer sections */}
-                            {/* Processing Fee Section */}
-                            <TableCell className="h-12 px-2 border-r border-gray-200">
-                              <Input
-                                value={row.processingFeeAmount}
-                                onChange={(e) =>
-                                  setTableData((prev) =>
-                                    prev.map((r) =>
-                                      r.id === row.id ? { ...r, processingFeeAmount: e.target.value } : r,
-                                    ),
-                                  )
-                                }
-                                className="h-8 text-center text-sm"
-                              />
-                            </TableCell>
-                            <TableCell className="h-12 px-2 border-r border-gray-200">
-                              <Select
-                                value={row.processingFeeCurrency}
-                                onValueChange={(value) =>
-                                  handleCurrencyChange(row.id, "processingFeeCurrency", value)
-                                }
-                              >
-                                <SelectTrigger className="h-8 text-sm">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="ksh">KSH</SelectItem>
-                                  <SelectItem value="usd">USD</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-                            <TableCell className="h-12 px-2 border-r border-gray-300">
-                              <Input
-                                value={row.processingFeeRate}
-                                readOnly
-                                className="h-8 text-center text-sm bg-gray-50"
-                              />
-                            </TableCell>
+                                  {group.subdepartment}
+                                  {group.classes.length > 1 && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => toggleSubdepartment(group.subdepartment)}
+                                      className="h-6 w-6 p-0"
+                                    >
+                                      {expandedSubdepartments.has(group.subdepartment) ? (
+                                        <Minus className="h-4 w-4" />
+                                      ) : (
+                                        <Plus className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                  )}
+                                  <Badge variant="secondary" className="text-xs">
+                                    {group.classes.length}
+                                  </Badge>
+                                </div>
+                              </TableCell>
+                              <TableCell colSpan={13} className="text-gray-500 italic h-14 px-4">
+                                {group.classes.length === 1
+                                  ? ""
+                                  : `${group.classes.length} classes available`}
+                              </TableCell>
+                            </TableRow>
 
-                            {/* Issuance Fee Section */}
-                            <TableCell className="h-12 px-2 border-r border-gray-200">
-                              <Input
-                                value={row.issuanceFeeAmount}
-                                onChange={(e) =>
-                                  setTableData((prev) =>
-                                    prev.map((r) =>
-                                      r.id === row.id ? { ...r, issuanceFeeAmount: e.target.value } : r,
-                                    ),
-                                  )
-                                }
-                                className="h-8 text-center text-sm"
-                              />
-                            </TableCell>
-                            <TableCell className="h-12 px-2 border-r border-gray-200">
-                              <Select
-                                value={row.issuanceFeeCurrency}
-                                onValueChange={(value) =>
-                                  handleCurrencyChange(row.id, "issuanceFeeCurrency", value)
-                                }
-                              >
-                                <SelectTrigger className="h-8 text-sm">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="ksh">KSH</SelectItem>
-                                  <SelectItem value="usd">USD</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-                            <TableCell className="h-12 px-2 border-r border-gray-300">
-                              <Input
-                                value={row.issuanceFeeRate}
-                                readOnly
-                                className="h-8 text-center text-sm bg-gray-50"
-                              />
-                            </TableCell>
-                            <TableCell className="h-12 px-2 border-r border-gray-200">
-                              <Select
-                                value={row.issuancePeriodDenomination[0] || ''}
-                                onValueChange={(value) =>
-                                  setTableData((prev) =>
-                                    prev.map((r) =>
-                                      r.id === row.id ? { ...r, issuancePeriodDenomination: [value] } : r,
-                                    ),
-                                  )
-                                }
-                              >
-                                <SelectTrigger className="h-8 text-sm">
-                                  <SelectValue placeholder="Select" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="months">Months</SelectItem>
-                                  <SelectItem value="years">Years</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-                            <TableCell className="h-12 px-2 border-r border-gray-300">
-                              <Select
-                                value={row.noOfIssuancePeriod[0] || ''}
-                                onValueChange={(value) =>
-                                  setTableData((prev) =>
-                                    prev.map((r) =>
-                                      r.id === row.id ? { ...r, noOfIssuancePeriod: [value] } : r,
-                                    ),
-                                  )
-                                }
-                              >
-                                <SelectTrigger className="h-8 text-sm">
-                                  <SelectValue placeholder="Select" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="1">1</SelectItem>
-                                  <SelectItem value="2">2</SelectItem>
-                                  <SelectItem value="3">3</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
+                            {/* Class rows */}
+                            {(expandedSubdepartments.has(group.subdepartment) || group.classes.length === 1) &&
+                              group.classes.map((row, rowIndex) => (
+                                <TableRow
+                                  key={row.id}
+                                  className={`hover:bg-blue-50 border-b border-blue-200 ${rowIndex % 2 === 0 ? "bg-white" : "bg-blue-25"
+                                    }`}
+                                >
+                                  <TableCell className="sticky left-0 z-10 bg-white border-r border-blue-200 text-blue-900 h-16 px-4">
+                                    {groupIndex + 1}.{rowIndex + 1}
+                                  </TableCell>
+                                  <TableCell className="sticky left-[60px] z-10 bg-white border-r border-blue-200 font-medium text-blue-900 h-16 px-4">
+                                    <div className="pl-6 text-sm">↳ {row.subdepartment}</div>
+                                  </TableCell>
+                                  <TableCell className="border-r border-blue-200 font-medium text-blue-800 h-16 px-4 text-center">
+                                    {row.class}
+                                  </TableCell>
+                                  {/* Processing Fee Section */}
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      value={row.processingFeeAmount}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, processingFeeAmount: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Select
+                                      value={row.processingFeeCurrency}
+                                      onValueChange={(value) =>
+                                        handleCurrencyChange(row.id, "processingFeeCurrency", value)
+                                      }
+                                    >
+                                      <SelectTrigger className="h-10">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="ksh">KSH</SelectItem>
+                                        <SelectItem value="usd">USD</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </TableCell>
+                                  <TableCell className="border-r border-gray-300 h-16 px-4">
+                                    <div className="flex items-center gap-2">
+                                      <Input
+                                        value={row.processingFeeRate}
+                                        readOnly
+                                        className="h-10 text-center"
+                                      />
+                                    </div>
+                                  </TableCell>
 
-                            {/* BCL Consultancy Section */}
-                            <TableCell className="h-12 px-2 border-r border-gray-200">
-                              <Input
-                                value={row.bclTier1}
-                                onChange={(e) =>
-                                  setTableData((prev) =>
-                                    prev.map((r) => (r.id === row.id ? { ...r, bclTier1: e.target.value } : r)),
-                                  )
-                                }
-                                className="h-8 text-center text-sm"
-                              />
-                            </TableCell>
-                            <TableCell className="h-12 px-2 border-r border-gray-200">
-                              <Input
-                                value={row.bclTier2}
-                                onChange={(e) =>
-                                  setTableData((prev) =>
-                                    prev.map((r) => (r.id === row.id ? { ...r, bclTier2: e.target.value } : r)),
-                                  )
-                                }
-                                className="h-8 text-center text-sm"
-                              />
-                            </TableCell>
-                            <TableCell className="h-12 px-2 border-r border-gray-300">
-                              <Input
-                                value={row.bclTier3}
-                                onChange={(e) =>
-                                  setTableData((prev) =>
-                                    prev.map((r) => (r.id === row.id ? { ...r, bclTier3: e.target.value } : r)),
-                                  )
-                                }
-                                className="h-8 text-center text-sm"
-                              />
-                            </TableCell>
+                                  {/* Issuance Fee Section */}
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      value={row.issuanceFeeAmount}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, issuanceFeeAmount: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Select
+                                      value={row.issuanceFeeCurrency}
+                                      onValueChange={(value) =>
+                                        handleCurrencyChange(row.id, "issuanceFeeCurrency", value)
+                                      }
+                                    >
+                                      <SelectTrigger className="h-10">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="ksh">KSH</SelectItem>
+                                        <SelectItem value="usd">USD</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <div className="flex items-center gap-2">
+                                      <Input
+                                        value={row.issuanceFeeRate}
+                                        readOnly
+                                        className="h-10 text-center"
+                                      />
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <MultiSelectPopover
+                                      rowId={row.id}
+                                      field="issuancePeriodDenomination"
+                                      options={["months", "years"]}
+                                      values={row.issuancePeriodDenomination}
+                                      placeholder="Select period type"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="border-r border-gray-300 h-16 px-4">
+                                    <MultiSelectPopover
+                                      rowId={row.id}
+                                      field="noOfIssuancePeriod"
+                                      options={["1", "2", "3"]}
+                                      values={row.noOfIssuancePeriod}
+                                      placeholder="Select periods"
+                                    />
+                                  </TableCell>
 
-                            {/* Officer Section */}
-                            <TableCell className="h-12 px-2 border-r border-gray-200">
-                              <Input
-                                value={row.officer1}
-                                onChange={(e) =>
-                                  setTableData((prev) =>
-                                    prev.map((r) => (r.id === row.id ? { ...r, officer1: e.target.value } : r)),
-                                  )
-                                }
-                                className="h-8 text-center text-sm"
-                              />
-                            </TableCell>
-                            <TableCell className="h-12 px-2 border-r border-gray-200">
-                              <Input
-                                value={row.officer2}
-                                onChange={(e) =>
-                                  setTableData((prev) =>
-                                    prev.map((r) => (r.id === row.id ? { ...r, officer2: e.target.value } : r)),
-                                  )
-                                }
-                                className="h-8 text-center text-sm"
-                              />
-                            </TableCell>
-                            <TableCell className="h-12 px-2">
-                              <Input
-                                value={row.officer3}
-                                onChange={(e) =>
-                                  setTableData((prev) =>
-                                    prev.map((r) => (r.id === row.id ? { ...r, officer3: e.target.value } : r)),
-                                  )
-                                }
-                                className="h-8 text-center text-sm"
-                              />
-                            </TableCell>
-                          </TableRow>
+                                  {/* BCL Consultancy Section */}
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      value={row.bclTier1}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, bclTier1: e.target.value } : r)),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      value={row.bclTier2}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, bclTier2: e.target.value } : r)),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="border-r border-gray-300 h-16 px-4">
+                                    <Input
+                                      value={row.bclTier3}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, bclTier3: e.target.value } : r)),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+
+                                  {/* Officer Section */}
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      value={row.officerBossFixed}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, officerBossFixed: e.target.value } : r)),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      value={row.officerPaTier1}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, officerPaTier1: e.target.value } : r)),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      value={row.officerPaEditable}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, officerPaEditable: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                    />
+                                  </TableCell>
+                                  {/* Extra Consideration Cells */}
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Select
+                                      value={row.extraConsiderationApplicable}
+                                      onValueChange={(value) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, extraConsiderationApplicable: value } : r,
+                                          ),
+                                        )
+                                      }
+                                    >
+                                      <SelectTrigger className="h-10">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {yesNoOptions.map((option) => (
+                                          <SelectItem key={option} value={option}>
+                                            {option}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      type="number"
+                                      value={row.tccCompanyIgnore}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, tccCompanyIgnore: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                      placeholder="0"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      type="number"
+                                      value={row.tccIndividualIgnore}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, tccIndividualIgnore: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                      placeholder="0"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      type="number"
+                                      value={row.auditorsFee}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, auditorsFee: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                      placeholder="0"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      type="number"
+                                      value={row.degree}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, degree: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                      placeholder="0"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      type="number"
+                                      value={row.tfFile}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, tfFile: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                      placeholder="0"
+                                    />
+                                  </TableCell>
+                                  {/* Convenience Fee Cells */}
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Select
+                                      value={row.convenienceFeeApplicable}
+                                      onValueChange={(value) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, convenienceFeeApplicable: value } : r,
+                                          ),
+                                        )
+                                      }
+                                    >
+                                      <SelectTrigger className="h-10">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {yesNoOptions.map((option) => (
+                                          <SelectItem key={option} value={option}>
+                                            {option}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      type="number"
+                                      value={row.alienAssistance}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, alienAssistance: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                      placeholder="0"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4 border-r border-gray-200">
+                                    <Input
+                                      type="number"
+                                      value={row.reEntryApproval}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, reEntryApproval: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                      placeholder="0"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="h-16 px-4">
+                                    <Input
+                                      type="number"
+                                      value={row.passportEndorsement}
+                                      onChange={(e) =>
+                                        setTableData((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, passportEndorsement: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="h-10 text-center"
+                                      placeholder="0"
+                                    />
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                          </>
                         )) : (
                           <TableRow>
-                            <TableCell colSpan={15} className="h-32 text-center text-gray-500">
+                            <TableCell colSpan={14} className="h-32 text-center text-gray-500">
                               No subdepartments or classes found for this department.
                             </TableCell>
                           </TableRow>
                         )}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        </TableBody>
+                      </Table>
+                    </div>
                 </CardContent>
               </Card>
             </TabsContent>
