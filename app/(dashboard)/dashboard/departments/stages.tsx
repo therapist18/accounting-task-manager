@@ -33,6 +33,19 @@ type TimeConfig = {
   minutes: number
 }
 
+type StageDocument = {
+  id: string
+  name: string
+  description?: string
+  isRequired: boolean
+  extractionSpecs?: Array<{
+    fieldName: string
+    fieldType: 'text' | 'date' | 'number' | 'boolean'
+    isRequired: boolean
+    description?: string
+  }>
+}
+
 type Stage = {
   id: string
   name: string
@@ -41,11 +54,19 @@ type Stage = {
   follow_up?: 'Client' | 'Officer' | 'BCL' | null
   isSpecial: boolean
   timeConfigs?: TimeConfig[]
+  documents?: StageDocument[]
   allocations?: {
     [key: string]: {
       applicable: boolean
       display: boolean
       classId?: string
+      duration?: {
+        days: number
+        hours: number
+        minutes: number
+      }
+      followUpWith?: 'Client' | 'Officer' | 'BCL' | null
+      documents?: StageDocument[]
     }
   }
 }

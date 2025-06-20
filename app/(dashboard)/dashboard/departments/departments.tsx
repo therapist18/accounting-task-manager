@@ -5,7 +5,9 @@ import {
   fetchUsers,
   fetchDepartments,
   createDepartment as createDepartmentDb,
-  
+  saveClassRequirements,
+  updateClassRequirements,
+  saveSubdepartmentRequirements,
   Department,
   Subdepartment,
   Class,
@@ -620,7 +622,7 @@ export default function Departments() {
       toast.error('Department name is required')
       return
     }
- 
+  
     // Validate subdepartments
     for (const subdept of departmentForm.subdepartments) {
       if (!subdept.name.trim()) {
@@ -628,13 +630,13 @@ export default function Departments() {
         return
       }
     }
- 
+  
     try {
       setSaving(true)
- 
+  
       const isEditingSubdepartment = departmentForm.subdepartments[0]?.id !== undefined
       const isAddingSingleSubdepartment = !!currentDepartmentId && departmentForm.subdepartments.length === 1
- 
+  
       if (isAddingSingleSubdepartment) {
         // Handle single subdepartment addition/editing
         const subdept = departmentForm.subdepartments[0]
@@ -670,84 +672,83 @@ export default function Departments() {
               end_date: null
             }))
         }
- 
+  
         if (isEditingSubdepartment) {
+          // Update subdepartment
           const { error: updateError } = await supabase
             .from('tm_subdepartments')
             .update(subdeptData)
             .eq('id', subdept.id)
- 
+        
           if (updateError) throw updateError
+  
+          // Update class requirements
+          for (const cls of subdept.classes) {
+            const classId = `${subdept.id}_${cls.id}`
+            
+            // Update class-level requirements if any exist
+            if (cls.requirements && cls.requirements.length > 0) {
+              await updateClassRequirements(classId, cls.requirements, 'class')
+            }
+  
+            // Update subclass requirements
+            for (const subCls of cls.subClasses) {
+              const subclassId = `${classId}_${subCls.id}`
+              
+              // Update subclass requirements if any exist
+              if (subCls.requirements && subCls.requirements.length > 0) {
+                await updateClassRequirements(subclassId, subCls.requirements, 'subclass')
+              }
+            }
+          }
+  
           toast.success('Subdepartment updated successfully')
         } else {
-          const { error: insertError } = await supabase
+          // Insert new subdepartment
+          const { data: newSubdept, error: insertError } = await supabase
             .from('tm_subdepartments')
             .insert(subdeptData)
- 
+            .select()
+            .single()
+  
           if (insertError) throw insertError
+  
+          // Save class requirements for new subdepartment
+          if (newSubdept) {
+            for (const cls of subdept.classes) {
+              const classId = `${newSubdept.id}_${cls.id}`
+              
+              // Save class-level requirements
+              if (cls.requirements && cls.requirements.length > 0) {
+                await saveClassRequirements(classId, cls.requirements, 'class')
+              }
+  
+              // Save subclass requirements
+              for (const subCls of cls.subClasses) {
+                const subclassId = `${newSubdept.id}_${cls.id}_${subCls.id}`
+                if (subCls.requirements && subCls.requirements.length > 0) {
+                  await saveClassRequirements(subclassId, subCls.requirements, 'subclass')
+                }
+              }
+            }
+          }
+  
           toast.success('Subdepartment added successfully')
         }
- 
+  
         await fetchData()
         setIsAddDepartmentOpen(false)
         setCurrentDepartmentId(null)
         return
       }
- 
+  
       // Handle full department creation with multiple subdepartments
-      const departmentData = {
+      await createDepartmentDb({
         name: departmentForm.name.trim(),
         description: departmentForm.description ? departmentForm.description.trim() : null,
-        subdepartments: departmentForm.subdepartments.map(subdept => ({
-          id: subdept.id,
-          name: subdept.name.trim(),
-          description: subdept.description ? subdept.description.trim() : null,
-          classes: subdept.classes.map(cls => ({
-            id: cls.id,
-            name: cls.name,
-            description: cls.description || null,
-            order: cls.order,
-            isVisible: cls.isVisible,
-            requirements: cls.requirements.map(req => ({
-              id: req.id,
-              name: req.name,
-              description: req.description || null,
-              isRequired: req.isRequired,
-              order: req.order,
-              isVisible: req.isVisible
-            })),
-            subClasses: cls.subClasses.map(subCls => ({
-              id: subCls.id,
-              name: subCls.name,
-              description: subCls.description || null,
-              order: subCls.order,
-              isVisible: subCls.isVisible,
-              requirements: subCls.requirements.map(req => ({
-                id: req.id,
-                name: req.name,
-                description: req.description || null,
-                isRequired: req.isRequired,
-                order: req.order,
-                isVisible: req.isVisible
-              }))
-            }))
-          })),
-          task_manager: subdept.taskManagerId && subdept.taskManagerId !== 'none' ? {
-            id: subdept.taskManagerId,
-            start_date: new Date().toISOString(),
-            end_date: null
-          } : null,
-          task_assistants: subdept.taskAssistantIds
-            .filter(id => id && id !== 'none')
-            .map(id => ({
-              id,
-              start_date: new Date().toISOString(),
-              end_date: null
-            }))
-        }))
-      }
- 
-      await createDepartmentDb(departmentData)
+        subdepartments: departmentForm.subdepartments
+      })
+  
       await fetchData()
       toast.success('Department created successfully')
       setIsAddDepartmentOpen(false)
@@ -768,38 +769,52 @@ export default function Departments() {
         id: subdept.id,
         name: subdept.name,
         description: subdept.description || '',
-        classes: subdept.classes.map(cls => ({
-          id: cls.id,
-          name: cls.name,
-          description: cls.description || '',
-          order: cls.order,
-          isVisible: cls.isVisible,
-          requirements: cls.requirements.map(req => ({
-            id: req.id,
+        classes: subdept.classes?.map(cls => {
+          // Map class requirements
+          const classRequirements = cls.requirements?.map((req, idx) => ({
+            id: req.id || `req_${cls.id}_${idx}`,
             name: req.name,
             description: req.description || '',
-            isRequired: req.isRequired,
-            order: req.order,
-            isVisible: req.isVisible
-          })),
-          subClasses: cls.subClasses.map(subCls => ({
-            id: subCls.id,
-            name: subCls.name,
-            description: subCls.description || '',
-            order: subCls.order,
-            isVisible: subCls.isVisible,
-            requirements: subCls.requirements.map(req => ({
-              id: req.id,
+            isRequired: req.isRequired !== false,
+            order: req.order || idx,
+            isVisible: req.isVisible !== false,
+            type: req.type || 'standard'
+          })) || [];
+  
+          // Map sub-classes with their requirements
+          const subClasses = cls.subClasses?.map(subCls => {
+            const subClassRequirements = subCls.requirements?.map((req, idx) => ({
+              id: req.id || `subreq_${subCls.id}_${idx}`,
               name: req.name,
               description: req.description || '',
-              isRequired: req.isRequired,
-              order: req.order,
-              isVisible: req.isVisible
-            }))
-          }))
-        })),
+              isRequired: req.isRequired !== false,
+              order: req.order || idx,
+              isVisible: req.isVisible !== false,
+              type: req.type || 'standard'
+            })) || [];
+  
+            return {
+              id: subCls.id,
+              name: subCls.name,
+              description: subCls.description || '',
+              order: subCls.order,
+              isVisible: subCls.isVisible !== false,
+              requirements: subClassRequirements
+            };
+          }) || [];
+  
+          return {
+            id: cls.id,
+            name: cls.name,
+            description: cls.description || '',
+            order: cls.order,
+            isVisible: cls.isVisible !== false,
+            requirements: classRequirements,
+            subClasses
+          };
+        }) || [],
         taskManagerId: subdept.taskManagerId || '',
-        taskAssistantIds: subdept.taskAssistants.map(ta => ta.userId),
+        taskAssistantIds: subdept.taskAssistants?.map(ta => ta.userId) || [],
         stages: globalStages.reduce((acc, stage) => ({
           ...acc,
           [stage.name]: {
@@ -837,50 +852,7 @@ export default function Departments() {
       setSaving(false)
     }
   }
- 
-  const handleOpenAssignmentDialog = (deptId: string, subdept: Subdepartment) => {
-    setSelectedSubdept({ deptId, subdept })
-    setAssignmentDialogOpen(true)
-  }
- 
-  const handleSaveAssignments = async (taskManagerId: string, taskAssistantIds: string[]) => {
-    if (!selectedSubdept) return
- 
-    try {
-      setSaving(true)
- 
-      const { error } = await supabase
-        .from('tm_subdepartments')
-        .update({
-          task_manager: taskManagerId ? {
-            id: taskManagerId,
-            start_date: new Date().toISOString(),
-            end_date: null
-          } : null,
-          task_assistant: taskAssistantIds
-            .filter(id => id && id !== 'none')
-            .map(id => ({
-              id,
-              start_date: new Date().toISOString(),
-              end_date: null
-            })),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', selectedSubdept.subdept.id)
- 
-      if (error) throw error
- 
-      await fetchData()
-      setAssignmentDialogOpen(false)
-      toast.success('Assignments updated successfully')
-    } catch (error) {
-      console.error('Error updating assignments:', error)
-      toast.error('Failed to update assignments')
-    } finally {
-      setSaving(false)
-    }
-  }
- 
+  
   const getUserName = (userId: string) => {
     const user = users.find(u => u.id === userId)
     return user ? user.name : 'Unknown User'
@@ -1159,15 +1131,6 @@ export default function Departments() {
                                   </TableCell>
                                   <TableCell>
                                     <div className="flex space-x-2 justify-center">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleOpenAssignmentDialog(dept.id, subdept)}
-                                        title="Assign users"
-                                        className="hover:bg-blue-50"
-                                      >
-                                        <UserPlus className="h-4 w-4" />
-                                      </Button>
                                       <Button
                                         variant="outline"
                                         size="sm"
@@ -1517,204 +1480,6 @@ export default function Departments() {
          </div>
        </DialogContent>
      </Dialog>
-
-     {/* Assignment Dialog */}
-     <Dialog open={assignmentDialogOpen} onOpenChange={setAssignmentDialogOpen}>
-       <DialogContent className="sm:max-w-[700px]">
-         <DialogHeader className="pb-4 border-b">
-           <DialogTitle className="text-xl font-bold">Assign Team Members</DialogTitle>
-           <p className="text-sm text-muted-foreground">
-             {selectedSubdept?.subdept.name} - {departments.find(d => d.id === selectedSubdept?.deptId)?.name}
-           </p>
-         </DialogHeader>
-
-         {selectedSubdept && (
-           <AssignmentDialogContent
-             subdept={selectedSubdept.subdept}
-             users={users}
-             onSave={handleSaveAssignments}
-             onCancel={() => setAssignmentDialogOpen(false)}
-             saving={saving}
-           />
-         )}
-       </DialogContent>
-     </Dialog>
-   </div>
- )
-}
-
-// Assignment Dialog Content Component
-function AssignmentDialogContent({ 
- subdept, 
- users, 
- onSave, 
- onCancel, 
- saving 
-}: {
- subdept: Subdepartment
- users: User[]
- onSave: (taskManagerId: string, taskAssistantIds: string[]) => void
- onCancel: () => void
- saving: boolean
-}) {
- const [taskManagerId, setTaskManagerId] = useState(subdept.taskManagerId || '')
- const [taskAssistantIds, setTaskAssistantIds] = useState(
-   subdept.taskAssistants.map(ta => ta.userId)
- )
-
- const addTaskAssistant = () => {
-   setTaskAssistantIds([...taskAssistantIds, ''])
- }
-
- const removeTaskAssistant = (index: number) => {
-   setTaskAssistantIds(taskAssistantIds.filter((_, i) => i !== index))
- }
-
- const updateTaskAssistant = (index: number, userId: string) => {
-   const newIds = [...taskAssistantIds]
-   newIds[index] = userId
-   setTaskAssistantIds(newIds)
- }
-
- const handleSave = () => {
-   onSave(taskManagerId, taskAssistantIds.filter(id => id && id !== 'none'))
- }
-
- return (
-   <div className="space-y-6 py-6">
-     {/* Task Manager Section */}
-     <Card className="bg-blue-50 border-blue-200">
-       <CardHeader className="pb-3">
-         <CardTitle className="text-base flex items-center">
-           <div className="h-6 w-6 rounded-full bg-blue-100 flex items-center justify-center mr-2">
-             <UserIcon className="h-3 w-3 text-blue-600" />
-           </div>
-           Task Manager
-         </CardTitle>
-       </CardHeader>
-       <CardContent>
-         <Select value={taskManagerId} onValueChange={setTaskManagerId}>
-           <SelectTrigger className="bg-white">
-             <SelectValue placeholder="Select task manager" />
-           </SelectTrigger>
-           <SelectContent>
-             <SelectItem value="">Unassigned</SelectItem>
-             {users
-               .filter(u => ['admin', 'user'].includes(u.role))
-               .map(user => (
-                 <SelectItem key={user.id} value={user.id}>
-                   <div className="flex items-center space-x-3">
-                     <div className="h-6 w-6 rounded-full bg-blue-100 flex items-center justify-center">
-                       <UserIcon className="h-3 w-3 text-blue-600" />
-                     </div>
-                     <div>
-                       <span className="font-medium">{user.name}</span>
-                       <Badge variant="outline" className="ml-2 text-xs">{user.role}</Badge>
-                     </div>
-                   </div>
-                 </SelectItem>
-               ))
-             }
-           </SelectContent>
-         </Select>
-       </CardContent>
-     </Card>
-
-     {/* Task Assistants Section */}
-     <Card className="bg-green-50 border-green-200">
-       <CardHeader className="pb-3">
-         <div className="flex items-center justify-between">
-           <CardTitle className="text-base flex items-center">
-             <div className="h-6 w-6 rounded-full bg-green-100 flex items-center justify-center mr-2">
-               <Users className="h-3 w-3 text-green-600" />
-             </div>
-             Task Assistants ({taskAssistantIds.length})
-           </CardTitle>
-           <Button variant="outline" size="sm" onClick={addTaskAssistant} className="bg-white border-green-300 hover:bg-green-50">
-             <Plus className="h-4 w-4 mr-1" />
-             Add Assistant
-           </Button>
-         </div>
-       </CardHeader>
-       <CardContent>
-         <div className="space-y-3">
-           {taskAssistantIds.map((assistantId, index) => (
-             <div key={index} className="flex items-center space-x-3 p-3 bg-white rounded-lg border border-green-200">
-               <div className="flex-1">
-                 <Select
-                   value={assistantId}
-                   onValueChange={(value) => updateTaskAssistant(index, value)}
-                 >
-                   <SelectTrigger>
-                     <SelectValue placeholder="Select task assistant" />
-                   </SelectTrigger>
-                   <SelectContent>
-                     <SelectItem value="">Unassigned</SelectItem>
-                     {users
-                       .filter(u => ['admin', 'user'].includes(u.role))
-                       .map(user => (
-                         <SelectItem key={user.id} value={user.id}>
-                           <div className="flex items-center space-x-3">
-                             <div className="h-6 w-6 rounded-full bg-green-100 flex items-center justify-center">
-                               <UserIcon className="h-3 w-3 text-green-600" />
-                             </div>
-                             <div>
-                               <span className="font-medium">{user.name}</span>
-                               <Badge variant="outline" className="ml-2 text-xs">{user.role}</Badge>
-                             </div>
-                           </div>
-                         </SelectItem>
-                       ))
-                     }
-                   </SelectContent>
-                 </Select>
-               </div>
-               <Button
-                 variant="ghost"
-                 size="sm"
-                 onClick={() => removeTaskAssistant(index)}
-                 className="text-red-500 hover:text-red-700 hover:bg-red-50"
-               >
-                 <Trash2 className="h-4 w-4" />
-               </Button>
-             </div>
-           ))}
-
-           {taskAssistantIds.length === 0 && (
-             <div className="text-center py-8 bg-white border-2 border-dashed border-green-200 rounded-lg">
-               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-100 mx-auto mb-3">
-                 <Users className="h-6 w-6 text-green-400" />
-               </div>
-               <p className="text-muted-foreground mb-3">No task assistants assigned</p>
-               <Button variant="outline" onClick={addTaskAssistant} className="border-green-300 hover:bg-green-50">
-                 <Plus className="h-4 w-4 mr-2" />
-                 Add First Assistant
-               </Button>
-             </div>
-           )}
-         </div>
-       </CardContent>
-     </Card>
-
-     {/* Actions */}
-     <div className="flex justify-end space-x-3 pt-4 border-t">
-       <Button variant="outline" onClick={onCancel} disabled={saving} size="lg">
-         Cancel
-       </Button>
-       <Button onClick={handleSave} disabled={saving} size="lg" className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
-         {saving ? (
-           <>
-             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-             Saving...
-           </>
-         ) : (
-           <>
-             <Check className="mr-2 h-4 w-4" />
-             Save Assignments
-           </>
-         )}
-       </Button>
-     </div>
    </div>
  )
 }

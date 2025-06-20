@@ -6,264 +6,106 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
-import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid } from "lucide-react"
+import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import { useDepartmentState } from "./use-department-state"
-import type { Department } from "./use-department-state"
+import { saveClassRequirements, saveSubdepartmentRequirements } from "./database"
+import type { Department, Requirement, RequirementForm } from "./database"
 
 interface DepartmentRequirementsProps {
   departments: Department[]
 }
 
+interface EditingContext {
+  type: 'subdepartment' | 'class' | 'subclass'
+  departmentId: string
+  subdepartmentId: string
+  classId?: string
+  subclassId?: string
+}
+
 export default function DepartmentRequirements({ departments: initialDepartments }: DepartmentRequirementsProps) {
-  const { departments, setDepartments, activeDept, setActiveDept, activeSubdept, setActiveSubdept, activeClass, setActiveClass, isDialogOpen, setIsDialogOpen, isDeleteDialogOpen, setIsDeleteDialogOpen, deleteContext, setDeleteContext, editingContext, setEditingContext, newRequirements, setNewRequirements, isSubmitting, setIsSubmitting, editingIndex, setEditingIndex, editForm, setEditForm, selectedDept, setSelectedDept, selectedSubdept, setSelectedSubdept, selectedClass, setSelectedClass, viewMode, setViewMode, isReady, setIsReady } = useDepartmentState(initialDepartments);
+  const [departments, setDepartments] = useState<Department[]>(initialDepartments)
+  const [activeDept, setActiveDept] = useState<string>('')
+  const [activeSubdept, setActiveSubdept] = useState<Record<string, string>>({})
+  const [activeClass, setActiveClass] = useState<Record<string, string>>({})
+  const [activeSubclass, setActiveSubclass] = useState<Record<string, string>>({})
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
+  
+  // Dialog states
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [deleteContext, setDeleteContext] = useState<{type: string, index: number} | null>(null)
+  const [editingContext, setEditingContext] = useState<EditingContext | null>(null)
+  const [newRequirements, setNewRequirements] = useState<{name: string, description: string}[]>([{name: '', description: ''}])
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  
+  // Edit states
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState({name: '', description: ''})
+  
+  // Selection states for dialog
+  const [selectedDept, setSelectedDept] = useState('')
+  const [selectedSubdept, setSelectedSubdept] = useState('')
+  const [selectedClass, setSelectedClass] = useState('')
+  const [selectedSubclass, setSelectedSubclass] = useState('')
+  
+  const [isReady, setIsReady] = useState(false)
 
-  // Initialize component when departments are loaded
-  useEffect(() => { 
-    if (departments.length === 0 || isReady) return;
-
-    // Set initial selected department
-    const initialDept = departments[0]?.id || '';
-    setSelectedDept(initialDept);
-    setActiveDept(initialDept);
-
-    // Set initial subdepartment if available
-    const initialSubdept = departments[0]?.tm_subdepartments?.[0];
-    if (initialSubdept) {
-      const subdeptId = initialSubdept.id.toString();
-      setSelectedSubdept(subdeptId);
-      setActiveSubdept(prev => ({
-        ...prev,
-        [initialDept]: subdeptId
-      }));
-
-      // Set initial class if available
-      const initialClass = initialSubdept.classes?.[0]?.name;
-      if (initialClass) {
-        const subdeptKey = `${initialDept}-${subdeptId}`;
-        setActiveClass(prev => ({
-          ...prev,
-          [subdeptKey]: initialClass
-        }));
-      }
-    }
-    // Mark as ready to prevent re-initialization
-    setIsReady(true);
-  }, [departments, isReady]);
-
-  // Update editing context when active selections change
+  // Initialize component
   useEffect(() => {
-    if (!isReady) return;
+    if (departments.length === 0 || isReady) return
 
-    const currentDept = departments.find(d => d.id === activeDept);
-    if (!currentDept) return;
+    const initialDept = departments[0]?.id || ''
+    setActiveDept(initialDept)
+    setSelectedDept(initialDept)
 
-    const currentSubdeptId = activeSubdept[activeDept];
-    if (!currentSubdeptId) return;
+    const initialSubdept = departments[0]?.tm_subdepartments?.[0]
+    if (initialSubdept) {
+      const subdeptId = initialSubdept.id.toString()
+      setActiveSubdept(prev => ({ ...prev, [initialDept]: subdeptId }))
+      setSelectedSubdept(subdeptId)
 
-    const currentSubdept = currentDept.tm_subdepartments?.find(
-      sd => sd.id.toString() === currentSubdeptId
-    );
-    if (!currentSubdept) return;
+      const initialClass = initialSubdept.classes?.[0]
+      if (initialClass) {
+        const subdeptKey = `${initialDept}-${subdeptId}`
+        setActiveClass(prev => ({ ...prev, [subdeptKey]: initialClass.name }))
+        setSelectedClass(initialClass.name)
 
-    const subdeptKey = `${activeDept}-${currentSubdeptId}`;
-    const currentClassId = activeClass[subdeptKey];
-
-    setEditingContext({
-      type: currentSubdept.classes?.length ? 'class' : 'subdepartment',
-      departmentId: activeDept,
-      subdepartmentId: currentSubdeptId,
-      classId: currentClassId
-    });
-  }, [activeDept, activeSubdept, activeClass, departments, isReady]);
-
-  const openMultipleRequirementsDialog = (
-    type: 'subdepartment' | 'class'
-  ) => {
-    setEditingContext({
-      type,
-      departmentId: activeDept,
-      subdepartmentId: activeSubdept[activeDept],
-      classId: activeClass[activeSubdept[activeDept] || ''] || ''
-    })
-
-    // Initialize with one empty requirement
-    setNewRequirements([{ name: '', description: '' }])
-    setIsDialogOpen(true)
-  }
-
-  const updateSubdepartmentRequirements = (subdepartmentId: string, updatedRequirements: ClassRequirement[]) => {
-    setDepartments(prevDepartments =>
-      prevDepartments.map(dept => ({
-        ...dept,
-        tm_subdepartments: dept.tm_subdepartments?.map(subdept =>
-          subdept.id.toString() === subdepartmentId
-            ? { ...subdept, upload_requirements: updatedRequirements }
-            : subdept
-        ) || []
-      }))
-    )
-  }
-
-  const updateClassRequirements = (subdepartmentId: string, className: string, updatedRequirements: ClassRequirement[]) => {
-    setDepartments(prevDepartments =>
-      prevDepartments.map(dept => ({
-        ...dept,
-        tm_subdepartments: dept.tm_subdepartments?.map(subdept => ({
-          ...subdept,
-          classes: subdept.classes?.map(cls =>
-            cls.name === className
-              ? { ...cls, requirements: updatedRequirements }
-              : cls
-          ) || []
-        })) || []
-      }))
-    )
-  }
-
-  const saveSubdepartmentRequirement = async (
-    requirement: { name: string; description: string | null },
-    subdepartmentId?: string,
-    index?: number
-  ) => {
-    if (!subdepartmentId) return;
-
-    try {
-      const subdept = departments
-        .flatMap(dept => dept.tm_subdepartments || [])
-        .find(sd => sd.id.toString() === subdepartmentId);
-
-      if (!subdept) return;
-
-      const currentRequirements = subdept.upload_requirements || [];
-      const updatedRequirements =
-        index !== undefined && index >= 0
-          ? currentRequirements.map((r, i) => (i === index ? requirement : r))
-          : [...currentRequirements, requirement];
-
-      // Update local state immediately for better UX
-      updateSubdepartmentRequirements(subdepartmentId, updatedRequirements);
-
-      // Update database
-      const { error } = await supabase
-        .from('tm_subdepartments')
-        .update({ upload_requirements: updatedRequirements })
-        .eq('id', subdepartmentId);
-
-      if (error) throw error;
-
-      // Show success message
-      toast({
-        title: "Success",
-        description: "Requirements updated successfully",
-        variant: "default"
-      });
-
-    } catch (error) {
-      console.error('Error saving subdepartment requirement:', error);
-      // Revert local state on error
-      const subdept = departments
-        .flatMap(dept => dept.tm_subdepartments || [])
-        .find(sd => sd.id.toString() === subdepartmentId);
-      if (subdept) {
-        updateSubdepartmentRequirements(subdepartmentId, subdept.upload_requirements || []);
-      }
-      // Show error message
-      toast({
-        title: "Error",
-        description: "Failed to update requirements. Please try again.",
-        variant: "destructive"
-      });
-    }
-  }
-
-  const saveClassRequirement = async (
-    requirement: { name: string; description: string | null },
-    subdepartmentId?: string,
-    className?: string,
-    index?: number
-  ) => {
-    if (!subdepartmentId || !className) return;
-
-    try {
-      const subdept = departments
-        .flatMap(dept => dept.tm_subdepartments || [])
-        .find(sd => sd.id.toString() === subdepartmentId);
-
-      if (!subdept) return;
-
-      const targetClass = subdept.classes?.find(cls => cls.name === className);
-      if (!targetClass) return;
-
-      const currentRequirements = targetClass.requirements || [];
-      const updatedRequirements =
-        index !== undefined && index >= 0
-          ? currentRequirements.map((r, i) => (i === index ? requirement : r))
-          : [...currentRequirements, requirement];
-
-      // Update local state immediately for better UX
-      updateClassRequirements(subdepartmentId, className, updatedRequirements);
-
-      // Get current subdepartment data
-      const { data: subdeptData, error: fetchError } = await supabase
-        .from('tm_subdepartments')
-        .select('classes')
-        .eq('id', subdepartmentId)
-        .single();
-
-      if (fetchError) throw fetchError;
-
-      // Update the class requirements in the classes array
-      const updatedClasses = subdeptData.classes.map((cls: any) =>
-        cls.name === className
-          ? { ...cls, requirements: updatedRequirements }
-          : cls
-      );
-
-      // Save back to database
-      const { error: updateError } = await supabase
-        .from('tm_subdepartments')
-        .update({ classes: updatedClasses })
-        .eq('id', subdepartmentId);
-
-      if (updateError) throw updateError;
-
-      // Show success message
-      toast({
-        title: "Success",
-        description: "Class requirements updated successfully",
-        variant: "default"
-      });
-
-    } catch (error) {
-      console.error('Error saving class requirement:', error);
-      // Revert local state on error
-      const subdept = departments
-        .flatMap(dept => dept.tm_subdepartments || [])
-        .find(sd => sd.id.toString() === subdepartmentId);
-
-      if (subdept) {
-        const targetClass = subdept.classes?.find(cls => cls.name === className);
-        if (targetClass) {
-          updateClassRequirements(subdepartmentId, className, targetClass.requirements || []);
+        const initialSubclass = initialClass.subClasses?.[0]
+        if (initialSubclass) {
+          const classKey = `${subdeptKey}-${initialClass.name}`
+          setActiveSubclass(prev => ({ ...prev, [classKey]: initialSubclass.name }))
+          setSelectedSubclass(initialSubclass.name)
         }
       }
-      // Show error message
-      toast({
-        title: "Error",
-        description: "Failed to update class requirements. Please try again.",
-        variant: "destructive"
-      });
     }
+
+    setIsReady(true)
+  }, [departments, isReady])
+
+  // Update departments state when prop changes
+  useEffect(() => {
+    setDepartments(initialDepartments)
+  }, [initialDepartments])
+
+  const toggleExpanded = (key: string) => {
+    setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const openRequirementsDialog = (context: EditingContext) => {
+    setEditingContext(context)
+    setNewRequirements([{ name: '', description: '' }])
+    setIsDialogOpen(true)
   }
 
   const handleCloseDialog = () => {
@@ -272,90 +114,63 @@ export default function DepartmentRequirements({ departments: initialDepartments
     setNewRequirements([{ name: '', description: '' }])
   }
 
-  const handleCloseDeleteDialog = () => {
-    setIsDeleteDialogOpen(false)
-    setDeleteContext(null)
-  }
-
-  const handleDeleteClick = (type: 'subdepartment' | 'class', index: number) => {
+  const handleDeleteClick = (type: string, index: number) => {
     setDeleteContext({ type, index })
     setIsDeleteDialogOpen(true)
   }
 
   const handleDeleteConfirm = async () => {
-    if (!deleteContext) return
-
-    const { type, index } = deleteContext
-
+    if (!deleteContext || !editingContext) return
+  
     try {
-      if (!editingContext) return
-
-      if (type === 'subdepartment' && editingContext.subdepartmentId) {
-        const subdept = departments
-          .flatMap(dept => dept.tm_subdepartments || [])
-          .find(sd => sd.id.toString() === editingContext.subdepartmentId)
-
+      setIsSubmitting(true)
+      const { type, index } = deleteContext
+  
+      if (type === 'subdepartment') {
+        const dept = departments.find(d => d.id === editingContext.departmentId)
+        const subdept = dept?.tm_subdepartments?.find(s => s.id === editingContext.subdepartmentId)
         if (!subdept?.upload_requirements) return
-
+  
         const updatedRequirements = subdept.upload_requirements.filter((_, i) => i !== index)
-        updateSubdepartmentRequirements(editingContext.subdepartmentId, updatedRequirements)
-
-        const { error } = await supabase
-          .from('tm_subdepartments')
-          .update({ upload_requirements: updatedRequirements })
-          .eq('id', editingContext.subdepartmentId)
-
-        if (error) throw error
-
-      } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
-        const subdept = departments
-          .flatMap(dept => dept.tm_subdepartments || [])
-          .find(sd => sd.id.toString() === editingContext.subdepartmentId)
-
-        if (!subdept) return
-
-        const targetClass = subdept.classes?.find(cls => cls.name === editingContext.classId)
-        if (!targetClass?.requirements) return
-
-        // Update local state first for better UX
+        await saveSubdepartmentRequirements(editingContext.subdepartmentId, updatedRequirements)
+  
+      } else if (type === 'class') {
+        const dept = departments.find(d => d.id === editingContext.departmentId)
+        const subdept = dept?.tm_subdepartments?.find(s => s.id === editingContext.subdepartmentId)
+        const targetClass = subdept?.classes?.find(c => c.id.toString() === editingContext.classId)
+        
+        if (!targetClass) return
+        
+        const classId = `${editingContext.subdepartmentId}_${targetClass.id}`
         const updatedRequirements = targetClass.requirements.filter((_, i) => i !== index)
-        updateClassRequirements(editingContext.subdepartmentId, editingContext.classId, updatedRequirements)
-
-        // Get current classes from the subdepartment
-        const { data: currentData, error: fetchError } = await supabase
-          .from('tm_subdepartments')
-          .select('classes')
-          .eq('id', editingContext.subdepartmentId)
-          .single()
-
-        if (fetchError) throw fetchError
-
-        // Update only the requirements for the target class
-        const updatedClasses = currentData.classes.map((cls: any) =>
-          cls.name === editingContext.classId
-            ? { ...cls, requirements: updatedRequirements }
-            : cls
-        )
-
-        // Update the database with the modified classes array
-        const { error } = await supabase
-          .from('tm_subdepartments')
-          .update({ classes: updatedClasses })
-          .eq('id', editingContext.subdepartmentId)
-
-        if (error) throw error
-
-        // Show success message
-        toast({
-          title: "Success",
-          description: "Requirement deleted successfully",
-          variant: "default"
-        })
+        
+        await saveClassRequirements(classId, updatedRequirements, 'class')
+  
+      } else if (type === 'subclass') {
+        const dept = departments.find(d => d.id === editingContext.departmentId)
+        const subdept = dept?.tm_subdepartments?.find(s => s.id === editingContext.subdepartmentId)
+        const targetClass = subdept?.classes?.find(c => c.id.toString() === editingContext.classId)
+        const targetSubclass = targetClass?.subClasses?.find(sc => sc.id.toString() === editingContext.subclassId)
+        
+        if (!targetSubclass) return
+        
+        const subclassId = `${editingContext.subdepartmentId}_${editingContext.classId}_${targetSubclass.id}`
+        const updatedRequirements = targetSubclass.requirements.filter((_, i) => i !== index)
+        
+        await saveClassRequirements(subclassId, updatedRequirements, 'subclass')
       }
-
+  
+      await refreshDepartments()
+      
+      toast({
+        title: "Success",
+        description: "Requirement deleted successfully",
+        variant: "default"
+      })
+  
       setIsDeleteDialogOpen(false)
       setDeleteContext(null)
-
+  
     } catch (error) {
       console.error('Error deleting requirement:', error)
       toast({
@@ -368,14 +183,122 @@ export default function DepartmentRequirements({ departments: initialDepartments
     }
   }
 
+  const refreshDepartments = async () => {
+    try {
+      // Instead of reimplementing the logic, we can refetch the departments
+      const { data: departmentsData, error } = await supabase
+        .from('tm_departments')
+        .select(`
+          *,
+          tm_subdepartments (*)
+        `)
+        .order('name')
+  
+      if (error) throw error
+  
+      // Fetch all requirements
+      const { data: requirements, error: reqError } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .order('id')
+  
+      if (reqError) throw reqError
+  
+      // Rebuild department structure similar to fetchDepartments
+      const processedDepartments = departmentsData.map(dept => {
+        const subdepartments = (dept.tm_subdepartments || []).map(subdept => {
+          // Process classes and subclasses
+          const classes = (subdept.classes || []).map(cls => {
+            const classId = `${subdept.id}_${cls.id}`
+            const classRequirements = (requirements || [])
+              .filter(req => req.class_id === classId)
+              .flatMap(req => 
+                (req.requirements || []).map((r: any, idx: number) => ({
+                  id: `${req.id}_${idx}`,
+                  name: r.name || '',
+                  description: r.description || '',
+                  isRequired: r.isRequired !== false,
+                  order: r.order || idx,
+                  isVisible: r.isVisible !== false,
+                  type: r.type || 'standard'
+                }))
+              )
+  
+            // Process subclasses
+            const subClasses = (cls.subClasses || []).map(subCls => {
+              const subClassId = `${classId}_${subCls.id}`
+              const subClassRequirements = (requirements || [])
+                .filter(req => req.class_id === subClassId)
+                .flatMap(req => 
+                  (req.requirements || []).map((r: any, idx: number) => ({
+                    id: `${req.id}_${idx}`,
+                    name: r.name || '',
+                    description: r.description || '',
+                    isRequired: r.isRequired !== false,
+                    order: r.order || idx,
+                    isVisible: r.isVisible !== false,
+                    type: r.type || 'standard'
+                  }))
+                )
+  
+              return {
+                ...subCls,
+                parentClassId: classId,
+                requirements: subClassRequirements
+              }
+            })
+  
+            return {
+              ...cls,
+              requirements: classRequirements,
+              subClasses
+            }
+          })
+  
+          // Process subdepartment requirements
+          const uploadRequirements = (subdept.upload_requirements || []).map((req: any, idx: number) => ({
+            id: `subdept_${subdept.id}_${idx}`,
+            name: req.name || '',
+            description: req.description || '',
+            isRequired: req.isRequired !== false,
+            order: req.order || idx,
+            isVisible: req.isVisible !== false,
+            type: req.type || 'standard'
+          }))
+  
+          return {
+            ...subdept,
+            classes,
+            upload_requirements: uploadRequirements
+          }
+        })
+  
+        return {
+          ...dept,
+          tm_subdepartments: subdepartments,
+          subdepartments // For backward compatibility
+        }
+      })
+  
+      setDepartments(processedDepartments)
+    } catch (error) {
+      console.error('Error refreshing departments:', error)
+      toast({
+        title: "Error",
+        description: "Failed to refresh departments. Please try again.",
+        variant: "destructive"
+      })
+    }
+  }
+
   const addNewRequirement = () => {
     setNewRequirements([...newRequirements, { name: '', description: '' }])
   }
 
   const removeNewRequirement = (index: number) => {
-    const updated = [...newRequirements]
-    updated.splice(index, 1)
-    setNewRequirements(updated)
+    if (newRequirements.length > 1) {
+      setNewRequirements(newRequirements.filter((_, i) => i !== index))
+    }
   }
 
   const handleNewRequirementChange = (index: number, field: 'name' | 'description', value: string) => {
@@ -385,973 +308,843 @@ export default function DepartmentRequirements({ departments: initialDepartments
   }
 
   const handleAddMultipleRequirements = async () => {
-    if (!selectedDept || !selectedSubdept) {
-      toast({
-        title: "Error",
-        description: "Please select a department and subdepartment",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    // Filter out empty requirements
-    const validRequirements = newRequirements.filter(req => req.name.trim() !== '');
-
+    if (!editingContext) return
+  
+    const validRequirements = newRequirements.filter(req => req.name.trim() !== '')
     if (validRequirements.length === 0) {
-      handleCloseDialog();
-      return;
+      handleCloseDialog()
+      return
     }
-
+  
     try {
-      setIsSubmitting(true);
-
-      // Get the selected department and subdepartment
-      const currentDept = departments.find(d => d.id === selectedDept);
-      const subdept = currentDept?.tm_subdepartments?.find(sd => sd.id.toString() === selectedSubdept);
-
-      if (!currentDept || !subdept) {
-        throw new Error('Department or subdepartment not found');
-      }
-
-      // Update local state immediately for better UX
-      if (editingContext.type === 'subdepartment' || !subdept.classes?.length) {
-        const currentRequirements = subdept.upload_requirements || [];
-        const updatedRequirements = [...currentRequirements, ...validRequirements.map(req => ({
-          name: req.name.trim(),
-          description: req.description?.trim() || null
-        }))];
-        updateSubdepartmentRequirements(editingContext.subdepartmentId, updatedRequirements);
+      setIsSubmitting(true)
+  
+      const requirementsToAdd = validRequirements.map((req, index) => ({
+        id: `new_${Date.now()}_${index}`,
+        name: req.name.trim(),
+        description: req.description.trim() || '',
+        isRequired: true,
+        order: index,
+        isVisible: true,
+        type: 'standard'
+      }))
+  
+      if (editingContext.type === 'subdepartment') {
+        const dept = departments.find(d => d.id === editingContext.departmentId)
+        const subdept = dept?.tm_subdepartments?.find(s => s.id === editingContext.subdepartmentId)
+        const currentRequirements = subdept?.upload_requirements || []
+        
+        await saveSubdepartmentRequirements(editingContext.subdepartmentId, [
+          ...currentRequirements,
+          ...requirementsToAdd
+        ])
+  
       } else if (editingContext.type === 'class') {
-        // If classId is empty, use the first class
-        const targetClass = selectedClass
-          ? subdept.classes?.find(cls => cls.name === selectedClass)
-          : subdept.classes?.[0];
-
-        if (!targetClass) {
-          throw new Error('No valid class found');
-        }
-
-        const currentRequirements = targetClass.requirements || [];
-        const updatedRequirements = [...currentRequirements, ...validRequirements.map(req => ({
-          name: req.name.trim(),
-          description: req.description?.trim() || null
-        }))];
-
-        updateClassRequirements(editingContext.subdepartmentId, targetClass.name, updatedRequirements);
+        const dept = departments.find(d => d.id === editingContext.departmentId)
+        const subdept = dept?.tm_subdepartments?.find(s => s.id === editingContext.subdepartmentId)
+        const targetClass = subdept?.classes?.find(c => c.name === editingContext.classId)
+        
+        if (!targetClass) return
+        
+        const classId = `${editingContext.subdepartmentId}_${targetClass.id}`
+        const currentRequirements = targetClass.requirements || []
+  
+        await saveClassRequirements(classId, [
+          ...currentRequirements,
+          ...requirementsToAdd
+        ], 'class')
+  
+      } else if (editingContext.type === 'subclass') {
+        const dept = departments.find(d => d.id === editingContext.departmentId)
+        const subdept = dept?.tm_subdepartments?.find(s => s.id === editingContext.subdepartmentId)
+        const targetClass = subdept?.classes?.find(c => c.name === editingContext.classId)
+        const targetSubclass = targetClass?.subClasses?.find(sc => sc.name === editingContext.subclassId)
+        
+        if (!targetSubclass) return
+        
+        const subclassId = `${editingContext.subdepartmentId}_${targetClass.id}_${targetSubclass.id}`
+        const currentRequirements = targetSubclass.requirements || []
+  
+        await saveClassRequirements(subclassId, [
+          ...currentRequirements,
+          ...requirementsToAdd
+        ], 'subclass')
       }
-
-      // Update database
-      const { data: subdeptData, error: fetchError } = await supabase
-        .from('tm_subdepartments')
-        .select('*')
-        .eq('id', editingContext.subdepartmentId)
-        .single();
-
-      if (fetchError) {
-        throw fetchError;
-      }
-
-      // Prepare the update data
-      let updateData: any = {};
-
-      if (editingContext.type === 'subdepartment' || !subdept.classes?.length) {
-        // Handle subdepartment requirements
-        const currentRequirements = subdeptData.upload_requirements || [];
-        const newRequirements = validRequirements.map(req => ({
-          name: req.name.trim(),
-          description: req.description?.trim() || null
-        }));
-        updateData.upload_requirements = [...currentRequirements, ...newRequirements];
-      } else {
-        // Handle class requirements
-        const targetClassName = selectedClass || (subdept.classes?.[0]?.name);
-        if (!targetClassName) {
-          throw new Error('No valid class found');
-        }
-
-        // Get current classes or initialize if not exists
-        const currentClasses = Array.isArray(subdeptData.classes) ? [...subdeptData.classes] : [];
-        const classIndex = currentClasses.findIndex(cls => cls.name === targetClassName);
-
-        const newRequirements = validRequirements.map(req => ({
-          name: req.name.trim(),
-          description: req.description?.trim() || null
-        }));
-
-        if (classIndex >= 0) {
-          // Update existing class
-          const existingClass = currentClasses[classIndex];
-          currentClasses[classIndex] = {
-            ...existingClass,
-            requirements: [...(existingClass.requirements || []), ...newRequirements]
-          };
-        } else {
-          // Add new class with requirements
-          currentClasses.push({
-            name: targetClassName,
-            description: null,
-            requirements: newRequirements
-          });
-        }
-
-        updateData.classes = currentClasses;
-      }
-
-      // Update the database
-      const { error: updateError } = await supabase
-        .from('tm_subdepartments')
-        .update(updateData)
-        .eq('id', editingContext.subdepartmentId)
-        .select('*');
-
-      // Refresh the data after successful update
-      if (!updateError) {
-        const { data: updatedData, error: refreshError } = await supabase
-          .from('tm_subdepartments')
-          .select('*')
-          .eq('id', editingContext.subdepartmentId)
-          .single();
-
-        if (!refreshError && updatedData) {
-          // Update local state with fresh data from database
-          const updatedDepartments = departments.map(dept => ({
-            ...dept,
-            tm_subdepartments: dept.tm_subdepartments?.map(sd =>
-              sd.id.toString() === editingContext.subdepartmentId ? updatedData : sd
-            ) || []
-          }));
-          setDepartments(updatedDepartments);
-        }
-      }
-
-      if (updateError) {
-        // Revert local state on error
-        if (editingContext.type === 'subdepartment') {
-          updateSubdepartmentRequirements(editingContext.subdepartmentId, subdept.upload_requirements || []);
-        } else if (editingContext.type === 'class' && editingContext.classId) {
-          const targetClass = subdept.classes?.find(cls => cls.name === editingContext.classId);
-          if (targetClass) {
-            updateClassRequirements(editingContext.subdepartmentId, editingContext.classId, targetClass.requirements || []);
-          }
-        }
-        throw updateError;
-      }
-
-      // Show success message
+  
+      await refreshDepartments()
+  
       toast({
         title: "Success",
         description: `Added ${validRequirements.length} requirement${validRequirements.length > 1 ? 's' : ''} successfully`,
         variant: "default"
-      });
-
-      handleCloseDialog();
+      })
+  
+      handleCloseDialog()
+  
     } catch (error) {
-      console.error('Error adding requirements:', error);
+      console.error('Error adding requirements:', error)
       toast({
         title: "Error",
         description: "Failed to add requirements. Please try again.",
         variant: "destructive"
-      });
+      })
     } finally {
-      setIsSubmitting(false);
+      setIsSubmitting(false)
     }
   }
 
-  const renderRequirements = (requirements: ClassRequirement[] | undefined, type: 'subdepartment' | 'class', context: typeof editingContext) => {
-    const handleDeleteClickWrapper = (e: React.MouseEvent, index: number) => {
-      e.stopPropagation()
-      handleDeleteClick(type, index)
-    }
-    const hasRequirements = requirements && requirements.length > 0;
-    const requirementsList = [...(requirements || [])];
+  const renderRequirements = (requirements: Requirement[] | null | undefined, context: EditingContext) => {
+    // Ensure requirements is always an array
+    const safeRequirements = requirements || [];
     
-    // Add index to each requirement for sidebar navigation
-    const requirementsWithIndex = requirementsList.map((req, idx) => ({
-      ...req,
-      index: idx + 1
-    }));
-
-    const handleMove = (index: number, direction: 'up' | 'down') => {
-      if (!requirements || !context) return;
-      handleMoveRequirement(index, direction, type, requirements);
-    };
-
     const handleEdit = (index: number) => {
-      setEditingIndex(index);
+      setEditingIndex(index)
       setEditForm({
-        name: requirementsList[index].name,
-        description: requirementsList[index].description || ''
-      });
-    };
+        name: safeRequirements[index].name,
+        description: safeRequirements[index].description || ''
+      })
+    }
 
     const handleSaveEdit = async () => {
-      if (editingIndex === null || !context) return;
-
-      const updatedRequirement = {
-        name: editForm.name.trim(),
-        description: editForm.description.trim() || null
-      };
-
-      if (type === 'subdepartment' && context.subdepartmentId) {
-        await saveSubdepartmentRequirement(updatedRequirement, context.subdepartmentId, editingIndex);
-      } else if (type === 'class' && context.subdepartmentId && context.classId) {
-        await saveClassRequirement(updatedRequirement, context.subdepartmentId, context.classId, editingIndex);
-      }
-
-      setEditingIndex(null);
-    };
-
-    return (
-      <div className="relative h-[calc(80vh-200px)] border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm flex flex-col">
-        <div className="flex-1 overflow-auto">
-          <Table className="w-full border-collapse">
-            <TableHeader className="sticky top-0 z-10">
-              <TableRow className="bg-gray-50 dark:bg-gray-800">
-                <TableHead className="sticky left-0 z-20 w-12 px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                  #
-                </TableHead>
-                <TableHead className="sticky left-12 z-20 px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                  Requirement
-                </TableHead>
-                <TableHead className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                  Description
-                </TableHead>
-                <TableHead className="sticky right-0 z-20 px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-48 bg-gray-50 dark:bg-gray-800">
-                  Actions
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                {hasRequirements ? requirementsWithIndex.map((req, idx) => (
-                  <TableRow 
-                    key={`req-${idx}`} 
-                    className={`group hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${
-                      idx % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/30'
-                    }`}
-                  >
-                    <TableCell className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100 border-r border-gray-200 dark:border-gray-700">
-                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs font-medium">
-                        {req.index}
-                      </span>
-                    </TableCell>
-                    <TableCell className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white border-r border-gray-200 dark:border-gray-700">
-                      {editingIndex === idx ? (
-                        <Input
-                          value={editForm.name}
-                          onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                          className="h-9 border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
-                          autoFocus
-                        />
-                      ) : (
-                        <span className="font-medium">{req.name}</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 border-r border-gray-200 dark:border-gray-700">
-                      {editingIndex === idx ? (
-                        <Input
-                          value={editForm.description}
-                          onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                          className="h-9 border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
-                          placeholder="No description"
-                          onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
-                        />
-                      ) : (
-                        <span className={!req.description ? 'text-gray-400 dark:text-gray-500 italic' : ''}>
-                          {req.description || 'No description'}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
-                      <div className="flex justify-end items-center space-x-1">
-                        {editingIndex === idx ? (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 hover:bg-green-50 dark:hover:bg-green-900/30 text-green-600 dark:text-green-400"
-                              onClick={handleSaveEdit}
-                              title="Save"
-                            >
-                              <Check className="h-4 w-4" />
-                              <span className="sr-only">Save</span>
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
-                              onClick={() => setEditingIndex(null)}
-                              title="Cancel"
-                            >
-                              <X className="h-4 w-4" />
-                              <span className="sr-only">Cancel</span>
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-gray-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400"
-                              onClick={() => handleEdit(idx)}
-                              title="Edit"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                              <span className="sr-only">Edit</span>
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:pointer-events-none"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleMove(idx, 'up');
-                              }}
-                              disabled={idx === 0}
-                              title="Move up"
-                            >
-                              <ArrowUp className="h-3.5 w-3.5" />
-                              <span className="sr-only">Move up</span>
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:pointer-events-none"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleMove(idx, 'down');
-                              }}
-                              disabled={idx === requirementsList.length - 1}
-                              title="Move down"
-                            >
-                              <ArrowDown className="h-3.5 w-3.5" />
-                              <span className="sr-only">Move down</span>
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400"
-                              onClick={(e) => handleDeleteClickWrapper(e, idx)}
-                              title="Delete"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              <span className="sr-only">Delete</span>
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                </TableRow>
-                )) : (
-                  <TableRow>
-                    <TableCell colSpan={4} className="px-4 py-6 text-center text-gray-500 dark:text-gray-400 text-sm">
-                      <div className="flex flex-col items-center justify-center space-y-2">
-                        <div className="h-12 w-12 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-                          <svg className="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
-                        </div>
-                        <p className="font-medium text-gray-500 dark:text-gray-400">No requirements added yet</p>
-                        <p className="text-xs text-gray-400 dark:text-gray-500">Click the button above to add a new requirement</p>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-      </div>
-    )
-  }
-
-  // Effect to update editing context when active selections change
-  useEffect(() => {
-    if (!isReady) return;
-
-    const currentDept = departments.find(d => d.id === activeDept);
-    if (!currentDept) return;
-
-    const currentSubdeptId = activeSubdept[activeDept];
-    if (!currentSubdeptId) return;
-
-    const currentSubdept = currentDept.tm_subdepartments?.find(
-      sd => sd.id.toString() === currentSubdeptId
-    );
-    if (!currentSubdept) return;
-
-    const subdeptKey = `${activeDept}-${currentSubdeptId}`;
-    const currentClassId = activeClass[subdeptKey];
-    const hasClasses = currentSubdept.classes && currentSubdept.classes.length > 0;
-
-    setEditingContext({
-      type: hasClasses ? 'class' : 'subdepartment',
-      departmentId: activeDept,
-      subdepartmentId: currentSubdeptId,
-      classId: currentClassId
-    });
-  }, [activeDept, activeSubdept, activeClass, departments, isReady]);
-
-  const renderSubdepartmentContent = (subdept: Subdepartment, deptId: string) => {
-    const hasClasses = subdept.classes && subdept.classes.length > 0;
-    const subdeptKey = `${deptId}-${subdept.id}`;
-    const currentClass = activeClass[subdeptKey];
-
-    // Create context for requirements rendering
-    const context = {
-      type: hasClasses ? 'class' as const : 'subdepartment' as const,
-      departmentId: deptId,
-      subdepartmentId: subdept.id.toString(),
-      classId: hasClasses ? currentClass : undefined
-    };
-
-    return (
-      <div className="space-y-6">
-        {hasClasses ? (
-          <div className="space-y-4">
-            <Tabs
-              value={activeClass[subdeptKey] || ''}
-              onValueChange={(value) => setActiveClass(prev => ({
-                ...prev,
-                [subdeptKey]: value
-              }))}
-              className="space-y-4"
-            >
-              <div className="flex justify-between items-center">
-                <TabsList>
-                  {subdept.classes?.map(cls => (
-                    <TabsTrigger key={cls.name} value={cls.name}>
-                      {cls.name}
-                      {cls.requirements?.length > 0 && (
-                        <span className="ml-2 text-xs bg-muted-foreground/10 text-muted-foreground rounded-full px-2 py-0.5">
-                          {cls.requirements.length}
-                        </span>
-                      )}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => openMultipleRequirementsDialog('class')}
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Requirements
-                </Button>
-              </div>
-
-              {subdept.classes?.map(cls => (
-                <TabsContent key={cls.name} value={cls.name} className="mt-0 space-y-4">
-                  {cls.description && (
-                    <p className="text-muted-foreground">{cls.description}</p>
-                  )}
-                  {renderRequirements(cls.requirements, 'class', context)}
-                </TabsContent>
-              ))}
-            </Tabs>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-medium">Subdepartment Requirements</h3>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9 gap-1.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                onClick={() => openMultipleRequirementsDialog('subdepartment')}
-              >
-                <Plus className="h-4 w-4" />
-                <span className="hidden sm:inline-flex ml-1.5">
-                  Add Requirements
-                </span>
-              </Button>
-            </div>
-            {renderRequirements(subdept.upload_requirements, 'subdepartment', context)}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // Add a null check for departments
-  if (!departments || departments.length === 0) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <p className="text-muted-foreground">No departments found</p>
-      </div>
-    );
-  }
-
-  const moveRequirement = (requirements: ClassRequirement[], currentIndex: number, direction: 'up' | 'down'): ClassRequirement[] => {
-    const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
-
-    // Check if the move is valid
-    if (newIndex < 0 || newIndex >= requirements.length) {
-      return requirements;
-    }
-
-    // Create a new array with the items swapped
-    const newRequirements = [...requirements];
-    [newRequirements[currentIndex], newRequirements[newIndex]] =
-      [newRequirements[newIndex], newRequirements[currentIndex]];
-
-    return newRequirements;
-  };
-
-  const handleMoveRequirement = async (index: number, direction: 'up' | 'down', type: 'subdepartment' | 'class', requirements: ClassRequirement[] = []) => {
-    if (!editingContext) return;
-
-    const updatedRequirements = moveRequirement(requirements, index, direction);
-
-    try {
-      if (type === 'subdepartment' && editingContext.subdepartmentId) {
-        // Update local state immediately for better UX
-        updateSubdepartmentRequirements(editingContext.subdepartmentId, updatedRequirements);
-
-        // Update database
-        const { error } = await supabase
-          .from('tm_subdepartments')
-          .update({ upload_requirements: updatedRequirements })
-          .eq('id', editingContext.subdepartmentId);
-
-        if (error) throw error;
-
-      } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
-        // Update local state immediately for better UX
-        updateClassRequirements(editingContext.subdepartmentId, editingContext.classId, updatedRequirements);
-
-        // Get current subdepartment data
-        const { data: subdeptData, error: fetchError } = await supabase
-          .from('tm_subdepartments')
-          .select('classes')
-          .eq('id', editingContext.subdepartmentId)
-          .single();
-
-        if (fetchError) throw fetchError;
-
-        // Update the class requirements in the classes array
-        const updatedClasses = subdeptData.classes.map((cls: any) =>
-          cls.name === editingContext.classId
-            ? { ...cls, requirements: updatedRequirements }
-            : cls
-        );
-
-        // Save back to database
-        const { error: updateError } = await supabase
-          .from('tm_subdepartments')
-          .update({ classes: updatedClasses })
-          .eq('id', editingContext.subdepartmentId);
-
-        if (updateError) throw updateError;
-      }
-    } catch (error) {
-      console.error('Error moving requirement:', error);
-      // TODO: Show error toast to user
-      toast({
-        title: "Error",
-        description: "Failed to move requirement. Please try again.",
-        variant: "destructive"
-      });
-      // Revert local state on error
-      if (type === 'subdepartment' && editingContext.subdepartmentId) {
-        updateSubdepartmentRequirements(editingContext.subdepartmentId, requirements);
-      } else if (type === 'class' && editingContext.subdepartmentId && editingContext.classId) {
-        updateClassRequirements(editingContext.subdepartmentId, editingContext.classId, requirements);
+      if (editingIndex === null) return
+    
+      try {
+        const updatedRequirements = [...safeRequirements]
+        updatedRequirements[editingIndex] = {
+          ...updatedRequirements[editingIndex],
+          name: editForm.name.trim(),
+          description: editForm.description.trim()
+        }
+    
+        if (context.type === 'subdepartment') {
+          await saveSubdepartmentRequirements(context.subdepartmentId, updatedRequirements)
+        } else if (context.type === 'class') {
+          const dept = departments.find(d => d.id === context.departmentId)
+          const subdept = dept?.tm_subdepartments?.find(s => s.id === context.subdepartmentId)
+          const targetClass = subdept?.classes?.find(c => c.name === context.classId)
+          
+          if (!targetClass) return
+          
+          const classId = `${context.subdepartmentId}_${targetClass.id}`
+          await saveClassRequirements(classId, updatedRequirements, 'class')
+          
+        } else if (context.type === 'subclass') {
+          const dept = departments.find(d => d.id === context.departmentId)
+          const subdept = dept?.tm_subdepartments?.find(s => s.id === context.subdepartmentId)
+          const targetClass = subdept?.classes?.find(c => c.name === context.classId)
+          const targetSubclass = targetClass?.subClasses?.find(sc => sc.name === context.subclassId)
+          
+          if (!targetSubclass) return
+          
+          const subclassId = `${context.subdepartmentId}_${targetClass.id}_${targetSubclass.id}`
+          await saveClassRequirements(subclassId, updatedRequirements, 'subclass')
+        }
+    
+        await refreshDepartments()
+        setEditingIndex(null)
+    
+        toast({
+          title: "Success",
+          description: "Requirement updated successfully",
+          variant: "default"
+        })
+    
+      } catch (error) {
+        console.error('Error updating requirement:', error)
+        toast({
+          title: "Error",
+          description: "Failed to update requirement. Please try again.",
+          variant: "destructive"
+        })
       }
     }
-  };
-
-  // Render the sidebar view with hierarchical numbering (1, 1.1, 1.1.1)
-  const renderSidebarView = () => {
-    const currentDept = departments.find(d => d.id === activeDept);
-    const currentSubdept = currentDept?.tm_subdepartments?.find(sd => sd.id.toString() === activeSubdept[currentDept.id]);
+    const handleMove = async (index: number, direction: 'up' | 'down') => {
+      const newIndex = direction === 'up' ? index - 1 : index + 1
+      if (newIndex < 0 || newIndex >= safeRequirements.length) return
+    
+      try {
+        const updatedRequirements = [...safeRequirements]
+        ;[updatedRequirements[index], updatedRequirements[newIndex]] = 
+         [updatedRequirements[newIndex], updatedRequirements[index]]
+    
+        // Update order values
+        updatedRequirements.forEach((req, i) => {
+          req.order = i
+        })
+    
+        if (context.type === 'subdepartment') {
+          await saveSubdepartmentRequirements(context.subdepartmentId, updatedRequirements)
+        } else if (context.type === 'class') {
+          const dept = departments.find(d => d.id === context.departmentId)
+          const subdept = dept?.tm_subdepartments?.find(s => s.id === context.subdepartmentId)
+          const targetClass = subdept?.classes?.find(c => c.name === context.classId)
+          
+          if (!targetClass) return
+          
+          const classId = `${context.subdepartmentId}_${targetClass.id}`
+          await saveClassRequirements(classId, updatedRequirements, 'class')
+          
+        } else if (context.type === 'subclass') {
+          const dept = departments.find(d => d.id === context.departmentId)
+          const subdept = dept?.tm_subdepartments?.find(s => s.id === context.subdepartmentId)
+          const targetClass = subdept?.classes?.find(c => c.name === context.classId)
+          const targetSubclass = targetClass?.subClasses?.find(sc => sc.name === context.subclassId)
+          
+          if (!targetSubclass) return
+          
+          const subclassId = `${context.subdepartmentId}_${targetClass.id}_${targetSubclass.id}`
+          await saveClassRequirements(subclassId, updatedRequirements, 'subclass')
+        }
+    
+        await refreshDepartments()
+    
+      } catch (error) {
+        console.error('Error moving requirement:', error)
+        toast({
+          title: "Error",
+          description: "Failed to move requirement. Please try again.",
+          variant: "destructive"
+        })
+      }
+    }
 
     return (
-      <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-auto">
-        {/* Sidebar */}
-        <div className="w-64 border-r bg-muted/20">
-          <ScrollArea className="h-full">
-            <div className="p-4 space-y-1">
-              <h3 className="px-2 mb-2 text-sm font-semibold text-muted-foreground">Departments</h3>
-              {departments.map((dept, deptIndex) => {
-                const deptNumber = deptIndex + 1;
-                return (
-                  <div key={dept.id} className="space-y-1">
-                    <button
-                      onClick={() => setActiveDept(dept.id)}
-                      className={cn(
-                        "w-full text-left px-3 py-2 text-sm rounded-md transition-colors flex items-center justify-between",
-                        activeDept === dept.id
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "hover:bg-muted/50"
-                      )}
-                    >
-                      <span>
-                        <span className="font-mono text-xs text-muted-foreground mr-2">{deptNumber}.</span>
-                        {dept.name}
-                      </span>
-                      {dept.tm_subdepartments && dept.tm_subdepartments.length > 0 && (
-                        <span className="text-xs bg-muted-foreground/10 text-muted-foreground rounded-full px-2 py-0.5">
-                          {dept.tm_subdepartments.length}
-                        </span>
-                      )}
-                    </button>
+      <div className="relative h-[calc(80vh-200px)] border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm">
+        <Table>
+          <TableHeader className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800">
+            <TableRow>
+              <TableHead className="w-12">#</TableHead>
+              <TableHead>Requirement</TableHead>
+              <TableHead>Description</TableHead>
+              <TableHead className="w-48">Actions</TableHead>
+           </TableRow>
+         </TableHeader>
+         <TableBody>
+           {safeRequirements.length > 0 ? (
+             safeRequirements.map((req, idx) => (
+               <TableRow key={req.id} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                 <TableCell className="font-medium">
+                   <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs">
+                     {idx + 1}
+                   </span>
+                 </TableCell>
+                 <TableCell>
+                   {editingIndex === idx ? (
+                     <Input
+                       value={editForm.name}
+                       onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                       className="h-9"
+                       autoFocus
+                     />
+                   ) : (
+                     <span className="font-medium">{req.name}</span>
+                   )}
+                 </TableCell>
+                 <TableCell>
+                   {editingIndex === idx ? (
+                     <Input
+                       value={editForm.description}
+                       onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                       className="h-9"
+                       placeholder="Description"
+                       onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
+                     />
+                   ) : (
+                     <span className={!req.description ? 'text-gray-400 italic' : ''}>
+                       {req.description || 'No description'}
+                     </span>
+                   )}
+                 </TableCell>
+                 <TableCell>
+                   <div className="flex items-center space-x-1">
+                     {editingIndex === idx ? (
+                       <>
+                         <Button
+                           variant="ghost"
+                           size="sm"
+                           className="h-8 w-8 p-0 text-green-600"
+                           onClick={handleSaveEdit}
+                         >
+                           <Check className="h-4 w-4" />
+                         </Button>
+                         <Button
+                           variant="ghost"
+                           size="sm"
+                           className="h-8 w-8 p-0"
+                           onClick={() => setEditingIndex(null)}
+                         >
+                           <X className="h-4 w-4" />
+                         </Button>
+                       </>
+                     ) : (
+                       <>
+                         <Button
+                           variant="ghost"
+                           size="sm"
+                           className="h-8 w-8 p-0 text-blue-600"
+                           onClick={() => handleEdit(idx)}
+                         >
+                           <Pencil className="h-3.5 w-3.5" />
+                         </Button>
+                         <Button
+                           variant="ghost"
+                           size="sm"
+                           className="h-8 w-8 p-0"
+                           onClick={() => handleMove(idx, 'up')}
+                           disabled={idx === 0}
+                         >
+                           <ArrowUp className="h-3.5 w-3.5" />
+                         </Button>
+                         <Button
+                           variant="ghost"
+                           size="sm"
+                           className="h-8 w-8 p-0"
+                           onClick={() => handleMove(idx, 'down')}
+                           disabled={idx === safeRequirements.length - 1}
+                         >
+                           <ArrowDown className="h-3.5 w-3.5" />
+                         </Button>
+                         <Button
+                           variant="ghost"
+                           size="sm"
+                           className="h-8 w-8 p-0 text-red-500"
+                           onClick={() => handleDeleteClick(context.type, idx)}
+                         >
+                           <Trash2 className="h-3.5 w-3.5" />
+                         </Button>
+                       </>
+                     )}
+                   </div>
+                 </TableCell>
+               </TableRow>
+             ))
+           ) : (
+             <TableRow>
+               <TableCell colSpan={4} className="text-center py-8 text-gray-500">
+                 <div className="flex flex-col items-center space-y-2">
+                   <FileText className="h-8 w-8 text-gray-400" />
+                   <p>No requirements added yet</p>
+                   <p className="text-xs text-gray-400">Click the button above to add requirements</p>
+                 </div>
+               </TableCell>
+             </TableRow>
+           )}
+         </TableBody>
+       </Table>
+     </div>
+   )
+ }
 
-                    {activeDept === dept.id && dept.tm_subdepartments && dept.tm_subdepartments.length > 0 && (
-                      <div className="ml-4 space-y-1 mt-1">
-                        <h4 className="px-2 text-xs font-medium text-muted-foreground">Subdepartments</h4>
-                        {dept.tm_subdepartments.map((subdept, subdeptIndex) => {
-                          const subdeptNumber = `${deptNumber}.${subdeptIndex + 1}`;
-                          return (
-                            <div key={subdept.id} className="space-y-1">
-                              <button
-                                onClick={() => setActiveSubdept(prev => ({
-                                  ...prev,
-                                  [dept.id]: subdept.id.toString()
-                                }))}
-                                className={cn(
-                                  "w-full text-left px-3 py-1.5 text-sm rounded-md transition-colors flex items-start",
-                                  activeSubdept[dept.id] === subdept.id.toString()
-                                    ? "bg-primary/5 text-foreground"
-                                    : "hover:bg-muted/30"
-                                )}
-                              >
-                                <span className="font-mono text-xs text-muted-foreground mr-2">{subdeptNumber}.</span>
-                                <span className="flex-1">{subdept.name}</span>
-                              </button>
+ const renderSidebarView = () => {
+   return (
+     <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-hidden">
+       {/* Enhanced Sidebar */}
+       <div className="w-80 border-r bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900">
+         <ScrollArea className="h-full">
+           <div className="p-4 space-y-2">
+             <div className="flex items-center space-x-2 mb-4">
+               <Layers className="h-5 w-5 text-blue-600" />
+               <h3 className="font-semibold text-gray-900 dark:text-gray-100">Department Structure</h3>
+             </div>
 
-                              {activeSubdept[dept.id] === subdept.id.toString() && subdept.classes && subdept.classes.length > 0 && (
-                                <div className="ml-3 space-y-1">
-                                  <h5 className="px-2 text-xs font-medium text-muted-foreground">Classes</h5>
-                                  {subdept.classes.map((cls, classIndex) => {
-                                    const classNumber = `${subdeptNumber}.${classIndex + 1}`;
-                                    return (
-                                      <button
-                                        key={cls.name}
-                                        onClick={() => setActiveClass(prev => ({
-                                          ...prev,
-                                          [`${dept.id}-${subdept.id}`]: cls.name
-                                        }))}
-                                        className={cn(
-                                          "w-full text-left px-3 py-1 text-xs rounded-md transition-colors truncate flex items-start",
-                                          activeClass[`${dept.id}-${subdept.id}`] === cls.name
-                                            ? "bg-primary/5 text-foreground font-medium"
-                                            : "text-muted-foreground hover:bg-muted/20"
-                                        )}
-                                      >
-                                        <span className="font-mono text-xs text-muted-foreground mr-2">{classNumber}.</span>
-                                        <span className="flex-1 truncate">{cls.name}</span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </ScrollArea>
-        </div>
+             {departments.map((dept, deptIndex) => {
+               const deptNumber = deptIndex + 1
+               const deptKey = `dept-${dept.id}`
+               const isDeptExpanded = expandedItems[deptKey] ?? true
 
-        {/* Main Content */}
-        <div className="flex-1 p-6">
-          {currentDept && currentSubdept ? (
-            <>
-              <div className="mb-6">
-                <h2 className="text-2xl font-bold">{currentDept.name}</h2>
-                <h3 className="text-lg text-muted-foreground">{currentSubdept.name}</h3>
-              </div>
-              {renderSubdepartmentContent(currentSubdept, currentDept.id)}
-            </>
-          ) : (
-            <div className="flex items-center justify-center h-full text-muted-foreground">
-              Select a department and subdepartment to view requirements
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
+               return (
+                 <div key={dept.id} className="space-y-1">
+                   <Collapsible open={isDeptExpanded} onOpenChange={() => toggleExpanded(deptKey)}>
+                     <CollapsibleTrigger asChild>
+                       <button
+                         className={cn(
+                           "w-full flex items-center justify-between p-3 text-left rounded-lg transition-all duration-200",
+                           activeDept === dept.id
+                             ? "bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100 shadow-sm"
+                             : "hover:bg-white dark:hover:bg-gray-800 hover:shadow-sm"
+                         )}
+                         onClick={() => setActiveDept(dept.id)}
+                       >
+                         <div className="flex items-center space-x-3">
+                           <div className="flex items-center space-x-2">
+                             {isDeptExpanded ? (
+                               <ChevronDown className="h-4 w-4 text-gray-500" />
+                             ) : (
+                               <ChevronRight className="h-4 w-4 text-gray-500" />
+                             )}
+                             <span className="font-mono text-xs text-gray-500 bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">
+                               {deptNumber}
+                             </span>
+                           </div>
+                           <div>
+                             <div className="font-medium text-sm">{dept.name}</div>
+                             {dept.description && (
+                               <div className="text-xs text-gray-500 truncate max-w-[180px]">
+                                 {dept.description}
+                               </div>
+                             )}
+                           </div>
+                         </div>
+                         <Badge variant="secondary" className="text-xs">
+                           {dept.tm_subdepartments?.length || 0}
+                         </Badge>
+                       </button>
+                     </CollapsibleTrigger>
 
-  // Render the tabs view
-  const renderTabsView = () => {
-    return (
-      <Tabs
-        value={activeDept}
-        onValueChange={setActiveDept}
-        className="space-y-4"
-      >
-        <TabsList className="w-full justify-start overflow-x-auto">
-          {departments.map((dept) => (
-            <TabsTrigger key={dept.id} value={dept.id}>
-              {dept.name}
-              {dept.tm_subdepartments && dept.tm_subdepartments.length > 0 && (
-                <span className="ml-2 text-xs bg-muted-foreground/10 text-muted-foreground rounded-full px-2 py-0.5">
-                  {dept.tm_subdepartments.length}
-                </span>
-              )}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+                     <CollapsibleContent className="ml-4 mt-2 space-y-1">
+                       {dept.tm_subdepartments?.map((subdept, subdeptIndex) => {
+                         const subdeptNumber = `${deptNumber}.${subdeptIndex + 1}`
+                         const subdeptKey = `subdept-${subdept.id}`
+                         const isSubdeptExpanded = expandedItems[subdeptKey] ?? false
+                         const isActiveSubdept = activeSubdept[dept.id] === subdept.id.toString()
 
-        {departments.map((dept) => (
-          <TabsContent key={dept.id} value={dept.id} className="mt-0 space-y-4">
-            {dept.tm_subdepartments && dept.tm_subdepartments.length > 0 ? (
-              <div className="space-y-6">
-                {/* Subdepartment Tabs */}
-                <Tabs
-                  value={activeSubdept[dept.id] || ''}
-                  onValueChange={(value) => setActiveSubdept(prev => ({
-                    ...prev,
-                    [dept.id]: value
-                  }))}
-                >
-                  <TabsList className="mb-4">
-                    {dept.tm_subdepartments.map((subdept) => (
-                      <TabsTrigger
-                        key={subdept.id}
-                        value={subdept.id.toString()}
-                        className="flex items-center gap-2"
-                      >
-                        {subdept.name}
-                        {(subdept.upload_requirements?.length || 0) > 0 && (
-                          <span className="text-xs bg-muted-foreground/10 text-muted-foreground rounded-full px-1.5">
-                            {subdept.upload_requirements?.length}
-                          </span>
-                        )}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
+                         return (
+                           <div key={subdept.id} className="space-y-1">
+                             <Collapsible open={isSubdeptExpanded} onOpenChange={() => toggleExpanded(subdeptKey)}>
+                               <CollapsibleTrigger asChild>
+                                 <button
+                                   className={cn(
+                                     "w-full flex items-center justify-between p-2 text-left rounded-md transition-colors",
+                                     isActiveSubdept
+                                       ? "bg-green-100 dark:bg-green-900/30 text-green-900 dark:text-green-100"
+                                       : "hover:bg-gray-100 dark:hover:bg-gray-700"
+                                   )}
+                                   onClick={() => {
+                                     setActiveSubdept(prev => ({ ...prev, [dept.id]: subdept.id.toString() }))
+                                     if (activeDept !== dept.id) setActiveDept(dept.id)
+                                   }}
+                                 >
+                                   <div className="flex items-center space-x-2">
+                                     {subdept.classes && subdept.classes.length > 0 && (
+                                       <>
+                                         {isSubdeptExpanded ? (
+                                           <ChevronDown className="h-3 w-3 text-gray-400" />
+                                         ) : (
+                                           <ChevronRight className="h-3 w-3 text-gray-400" />
+                                         )}
+                                       </>
+                                     )}
+                                     <span className="font-mono text-xs text-gray-500 bg-gray-200 dark:bg-gray-600 px-1.5 py-0.5 rounded">
+                                       {subdeptNumber}
+                                     </span>
+                                     <span className="text-sm font-medium">{subdept.name}</span>
+                                   </div>
+                                   <div className="flex items-center space-x-1">
+                                     {(subdept.upload_requirements?.length || 0) > 0 && (
+                                       <Badge variant="outline" className="text-xs">
+                                         {subdept.upload_requirements?.length} reqs
+                                       </Badge>
+                                     )}
+                                     {subdept.classes && subdept.classes.length > 0 && (
+                                       <Badge variant="secondary" className="text-xs">
+                                         {subdept.classes.length} classes
+                                       </Badge>
+                                     )}
+                                   </div>
+                                 </button>
+                               </CollapsibleTrigger>
 
-                  {dept.tm_subdepartments.map((subdept) => (
-                    <TabsContent
-                      key={subdept.id}
-                      value={subdept.id.toString()}
-                      className="mt-0"
-                    >
-                      {subdept.description && (
-                        <p className="text-muted-foreground mb-4">{subdept.description}</p>
-                      )}
-                      {renderSubdepartmentContent(subdept, dept.id)}
-                    </TabsContent>
-                  ))}
-                </Tabs>
-              </div>
-            ) : (
-              <div className="text-muted-foreground p-4 border rounded-md">
-                No subdepartments found for this department.
-              </div>
-            )}
-          </TabsContent>
-        ))}
-      </Tabs>
-    );
-  };
+                               <CollapsibleContent className="ml-6 mt-1 space-y-1">
+                                 {subdept.classes?.map((cls, classIndex) => {
+                                   const classNumber = `${subdeptNumber}.${classIndex + 1}`
+                                   const classKey = `class-${dept.id}-${subdept.id}-${cls.name}`
+                                   const isClassExpanded = expandedItems[classKey] ?? false
+                                   const activeClassKey = `${dept.id}-${subdept.id}`
+                                   const isActiveClass = activeClass[activeClassKey] === cls.name
 
-  return (
-    <div className="space-y-4"> 
-    <div>{renderSidebarView()}</div>
+                                   return (
+                                     <div key={cls.name} className="space-y-1">
+                                       <Collapsible open={isClassExpanded} onOpenChange={() => toggleExpanded(classKey)}>
+                                         <CollapsibleTrigger asChild>
+                                           <button
+                                             className={cn(
+                                               "w-full flex items-center justify-between p-2 text-left rounded-md transition-colors",
+                                               isActiveClass
+                                                 ? "bg-purple-100 dark:bg-purple-900/30 text-purple-900 dark:text-purple-100"
+                                                 : "hover:bg-gray-50 dark:hover:bg-gray-700"
+                                             )}
+                                             onClick={() => {
+                                               setActiveClass(prev => ({ ...prev, [activeClassKey]: cls.name }))
+                                               if (!isActiveSubdept) {
+                                                 setActiveSubdept(prev => ({ ...prev, [dept.id]: subdept.id.toString() }))
+                                               }
+                                               if (activeDept !== dept.id) setActiveDept(dept.id)
+                                             }}
+                                           >
+                                             <div className="flex items-center space-x-2">
+                                               {cls.subClasses && cls.subClasses.length > 0 && (
+                                                 <>
+                                                   {isClassExpanded ? (
+                                                     <ChevronDown className="h-3 w-3 text-gray-400" />
+                                                   ) : (
+                                                     <ChevronRight className="h-3 w-3 text-gray-400" />
+                                                   )}
+                                                 </>
+                                               )}
+                                               <span className="font-mono text-xs text-gray-500 bg-purple-200 dark:bg-purple-700 px-1.5 py-0.5 rounded">
+                                                 {classNumber}
+                                               </span>
+                                               <span className="text-sm">{cls.name}</span>
+                                             </div>
+                                             <div className="flex items-center space-x-1">
+                                               {(cls.requirements?.length || 0) > 0 && (
+                                                 <Badge variant="outline" className="text-xs">
+                                                   {cls.requirements?.length} reqs
+                                                 </Badge>
+                                               )}
+                                               {cls.subClasses && cls.subClasses.length > 0 && (
+                                                 <Badge variant="secondary" className="text-xs">
+                                                   {cls.subClasses.length} subs
+                                                 </Badge>
+                                               )}
+                                             </div>
+                                           </button>
+                                         </CollapsibleTrigger>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Requirement</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this {deleteContext?.type} requirement? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={handleCloseDeleteDialog}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDeleteConfirm}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? 'Deleting...' : 'Delete'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                                         <CollapsibleContent className="ml-6 mt-1 space-y-1">
+                                           {cls.subClasses?.map((subCls, subClassIndex) => {
+                                             const subClassNumber = `${classNumber}.${subClassIndex + 1}`
+                                             const activeSubclassKey = `${activeClassKey}-${cls.name}`
+                                             const isActiveSubclass = activeSubclass[activeSubclassKey] === subCls.name
 
-      {/* Requirements Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add Multiple Requirements</DialogTitle>
-            <DialogDescription>Add multiple requirements at once.</DialogDescription>
-          </DialogHeader>
+                                             return (
+                                               <button
+                                                 key={subCls.name}
+                                                 className={cn(
+                                                   "w-full flex items-center justify-between p-1.5 text-left rounded-md transition-colors",
+                                                   isActiveSubclass
+                                                     ? "bg-orange-100 dark:bg-orange-900/30 text-orange-900 dark:text-orange-100"
+                                                     : "hover:bg-gray-50 dark:hover:bg-gray-700"
+                                                 )}
+                                                 onClick={() => {
+                                                   setActiveSubclass(prev => ({ ...prev, [activeSubclassKey]: subCls.name }))
+                                                   if (!isActiveClass) {
+                                                     setActiveClass(prev => ({ ...prev, [activeClassKey]: cls.name }))
+                                                   }
+                                                   if (!isActiveSubdept) {
+                                                     setActiveSubdept(prev => ({ ...prev, [dept.id]: subdept.id.toString() }))
+                                                   }
+                                                   if (activeDept !== dept.id) setActiveDept(dept.id)
+                                                 }}
+                                               >
+                                                 <div className="flex items-center space-x-2">
+                                                   <span className="font-mono text-xs text-gray-500 bg-orange-200 dark:bg-orange-700 px-1.5 py-0.5 rounded">
+                                                     {subClassNumber}
+                                                   </span>
+                                                   <span className="text-xs">{subCls.name}</span>
+                                                 </div>
+                                                 {(subCls.requirements?.length || 0) > 0 && (
+                                                   <Badge variant="outline" className="text-xs">
+                                                     {subCls.requirements?.length}
+                                                   </Badge>
+                                                 )}
+                                               </button>
+                                             )
+                                           })}
+                                         </CollapsibleContent>
+                                       </Collapsible>
+                                     </div>
+                                   )
+                                 })}
+                               </CollapsibleContent>
+                             </Collapsible>
+                           </div>
+                         )
+                       })}
+                     </CollapsibleContent>
+                   </Collapsible>
+                 </div>
+               )
+             })}
+           </div>
+         </ScrollArea>
+       </div>
 
-          <div className="space-y-4">
-            {/* Department Selection */}
-            <div>
-              <Label htmlFor="department">Department</Label>
-              <select
-                id="department"
-                value={selectedDept}
-                onChange={(e) => {
-                  setSelectedDept(e.target.value);
-                  setSelectedSubdept('');
-                  setSelectedClass('');
-                }}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value="">Select Department</option>
-                {departments.map((dept) => (
-                  <option key={dept.id} value={dept.id}>
-                    {dept.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+       {/* Main Content */}
+       <div className="flex-1 p-6 bg-white dark:bg-gray-900">
+         {renderMainContent()}
+       </div>
+     </div>
+   )
+ }
 
-            {/* Subdepartment Selection */}
-            {selectedDept && (
-              <div>
-                <Label htmlFor="subdepartment">Subdepartment</Label>
-                <select
-                  id="subdepartment"
-                  value={selectedSubdept}
-                  onChange={(e) => {
-                    setSelectedSubdept(e.target.value);
-                    setSelectedClass('');
-                  }}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <option value="">Select Subdepartment</option>
-                  {(() => {
-                    if (!selectedDept) return null;
-                    const dept = departments.find(d => d.id === selectedDept);
-                    if (!dept?.tm_subdepartments?.length) {
-                      return <option value="">No subdepartments available</option>;
-                    }
-                    return dept.tm_subdepartments.map((subdept) => (
-                      <option key={subdept.id} value={subdept.id.toString()}>
-                        {subdept.name}
-                      </option>
-                    ));
-                  })()}
-                </select>
-              </div>
-            )}
+ const renderMainContent = () => {
+   const currentDept = departments.find(d => d.id === activeDept)
+   if (!currentDept) {
+     return (
+       <div className="flex items-center justify-center h-full text-gray-500">
+         <div className="text-center">
+           <Layers className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+           <p className="text-lg font-medium">Select a department</p>
+           <p className="text-sm">Choose a department from the sidebar to view its structure</p>
+         </div>
+       </div>
+     )
+   }
 
-            {/* Class Selection */}
-            {selectedSubdept && (() => {
-              // Find the selected subdepartment
-              const dept = departments.find(d => d.id === selectedDept);
-              if (!dept?.tm_subdepartments) return null;
+   const currentSubdeptId = activeSubdept[currentDept.id]
+   const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id.toString() === currentSubdeptId)
 
-              const subdept = dept.tm_subdepartments.find(sd => sd.id.toString() === selectedSubdept);
-              if (!subdept) return null;
+   if (!currentSubdept) {
+     return (
+       <div className="space-y-6">
+         <div>
+           <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
+           {currentDept.description && (
+             <p className="text-gray-600 dark:text-gray-400">{currentDept.description}</p>
+           )}
+         </div>
+         <div className="flex items-center justify-center h-64 text-gray-500">
+           <div className="text-center">
+             <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+             <p className="text-lg font-medium">Select a subdepartment</p>
+             <p className="text-sm">Choose a subdepartment to view and manage requirements</p>
+           </div>
+         </div>
+       </div>
+     )
+   }
 
-              // Only show class selection if the subdepartment has classes
-              if (!subdept.classes?.length) return null;
+   const activeClassKey = `${currentDept.id}-${currentSubdept.id}`
+   const currentClassName = activeClass[activeClassKey]
+   const currentClass = currentSubdept.classes?.find(c => c.name === currentClassName)
 
-              return (
-                <div>
-                  <Label htmlFor="class">Class</Label>
-                  <select
-                    id="class"
-                    value={selectedClass}
-                    onChange={(e) => setSelectedClass(e.target.value)}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <option value="">Select Class</option>
-                    {subdept.classes.map((cls) => (
-                      <option key={cls.name} value={cls.name}>
-                        {cls.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              );
-            })()}
+   const activeSubclassKey = `${activeClassKey}-${currentClassName}`
+   const currentSubclassName = activeSubclass[activeSubclassKey]
+   const currentSubclass = currentClass?.subClasses?.find(sc => sc.name === currentSubclassName)
 
-            {/* Requirements */}
-            <div className="space-y-2">
-              {newRequirements.map((req, idx) => (
-                <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-5">
-                    <Label htmlFor={`name-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
-                      Name {idx > 0 ? idx + 1 : ''}
-                    </Label>
-                    <Input
-                      id={`name-${idx}`}
-                      value={req.name}
-                      onChange={(e) => handleNewRequirementChange(idx, 'name', e.target.value)}
-                      placeholder="Requirement name"
-                    />
-                  </div>
-                  <div className="col-span-6">
-                    <Label htmlFor={`desc-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
-                      Description {idx > 0 ? idx + 1 : ''}
-                    </Label>
-                    <Input
-                      id={`desc-${idx}`}
-                      value={req.description}
-                      onChange={(e) => handleNewRequirementChange(idx, 'description', e.target.value)}
-                      placeholder="Description (optional)"
-                    />
-                  </div>
-                  <div className="col-span-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9"
-                      onClick={() => removeNewRequirement(idx)}
-                      disabled={newRequirements.length <= 1}
-                    >
-                      <X className="h-4 w-4" />
-                      <span className="sr-only">Remove requirement {idx + 1}</span>
-                    </Button>
-                  </div>
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-2"
-                onClick={() => addNewRequirement()}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Another
-              </Button>
-            </div>
-          </div>
+   return (
+     <div className="space-y-6">
+       {/* Header */}
+       <div className="border-b pb-4">
+         <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
+         <h3 className="text-lg text-gray-600 dark:text-gray-400">{currentSubdept.name}</h3>
+         {currentClass && (
+           <div className="flex items-center space-x-2 mt-2">
+             <Badge variant="outline">{currentClass.name}</Badge>
+             {currentSubclass && (
+               <>
+                 <ChevronRight className="h-4 w-4 text-gray-400" />
+                 <Badge variant="outline">{currentSubclass.name}</Badge>
+               </>
+             )}
+           </div>
+         )}
+       </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={handleCloseDialog}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleAddMultipleRequirements}
-              disabled={!selectedDept || !selectedSubdept || (!selectedClass && departments.find(d => d.id === selectedDept)?.tm_subdepartments?.find(sd => sd.id.toString() === selectedSubdept)?.classes?.length > 0) || !newRequirements.some(req => req.name.trim() !== '') || isSubmitting}
-            >
-              {isSubmitting ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Adding...
-                </>
-              ) : (
-                `Add ${newRequirements.filter(req => req.name.trim() !== '').length} Requirements`
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
+       {/* Content based on current selection */}
+       {currentSubclass ? (
+         // Show subclass requirements
+         <div className="space-y-4">
+           <div className="flex items-center justify-between">
+             <h4 className="text-lg font-medium flex items-center space-x-2">
+               <Layers className="h-5 w-5 text-orange-600" />
+               <span>Sub-class Requirements: {currentSubclass.name}</span>
+             </h4>
+             <Button
+               onClick={() => openRequirementsDialog({
+                 type: 'subclass',
+                 departmentId: currentDept.id,
+                 subdepartmentId: currentSubdept.id,
+                 classId: currentClass?.name,
+                 subclassId: currentSubclass.name
+               })}
+               size="sm"
+             >
+               <Plus className="h-4 w-4 mr-2" />
+               Add Requirements
+             </Button>
+           </div>
+           {renderRequirements(currentSubclass.requirements, {
+             type: 'subclass',
+             departmentId: currentDept.id,
+             subdepartmentId: currentSubdept.id,
+             classId: currentClass?.name,
+             subclassId: currentSubclass.name
+           })}
+         </div>
+       ) : currentClass ? (
+         // Show class requirements
+         <div className="space-y-4">
+           <div className="flex items-center justify-between">
+             <h4 className="text-lg font-medium flex items-center space-x-2">
+               <Layers className="h-5 w-5 text-purple-600" />
+               <span>Class Requirements: {currentClass.name}</span>
+             </h4>
+             <Button
+               onClick={() => openRequirementsDialog({
+                 type: 'class',
+                 departmentId: currentDept.id,
+                 subdepartmentId: currentSubdept.id,
+                 classId: currentClass.name
+               })}
+               size="sm"
+             >
+               <Plus className="h-4 w-4 mr-2" />
+               Add Requirements
+             </Button>
+           </div>
+           {renderRequirements(currentClass.requirements, {
+             type: 'class',
+             departmentId: currentDept.id,
+             subdepartmentId: currentSubdept.id,
+             classId: currentClass.name
+           })}
+         </div>
+       ) : (
+         // Show subdepartment requirements
+         <div className="space-y-4">
+           <div className="flex items-center justify-between">
+             <h4 className="text-lg font-medium flex items-center space-x-2">
+               <FileText className="h-5 w-5 text-green-600" />
+               <span>Subdepartment Requirements</span>
+             </h4>
+             <Button
+               onClick={() => openRequirementsDialog({
+                 type: 'subdepartment',
+                 departmentId: currentDept.id,
+                 subdepartmentId: currentSubdept.id
+               })}
+               size="sm"
+             >
+               <Plus className="h-4 w-4 mr-2" />
+               Add Requirements
+             </Button>
+           </div>
+           {renderRequirements(currentSubdept.upload_requirements, {
+             type: 'subdepartment',
+             departmentId: currentDept.id,
+             subdepartmentId: currentSubdept.id
+           })}
+         </div>
+       )}
+     </div>
+   )
+ }
+
+ if (!departments || departments.length === 0) {
+   return (
+     <div className="flex items-center justify-center p-8">
+       <div className="text-center">
+         <Layers className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+         <p className="text-lg font-medium text-gray-600">No departments found</p>
+         <p className="text-sm text-gray-500">Create departments first to manage requirements</p>
+       </div>
+     </div>
+   )
+ }
+
+ return (
+   <div className="space-y-4">
+     {renderSidebarView()}
+
+     {/* Delete Confirmation Dialog */}
+     <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+       <DialogContent>
+         <DialogHeader>
+           <DialogTitle>Delete Requirement</DialogTitle>
+           <DialogDescription>
+             Are you sure you want to delete this requirement? This action cannot be undone.
+           </DialogDescription>
+         </DialogHeader>
+         <DialogFooter>
+           <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+             Cancel
+           </Button>
+           <Button
+             variant="destructive"
+             onClick={handleDeleteConfirm}
+             disabled={isSubmitting}
+           >
+             {isSubmitting ? 'Deleting...' : 'Delete'}
+           </Button>
+         </DialogFooter>
+       </DialogContent>
+     </Dialog>
+
+     {/* Add Requirements Dialog */}
+     <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+       <DialogContent className="max-w-2xl">
+         <DialogHeader>
+           <DialogTitle>Add Multiple Requirements</DialogTitle>
+           <DialogDescription>
+             Add multiple requirements to {editingContext?.type === 'subdepartment' ? 'subdepartment' : 
+               editingContext?.type === 'class' ? 'class' : 'sub-class'}
+           </DialogDescription>
+         </DialogHeader>
+
+         <div className="space-y-4 max-h-96 overflow-y-auto">
+           {newRequirements.map((req, idx) => (
+             <div key={idx} className="grid grid-cols-12 gap-2 items-end p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+               <div className="col-span-5">
+                 <Label htmlFor={`name-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
+                   Requirement Name
+                 </Label>
+                 <Input
+                   id={`name-${idx}`}
+                   value={req.name}
+                   onChange={(e) => handleNewRequirementChange(idx, 'name', e.target.value)}
+                   placeholder="Enter requirement name"
+                 />
+               </div>
+               <div className="col-span-6">
+                 <Label htmlFor={`desc-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
+                   Description
+                 </Label>
+                 <Input
+                   id={`desc-${idx}`}
+                   value={req.description}
+                   onChange={(e) => handleNewRequirementChange(idx, 'description', e.target.value)}
+                   placeholder="Description (optional)"
+                 />
+               </div>
+               <div className="col-span-1">
+                 <Button
+                   type="button"
+                   variant="ghost"
+                   size="icon"
+                   className="h-9 w-9 text-red-500"
+                   onClick={() => removeNewRequirement(idx)}
+                   disabled={newRequirements.length <= 1}
+                 >
+                   <X className="h-4 w-4" />
+                 </Button>
+               </div>
+             </div>
+           ))}
+         </div>
+
+         <Button
+           type="button"
+           variant="outline"
+           size="sm"
+           onClick={addNewRequirement}
+           className="w-full"
+         >
+           <Plus className="mr-2 h-4 w-4" />
+           Add Another Requirement
+         </Button>
+
+         <DialogFooter>
+           <Button variant="outline" onClick={handleCloseDialog}>
+             Cancel
+           </Button>
+           <Button
+             onClick={handleAddMultipleRequirements}
+             disabled={!newRequirements.some(req => req.name.trim() !== '') || isSubmitting}
+           >
+             {isSubmitting ? (
+               <>
+                 <div className="animate-spin -ml-1 mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+                 Adding...
+               </>
+             ) : (
+               `Add ${newRequirements.filter(req => req.name.trim() !== '').length} Requirements`
+             )}
+           </Button>
+         </DialogFooter>
+       </DialogContent>
+     </Dialog>
+   </div>
+ )
 }
