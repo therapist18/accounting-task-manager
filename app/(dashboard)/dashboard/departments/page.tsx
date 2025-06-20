@@ -9,6 +9,7 @@ import DepartmentRequirements from "./department-requirements"
 import WebData from "./webdata"
 import Rates from "./rates"
 import Stages from "./stages"
+import Payments from "./payments"
 
 type Department = {
   id: string
@@ -90,9 +91,10 @@ export default function DepartmentsPage() {
       <TabsList>
         <TabsTrigger value="departments">Departments</TabsTrigger>
         <TabsTrigger value="stages">Stages</TabsTrigger>
-        <TabsTrigger value="requirements">Upload Processing Requirements</TabsTrigger>
-        <TabsTrigger value="webdata">Web Data</TabsTrigger>  
         <TabsTrigger value="rates">Rates</TabsTrigger>  
+        <TabsTrigger value="requirements">GOVT Upload Processing Requirements</TabsTrigger>
+        <TabsTrigger value="webdata">Web Data</TabsTrigger>  
+        <TabsTrigger value="payments">Payments</TabsTrigger>  
       </TabsList>
       <TabsContent value="departments">
         <Departments />
@@ -108,6 +110,9 @@ export default function DepartmentsPage() {
       </TabsContent>
       <TabsContent value="rates">
         <Rates departments={departments} />
+      </TabsContent>
+      <TabsContent value="payments">
+        <Payments departments={departments} />
       </TabsContent>
     </Tabs>
   )
