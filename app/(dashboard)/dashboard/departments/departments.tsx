@@ -5,18 +5,22 @@ import {
   fetchUsers,
   fetchDepartments,
   createDepartment as createDepartmentDb,
-  createStage as createStageDb,
-  User as DbUser,
+  
   Department,
   Subdepartment,
-  Stage,
-  UserRole
+  Class,
+  SubClass,
+  Requirement,
+  SubdepartmentForm,
+  ClassForm,
+  SubClassForm,
+  RequirementForm
 } from "./database"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -24,21 +28,36 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, UserPlus, UserCheck, UserX, ChevronDown, Check, User } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { 
+  FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, 
+  UserPlus, UserCheck, UserX, ChevronDown, Check, Eye, EyeOff, 
+  ChevronRight, ChevronUp, Trash2, FileText, Layers, Target,
+  UserIcon, 
+} from "lucide-react"
 import supabase from "@/lib/supabase/client"
 import { toast } from "sonner"
-type User = {
-  id: string
-  name: string | null
-  email: string
-  phone_number?: string
-  role: 'admin' | 'task_manager' | 'task_assistant' | 'officer' | string
-  created_at?: string
-  updated_at?: string
-  assignedDepartments?: string[]
-  assignedSubdepartments?: string[]
+
+// Helper function for deep cloning
+const deepClone = (obj: any) => JSON.parse(JSON.stringify(obj))
+
+// Helper function for updating nested state
+const updateNestedState = (state: any, path: string[], value: any) => {
+  const newState = deepClone(state)
+  let current = newState
+  
+  for (let i = 0; i < path.length - 1; i++) {
+    if (!current[path[i]]) {
+      current[path[i]] = {}
+    }
+    current = current[path[i]]
+  }
+  
+  current[path[path.length - 1]] = value
+  return newState
 }
 
+// User Details Popover Component
 function UserDetailsPopover({ userId, users, role, children }: { 
   userId: string, 
   users: User[],
@@ -52,28 +71,24 @@ function UserDetailsPopover({ userId, users, role, children }: {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <span className="cursor-pointer hover:underline">{children}</span>
+        <span className="cursor-pointer hover:underline text-blue-600">{children}</span>
       </PopoverTrigger>
-      <PopoverContent className="w-64">
-        <div className="space-y-4">
+      <PopoverContent className="w-72">
+        <div className="space-y-3">
           <div className="flex items-center space-x-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
-              <User className="h-5 w-5" />
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-purple-600 text-white">
+              <UserIcon className="h-6 w-6" />
             </div>
             <div>
-              <p className="font-medium">{user.name || 'No name'}</p>
+              <p className="font-semibold">{user.name || 'No name'}</p>
               <p className="text-sm text-muted-foreground">{user.email}</p>
             </div>
           </div>
-          {user.phone_number && (
-            <div className="text-sm">
-              <p className="text-muted-foreground">Phone Number</p>
-              <p>{user.phone_number}</p>
-            </div>
-          )}
           <div className="text-sm">
             <p className="text-muted-foreground">Role</p>
-            <p className="capitalize">Task {role === 'manager' ? 'Manager' : 'Assistant'}</p>
+            <Badge variant="outline" className="mt-1">
+              Task {role === 'manager' ? 'Manager' : 'Assistant'}
+            </Badge>
           </div>
         </div>
       </PopoverContent>
@@ -81,85 +96,374 @@ function UserDetailsPopover({ userId, users, role, children }: {
   )
 }
 
-type Stage = {
-  id: string
-  name: string
-  estimatedTime: number // in hours
-  reminderDays: number
-  order: number
-  taskManagerId?: string
-  taskAssistantId?: string
-  isActive: boolean
-  status: 'yes' | 'na' // yes or N/A
+// Enhanced Requirement Component
+function RequirementComponent({ 
+  requirement, 
+  onUpdate, 
+  onRemove, 
+  path 
+}: {
+  requirement: RequirementForm
+  onUpdate: (path: string[], value: any) => void
+  onRemove: () => void
+  path: string[]
+}) {
+  return (
+    <Card className="p-4 bg-gradient-to-r from-gray-50 to-gray-100 border-l-4 border-l-blue-500">
+      <div className="space-y-3">
+        <div className="flex items-start justify-between">
+          <div className="flex-1 space-y-3">
+            <div className="flex items-center space-x-2">
+              <FileText className="h-4 w-4 text-gray-500" />
+              <Input
+                placeholder="Requirement name"
+                value={requirement.name}
+                onChange={(e) => onUpdate([...path, 'name'], e.target.value)}
+                className="flex-1 font-medium"
+              />
+            </div>
+            <Textarea
+              placeholder="Description (optional)"
+              value={requirement.description}
+              onChange={(e) => onUpdate([...path, 'description'], e.target.value)}
+              className="min-h-[60px]"
+            />
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  checked={requirement.isVisible}
+                  onCheckedChange={(checked) => onUpdate([...path, 'isVisible'], Boolean(checked))}
+                />
+                <Label className="text-sm flex items-center">
+                  {requirement.isVisible ? <Eye className="h-3 w-3 mr-1" /> : <EyeOff className="h-3 w-3 mr-1" />}
+                  Visible
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  checked={requirement.isRequired}
+                  onCheckedChange={(checked) => onUpdate([...path, 'isRequired'], Boolean(checked))}
+                />
+                <Label className="text-sm flex items-center">
+                  <AlertTriangle className="h-3 w-3 mr-1 text-red-500" />
+                  Required
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Label className="text-sm">Order:</Label>
+                <Input
+                  type="number"
+                  value={requirement.order}
+                  onChange={(e) => onUpdate([...path, 'order'], parseInt(e.target.value) || 0)}
+                  className="w-16"
+                />
+              </div>
+            </div>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onRemove} className="text-red-500 hover:text-red-700">
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </Card>
+  )
 }
 
-type ClassRequirement = {
-  id: string
-  name: string
-  description?: string
-  isRequired: boolean
-}
+// Enhanced SubClass Component
+function SubClassComponent({ 
+  subClass, 
+  onUpdate, 
+  onRemove, 
+  path 
+}: {
+  subClass: SubClassForm
+  onUpdate: (path: string[], value: any) => void
+  onRemove: () => void
+  path: string[]
+}) {
+  const [isExpanded, setIsExpanded] = useState(false)
 
-type SubdepartmentClass = {
-  id: string
-  name: string
-  description?: string
-  requirements: ClassRequirement[]
-}
-
-type Subdepartment = {
-  id: string
-  name: string
-  description?: string
-  classes?: SubdepartmentClass[]
-  stages: Stage[]
-  taskManagerId?: string
-  taskAssistantId?: string
-  processingTime: number // in days
-  deliveryTime: number // in days
-}
-
-type Department = {
-  id: string
-  name: string
-  description?: string
-  subdepartments: Subdepartment[]
-}
-
-type SubdepartmentForm = {
-  name: string
-  description: string
-  classes: SubdepartmentClass[]
-  taskManagerId: string
-  taskAssistantId: string
-  stages: {
-    [key: string]: {
-      applies: boolean
-      estimatedTime: number
-      reminderDays: number
+  const addRequirement = () => {
+    const newRequirement: RequirementForm = {
+      id: Date.now(),
+      name: '',
+      description: '',
+      isRequired: true,
+      order: subClass.requirements.length + 1,
+      isVisible: true
     }
+    onUpdate([...path, 'requirements'], [...subClass.requirements, newRequirement])
   }
+
+  const removeRequirement = (index: number) => {
+    onUpdate([...path, 'requirements'], subClass.requirements.filter((_, i) => i !== index))
+  }
+
+  return (
+    <Card className="border-l-4 border-l-purple-500 bg-gradient-to-r from-purple-50 to-indigo-50">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3 flex-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="p-1"
+            >
+              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </Button>
+            <Layers className="h-4 w-4 text-purple-600" />
+            <Input
+              placeholder="Sub-class name"
+              value={subClass.name}
+              onChange={(e) => onUpdate([...path, 'name'], e.target.value)}
+              className="flex-1 font-semibold"
+            />
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                checked={subClass.isVisible}
+                onCheckedChange={(checked) => onUpdate([...path, 'isVisible'], Boolean(checked))}
+              />
+              <Label className="text-sm whitespace-nowrap">Visible</Label>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Badge variant="secondary">{subClass.requirements.length} req</Badge>
+            <Button variant="ghost" size="sm" onClick={onRemove} className="text-red-500">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+
+      {isExpanded && (
+        <CardContent className="pt-0">
+          <div className="space-y-4">
+            <Textarea
+              placeholder="Sub-class description"
+              value={subClass.description}
+              onChange={(e) => onUpdate([...path, 'description'], e.target.value)}
+              className="min-h-[60px]"
+            />
+            
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-semibold flex items-center">
+                  <Target className="h-4 w-4 mr-1" />
+                  Requirements ({subClass.requirements.length})
+                </Label>
+                <Button variant="outline" size="sm" onClick={addRequirement}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add Requirement
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {subClass.requirements.map((req, reqIndex) => (
+                  <RequirementComponent
+                    key={req.id}
+                    requirement={req}
+                    onUpdate={onUpdate}
+                    onRemove={() => removeRequirement(reqIndex)}
+                    path={[...path, 'requirements', reqIndex.toString()]}
+                  />
+                ))}
+                {subClass.requirements.length === 0 && (
+                  <div className="text-center py-6 text-muted-foreground border-2 border-dashed rounded-lg">
+                    No requirements added yet
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  )
+}
+
+// Enhanced Class Component  
+function ClassComponent({ 
+  classItem, 
+  onUpdate, 
+  onRemove, 
+  path 
+}: {
+  classItem: ClassForm
+  onUpdate: (path: string[], value: any) => void
+  onRemove: () => void
+  path: string[]
+}) {
+  const [activeTab, setActiveTab] = useState("details")
+
+  const addSubClass = () => {
+    const newSubClass: SubClassForm = {
+      id: Date.now(),
+      name: '',
+      description: '',
+      order: classItem.subClasses.length + 1,
+      isVisible: true,
+      requirements: []
+    }
+    onUpdate([...path, 'subClasses'], [...classItem.subClasses, newSubClass])
+  }
+
+  const removeSubClass = (index: number) => {
+    onUpdate([...path, 'subClasses'], classItem.subClasses.filter((_, i) => i !== index))
+  }
+
+  const addDirectRequirement = () => {
+    const newRequirement: RequirementForm = {
+      id: Date.now(),
+      name: '',
+      description: '',
+      isRequired: true,
+      order: classItem.requirements.length + 1,
+      isVisible: true
+    }
+    onUpdate([...path, 'requirements'], [...classItem.requirements, newRequirement])
+  }
+
+  const removeDirectRequirement = (index: number) => {
+    onUpdate([...path, 'requirements'], classItem.requirements.filter((_, i) => i !== index))
+  }
+
+  const totalRequirements = classItem.requirements.length + 
+    classItem.subClasses.reduce((total, subClass) => total + subClass.requirements.length, 0)
+
+  return (
+    <Card className="border-l-4 border-l-green-500 bg-gradient-to-r from-green-50 to-emerald-50">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3 flex-1">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100">
+              <Layers className="h-4 w-4 text-green-600" />
+            </div>
+            <Input
+              placeholder="Class name"
+              value={classItem.name}
+              onChange={(e) => onUpdate([...path, 'name'], e.target.value)}
+              className="flex-1 font-bold text-lg"
+            />
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                checked={classItem.isVisible}
+                onCheckedChange={(checked) => onUpdate([...path, 'isVisible'], Boolean(checked))}
+              />
+              <Label className="text-sm whitespace-nowrap">Visible</Label>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Badge variant="default">{classItem.subClasses.length} sub-classes</Badge>
+            <Badge variant="secondary">{totalRequirements} total req</Badge>
+            <Button variant="ghost" size="sm" onClick={onRemove} className="text-red-500">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="details">Details</TabsTrigger>
+            <TabsTrigger value="requirements">Requirements ({classItem.requirements.length})</TabsTrigger>
+            <TabsTrigger value="subclasses">Sub-classes ({classItem.subClasses.length})</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="details" className="space-y-4">
+            <div className="space-y-3">
+              <div>
+                <Label className="text-sm font-medium">Description</Label>
+                <Textarea
+                  placeholder="Class description"
+                  value={classItem.description}
+                  onChange={(e) => onUpdate([...path, 'description'], e.target.value)}
+                  className="mt-1 min-h-[80px]"
+                />
+              </div>
+              <div>
+                <Label className="text-sm font-medium">Order</Label>
+                <Input
+                  type="number"
+                  value={classItem.order}
+                  onChange={(e) => onUpdate([...path, 'order'], parseInt(e.target.value) || 0)}
+                  className="mt-1 w-32"
+                />
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="requirements" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-semibold">Direct Requirements for this Class</Label>
+              <Button variant="outline" size="sm" onClick={addDirectRequirement}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add Requirement
+              </Button>
+            </div>
+            
+            <div className="space-y-3">
+              {classItem.requirements.map((req, reqIndex) => (
+                <RequirementComponent
+                  key={req.id}
+                  requirement={req}
+                  onUpdate={onUpdate}
+                  onRemove={() => removeDirectRequirement(reqIndex)}
+                  path={[...path, 'requirements', reqIndex.toString()]}
+                />
+              ))}
+              {classItem.requirements.length === 0 && (
+                <div className="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
+                  No direct requirements added yet
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="subclasses" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-semibold">Sub-classes</Label>
+              <Button variant="outline" size="sm" onClick={addSubClass}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add Sub-class
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              {classItem.subClasses.map((subClass, subClassIndex) => (
+                <SubClassComponent
+                  key={subClass.id}
+                  subClass={subClass}
+                  onUpdate={onUpdate}
+                  onRemove={() => removeSubClass(subClassIndex)}
+                  path={[...path, 'subClasses', subClassIndex.toString()]}
+                />
+              ))}
+              {classItem.subClasses.length === 0 && (
+                <div className="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
+                  No sub-classes added yet
+                </div>
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
+  )
 }
 
 export default function Departments() {
   const [isAddDepartmentOpen, setIsAddDepartmentOpen] = useState(false)
-  const [isAddStageOpen, setIsAddStageOpen] = useState(false)
-  const [currentSubdept, setCurrentSubdept] = useState<Subdepartment | null>(null)
-  const [newClassInput, setNewClassInput] = useState('')
-  const [newClassRequirement, setNewClassRequirement] = useState({
-    name: '',
-    description: '',
-    isRequired: true
-  })
+  const [currentDepartmentId, setCurrentDepartmentId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
   const [selectedSubdept, setSelectedSubdept] = useState<{ deptId: string, subdept: Subdepartment } | null>(null)
-  const [isAddSubdepartmentOpen, setIsAddSubdepartmentOpen] = useState(false)
-  const [currentDepartmentId, setCurrentDepartmentId] = useState<string | null>(null)
-  const [globalStages, setGlobalStages] = useState<Array<{ id: string, name: string }>>([])
+  
   const [users, setUsers] = useState<User[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
+  const [globalStages, setGlobalStages] = useState<Array<{ id: string, name: string }>>([])
 
   // Form state for new department
   const [departmentForm, setDepartmentForm] = useState({
@@ -167,7 +471,7 @@ export default function Departments() {
     description: '',
     subdepartments: [] as SubdepartmentForm[]
   })
-
+ 
   // Fetch data on component mount
   useEffect(() => {
     const fetchGlobalStages = async () => {
@@ -176,7 +480,7 @@ export default function Departments() {
           .from('tm_stages')
           .select('id, name')
           .order('order_num', { ascending: true })
-
+ 
         if (error) throw error
         setGlobalStages(stages || [])
       } catch (error) {
@@ -184,34 +488,25 @@ export default function Departments() {
         toast.error('Failed to load workflow stages')
       }
     }
-
+ 
     fetchData()
-    fetchUsers()
+    fetchUsersData()
     fetchGlobalStages()
   }, [])
-
-  // Fetch users from the database
-  const fetchUsers = async () => {
+ 
+  const fetchUsersData = async () => {
     try {
-      const { data: users, error } = await supabase
-        .from('tm_users')
-        .select('id, name, email, phone_number, role, created_at, updated_at')
-        .order('name')
-        .eq('role', 'user')
-
-      if (error) throw error
-      setUsers(users || [])
+      const usersData = await fetchUsers()
+      setUsers(usersData)
     } catch (error) {
       console.error('Error fetching users:', error)
       toast.error('Failed to load users')
     }
   }
-
+ 
   const fetchData = async () => {
     try {
       setLoading(true)
-
-      // Fetch departments using direct database function
       const departmentsData = await fetchDepartments()
       setDepartments(departmentsData)
     } catch (error) {
@@ -221,313 +516,237 @@ export default function Departments() {
       setLoading(false)
     }
   }
-
+ 
+  // Helper function to update nested form state
+  const updateFormState = (path: string[], value: any) => {
+    setDepartmentForm(prevState => updateNestedState(prevState, path, value))
+  }
+ 
   const handleAddDepartment = () => {
     setDepartmentForm({
       name: '',
       description: '',
       subdepartments: []
     })
+    setCurrentDepartmentId(null)
     setIsAddDepartmentOpen(true)
   }
-
-  const handleRemoveSubdepartment = (index: number) => {
-    setDepartmentForm(prev => ({
-      ...prev,
-      subdepartments: prev.subdepartments.filter((_, i) => i !== index)
-    }))
-  }
-
-  const handleAddClass = (subdeptIndex: number) => {
-    if (!newClassInput.trim()) return
-
-    const newClass: SubdepartmentClass = {
-      id: `temp-${Date.now()}`,
-      name: newClassInput.trim(),
+ 
+  const handleAddSubdepartment = (deptId?: string, deptName?: string) => {
+    const newSubdept: SubdepartmentForm = {
+      name: `Subdepartment ${departmentForm.subdepartments.length + 1}`,
       description: '',
-      requirements: []
-    }
-
-    setDepartmentForm(prev => ({
-      ...prev,
-      subdepartments: prev.subdepartments.map((subdept, index) =>
-        index === subdeptIndex
-          ? { ...subdept, classes: [...(subdept.classes || []), newClass] }
-          : subdept
-      )
-    }))
-    setNewClassInput('')
-  }
-
-  const handleAddClassRequirement = (subdeptIndex: number, classIndex: number) => {
-    if (!newClassRequirement.name.trim()) return
-
-    const requirement: ClassRequirement = {
-      id: `req-${Date.now()}`,
-      name: newClassRequirement.name.trim(),
-      description: newClassRequirement.description?.trim(),
-      isRequired: newClassRequirement.isRequired
-    }
-
-    setDepartmentForm(prev => {
-      const updatedSubdepartments = [...prev.subdepartments]
-      const subdept = { ...updatedSubdepartments[subdeptIndex] }
-      const updatedClasses = [...(subdept.classes || [])]
-
-      if (updatedClasses[classIndex]) {
-        updatedClasses[classIndex] = {
-          ...updatedClasses[classIndex],
-          requirements: [...(updatedClasses[classIndex].requirements || []), requirement]
+      classes: [],
+      taskManagerId: '',
+      taskAssistantIds: [],
+      stages: globalStages.reduce((acc, stage) => ({
+        ...acc,
+        [stage.name]: {
+          applies: true,
+          estimatedTime: 8,
+          reminderDays: 1
         }
-        subdept.classes = updatedClasses
-        updatedSubdepartments[subdeptIndex] = subdept
-      }
-
-      return {
-        ...prev,
-        subdepartments: updatedSubdepartments
-      }
-    })
-
-    // Reset requirement form
-    setNewClassRequirement({
+      }), {} as any)
+    }
+    
+    if (isAddDepartmentOpen && departmentForm.subdepartments.length > 0) {
+      // Adding to existing form
+      updateFormState(['subdepartments'], [...departmentForm.subdepartments, newSubdept])
+    } else {
+      // Opening dialog for the first time
+      setCurrentDepartmentId(deptId || null)
+      setDepartmentForm({ 
+        name: deptName || '',
+        description: '',
+        subdepartments: [newSubdept]
+      })
+      setIsAddDepartmentOpen(true)
+    }
+  }
+ 
+  const handleAddClass = (subdeptIndex: number) => {
+    const newClass: ClassForm = {
+      id: Date.now(),
       name: '',
       description: '',
-      isRequired: true
-    })
+      order: departmentForm.subdepartments[subdeptIndex].classes.length + 1,
+      isVisible: true,
+      requirements: [],
+      subClasses: []
+    }
+    
+    updateFormState(['subdepartments', subdeptIndex.toString(), 'classes'], [
+      ...departmentForm.subdepartments[subdeptIndex].classes, 
+      newClass
+    ])
   }
-
-  const handleRemoveClassRequirement = (subdeptIndex: number, classIndex: number, reqIndex: number) => {
-    setDepartmentForm(prev => {
-      const updatedSubdepartments = [...prev.subdepartments]
-      const subdept = { ...updatedSubdepartments[subdeptIndex] }
-      const updatedClasses = [...(subdept.classes || [])]
-
-      if (updatedClasses[classIndex]?.requirements) {
-        updatedClasses[classIndex] = {
-          ...updatedClasses[classIndex],
-          requirements: updatedClasses[classIndex].requirements.filter((_, i) => i !== reqIndex)
-        }
-        subdept.classes = updatedClasses
-        updatedSubdepartments[subdeptIndex] = subdept
-      }
-
-      return {
-        ...prev,
-        subdepartments: updatedSubdepartments
-      }
-    })
-  }
-
+ 
   const handleRemoveClass = (subdeptIndex: number, classIndex: number) => {
-    setDepartmentForm(prev => ({
-      ...prev,
-      subdepartments: prev.subdepartments.map((subdept, index) =>
-        index === subdeptIndex
-          ? { ...subdept, classes: subdept.classes.filter((_, i) => i !== classIndex) }
-          : subdept
-      )
-    }))
+    updateFormState(
+      ['subdepartments', subdeptIndex.toString(), 'classes'], 
+      departmentForm.subdepartments[subdeptIndex].classes.filter((_, i) => i !== classIndex)
+    )
   }
-
+ 
+  const handleRemoveSubdepartment = (index: number) => {
+    updateFormState(['subdepartments'], departmentForm.subdepartments.filter((_, i) => i !== index))
+  }
+ 
   const handleSubdepartmentChange = (subdeptIndex: number, field: string, value: any) => {
-    setDepartmentForm(prev => ({
-      ...prev,
-      subdepartments: prev.subdepartments.map((subdept, index) =>
-        index === subdeptIndex
-          ? { ...subdept, [field]: value }
-          : subdept
-      )
-    }))
+    updateFormState(['subdepartments', subdeptIndex.toString(), field], value)
   }
-
-  const handleStageChange = (subdeptIndex: number, stageName: string, field: string, value: any) => {
-    setDepartmentForm(prev => ({
-      ...prev,
-      subdepartments: prev.subdepartments.map((subdept, index) =>
-        index === subdeptIndex
-          ? {
-            ...subdept,
-            stages: {
-              ...subdept.stages,
-              [stageName]: {
-                ...subdept.stages[stageName],
-                [field]: value
-              }
-            }
-          }
-          : subdept
-      )
-    }))
+ 
+  const handleAddTaskAssistant = (subdeptIndex: number) => {
+    const currentIds = departmentForm.subdepartments[subdeptIndex].taskAssistantIds
+    updateFormState(['subdepartments', subdeptIndex.toString(), 'taskAssistantIds'], [...currentIds, ''])
   }
-
+ 
+  const handleRemoveTaskAssistant = (subdeptIndex: number, assistantIndex: number) => {
+    const currentIds = departmentForm.subdepartments[subdeptIndex].taskAssistantIds
+    updateFormState(
+      ['subdepartments', subdeptIndex.toString(), 'taskAssistantIds'], 
+      currentIds.filter((_, i) => i !== assistantIndex)
+    )
+  }
+ 
+  const handleTaskAssistantChange = (subdeptIndex: number, assistantIndex: number, userId: string) => {
+    const currentIds = [...departmentForm.subdepartments[subdeptIndex].taskAssistantIds]
+    currentIds[assistantIndex] = userId
+    updateFormState(['subdepartments', subdeptIndex.toString(), 'taskAssistantIds'], currentIds)
+  }
+ 
   const handleSaveDepartment = async () => {
     if (!departmentForm.name.trim()) {
       toast.error('Department name is required')
       return
     }
-
-    const isEditingSubdepartment = departmentForm.subdepartments[0]?.id !== undefined
-    const isAddingSingleSubdepartment = !!currentDepartmentId && departmentForm.subdepartments.length === 1
-    const isAddingMultipleSubdepartments = !currentDepartmentId && departmentForm.subdepartments.length > 0
-
+ 
+    // Validate subdepartments
+    for (const subdept of departmentForm.subdepartments) {
+      if (!subdept.name.trim()) {
+        toast.error('Please enter a name for all subdepartments')
+        return
+      }
+    }
+ 
     try {
       setSaving(true)
-
-      // Process a single subdepartment (when adding/editing a subdepartment)
+ 
+      const isEditingSubdepartment = departmentForm.subdepartments[0]?.id !== undefined
+      const isAddingSingleSubdepartment = !!currentDepartmentId && departmentForm.subdepartments.length === 1
+ 
       if (isAddingSingleSubdepartment) {
+        // Handle single subdepartment addition/editing
         const subdept = departmentForm.subdepartments[0]
-        if (!subdept.name.trim()) {
-          toast.error('Please enter a subdepartment name')
-          return
-        }
-
-        // Prepare task manager data if selected
-        const taskManager = subdept.taskManagerId && subdept.taskManagerId !== 'none'
-          ? await supabase
-              .from('tm_users')
-              .select('id, name, email, role')
-              .eq('id', subdept.taskManagerId)
-              .eq('role', 'user')
-              .single()
-          : { data: null }
-
-        // Prepare task assistant data if selected
-        const taskAssistant = subdept.taskAssistantId && subdept.taskAssistantId !== 'none'
-          ? await supabase
-              .from('tm_users')
-              .select('id, name, email, role')
-              .eq('id', subdept.taskAssistantId)
-              .eq('role', 'user')
-              .single()
-          : { data: null }
-
-        // Get selected stages with their IDs
-        const selectedStages = await supabase
-          .from('tm_stages')
-          .select('id, name, order_num, estimated_time')
-          .in('name', Object.entries(subdept.stages)
-            .filter(([_, stage]) => stage?.applies)
-            .map(([name]) => name)
-          )
-
+        
         const subdeptData = {
           name: subdept.name.trim(),
           description: subdept.description ? subdept.description.trim() : null,
           department_id: currentDepartmentId,
-          classes: subdept.classes?.map(cls => ({
+          classes: subdept.classes.map(cls => ({
+            id: cls.id,
             name: cls.name,
             description: cls.description || null,
-            requirements: cls.requirements?.map(req => ({
-              name: req.name,
-              description: req.description || null,
-              is_required: req.isRequired
-            })) || []
-          })) || [],
-          task_manager: taskManager.data ? {
-            id: taskManager.data.id,
+            order: cls.order,
+            isVisible: cls.isVisible,
+            subClasses: cls.subClasses.map(subCls => ({
+              id: subCls.id,
+              name: subCls.name,
+              description: subCls.description || null,
+              order: subCls.order,
+              isVisible: subCls.isVisible
+            }))
+          })),
+          task_manager: subdept.taskManagerId && subdept.taskManagerId !== 'none' ? {
+            id: subdept.taskManagerId,
             start_date: new Date().toISOString(),
             end_date: null
           } : null,
-          task_assistant: taskAssistant.data ? {
-            id: taskAssistant.data.id,
-            start_date: new Date().toISOString(),
-            end_date: null
-          } : null,
+          task_assistant: subdept.taskAssistantIds
+            .filter(id => id && id !== 'none')
+            .map(id => ({
+              id,
+              start_date: new Date().toISOString(),
+              end_date: null
+            }))
         }
-
+ 
         if (isEditingSubdepartment) {
-          // Update existing subdepartment
           const { error: updateError } = await supabase
             .from('tm_subdepartments')
             .update(subdeptData)
             .eq('id', subdept.id)
-
+ 
           if (updateError) throw updateError
           toast.success('Subdepartment updated successfully')
         } else {
-          // Create new subdepartment
-          const { error: subdeptError } = await supabase
+          const { error: insertError } = await supabase
             .from('tm_subdepartments')
             .insert(subdeptData)
-            .select()
-            .single()
-
-          if (subdeptError) throw subdeptError
+ 
+          if (insertError) throw insertError
           toast.success('Subdepartment added successfully')
         }
-
-        // Refresh the data
+ 
         await fetchData()
         setIsAddDepartmentOpen(false)
         setCurrentDepartmentId(null)
         return
       }
-
-
-      // Prepare department data with all subdepartments
+ 
+      // Handle full department creation with multiple subdepartments
       const departmentData = {
         name: departmentForm.name.trim(),
         description: departmentForm.description ? departmentForm.description.trim() : null,
-        subdepartments: departmentForm.subdepartments.map(subdept => {
-          // Validate subdepartment name
-          if (!subdept.name.trim()) {
-            throw new Error('Subdepartment name is required')
-          }
-
-          // Prepare task manager data if selected
-          const taskManager = subdept.taskManagerId && subdept.taskManagerId !== 'none'
-            ? users.find(u => u.id === subdept.taskManagerId)
-            : null
-
-          // Prepare task assistant data if selected
-          const taskAssistant = subdept.taskAssistantId && subdept.taskAssistantId !== 'none'
-            ? users.find(u => u.id === subdept.taskAssistantId)
-            : null
-
-          // Get stages data
-          let stagesData: any[] = []
-          if (subdept.stages) {
-            stagesData = Object.entries(subdept.stages)
-              .filter(([_, stage]) => stage && stage.applies)
-              .map(([name]) => ({
-                name,
-                estimated_time: 8 * 60, // Default 8 hours in minutes
-                order_num: globalStages.findIndex(s => s.name === name) + 1
-              }))
-          }
-
-
-          return {
-            id: subdept.id, // Include ID for updates if it exists
-            name: subdept.name.trim(),
-            description: subdept.description ? subdept.description.trim() : null,
-            classes: subdept.classes?.map(cls => ({
-              id: cls.id, // Include ID for updates if it exists
-              name: cls.name,
-              description: cls.description ? cls.description : null,
-              requirements: cls.requirements?.map(req => ({
-                id: req.id, // Include ID for updates if it exists
+        subdepartments: departmentForm.subdepartments.map(subdept => ({
+          id: subdept.id,
+          name: subdept.name.trim(),
+          description: subdept.description ? subdept.description.trim() : null,
+          classes: subdept.classes.map(cls => ({
+            id: cls.id,
+            name: cls.name,
+            description: cls.description || null,
+            order: cls.order,
+            isVisible: cls.isVisible,
+            requirements: cls.requirements.map(req => ({
+              id: req.id,
+              name: req.name,
+              description: req.description || null,
+              isRequired: req.isRequired,
+              order: req.order,
+              isVisible: req.isVisible
+            })),
+            subClasses: cls.subClasses.map(subCls => ({
+              id: subCls.id,
+              name: subCls.name,
+              description: subCls.description || null,
+              order: subCls.order,
+              isVisible: subCls.isVisible,
+              requirements: subCls.requirements.map(req => ({
+                id: req.id,
                 name: req.name,
-                description: req.description ? req.description : null,
-                is_required: req.isRequired
-              })) || []
-            })) || [],
-            task_manager: taskManager ? {
-              id: taskManager.id,
+                description: req.description || null,
+                isRequired: req.isRequired,
+                order: req.order,
+                isVisible: req.isVisible
+              }))
+            }))
+          })),
+          task_manager: subdept.taskManagerId && subdept.taskManagerId !== 'none' ? {
+            id: subdept.taskManagerId,
+            start_date: new Date().toISOString(),
+            end_date: null
+          } : null,
+          task_assistants: subdept.taskAssistantIds
+            .filter(id => id && id !== 'none')
+            .map(id => ({
+              id,
               start_date: new Date().toISOString(),
               end_date: null
-            } : null,
-            task_assistant: taskAssistant ? {
-              id: taskAssistant.id,
-              start_date: new Date().toISOString(),
-              end_date: null
-            } : null,
-            stages: stagesData
-          }
-        })
+            }))
+        }))
       }
-
+ 
       await createDepartmentDb(departmentData)
       await fetchData()
       toast.success('Department created successfully')
@@ -539,195 +758,118 @@ export default function Departments() {
       setSaving(false)
     }
   }
-
-  const handleAddStage = (subdept: Subdepartment) => {
-    setCurrentSubdept(subdept)
-    setIsAddStageOpen(true)
-  }
-
+ 
   const handleEditSubdepartment = (deptId: string, subdept: Subdepartment) => {
     setCurrentDepartmentId(deptId)
     setDepartmentForm({
       name: departments.find(d => d.id === deptId)?.name || '',
       description: '',
       subdepartments: [{
-        ...subdept,
+        id: subdept.id,
+        name: subdept.name,
+        description: subdept.description || '',
+        classes: subdept.classes.map(cls => ({
+          id: cls.id,
+          name: cls.name,
+          description: cls.description || '',
+          order: cls.order,
+          isVisible: cls.isVisible,
+          requirements: cls.requirements.map(req => ({
+            id: req.id,
+            name: req.name,
+            description: req.description || '',
+            isRequired: req.isRequired,
+            order: req.order,
+            isVisible: req.isVisible
+          })),
+          subClasses: cls.subClasses.map(subCls => ({
+            id: subCls.id,
+            name: subCls.name,
+            description: subCls.description || '',
+            order: subCls.order,
+            isVisible: subCls.isVisible,
+            requirements: subCls.requirements.map(req => ({
+              id: req.id,
+              name: req.name,
+              description: req.description || '',
+              isRequired: req.isRequired,
+              order: req.order,
+              isVisible: req.isVisible
+            }))
+          }))
+        })),
         taskManagerId: subdept.taskManagerId || '',
-        taskAssistantId: subdept.taskAssistantId || '',
-        // Convert stages to the format expected by the form
+        taskAssistantIds: subdept.taskAssistants.map(ta => ta.userId),
         stages: globalStages.reduce((acc, stage) => ({
           ...acc,
           [stage.name]: {
-            applies: subdept.stages.some(s => s.name === stage.name),
-            estimatedTime: 8, // Default value, adjust as needed
-            reminderDays: 1   // Default value, adjust as needed
+            applies: subdept.stages?.some(s => s.name === stage.name) || false,
+            estimatedTime: 8,
+            reminderDays: 1
           }
         }), {} as any)
       }]
     })
     setIsAddDepartmentOpen(true)
   }
-
-  const handleAddSubdepartment = (deptId: string, deptName: string) => {
-    // If we're already in the dialog, just add a new subdepartment
-    if (isAddDepartmentOpen) {
-      const newSubdept = {
-        name: `Subdepartment ${departmentForm.subdepartments.length + 1}`,
-        description: '',
-        classes: [],
-        taskManagerId: '',
-        taskAssistantId: '',
-        stages: globalStages.reduce((acc, stage) => ({
-          ...acc,
-          [stage.name]: {
-            applies: true,
-            estimatedTime: 8,
-            reminderDays: 1
-          }
-        }), {} as any)
-      }
-      
-      setDepartmentForm(prev => ({
-        ...prev,
-        subdepartments: [...prev.subdepartments, newSubdept]
-      }))
+ 
+  const handleDeleteSubdepartment = async (departmentId: string, subdepartmentId: string) => {
+    if (!confirm('Are you sure you want to delete this subdepartment? This action cannot be undone.')) {
       return
     }
-    
-    // If we're opening the dialog for the first time
-    setCurrentDepartmentId(deptId)
-    setDepartmentForm({ 
-      name: deptName,
-      description: '',
-      subdepartments: [{
-        name: 'Subdepartment 1',
-        description: '',
-        classes: [],
-        taskManagerId: '',
-        taskAssistantId: '',
-        stages: globalStages.reduce((acc, stage) => ({
-          ...acc,
-          [stage.name]: {
-            applies: true,
-            estimatedTime: 8,
-            reminderDays: 1
-          }
-        }), {} as any)
-      }]
-    })
-    setIsAddDepartmentOpen(true)
-  }
-
-  const handleSaveStage = async (stageData: Omit<Stage, 'id' | 'order' | 'isActive'>) => {
-    if (!currentSubdept) return
-
+ 
     try {
       setSaving(true)
-
-      const newStage = await createStageDb({
-        ...stageData,
-        subdepartmentId: currentSubdept.id,
-        order: currentSubdept.stages.length + 1
-      })
-
-      // Update local state
-      setDepartments(prev => prev.map(dept => ({
-        ...dept,
-        subdepartments: dept.subdepartments.map(subdept => {
-          if (subdept.id === currentSubdept.id) {
-            return {
-              ...subdept,
-              stages: [...subdept.stages, newStage]
-            }
-          }
-          return subdept
-        })
-      })))
-
-      setIsAddStageOpen(false)
-      toast.success('Stage added successfully')
+      
+      const { error: deleteError } = await supabase
+        .from('tm_subdepartments')
+        .delete()
+        .eq('id', subdepartmentId)
+ 
+      if (deleteError) throw deleteError
+ 
+      await fetchData()
+      toast.success('Subdepartment deleted successfully')
     } catch (error) {
-      console.error('Error creating stage:', error)
-      toast.error('Failed to create stage. Please try again.')
+      console.error('Error deleting subdepartment:', error)
+      toast.error('Failed to delete subdepartment')
     } finally {
       setSaving(false)
     }
   }
-
-  const getUserName = (userData: any) => {
-    if (!userData) return 'Unassigned';
-    
-    // Handle case where userData is an object with id (from API response)
-    if (typeof userData === 'object' && userData !== null) {
-      if (userData.name) return userData.name;
-      if (userData.id) {
-        const user = users.find(u => u.id === userData.id);
-        return user ? user.name : 'Unassigned';
-      }
-      return 'Unassigned';
-    }
-    
-    // Handle case where userData is just an ID string
-    if (typeof userData === 'string') {
-      const user = users.find(u => u.id === userData);
-      return user ? user.name : 'Unassigned';
-    }
-    
-    return 'Unassigned';
-  }
-
+ 
   const handleOpenAssignmentDialog = (deptId: string, subdept: Subdepartment) => {
     setSelectedSubdept({ deptId, subdept })
     setAssignmentDialogOpen(true)
   }
-
-  const handleDeleteSubdepartment = async (departmentId: string, subdepartmentId: string) => {
-    if (!confirm('Are you sure you want to delete this subdepartment? This action cannot be undone.')) {
-      return;
-    }
-
-    try {
-      setSaving(true);
-      
-      // First, delete any related data (e.g., stages, assignments)
-      // This is a simplified example - adjust according to your database schema
-      const { error: deleteError } = await supabase
-        .from('tm_subdepartments')
-        .delete()
-        .eq('id', subdepartmentId);
-
-      if (deleteError) throw deleteError;
-
-      // Refresh the data
-      await fetchData();
-      toast.success('Subdepartment deleted successfully');
-    } catch (error) {
-      console.error('Error deleting subdepartment:', error);
-      toast.error('Failed to delete subdepartment');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSaveAssignments = async (taskManagerId: string, taskAssistantId: string) => {
+ 
+  const handleSaveAssignments = async (taskManagerId: string, taskAssistantIds: string[]) => {
     if (!selectedSubdept) return
-
+ 
     try {
       setSaving(true)
-
-      // Update the subdepartment with new assignments
+ 
       const { error } = await supabase
         .from('tm_subdepartments')
         .update({
-          task_manager_id: taskManagerId || null,
-          task_assistant_id: taskAssistantId || null,
+          task_manager: taskManagerId ? {
+            id: taskManagerId,
+            start_date: new Date().toISOString(),
+            end_date: null
+          } : null,
+          task_assistant: taskAssistantIds
+            .filter(id => id && id !== 'none')
+            .map(id => ({
+              id,
+              start_date: new Date().toISOString(),
+              end_date: null
+            })),
           updated_at: new Date().toISOString()
         })
         .eq('id', selectedSubdept.subdept.id)
-
+ 
       if (error) throw error
-
-      // Refresh the data
+ 
       await fetchData()
       setAssignmentDialogOpen(false)
       toast.success('Assignments updated successfully')
@@ -738,7 +880,13 @@ export default function Departments() {
       setSaving(false)
     }
   }
-
+ 
+  const getUserName = (userId: string) => {
+    const user = users.find(u => u.id === userId)
+    return user ? user.name : 'Unknown User'
+  }
+ 
+  // Reset form when dialog closes
   useEffect(() => {
     if (!isAddDepartmentOpen) {
       setDepartmentForm({
@@ -749,7 +897,7 @@ export default function Departments() {
       setCurrentDepartmentId(null)
     }
   }, [isAddDepartmentOpen])
-
+ 
   if (loading) {
     return (
       <div className="flex-1 space-y-4">
@@ -760,49 +908,76 @@ export default function Departments() {
       </div>
     )
   }
-
+ 
   return (
-    <div className="flex-1 space-y-4">
-      <div className="flex items-center justify-between space-y-2">
+    <div className="flex-1 space-y-6 p-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Departments & Workflows</h2>
-          <p className="text-sm text-muted-foreground">
-            Manage departments, subdepartments, and their workflow stages
+          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            Departments & Workflows
+          </h2>
+          <p className="text-muted-foreground mt-2">
+            Manage departments, subdepartments, classes, sub-classes, and their requirements
           </p>
         </div>
-        <div className="flex items-center space-x-2">
-          <Button onClick={handleAddDepartment}>
-            <FolderPlus className="mr-2 h-4 w-4" />
-            Add Department
-          </Button>
-        </div>
+        <Button onClick={handleAddDepartment} size="lg" className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+          <FolderPlus className="mr-2 h-5 w-5" />
+          Add Department
+        </Button>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Departments</CardTitle>
-          <CardDescription>Manage departments and their subdepartments.</CardDescription>
+ 
+      {/* Main Content */}
+      <Card className="shadow-lg">
+        <CardHeader className="bg-gradient-to-r from-gray-50 to-gray-100">
+          <CardTitle className="flex items-center">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 mr-3">
+              <Layers className="h-4 w-4 text-blue-600" />
+            </div>
+            Departments Overview
+          </CardTitle>
+          <CardDescription>
+            Manage your organizational structure with hierarchical class systems and team assignments.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-6">
           {departments.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-muted-foreground">No departments found. Create your first department to get started.</p>
+            <div className="text-center py-12">
+              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gray-100 mx-auto mb-4">
+                <FolderPlus className="h-10 w-10 text-gray-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No departments found</h3>
+              <p className="text-muted-foreground mb-6">Create your first department to get started with managing your organizational structure.</p>
+              <Button onClick={handleAddDepartment} size="lg">
+                <Plus className="mr-2 h-4 w-4" />
+                Create First Department
+              </Button>
             </div>
           ) : (
-            <Accordion type="single" collapsible className="w-full">
+            <Accordion type="single" collapsible className="w-full space-y-4">
               {departments.map((dept) => (
-                <AccordionItem key={dept.id} value={dept.id}>
-                  <AccordionTrigger className="hover:bg-muted/50 px-4 py-2 rounded-md">
+                <AccordionItem key={dept.id} value={dept.id} className="border rounded-lg shadow-sm">
+                  <AccordionTrigger className="hover:bg-gradient-to-r hover:from-blue-50 hover:to-purple-50 px-6 py-4 rounded-lg">
                     <div className="flex items-center justify-between w-full pr-4">
                       <div className="text-left">
-                        <span className="font-medium">{dept.name}</span>
-                        {dept.description && (
-                          <p className="text-sm text-muted-foreground mt-1">{dept.description}</p>
-                        )}
+                        <div className="flex items-center space-x-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-purple-600 text-white">
+                            <Layers className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <span className="font-semibold text-lg">{dept.name}</span>
+                            {dept.description && (
+                              <p className="text-sm text-muted-foreground mt-1">{dept.description}</p>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex items-center space-x-2">
-                        <Badge variant="secondary">
+                      <div className="flex items-center space-x-3">
+                        <Badge variant="secondary" className="bg-blue-100 text-blue-700">
                           {dept.subdepartments.length} subdepartments
+                        </Badge>
+                        <Badge variant="outline">
+                          {dept.subdepartments.reduce((total, sub) => total + sub.classes.length, 0)} classes
                         </Badge>
                         <Button variant="outline" size="sm">
                           <Settings className="h-4 w-4" />
@@ -811,620 +986,735 @@ export default function Departments() {
                     </div>
                   </AccordionTrigger>
                   <AccordionContent>
-                    <div className="pl-4 pr-2 pt-2">
-                      <div className="flex justify-between items-center mb-2">
-                        <h4 className="text-sm font-medium">Subdepartments</h4>
+                    <div className="px-6 pb-6">
+                      <div className="flex justify-between items-center mb-4">
+                        <h4 className="text-lg font-semibold flex items-center">
+                          <Users className="h-5 w-5 mr-2 text-blue-600" />
+                          Subdepartments
+                        </h4>
                         <Button
                           variant="outline"
-                          size="sm"
                           onClick={() => handleAddSubdepartment(dept.id, dept.name)}
+                          className="bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 hover:from-green-100 hover:to-emerald-100"
                         >
                           <Plus className="h-4 w-4 mr-2" />
                           Add Subdepartment
                         </Button>
                       </div>
-                      <div className="space-y-2">
-                        {dept.subdepartments.length === 0 && (
-                          <p className="text-sm text-muted-foreground">No subdepartments yet. Click the button above to add one.</p>
-                        )}
-                      </div>
-                      <div className="border rounded-md overflow-hidden">
-                        <Table>
-                          <TableHeader className="bg-muted/50">
-                            <TableRow>
-                              <TableHead className="w-[50px] text-center">#</TableHead>
-                              <TableHead className="w-[200px] border-r">Subdepartment</TableHead>
-                              <TableHead className="border-r">Classes</TableHead>
-                              <TableHead className="border-r">Task Manager</TableHead>
-                              <TableHead className="border-r">Task Assistant</TableHead>
-                              <TableHead>Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {dept.subdepartments.map((subdept, index) => (
-                              <TableRow key={subdept.id} className="hover:bg-muted/50">
-                                <TableCell className="text-center text-sm text-muted-foreground border-r">
-                                  {index + 1}
-                                </TableCell>
-                                <TableCell className="border-r">
-                                  <div>
-                                    <div className="font-medium">{subdept.name}</div>
-                                    {subdept.description && (
-                                      <div className="text-sm text-muted-foreground">{subdept.description}</div>
-                                    )}
-                                  </div>
-                                </TableCell>
-                                <TableCell className="border-r">
-                                  <Popover>
-                                    <PopoverTrigger asChild>
-                                      <Button variant="outline" size="sm" className="h-8 w-full justify-between">
-                                        <span>{subdept.classes?.length || 0} Classes</span>
-                                        <ChevronDown className="h-4 w-4 ml-2" />
-                                      </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-80">
-                                      <div className="space-y-4">
-                                        <h4 className="font-medium leading-none">Classes & Requirements</h4>
-                                        {subdept.classes && subdept.classes.length > 0 ? (
-                                          <div className="space-y-4">
-                                            {subdept.classes.map((cls) => (
-                                              <div key={cls.id} className="border rounded-md p-3">
-                                                <div className="font-medium">{cls.name}</div>
-                                                {cls.description && (
-                                                  <p className="text-sm text-muted-foreground">{cls.description}</p>
-                                                )}
-                                                {cls.requirements && cls.requirements.length > 0 && (
-                                                  <div className="mt-2">
-                                                    <div className="text-xs font-medium text-muted-foreground mb-1">Requirements:</div>
-                                                    <ul className="space-y-1">
-                                                      {cls.requirements.map((req, idx) => (
-                                                        <li key={idx} className="flex items-start">
-                                                          <Check className="h-3 w-3 text-green-500 mt-0.5 mr-1 flex-shrink-0" />
-                                                          <span className="text-sm">
-                                                            {req.name}
-                                                            {req.description && (
-                                                              <span className="text-muted-foreground"> - {req.description}</span>
-                                                            )}
-                                                          </span>
-                                                        </li>
-                                                      ))}
-                                                    </ul>
-                                                  </div>
-                                                )}
-                                              </div>
-                                            ))}
-                                          </div>
-                                        ) : (
-                                          <div className="text-sm text-muted-foreground">No classes defined</div>
-                                        )}
-                                      </div>
-                                    </PopoverContent>
-                                  </Popover>
-                                </TableCell>
-                                <TableCell className="border-r">
-                                  <div className="min-w-[120px]">
-                                    {subdept.task_manager?.id ? (
-                                      <UserDetailsPopover userId={subdept.task_manager.id} users={users} role="manager">
-                                        <span className="text-sm">{getUserName(subdept.task_manager)}</span>
-                                      </UserDetailsPopover>
-                                    ) : (
-                                      <span className="text-sm text-muted-foreground">Unassigned</span>
-                                    )}
-                                  </div>
-                                </TableCell>
-                                <TableCell className="border-r">
-                                  <div className="min-w-[120px]">
-                                    {subdept.task_assistant?.id ? (
-                                      <UserDetailsPopover userId={subdept.task_assistant.id} users={users} role="assistant">
-                                        <span className="text-sm">{getUserName(subdept.task_assistant)}</span>
-                                      </UserDetailsPopover>
-                                    ) : (
-                                      <span className="text-sm text-muted-foreground">Unassigned</span>
-                                    )}
-                                  </div>
-                                </TableCell>
-                                {/* <TableCell className="border-r text-center">
-                                  <Badge variant="outline">{subdept.processingTime} days</Badge>
-                                </TableCell>
-                                <TableCell className="border-r text-center">
-                                  <Badge variant="outline">{subdept.deliveryTime} days</Badge>
-                                </TableCell>
-                                <TableCell className="border-r">
-                                  <div className="flex items-center space-x-2">
+                      
+                      {dept.subdepartments.length === 0 ? (
+                        <div className="text-center py-8">
+                          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 mx-auto mb-3">
+                            <Users className="h-8 w-8 text-gray-400" />
+                          </div>
+                          <p className="text-muted-foreground">No subdepartments yet. Add one to get started.</p>
+                        </div>
+                      ) : (
+                        <div className="border rounded-lg overflow-hidden bg-white">
+                          <Table>
+                            <TableHeader className="bg-gradient-to-r from-gray-50 to-gray-100">
+                              <TableRow>
+                                <TableHead className="w-[50px] text-center font-semibold">#</TableHead>
+                                <TableHead className="w-[250px] font-semibold">Subdepartment</TableHead>
+                                <TableHead className="font-semibold">Classes & Structure</TableHead>
+                                <TableHead className="font-semibold">Task Manager</TableHead>
+                                <TableHead className="font-semibold">Task Assistants</TableHead>
+                                <TableHead className="text-center font-semibold">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {dept.subdepartments.map((subdept, index) => (
+                                <TableRow key={subdept.id} className="hover:bg-gradient-to-r hover:from-blue-50 hover:to-purple-50">
+                                  <TableCell className="text-center text-sm text-muted-foreground font-medium">
+                                    {index + 1}
+                                  </TableCell>
+                                  <TableCell>
+                                    <div>
+                                      <div className="font-semibold text-gray-900">{subdept.name}</div>
+                                      {subdept.description && (
+                                        <div className="text-sm text-muted-foreground mt-1">{subdept.description}</div>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
                                     <Popover>
                                       <PopoverTrigger asChild>
-                                        <Button variant="outline" size="sm" className="h-8 w-full justify-between">
-                                          <span>{subdept.stages?.length || 0} Stages</span>
+                                        <Button variant="outline" size="sm" className="w-full justify-between hover:bg-blue-50">
+                                          <span className="flex items-center">
+                                            <Layers className="h-4 w-4 mr-2" />
+                                            {subdept.classes?.length || 0} Classes
+                                            {subdept.classes?.reduce((total, cls) => total + (cls.subClasses?.length || 0), 0) > 0 && 
+                                              ` • ${subdept.classes.reduce((total, cls) => total + (cls.subClasses?.length || 0), 0)} Sub-classes`
+                                            }
+                                          </span>
                                           <ChevronDown className="h-4 w-4 ml-2" />
                                         </Button>
                                       </PopoverTrigger>
-                                      <PopoverContent className="w-96">
+                                      <PopoverContent className="w-[500px] max-h-96 overflow-y-auto">
                                         <div className="space-y-4">
-                                          <h4 className="font-medium leading-none">Workflow Stages</h4>
-                                          <div className="space-y-4">
-                                            {subdept.stages && subdept.stages.length > 0 ? (
-                                              <div className="space-y-2">
-                                                {subdept.stages.map((stage) => (
-                                                  <div key={stage.id} className="border rounded-md p-3">
-                                                    <div className="flex justify-between items-start">
-                                                      <div>
-                                                        <div className="font-medium">{stage.name}</div>
-                                                        <div className="text-sm text-muted-foreground">
-                                                          {stage.estimatedTime} hours • Order: {stage.order}
-                                                        </div>
+                                          <h4 className="font-semibold text-lg flex items-center">
+                                            <Layers className="h-5 w-5 mr-2 text-blue-600" />
+                                            Classes & Sub-classes Structure
+                                          </h4>
+                                          {subdept.classes && subdept.classes.length > 0 ? (
+                                            <div className="space-y-3">
+                                              {subdept.classes.map((cls) => (
+                                                <Card key={cls.id} className="border-l-4 border-l-green-500 bg-gradient-to-r from-green-50 to-emerald-50">
+                                                  <CardContent className="p-4">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                      <div className="font-semibold flex items-center">
+                                                        {cls.isVisible ? <Eye className="h-4 w-4 mr-2 text-green-600" /> : <EyeOff className="h-4 w-4 mr-2 text-gray-400" />}
+                                                        {cls.name}
                                                       </div>
-                                                      <Badge variant={stage.status === 'yes' ? 'default' : 'outline'}>
-                                                        {stage.status === 'yes' ? 'Active' : 'N/A'}
-                                                      </Badge>
+                                                      <div className="flex space-x-2">
+                                                        <Badge variant="outline">{cls.requirements?.length || 0} reqs</Badge>
+                                                        <Badge variant="secondary">{cls.subClasses?.length || 0} sub</Badge>
+                                                      </div>
                                                     </div>
-                                                    {stage.reminderDays > 0 && (
-                                                      <div className="mt-2 text-sm text-muted-foreground">
-                                                        Reminder after {stage.reminderDays} days
+                                                    {cls.description && (
+                                                      <p className="text-sm text-muted-foreground mb-3">{cls.description}</p>
+                                                    )}
+                                                    
+                                                    {cls.subClasses && cls.subClasses.length > 0 && (
+                                                      <div className="ml-4 space-y-2">
+                                                        <div className="text-xs font-medium text-purple-600 mb-1">Sub-classes:</div>
+                                                        {cls.subClasses.map((subCls) => (
+                                                          <Card key={subCls.id} className="border-l-4 border-l-purple-400 bg-gradient-to-r from-purple-50 to-indigo-50">
+                                                            <CardContent className="p-3">
+                                                              <div className="flex items-center justify-between">
+                                                                <div className="text-sm font-medium flex items-center">
+                                                                  {subCls.isVisible ? <Eye className="h-3 w-3 mr-1 text-purple-600" /> : <EyeOff className="h-3 w-3 mr-1 text-gray-400" />}
+                                                                  {subCls.name}
+                                                                </div>
+                                                                <Badge variant="outline" className="text-xs">{subCls.requirements?.length || 0} reqs</Badge>
+                                                              </div>
+                                                              {subCls.description && (
+                                                                <p className="text-xs text-muted-foreground mt-1">{subCls.description}</p>
+                                                              )}
+                                                            </CardContent>
+                                                          </Card>
+                                                        ))}
                                                       </div>
                                                     )}
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            ) : (
-                                              <div className="text-sm text-muted-foreground">No stages defined</div>
-                                            )}
-                                          </div>
+                                                  </CardContent>
+                                                </Card>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <div className="text-center py-6">
+                                              <Layers className="h-12 w-12 text-gray-300 mx-auto mb-2" />
+                                              <p className="text-sm text-muted-foreground">No classes defined</p>
+                                            </div>
+                                          )}
                                         </div>
                                       </PopoverContent>
                                     </Popover>
-                                  </div>
-                                </TableCell> */}
-                                <TableCell className="w-[180px]">
-                                  <div className="flex space-x-2">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 w-8 p-0"
-                                      onClick={() => handleOpenAssignmentDialog(dept.id, subdept)}
-                                      title="Assign users"
-                                    >
-                                      <UserPlus className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 w-8 p-0"
-                                      onClick={() => handleEditSubdepartment(dept.id, subdept)}
-                                      title="Edit subdepartment"
-                                    >
-                                      <Edit className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                      onClick={() => handleDeleteSubdepartment(dept.id, subdept.id)}
-                                      title="Delete subdepartment"
-                                    >
-                                      <X className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Add Department/Subdepartment Dialog */}
-      <Dialog open={isAddDepartmentOpen} onOpenChange={setIsAddDepartmentOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {currentDepartmentId ? 'Add New Subdepartment' : 'Add New Department'}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-6 py-4">
-            {/* Department Basic Info */}
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="deptName">Department Name</Label>
-                <Input
-                  id="deptName"
-                  placeholder="e.g., Immigration"
-                  value={departmentForm.name}
-                  onChange={(e) => setDepartmentForm(prev => ({ ...prev, name: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="deptDescription">Description (Optional)</Label>
-                <Textarea
-                  id="deptDescription"
-                  placeholder="Brief description of the department"
-                  value={departmentForm.description}
-                  onChange={(e) => setDepartmentForm(prev => ({ ...prev, description: e.target.value }))}
-                />
-              </div>
-            </div>
-
-            {/* Subdepartments */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h4 className="text-lg font-medium">Subdepartments</h4>
-                <Button onClick={handleAddSubdepartment} variant="outline" size="sm">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Subdepartment
-                </Button>
-              </div>
-
-              {departmentForm.subdepartments.map((subdept, subdeptIndex) => (
-                <Card key={subdeptIndex} className="p-4">
-                  <div className="flex items-start justify-between mb-4">
-                    <h5 className="font-medium">Subdepartment {subdeptIndex + 1}</h5>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleRemoveSubdepartment(subdeptIndex)}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-
-                  <div className="space-y-4">
-                    {/* Basic Info */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label>Subdepartment Name</Label>
-                        <Input
-                          placeholder="e.g., Visa Processing"
-                          value={subdept.name}
-                          onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Description (Optional)</Label>
-                        <Input
-                          placeholder="Brief description"
-                          value={subdept.description}
-                          onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Staff Assignment */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label>Task Manager</Label>
-                        <Select
-                          value={subdept.taskManagerId || 'none'}
-                          onValueChange={(value) => handleSubdepartmentChange(subdeptIndex, 'taskManagerId', value === 'none' ? null : value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select task manager" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">None</SelectItem>
-                            {users.map(user => (
-                              <SelectItem key={user.id} value={user.id}>
-                                {user.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Task Assistant</Label>
-                        <Select
-                          value={subdept.taskAssistantId || 'none'}
-                          onValueChange={(value) => handleSubdepartmentChange(subdeptIndex, 'taskAssistantId', value === 'none' ? null : value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select task assistant" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">None</SelectItem>
-                            {users.map(user => (
-                              <SelectItem key={user.id} value={user.id}>
-                                {user.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    {/* Classes (Optional) */}
-                    <div className="space-y-2">
-                      <Label>Classes (Optional)</Label>
-                      <div className="flex space-x-2">
-                        <Input
-                          placeholder="Add a class name"
-                          value={newClassInput}
-                          onChange={(e) => setNewClassInput(e.target.value)}
-                          onKeyPress={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault()
-                              handleAddClass(subdeptIndex)
-                            }
-                          }}
-                        />
-                        <Button
-                          type="button"
-                          onClick={() => handleAddClass(subdeptIndex)}
-                          variant="outline"
-                        >
-                          Add
-                        </Button>
-                      </div>
-                      {subdept.classes.length > 0 && (
-                        <div className="space-y-3 mt-2">
-                          {subdept.classes.map((cls, classIndex) => (
-                            <div key={cls.id} className="border rounded-md p-3 space-y-2">
-                              <div className="flex justify-between items-center">
-                                <div className="font-medium">{cls.name}</div>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleRemoveClass(subdeptIndex, classIndex)}
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
-                              </div>
-
-                              {/* Class Requirements */}
-                              <div className="pl-2 border-l-2 border-muted">
-                                <div className="text-sm font-medium mb-2">Requirements:</div>
-                                <div className="space-y-2">
-                                  <div className="flex space-x-2">
-                                    <Input
-                                      placeholder="Requirement name"
-                                      value={newClassRequirement.name}
-                                      onChange={(e) => setNewClassRequirement(prev => ({ ...prev, name: e.target.value }))}
-                                      className="flex-1"
-                                    />
-                                    <Input
-                                      placeholder="Description (optional)"
-                                      value={newClassRequirement.description || ''}
-                                      onChange={(e) => setNewClassRequirement(prev => ({ ...prev, description: e.target.value }))}
-                                      className="flex-1"
-                                    />
-                                    <div className="flex items-center space-x-2">
-                                      <Checkbox
-                                        id={`req-required-${subdeptIndex}-${classIndex}`}
-                                        checked={newClassRequirement.isRequired}
-                                        onCheckedChange={(checked) =>
-                                          setNewClassRequirement(prev => ({ ...prev, isRequired: Boolean(checked) }))
-                                        }
-                                      />
-                                      <Label htmlFor={`req-required-${subdeptIndex}-${classIndex}`} className="whitespace-nowrap">
-                                        Required
-                                      </Label>
-                                    </div>
-                                    <Button
-                                      type="button"
-                                      onClick={() => handleAddClassRequirement(subdeptIndex, classIndex)}
-                                      variant="outline"
-                                      size="sm"
-                                    >
-                                      Add
-                                    </Button>
-                                  </div>
-
-                                  {cls.requirements?.length > 0 && (
-                                    <div className="space-y-1">
-                                      {cls.requirements.map((req, reqIndex) => (
-                                        <div key={req.id} className="flex items-center justify-between bg-muted/50 p-2 rounded">
-                                          <div className="flex-1">
-                                            <div className="flex items-center gap-2">
-                                              <span className="font-medium">{req.name}</span>
-                                              {req.description && (
-                                                <span className="text-muted-foreground text-sm">{req.description}</span>
-                                              )}
-                                              {req.isRequired && (
-                                                <Badge variant="default" className="text-xs">Required</Badge>
-                                              )}
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="min-w-[120px]">
+                                      {subdept.taskManagerId ? (
+                                        <UserDetailsPopover userId={subdept.taskManagerId} users={users} role="manager">
+                                          <div className="flex items-center space-x-2">
+                                            <div className="h-6 w-6 rounded-full bg-blue-100 flex items-center justify-center">
+                                              <UserIcon className="h-3 w-3 text-blue-600" />
                                             </div>
+                                            <span className="text-sm font-medium">{getUserName(subdept.taskManagerId)}</span>
                                           </div>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleRemoveClassRequirement(subdeptIndex, classIndex, reqIndex)}
-                                          >
-                                            <X className="h-4 w-4" />
-                                          </Button>
-                                        </div>
-                                      ))}
+                                        </UserDetailsPopover>
+                                      ) : (
+                                        <span className="text-sm text-muted-foreground flex items-center">
+                                          <UserX className="h-4 w-4 mr-1" />
+                                          Unassigned
+                                        </span>
+                                      )}
                                     </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </Card>
-              ))}
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="min-w-[150px]">
+                                      {subdept.taskAssistants.length > 0 ? (
+                                        <div className="space-y-1">
+                                          {subdept.taskAssistants.slice(0, 2).map((ta, taIndex) => (
+                                            <UserDetailsPopover key={taIndex} userId={ta.userId} users={users} role="assistant">
+                                              <div className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
+                                                <div className="h-5 w-5 rounded-full bg-green-100 flex items-center justify-center">
+                                                  <UserIcon className="h-3 w-3 text-green-600" />
+                                                </div>
+                                                <span className="text-sm">{getUserName(ta.userId)}</span>
+                                              </div>
+                                            </UserDetailsPopover>
+                                          ))}
+                                          {subdept.taskAssistants.length > 2 && (
+                                            <div className="text-xs text-muted-foreground">
+                                              +{subdept.taskAssistants.length - 2} more
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <span className="text-sm text-muted-foreground flex items-center">
+                                          <UserX className="h-4 w-4 mr-1" />
+                                          Unassigned
+                                        </span>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="flex space-x-2 justify-center">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleOpenAssignmentDialog(dept.id, subdept)}
+                                        title="Assign users"
+                                        className="hover:bg-blue-50"
+                                      >
+                                        <UserPlus className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleEditSubdepartment(dept.id, subdept)}
+                                        title="Edit subdepartment"
+                                        className="hover:bg-green-50"
+                                      >
+                                       <Edit className="h-4 w-4" />
+                                     </Button>
+                                     <Button
+                                       variant="outline"
+                                       size="sm"
+                                       onClick={() => handleDeleteSubdepartment(dept.id, subdept.id)}
+                                       title="Delete subdepartment"
+                                       className="hover:bg-red-50 text-red-500 hover:text-red-700"
+                                     >
+                                       <Trash2 className="h-4 w-4" />
+                                     </Button>
+                                   </div>
+                                 </TableCell>
+                               </TableRow>
+                             ))}
+                           </TableBody>
+                         </Table>
+                       </div>
+                     )}
+                   </div>
+                 </AccordionContent>
+               </AccordionItem>
+             ))}
+           </Accordion>
+         )}
+       </CardContent>
+     </Card>
 
-              {departmentForm.subdepartments.length === 0 && (
-                <div className="text-center py-8 text-muted-foreground">
-                  No subdepartments added yet. Click "Add Subdepartment" to get started.
-                </div>
-              )}
-            </div>
+     {/* Add Department/Subdepartment Dialog */}
+     <Dialog open={isAddDepartmentOpen} onOpenChange={setIsAddDepartmentOpen}>
+       <DialogContent className="max-w-7xl max-h-[95vh] overflow-y-auto">
+         <DialogHeader className="pb-4 border-b">
+           <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+             {currentDepartmentId ? 'Add/Edit Subdepartment' : 'Add New Department'}
+           </DialogTitle>
+         </DialogHeader>
+         
+         <div className="space-y-8 py-6">
+           {/* Department Basic Info */}
+           <Card className="bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200">
+             <CardHeader>
+               <CardTitle className="flex items-center">
+                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 mr-3">
+                   <Layers className="h-4 w-4 text-blue-600" />
+                 </div>
+                 Department Information
+               </CardTitle>
+             </CardHeader>
+             <CardContent className="space-y-4">
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                 <div className="space-y-2">
+                   <Label htmlFor="deptName" className="text-sm font-semibold">Department Name *</Label>
+                   <Input
+                     id="deptName"
+                     placeholder="e.g., Immigration Services"
+                     value={departmentForm.name}
+                     onChange={(e) => updateFormState(['name'], e.target.value)}
+                     className="text-lg font-medium"
+                   />
+                 </div>
+                 <div className="space-y-2">
+                   <Label htmlFor="deptDescription" className="text-sm font-semibold">Description</Label>
+                   <Textarea
+                     id="deptDescription"
+                     placeholder="Brief description of the department's purpose and scope"
+                     value={departmentForm.description}
+                     onChange={(e) => updateFormState(['description'], e.target.value)}
+                     className="min-h-[100px]"
+                   />
+                 </div>
+               </div>
+             </CardContent>
+           </Card>
 
-            {/* Dialog Actions */}
-            <div className="flex justify-end space-x-2 pt-4 border-t">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setIsAddDepartmentOpen(false)
-                  setCurrentDepartmentId(null)
-                }}
-                disabled={saving}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSaveDepartment}
-                disabled={saving}
-              >
-                {saving ? 'Saving...' : currentDepartmentId ? 'Save Subdepartment' : 'Save Department'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+           {/* Subdepartments */}
+           <Card>
+             <CardHeader>
+               <div className="flex items-center justify-between">
+                 <CardTitle className="flex items-center">
+                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100 mr-3">
+                     <Users className="h-4 w-4 text-green-600" />
+                   </div>
+                   Subdepartments ({departmentForm.subdepartments.length})
+                 </CardTitle>
+                 <Button onClick={() => handleAddSubdepartment()} variant="outline" size="sm" className="bg-green-50 border-green-200 hover:bg-green-100">
+                   <Plus className="h-4 w-4 mr-2" />
+                   Add Subdepartment
+                 </Button>
+               </div>
+             </CardHeader>
+             <CardContent>
+               <div className="space-y-6">
+                 {departmentForm.subdepartments.map((subdept, subdeptIndex) => (
+                   <Card key={subdeptIndex} className="border-l-4 border-l-orange-500 bg-gradient-to-r from-orange-50 to-amber-50">
+                     <CardHeader>
+                       <div className="flex items-start justify-between">
+                         <CardTitle className="flex items-center text-lg">
+                           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-100 mr-3">
+                             <span className="text-sm font-bold text-orange-600">{subdeptIndex + 1}</span>
+                           </div>
+                           Subdepartment {subdeptIndex + 1}
+                         </CardTitle>
+                         <Button
+                           variant="ghost"
+                           size="sm"
+                           onClick={() => handleRemoveSubdepartment(subdeptIndex)}
+                           className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                         >
+                           <Trash2 className="h-4 w-4" />
+                         </Button>
+                       </div>
+                     </CardHeader>
 
-      {/* Add Stage Dialog */}
-      <Dialog open={isAddStageOpen} onOpenChange={setIsAddStageOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add New Stage</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="stageName">Stage Name</Label>
-              <Input id="stageName" placeholder="e.g., Document Review" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="estimatedTime">Estimated Time (hours)</Label>
-              <Input
-                id="estimatedTime"
-                type="number"
-                min="1"
-                placeholder="e.g., 8"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="reminderDays">Reminder Days</Label>
-              <Input
-                id="reminderDays"
-                type="number"
-                min="1"
-                placeholder="e.g., 1"
-              />
-            </div>
-            <div className="flex justify-end space-x-2 pt-4">
-              <Button variant="outline" onClick={() => setIsAddStageOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={() => {
-                  const name = (document.getElementById('stageName') as HTMLInputElement).value
-                  const estimatedTime = parseInt((document.getElementById('estimatedTime') as HTMLInputElement).value || '8')
-                  const reminderDays = parseInt((document.getElementById('reminderDays') as HTMLInputElement).value || '1')
-                  handleSaveStage({ name, estimatedTime, reminderDays, status: 'yes' })
-                }}
-                disabled={saving}
-              >
-                {saving ? 'Saving...' : 'Add Stage'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+                     <CardContent className="space-y-6">
+                       {/* Basic Info */}
+                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                         <div className="space-y-2">
+                           <Label className="text-sm font-semibold">Subdepartment Name *</Label>
+                           <Input
+                             placeholder="e.g., Visa Processing Unit"
+                             value={subdept.name}
+                             onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)}
+                             className="font-medium"
+                           />
+                         </div>
+                         <div className="space-y-2">
+                           <Label className="text-sm font-semibold">Description</Label>
+                           <Textarea
+                             placeholder="Brief description of this subdepartment's responsibilities"
+                             value={subdept.description}
+                             onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)}
+                             className="min-h-[80px]"
+                           />
+                         </div>
+                       </div>
 
-      {/* Assignment Dialog */}
-      <Dialog open={assignmentDialogOpen} onOpenChange={setAssignmentDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Assign Team Members</DialogTitle>
-            <p className="text-sm text-muted-foreground">
-              {selectedSubdept?.subdept.name} - {departments.find(d => d.id === selectedSubdept?.deptId)?.name}
-            </p>
-          </DialogHeader>
+                       {/* Staff Assignment */}
+                       <Card className="bg-white border-gray-200">
+                         <CardHeader className="pb-3">
+                           <CardTitle className="text-base flex items-center">
+                             <UserCheck className="h-5 w-5 mr-2 text-blue-600" />
+                             Team Assignments
+                           </CardTitle>
+                         </CardHeader>
+                         <CardContent className="space-y-4">
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                             {/* Task Manager */}
+                             <div className="space-y-2">
+                               <Label className="text-sm font-semibold">Task Manager</Label>
+                               <Select
+                                 value={subdept.taskManagerId || 'none'}
+                                 onValueChange={(value) => handleSubdepartmentChange(subdeptIndex, 'taskManagerId', value === 'none' ? '' : value)}
+                               >
+                                 <SelectTrigger className="bg-blue-50 border-blue-200">
+                                   <SelectValue placeholder="Select task manager" />
+                                 </SelectTrigger>
+                                 <SelectContent>
+                                   <SelectItem value="none">None</SelectItem>
+                                   {users
+                                     .filter(u => ['admin', 'user'].includes(u.role))
+                                     .map(user => (
+                                       <SelectItem key={user.id} value={user.id}>
+                                         <div className="flex items-center space-x-2">
+                                           <div className="h-4 w-4 rounded-full bg-blue-100 flex items-center justify-center">
+                                             <UserIcon className="h-2 w-2 text-blue-600" />
+                                           </div>
+                                           <span>{user.name}</span>
+                                           <Badge variant="outline" className="text-xs">{user.role}</Badge>
+                                         </div>
+                                       </SelectItem>
+                                     ))
+                                   }
+                                 </SelectContent>
+                               </Select>
+                             </div>
 
-          {selectedSubdept && (
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Task Manager</Label>
-                <Select
-                  value={selectedSubdept.subdept.taskManagerId || ''}
-                  onValueChange={(value) => {
-                    setSelectedSubdept(prev => prev ? {
-                      ...prev,
-                      subdept: {
-                        ...prev.subdept,
-                        taskManagerId: value || undefined
-                      }
-                    } : null)
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select task manager" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">Unassigned</SelectItem>
-                    {users
-                      .filter(u => ['admin', 'task_manager'].includes(u.role))
-                      .map(user => (
-                        <SelectItem key={user.id} value={user.id}>
-                          {user.name}
-                        </SelectItem>
-                      ))
-                    }
-                  </SelectContent>
-                </Select>
-              </div>
+                             {/* Task Assistants */}
+                             <div className="space-y-2">
+                               <div className="flex items-center justify-between">
+                                 <Label className="text-sm font-semibold">Task Assistants ({subdept.taskAssistantIds.length})</Label>
+                                 <Button
+                                   variant="outline"
+                                   size="sm"
+                                   onClick={() => handleAddTaskAssistant(subdeptIndex)}
+                                   className="bg-green-50 border-green-200 hover:bg-green-100"
+                                 >
+                                   <Plus className="h-3 w-3 mr-1" />
+                                   Add
+                                 </Button>
+                               </div>
+                               <div className="space-y-2 max-h-40 overflow-y-auto">
+                                 {subdept.taskAssistantIds.map((assistantId, assistantIndex) => (
+                                   <div key={assistantIndex} className="flex items-center space-x-2">
+                                     <Select
+                                       value={assistantId || 'none'}
+                                       onValueChange={(value) => handleTaskAssistantChange(subdeptIndex, assistantIndex, value === 'none' ? '' : value)}
+                                     >
+                                       <SelectTrigger className="flex-1 bg-green-50 border-green-200">
+                                         <SelectValue placeholder="Select task assistant" />
+                                       </SelectTrigger>
+                                       <SelectContent>
+                                         <SelectItem value="none">None</SelectItem>
+                                         {users
+                                           .filter(u => ['admin', 'user'].includes(u.role))
+                                           .map(user => (
+                                             <SelectItem key={user.id} value={user.id}>
+                                               <div className="flex items-center space-x-2">
+                                                 <div className="h-4 w-4 rounded-full bg-green-100 flex items-center justify-center">
+                                                   <UserIcon className="h-2 w-2 text-green-600" />
+                                                 </div>
+                                                 <span>{user.name}</span>
+                                                 <Badge variant="outline" className="text-xs">{user.role}</Badge>
+                                               </div>
+                                             </SelectItem>
+                                           ))
+                                         }
+                                       </SelectContent>
+                                     </Select>
+                                     <Button
+                                       variant="ghost"
+                                       size="sm"
+                                       onClick={() => handleRemoveTaskAssistant(subdeptIndex, assistantIndex)}
+                                       className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                     >
+                                       <X className="h-4 w-4" />
+                                     </Button>
+                                   </div>
+                                 ))}
+                                 {subdept.taskAssistantIds.length === 0 && (
+                                   <div className="text-center py-4 text-muted-foreground border-2 border-dashed border-gray-200 rounded-lg">
+                                     No task assistants assigned
+                                   </div>
+                                 )}
+                               </div>
+                             </div>
+                           </div>
+                         </CardContent>
+                       </Card>
 
-              <div className="space-y-2">
-                <Label>Task Assistant</Label>
-                <Select
-                  value={selectedSubdept.subdept.taskAssistantId || ''}
-                  onValueChange={(value) => {
-                    setSelectedSubdept(prev => prev ? {
-                      ...prev,
-                      subdept: {
-                        ...prev.subdept,
-                        taskAssistantId: value || undefined
-                      }
-                    } : null)
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select task assistant" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">Unassigned</SelectItem>
-                    {users
-                      .filter(u => ['admin', 'task_assistant', 'officer'].includes(u.role))
-                      .map(user => (
-                        <SelectItem key={user.id} value={user.id}>
-                          {user.name}
-                        </SelectItem>
-                      ))
-                    }
-                  </SelectContent>
-                </Select>
-              </div>
+                       {/* Classes Section */}
+                       <Card className="bg-white border-gray-200">
+                         <CardHeader>
+                           <div className="flex items-center justify-between">
+                             <CardTitle className="text-base flex items-center">
+                               <Layers className="h-5 w-5 mr-2 text-green-600" />
+                               Classes & Requirements ({subdept.classes.length})
+                             </CardTitle>
+                             <Button
+                               variant="outline"
+                               size="sm"
+                               onClick={() => handleAddClass(subdeptIndex)}
+                               className="bg-green-50 border-green-200 hover:bg-green-100"
+                             >
+                               <Plus className="h-4 w-4 mr-1" />
+                               Add Class
+                             </Button>
+                           </div>
+                         </CardHeader>
+                         <CardContent>
+                           <div className="space-y-6">
+                             {subdept.classes.map((classItem, classIndex) => (
+                               <ClassComponent
+                                 key={classItem.id}
+                                 classItem={classItem}
+                                 onUpdate={updateFormState}
+                                 onRemove={() => handleRemoveClass(subdeptIndex, classIndex)}
+                                 path={['subdepartments', subdeptIndex.toString(), 'classes', classIndex.toString()]}
+                               />
+                             ))}
+                             
+                             {subdept.classes.length === 0 && (
+                               <div className="text-center py-12 bg-gradient-to-r from-gray-50 to-gray-100 border-2 border-dashed border-gray-300 rounded-lg">
+                                 <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 mx-auto mb-4">
+                                   <Layers className="h-8 w-8 text-gray-400" />
+                                 </div>
+                                 <h3 className="text-lg font-semibold text-gray-900 mb-2">No classes added yet</h3>
+                                 <p className="text-muted-foreground mb-4">Classes help organize requirements and sub-categories for this subdepartment.</p>
+                                 <Button onClick={() => handleAddClass(subdeptIndex)} variant="outline">
+                                   <Plus className="h-4 w-4 mr-2" />
+                                   Add Your First Class
+                                 </Button>
+                               </div>
+                             )}
+                           </div>
+                         </CardContent>
+                       </Card>
+                     </CardContent>
+                   </Card>
+                 ))}
 
-              <div className="flex justify-end space-x-2 pt-4">
-                <Button
-                  variant="outline"
-                  onClick={() => setAssignmentDialogOpen(false)}
-                  disabled={saving}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={() => selectedSubdept && handleSaveAssignments(
-                    selectedSubdept.subdept.taskManagerId || '',
-                    selectedSubdept.subdept.taskAssistantId || ''
-                  )}
-                  disabled={saving}
-                >
-                  {saving ? 'Saving...' : 'Save Assignments'}
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
-  )
+                 {departmentForm.subdepartments.length === 0 && (
+                   <div className="text-center py-12 bg-gradient-to-r from-gray-50 to-gray-100 border-2 border-dashed border-gray-300 rounded-lg">
+                     <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gray-100 mx-auto mb-4">
+                       <Users className="h-10 w-10 text-gray-400" />
+                     </div>
+                     <h3 className="text-lg font-semibold text-gray-900 mb-2">No subdepartments added yet</h3>
+                     <p className="text-muted-foreground mb-6">Subdepartments help organize your department into manageable units with specific responsibilities.</p>
+                     <Button onClick={() => handleAddSubdepartment()} size="lg">
+                       <Plus className="h-4 w-4 mr-2" />
+                       Add Your First Subdepartment
+                     </Button>
+                   </div>
+                 )}
+               </div>
+             </CardContent>
+           </Card>
+
+           {/* Dialog Actions */}
+           <div className="flex justify-end space-x-4 pt-6 border-t border-gray-200">
+             <Button
+               variant="outline"
+               onClick={() => {
+                 setIsAddDepartmentOpen(false)
+                 setCurrentDepartmentId(null)
+               }}
+               disabled={saving}
+               size="lg"
+             >
+               Cancel
+             </Button>
+             <Button
+               onClick={handleSaveDepartment}
+               disabled={saving || !departmentForm.name.trim()}
+               size="lg"
+               className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+             >
+               {saving ? (
+                 <>
+                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                   Saving...
+                 </>
+               ) : (
+                 <>
+                   <Check className="mr-2 h-4 w-4" />
+                   {currentDepartmentId ? 'Save Subdepartment' : 'Save Department'}
+                 </>
+               )}
+             </Button>
+           </div>
+         </div>
+       </DialogContent>
+     </Dialog>
+
+     {/* Assignment Dialog */}
+     <Dialog open={assignmentDialogOpen} onOpenChange={setAssignmentDialogOpen}>
+       <DialogContent className="sm:max-w-[700px]">
+         <DialogHeader className="pb-4 border-b">
+           <DialogTitle className="text-xl font-bold">Assign Team Members</DialogTitle>
+           <p className="text-sm text-muted-foreground">
+             {selectedSubdept?.subdept.name} - {departments.find(d => d.id === selectedSubdept?.deptId)?.name}
+           </p>
+         </DialogHeader>
+
+         {selectedSubdept && (
+           <AssignmentDialogContent
+             subdept={selectedSubdept.subdept}
+             users={users}
+             onSave={handleSaveAssignments}
+             onCancel={() => setAssignmentDialogOpen(false)}
+             saving={saving}
+           />
+         )}
+       </DialogContent>
+     </Dialog>
+   </div>
+ )
+}
+
+// Assignment Dialog Content Component
+function AssignmentDialogContent({ 
+ subdept, 
+ users, 
+ onSave, 
+ onCancel, 
+ saving 
+}: {
+ subdept: Subdepartment
+ users: User[]
+ onSave: (taskManagerId: string, taskAssistantIds: string[]) => void
+ onCancel: () => void
+ saving: boolean
+}) {
+ const [taskManagerId, setTaskManagerId] = useState(subdept.taskManagerId || '')
+ const [taskAssistantIds, setTaskAssistantIds] = useState(
+   subdept.taskAssistants.map(ta => ta.userId)
+ )
+
+ const addTaskAssistant = () => {
+   setTaskAssistantIds([...taskAssistantIds, ''])
+ }
+
+ const removeTaskAssistant = (index: number) => {
+   setTaskAssistantIds(taskAssistantIds.filter((_, i) => i !== index))
+ }
+
+ const updateTaskAssistant = (index: number, userId: string) => {
+   const newIds = [...taskAssistantIds]
+   newIds[index] = userId
+   setTaskAssistantIds(newIds)
+ }
+
+ const handleSave = () => {
+   onSave(taskManagerId, taskAssistantIds.filter(id => id && id !== 'none'))
+ }
+
+ return (
+   <div className="space-y-6 py-6">
+     {/* Task Manager Section */}
+     <Card className="bg-blue-50 border-blue-200">
+       <CardHeader className="pb-3">
+         <CardTitle className="text-base flex items-center">
+           <div className="h-6 w-6 rounded-full bg-blue-100 flex items-center justify-center mr-2">
+             <UserIcon className="h-3 w-3 text-blue-600" />
+           </div>
+           Task Manager
+         </CardTitle>
+       </CardHeader>
+       <CardContent>
+         <Select value={taskManagerId} onValueChange={setTaskManagerId}>
+           <SelectTrigger className="bg-white">
+             <SelectValue placeholder="Select task manager" />
+           </SelectTrigger>
+           <SelectContent>
+             <SelectItem value="">Unassigned</SelectItem>
+             {users
+               .filter(u => ['admin', 'user'].includes(u.role))
+               .map(user => (
+                 <SelectItem key={user.id} value={user.id}>
+                   <div className="flex items-center space-x-3">
+                     <div className="h-6 w-6 rounded-full bg-blue-100 flex items-center justify-center">
+                       <UserIcon className="h-3 w-3 text-blue-600" />
+                     </div>
+                     <div>
+                       <span className="font-medium">{user.name}</span>
+                       <Badge variant="outline" className="ml-2 text-xs">{user.role}</Badge>
+                     </div>
+                   </div>
+                 </SelectItem>
+               ))
+             }
+           </SelectContent>
+         </Select>
+       </CardContent>
+     </Card>
+
+     {/* Task Assistants Section */}
+     <Card className="bg-green-50 border-green-200">
+       <CardHeader className="pb-3">
+         <div className="flex items-center justify-between">
+           <CardTitle className="text-base flex items-center">
+             <div className="h-6 w-6 rounded-full bg-green-100 flex items-center justify-center mr-2">
+               <Users className="h-3 w-3 text-green-600" />
+             </div>
+             Task Assistants ({taskAssistantIds.length})
+           </CardTitle>
+           <Button variant="outline" size="sm" onClick={addTaskAssistant} className="bg-white border-green-300 hover:bg-green-50">
+             <Plus className="h-4 w-4 mr-1" />
+             Add Assistant
+           </Button>
+         </div>
+       </CardHeader>
+       <CardContent>
+         <div className="space-y-3">
+           {taskAssistantIds.map((assistantId, index) => (
+             <div key={index} className="flex items-center space-x-3 p-3 bg-white rounded-lg border border-green-200">
+               <div className="flex-1">
+                 <Select
+                   value={assistantId}
+                   onValueChange={(value) => updateTaskAssistant(index, value)}
+                 >
+                   <SelectTrigger>
+                     <SelectValue placeholder="Select task assistant" />
+                   </SelectTrigger>
+                   <SelectContent>
+                     <SelectItem value="">Unassigned</SelectItem>
+                     {users
+                       .filter(u => ['admin', 'user'].includes(u.role))
+                       .map(user => (
+                         <SelectItem key={user.id} value={user.id}>
+                           <div className="flex items-center space-x-3">
+                             <div className="h-6 w-6 rounded-full bg-green-100 flex items-center justify-center">
+                               <UserIcon className="h-3 w-3 text-green-600" />
+                             </div>
+                             <div>
+                               <span className="font-medium">{user.name}</span>
+                               <Badge variant="outline" className="ml-2 text-xs">{user.role}</Badge>
+                             </div>
+                           </div>
+                         </SelectItem>
+                       ))
+                     }
+                   </SelectContent>
+                 </Select>
+               </div>
+               <Button
+                 variant="ghost"
+                 size="sm"
+                 onClick={() => removeTaskAssistant(index)}
+                 className="text-red-500 hover:text-red-700 hover:bg-red-50"
+               >
+                 <Trash2 className="h-4 w-4" />
+               </Button>
+             </div>
+           ))}
+
+           {taskAssistantIds.length === 0 && (
+             <div className="text-center py-8 bg-white border-2 border-dashed border-green-200 rounded-lg">
+               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-100 mx-auto mb-3">
+                 <Users className="h-6 w-6 text-green-400" />
+               </div>
+               <p className="text-muted-foreground mb-3">No task assistants assigned</p>
+               <Button variant="outline" onClick={addTaskAssistant} className="border-green-300 hover:bg-green-50">
+                 <Plus className="h-4 w-4 mr-2" />
+                 Add First Assistant
+               </Button>
+             </div>
+           )}
+         </div>
+       </CardContent>
+     </Card>
+
+     {/* Actions */}
+     <div className="flex justify-end space-x-3 pt-4 border-t">
+       <Button variant="outline" onClick={onCancel} disabled={saving} size="lg">
+         Cancel
+       </Button>
+       <Button onClick={handleSave} disabled={saving} size="lg" className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+         {saving ? (
+           <>
+             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+             Saving...
+           </>
+         ) : (
+           <>
+             <Check className="mr-2 h-4 w-4" />
+             Save Assignments
+           </>
+         )}
+       </Button>
+     </div>
+   </div>
+ )
 }
