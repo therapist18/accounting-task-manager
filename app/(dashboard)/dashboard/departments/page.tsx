@@ -5,11 +5,12 @@ import { useEffect, useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { supabase } from "@/lib/supabase/client"
 import Departments from "./departments"
-import DepartmentRequirements from "./department-requirements"
 import WebData from "./webdata"
 import Rates from "./rates"
 import Stages from "./stages"
 import Payments from "./payments"
+import DepartmentRequirements from "./department-requirements"
+import DepartmentGuidelines from "./DepartmentGuidelines"
 
 type Department = {
   id: string
@@ -95,6 +96,7 @@ export default function DepartmentsPage() {
         <TabsTrigger value="requirements">GOVT Upload Processing Requirements</TabsTrigger>
         <TabsTrigger value="webdata">Web Data</TabsTrigger>  
         <TabsTrigger value="payments">Payments</TabsTrigger>  
+        <TabsTrigger value="guidelines">Guidelines</TabsTrigger>  
       </TabsList>
       <TabsContent value="departments">
         <Departments />
@@ -113,6 +115,9 @@ export default function DepartmentsPage() {
       </TabsContent>
       <TabsContent value="payments">
         <Payments departments={departments} />
+      </TabsContent>
+      <TabsContent value="guidelines">
+        <DepartmentGuidelines departments={departments} />
       </TabsContent>
     </Tabs>
   )

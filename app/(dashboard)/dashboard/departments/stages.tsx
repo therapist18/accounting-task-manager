@@ -7,15 +7,15 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { ArrowUp, ArrowDown, Pencil, Plus, X, Info, ChevronUp, ChevronDown } from "lucide-react"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { ArrowUp, ArrowDown, Pencil, Plus, X, Info, ChevronUp, ChevronDown, Clock, FileText, User } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { AddStageDialog } from "./add-stage-dialog"
 import { EditStageDialog } from "./edit-stage-dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Badge } from "@/components/ui/badge"
+import type { Department, Stage, Subdepartment, DepartmentOption } from "./types"
 
 // Simple UUID generator for client-side use
 const generateId = () => {
@@ -24,51 +24,6 @@ const generateId = () => {
     const v = c === 'x' ? r : (r & 0x3 | 0x8)
     return v.toString(16)
   })
-}
-
-type TimeConfig = {
-  applicationType: string
-  days: number
-  hours: number
-  minutes: number
-}
-
-type StageDocument = {
-  id: string
-  name: string
-  description?: string
-  isRequired: boolean
-  extractionSpecs?: Array<{
-    fieldName: string
-    fieldType: 'text' | 'date' | 'number' | 'boolean'
-    isRequired: boolean
-    description?: string
-  }>
-}
-
-type Stage = {
-  id: string
-  name: string
-  order_num: number
-  estimated_time: number | null
-  follow_up?: 'Client' | 'Officer' | 'BCL' | null
-  isSpecial: boolean
-  timeConfigs?: TimeConfig[]
-  documents?: StageDocument[]
-  allocations?: {
-    [key: string]: {
-      applicable: boolean
-      display: boolean
-      classId?: string
-      duration?: {
-        days: number
-        hours: number
-        minutes: number
-      }
-      followUpWith?: 'Client' | 'Officer' | 'BCL' | null
-      documents?: StageDocument[]
-    }
-  }
 }
 
 // Utility functions for time conversion
@@ -104,40 +59,13 @@ const timeStringToMinutes = (timeString: string): number => {
   return totalMinutes
 }
 
-type ClassRequirement = {
-  name: string
-  description: string | null
-  is_required: boolean
-}
-
-type SubdepartmentClass = {
-  name: string
-  description: string | null
-  requirements: ClassRequirement[]
-  stages?: StageAllocation[]
-}
-
-type StageAllocation = {
-  stage_id: string
-  applicable: boolean
-  display: boolean
-}
-
-type Subdepartment = {
-  id: number
-  name: string
-  department_id: string
-  classes?: SubdepartmentClass[]
-  stages?: StageAllocation[]
-  hasClasses: boolean
-}
-
-type Department = {
-  id: string
-  name: string
-  stages: Stage[]
-  tm_subdepartments?: Subdepartment[]
-  subdepartments?: Subdepartment[]
+const getTimeFromMinutes = (minutes: number | null) => {
+  if (minutes === null) return { days: 0, hours: 0, minutes: 0 }
+  const days = Math.floor(minutes / (24 * 60))
+  const remainingMinutes = minutes % (24 * 60)
+  const hours = Math.floor(remainingMinutes / 60)
+  const mins = remainingMinutes % 60
+  return { days, hours, minutes: mins }
 }
 
 export default function Stages() {
@@ -147,29 +75,22 @@ export default function Stages() {
   const [error, setError] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingStage, setEditingStage] = useState<Stage | null>(null)
-  const [isReordering, setIsReordering] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
 
-  const removeStageRow = (id: string) => {
-    if (newStages.length <= 1) return
-    setNewStages(prev => prev.filter(stage => stage.id !== id))
-  }
-
-  const updateNewStage = (id: string, updates: Partial<{
-    id: string
-    name: string
-    days: number
-    hours: number
-    minutes: number
-    followUp: string
-  }>) => {
-    setNewStages(prev =>
-      prev.map(stage =>
-        stage.id === id ? { ...stage, ...updates } : stage
-      )
-    )
-  }
   const { toast } = useToast()
+
+  const toggleRowExpansion = (rowId: string) => {
+    setExpandedRows(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(rowId)) {
+        newSet.delete(rowId)
+      } else {
+        newSet.add(rowId)
+      }
+      return newSet
+    })
+  }
 
   useEffect(() => {
     const fetchData = async () => {
@@ -224,7 +145,7 @@ export default function Stages() {
   }
 
   // Get simplified department list for the dropdown
-  const departmentList = useMemo(() =>
+  const departmentList = useMemo((): DepartmentOption[] =>
     departments.map(dept => ({
       id: dept.id,
       name: dept.name
@@ -267,7 +188,7 @@ export default function Stages() {
         }
 
         // Find or create stage allocation
-        let stageAllocation = updatedClasses[classIndex].stages.find((s: StageAllocation) => s.stage_id === stageId)
+        let stageAllocation = updatedClasses[classIndex].stages.find((s: any) => s.stage_id === stageId)
         if (!stageAllocation) {
           stageAllocation = { stage_id: stageId, applicable: false, display: false }
           updatedClasses[classIndex].stages.push(stageAllocation)
@@ -349,7 +270,7 @@ export default function Stages() {
                 }
 
                 // Find or create stage allocation
-                let stageAllocation = updatedClasses[classIndex].stages.find((s: StageAllocation) => s.stage_id === stageId)
+                let stageAllocation = updatedClasses[classIndex].stages.find((s: any) => s.stage_id === stageId)
                 if (!stageAllocation) {
                   stageAllocation = { stage_id: stageId, applicable: false, display: false }
                   updatedClasses[classIndex].stages.push(stageAllocation)
@@ -446,7 +367,7 @@ export default function Stages() {
           updatedClasses[classIndex].stages = []
         }
 
-        let stageAllocation = updatedClasses[classIndex].stages.find((s: StageAllocation) => s.stage_id === stageId)
+        let stageAllocation = updatedClasses[classIndex].stages.find((s: any) => s.stage_id === stageId)
         if (!stageAllocation) {
           stageAllocation = { stage_id: stageId, applicable: false, display: false }
           updatedClasses[classIndex].stages.push(stageAllocation)
@@ -514,7 +435,7 @@ export default function Stages() {
                   updatedClasses[classIndex].stages = []
                 }
 
-                let stageAllocation = updatedClasses[classIndex].stages.find((s: StageAllocation) => s.stage_id === stageId)
+                let stageAllocation = updatedClasses[classIndex].stages.find((s: any) => s.stage_id === stageId)
                 if (!stageAllocation) {
                   stageAllocation = { stage_id: stageId, applicable: false, display: false }
                   updatedClasses[classIndex].stages.push(stageAllocation)
@@ -570,21 +491,7 @@ export default function Stages() {
   }
 
   // Function to add new stages from the AddStageDialog
-  const handleAddStages = async (stages: Array<{
-    id: string
-    name: string
-    days: number
-    hours: number
-    minutes: number
-    followUp: string
-    isSpecial: boolean
-    timeConfigs: Array<{
-      applicationType: string
-      days: number
-      hours: number
-      minutes: number
-    }>
-  }>, departmentId: string) => {
+  const handleAddStages = async (stages: any[], departmentId: string) => {
     const currentDept = departments.find(d => d.id === departmentId)
     if (!currentDept) {
       toast({
@@ -594,10 +501,8 @@ export default function Stages() {
       })
       return
     }
-    try {
-      const currentDept = getCurrentDepartment()
-      if (!currentDept) return
 
+    try {
       // Process each stage to ensure proper time configurations
       const newStagesData = stages
         .filter(stage => stage.name.trim() !== '')
@@ -620,11 +525,13 @@ export default function Stages() {
             return {
               id: generateId(),
               name: stage.name.trim(),
+              description: stage.description || '',
               estimated_time: totalMinutes,
               order_num: currentDept.stages.length + index + 1,
               follow_up: stage.followUp === 'none' ? null : stage.followUp as 'Client' | 'Officer' | 'BCL',
               isSpecial: true,
               timeConfigs: timeConfigs.length > 0 ? timeConfigs : undefined,
+              documents: stage.documents || [],
               allocations: {}
             };
           }
@@ -638,11 +545,13 @@ export default function Stages() {
           return {
             id: generateId(),
             name: stage.name.trim(),
+            description: stage.description || '',
             estimated_time: totalMinutes,
             order_num: currentDept.stages.length + index + 1,
             follow_up: stage.followUp === 'none' ? null : stage.followUp as 'Client' | 'Officer' | 'BCL',
             isSpecial: false,
             timeConfigs: undefined,
+            documents: stage.documents || [],
             allocations: {}
           };
         });
@@ -659,18 +568,7 @@ export default function Stages() {
       // Prepare stages for database update
       const updatedStages = [
         ...currentDept.stages,
-        ...newStagesData.map(stage => ({
-          ...stage,
-          // Ensure timeConfigs is properly formatted for the database
-          timeConfigs: stage.isSpecial && stage.timeConfigs
-            ? stage.timeConfigs.map(config => ({
-                applicationType: config.applicationType,
-                days: Number(config.days) || 0,
-                hours: Number(config.hours) || 0,
-                minutes: Number(config.minutes) || 0
-              }))
-            : undefined
-        }))
+        ...newStagesData
       ];
 
       // Update department with new stages in the database
@@ -817,31 +715,12 @@ export default function Stages() {
       })
     }
   }
+
   const currentDept = getCurrentDepartment()
 
-  if (loading) return <div>Loading...</div>
-  if (error) return <div className="text-red-500">{error}</div>
-  if (!currentDept) return <div>No department selected</div>
-
-  const getSubdepartmentColSpan = (subdept: Subdepartment) => {
-    return (subdept.classes?.length || 0) || 1 // At least 1 if no classes
-  }
-
-
-  // Format time for display
-  const formatTime = (minutes: number | null) => {
-    if (minutes === null) return '0m'
-    const days = Math.floor(minutes / (60 * 24))
-    const hours = Math.floor((minutes % (60 * 24)) / 60)
-    const mins = minutes % 60
-
-    const parts = []
-    if (days > 0) parts.push(`${days}d`)
-    if (hours > 0) parts.push(`${hours}h`)
-    if (mins > 0 || parts.length === 0) parts.push(`${mins}m`)
-
-    return parts.join(' ')
-  }
+  if (loading) return <div className="flex items-center justify-center h-64">Loading...</div>
+  if (error) return <div className="text-red-500 p-4">{error}</div>
+  if (!currentDept) return <div className="p-4">No department selected</div>
 
   // Ensure we always have at least one subdepartment
   const normalizedSubdepartments = currentDept.subdepartments && currentDept.subdepartments.length > 0
@@ -855,43 +734,10 @@ export default function Stages() {
       classes: []
     }]
 
-  // Sortable row component - moved outside the component
-  const SortableRow = React.memo(({ id, children, isReordering }: { id: string, children: React.ReactNode, isReordering: boolean }) => {
-    const {
-      attributes,
-      listeners,
-      setNodeRef,
-      transform,
-      transition,
-    } = useSortable({ id })
-
-    const style = {
-      transform: CSS.Transform.toString(transform),
-      transition,
-    }
-
-    return (
-      <TableRow ref={setNodeRef} style={style} className="relative">
-        {isReordering && (
-          <TableCell className="w-10 p-0">
-            <button
-              {...attributes}
-              {...listeners}
-              className="p-2 hover:bg-muted rounded-md cursor-grab active:cursor-grabbing"
-            >
-              <GripVertical className="h-4 w-4 text-muted-foreground" />
-            </button>
-          </TableCell>
-        )}
-        {children}
-      </TableRow>
-    )
-  })
-
   return (
-    <div className="w-full">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold">Stages</h2>
+    <div className="w-full space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">Stages Management</h2>
         <AddStageDialog
           open={isDialogOpen}
           onOpenChange={setIsDialogOpen}
@@ -901,54 +747,129 @@ export default function Stages() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <EditStageDialog
-          open={!!editingStage}
-          onOpenChange={(open) => !open && setEditingStage(null)}
-          stage={editingStage}
-          onSave={handleUpdateStage}
-        />
-        <TabsList className="w-full mb-4 items-start justify-start">
+        <TabsList className="w-full mb-4 items-start justify-start overflow-x-auto">
           {departments.map(dept => (
-            <TabsTrigger key={dept.id} value={dept.id}>
+            <TabsTrigger key={dept.id} value={dept.id} className="whitespace-nowrap">
               {dept.name}
             </TabsTrigger>
           ))}
         </TabsList>
 
         {departments.map(dept => (
-          <TabsContent key={dept.id} value={dept.id} className="space-y-4">
-            <div className="relative overflow-auto max-h-[calc(100vh-300px)]">
-              <Table className="border min-w-max">
-                <TableHeader className="sticky top-0 bg-background z-10">
-                  {/* Header Row */}
-                  <TableRow className="bg-muted/50">
-                    <TableHead rowSpan={2} className="sticky left-0 bg-background border-r font-bold w-48 z-20">
+        <TabsContent key={dept.id} value={dept.id} className="space-y-4">
+        {dept.stages.length === 0 ? (
+          <div className="text-center py-12 border-2 border-dashed border-muted rounded-lg">
+            <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+            <h3 className="text-lg font-medium text-muted-foreground mb-2">No stages yet</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Create your first stage to get started with the workflow
+            </p>
+            <Button onClick={() => setIsDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add First Stage
+            </Button>
+          </div>
+        ) : (
+          <div className="relative overflow-auto max-h-[calc(100vh-300px)] border rounded-lg">
+            <Table className="min-w-max">
+              <TableHeader className="sticky top-0 bg-background z-10">
+                {/* Multi-level header for stages */}
+                <TableRow className="bg-muted/50">
+                  <TableHead rowSpan={3} className="sticky left-0 bg-background border-r font-bold w-48 z-20">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
                       Department / Class
-                    </TableHead>
-                    {dept.stages.map((stage, index) => (
-                      <TableHead 
-                        key={stage.id} 
-                        colSpan={2}
-                        className="border-r text-center font-bold bg-muted/30"
-                      >
-                        <div className="flex flex-col items-center p-2">
-                          <span className="font-medium">{stage.name}</span>
-                          <div className="text-xs text-muted-foreground">
-                            {formatTime(stage.estimated_time)}
-                            {stage.follow_up && ` • ${stage.follow_up}`}
+                    </div>
+                  </TableHead>
+                  {dept.stages.map((stage) => (
+                    <TableHead 
+                      key={stage.id} 
+                      colSpan={6} 
+                      className="border-r text-center font-bold bg-muted/30 min-w-[300px]"
+                    >
+                      <div className="flex flex-col items-center p-2 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{stage.name}</span>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={() => setEditingStage(stage)}
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={() => moveStage(stage.id, 'up')}
+                              disabled={stage.order_num === 1}
+                            >
+                              <ArrowUp className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={() => moveStage(stage.id, 'down')}
+                              disabled={stage.order_num === dept.stages.length}
+                            >
+                              <ArrowDown className="h-3 w-3" />
+                            </Button>
                           </div>
-                          {stage.isSpecial && (
+                        </div>
+                        
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Badge variant="outline" className="text-xs">
+                            #{stage.order_num}
+                          </Badge>
+                          {stage.documents && stage.documents.length > 0 && (
                             <Popover>
                               <PopoverTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-6 w-6 p-0">
-                                  <Info className="h-3 w-3 text-blue-500" />
+                                <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
+                                  <FileText className="h-3 w-3 text-blue-500" />
                                 </Button>
                               </PopoverTrigger>
                               <PopoverContent className="w-80">
                                 <div className="space-y-2">
-                                  <h4 className="font-medium">Special Stage Requirements</h4>
+                                  <h4 className="font-medium">Stage Documents</h4>
+                                  <div className="space-y-2">
+                                    {stage.documents.map((doc, i) => (
+                                      <div key={i} className="bg-muted/50 p-2 rounded text-sm">
+                                        <div className="font-medium flex items-center gap-2">
+                                          {doc.name}
+                                          <Badge variant={doc.isRequired ? "default" : "secondary"} className="text-xs">
+                                            {doc.isRequired ? "Required" : "Optional"}
+                                          </Badge>
+                                        </div>
+                                        <div className="text-muted-foreground text-xs">
+                                          Type: {doc.documentType}
+                                        </div>
+                                        {doc.extractionSpecs && doc.extractionSpecs.length > 0 && (
+                                          <div className="text-xs text-muted-foreground mt-1">
+                                            Extractions: {doc.extractionSpecs.map(spec => spec.fieldName).join(', ')}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          )}
+                          {stage.isSpecial && (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
+                                  <Clock className="h-3 w-3 text-orange-500" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-80">
+                                <div className="space-y-2">
+                                  <h4 className="font-medium">Special Time Requirements</h4>
                                   <div className="text-sm text-muted-foreground">
-                                    This stage has special time requirements based on application type:
+                                    This stage has different time requirements based on application type:
                                   </div>
                                   <div className="space-y-2 mt-2">
                                     {stage.timeConfigs?.map((config, i) => (
@@ -968,136 +889,275 @@ export default function Stages() {
                             </Popover>
                           )}
                         </div>
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                  
-                  {/* Allocate/Display Header Row */}
-                  <TableRow className="bg-muted/20">
-                    <TableHead className="sticky left-0 bg-background border-r z-20">
-                      <div className="text-center">Department / Class</div>
+                      </div>
                     </TableHead>
-                    {dept.stages.map(stage => (
-                      <React.Fragment key={`header-${stage.id}`}>
-                        <TableHead className="border text-center">
-                          Allocate
-                        </TableHead>
-                        <TableHead className="border text-center">
-                          Display
-                        </TableHead>
-                      </React.Fragment>
-                    ))}
-                  </TableRow>
-                </TableHeader>
+                  ))}
+                </TableRow>
+                
+                {/* Stage details row */}
+                <TableRow className="bg-muted/30">
+                  {dept.stages.map((stage) => (
+                    <React.Fragment key={`details-${stage.id}`}>
+                      <TableHead colSpan={3} className="border text-center text-xs font-medium">
+                        <div className="flex items-center justify-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          Duration
+                        </div>
+                      </TableHead>
+                      <TableHead className="border text-center text-xs font-medium">
+                        <div className="flex items-center justify-center gap-1">
+                          <User className="h-3 w-3" />
+                          Follow Up
+                        </div>
+                      </TableHead>
+                      <TableHead className="border text-center text-xs font-medium">
+                        Applicable
+                      </TableHead>
+                      <TableHead className="border text-center text-xs font-medium">
+                        Display
+                      </TableHead>
+                    </React.Fragment>
+                  ))}
+                </TableRow>
+                
+                {/* Duration breakdown row */}
+                <TableRow className="bg-muted/20">
+                  {dept.stages.map((stage) => (
+                    <React.Fragment key={`duration-${stage.id}`}>
+                      <TableHead className="border text-center text-xs">Days</TableHead>
+                      <TableHead className="border text-center text-xs">Hours</TableHead>
+                      <TableHead className="border text-center text-xs">Minutes</TableHead>
+                      <TableHead className="border text-center text-xs">Person</TableHead>
+                      <TableHead className="border text-center text-xs">Status</TableHead>
+                      <TableHead className="border text-center text-xs">Show</TableHead>
+                    </React.Fragment>
+                  ))}
+                </TableRow>
+              </TableHeader>
 
-                <TableBody>
-                  {normalizedSubdepartments.flatMap(subdept => {
-                    // Add subdepartment row
-                    const rows = [
-                      <TableRow key={`subdept-${subdept.id}`}>
-                        <TableCell className="sticky left-0 bg-background border-r font-medium z-10">
-                          {subdept.name}
-                        </TableCell>
-                        {dept.stages.map(stage => {
-                          const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id);
-                          const hasAllocation = stageAllocation?.applicable || false;
-                          const hasDisplay = stageAllocation?.display || false;
+              <TableBody>
+                {normalizedSubdepartments.flatMap(subdept => {
+                  const subdeptRowId = `subdept-${subdept.id}`
+                  const isExpanded = expandedRows.has(subdeptRowId)
+                  
+                  const rows = [
+                    // Subdepartment row
+                    <TableRow key={subdeptRowId} className="hover:bg-muted/50">
+                      <TableCell className="sticky left-0 bg-background border-r font-medium z-10">
+                        <div className="flex items-center gap-2">
+                          {subdept.hasClasses && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={() => toggleRowExpansion(subdeptRowId)}
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronUp className="h-4 w-4" />
+                              )}
+                            </Button>
+                          )}
+                          <span className="font-medium">{subdept.name}</span>
+                          {subdept.hasClasses && (
+                            <Badge variant="secondary" className="text-xs">
+                              {subdept.classes?.length || 0} classes
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      {dept.stages.map(stage => {
+                        const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id)
+                        const hasAllocation = stageAllocation?.applicable || false
+                        const hasDisplay = stageAllocation?.display || false
+                        const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
 
-                          return (
-                            <React.Fragment key={`subdept-${subdept.id}-${stage.id}`}>
-                              <TableCell className="border p-0">
-                                <Select
-                                  value={hasAllocation ? 'applicable' : 'not-applicable'}
-                                  onValueChange={(value) =>
-                                    handleAllocationChange(subdept.id, stage.id, value === 'applicable')
-                                  }
-                                >
-                                  <SelectTrigger className="h-8 w-full border-0 shadow-none focus:ring-1 focus:ring-ring">
-                                    <SelectValue placeholder="Select" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="applicable">Applicable</SelectItem>
-                                    <SelectItem value="not-applicable">Not Applicable</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </TableCell>
-                              <TableCell className="border p-0">
-                                <div className="flex items-center justify-center p-2">
-                                  <Checkbox
-                                    checked={hasDisplay}
-                                    onCheckedChange={(checked) =>
-                                      handleDisplayToggle(subdept.id, stage.id, checked as boolean)
-                                    }
-                                    disabled={!hasAllocation}
-                                    className="h-4 w-4"
-                                  />
-                                </div>
-                              </TableCell>
-                            </React.Fragment>
-                          );
-                        })}
-                      </TableRow>
-                    ];
-
-                    // Add class rows if they exist
-                    if (subdept.hasClasses && subdept.classes) {
-                      subdept.classes.forEach((cls, clsIndex) => {
-                        rows.push(
-                          <TableRow key={`class-${subdept.id}-${cls.id || clsIndex}`} className="bg-muted/5">
-                            <TableCell className="sticky left-0 bg-background border-r pl-8 z-10">
-                              <span className="text-muted-foreground">{cls.name}</span>
+                        return (
+                          <React.Fragment key={`subdept-${subdept.id}-${stage.id}`}>
+                            <TableCell className="border p-1 text-center text-sm font-mono">
+                              {days}
                             </TableCell>
-                            {dept.stages.map(stage => {
-                              const stageAllocation = cls.stages?.find(s => s.stage_id === stage.id);
-                              const hasAllocation = stageAllocation?.applicable || false;
-                              const hasDisplay = stageAllocation?.display || false;
-
-                              return (
-                                <React.Fragment key={`class-${subdept.id}-${cls.id || clsIndex}-${stage.id}`}>
-                                  <TableCell className="border p-0">
-                                    <Select
-                                      value={hasAllocation ? 'applicable' : 'not-applicable'}
-                                      onValueChange={(value) =>
-                                        handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex)
-                                      }
-                                    >
-                                      <SelectTrigger className="h-8 w-full border-0 shadow-none focus:ring-1 focus:ring-ring">
-                                        <SelectValue placeholder="Select" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="applicable">Applicable</SelectItem>
-                                        <SelectItem value="not-applicable">Not Applicable</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-                                  <TableCell className="border p-0">
-                                    <div className="flex items-center justify-center p-2">
-                                      <Checkbox
-                                        checked={hasDisplay}
-                                        onCheckedChange={(checked) =>
-                                          handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex)
-                                        }
-                                        disabled={!hasAllocation}
-                                        className="h-4 w-4"
-                                      />
+                            <TableCell className="border p-1 text-center text-sm font-mono">
+                              {hours}
+                            </TableCell>
+                            <TableCell className="border p-1 text-center text-sm font-mono">
+                              {minutes}
+                            </TableCell>
+                            <TableCell className="border p-1 text-center text-xs">
+                              {stage.follow_up ? (
+                                <Badge variant="outline" className="text-xs">
+                                  {stage.follow_up}
+                                </Badge>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="border p-0">
+                              <Select
+                                value={hasAllocation ? 'applicable' : 'not-applicable'}
+                                onValueChange={(value) =>
+                                  handleAllocationChange(subdept.id, stage.id, value === 'applicable')
+                                }
+                              >
+                                <SelectTrigger className="h-8 w-full border-0 shadow-none focus:ring-1 focus:ring-ring">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="applicable">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                      Applicable
                                     </div>
-                                  </TableCell>
-                                </React.Fragment>
-                              );
-                            })}
-                          </TableRow>
-                        );
-                      });
-                    }
+                                  </SelectItem>
+                                  <SelectItem value="not-applicable">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                      Not Applicable
+                                    </div>
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell className="border p-0">
+                              <div className="flex items-center justify-center p-2">
+                                <Checkbox
+                                  checked={hasDisplay}
+                                  onCheckedChange={(checked) =>
+                                    handleDisplayToggle(subdept.id, stage.id, checked as boolean)
+                                  }
+                                  disabled={!hasAllocation}
+                                  className="h-4 w-4"
+                                />
+                              </div>
+                            </TableCell>
+                          </React.Fragment>
+                        )
+                      })}
+                    </TableRow>
+                  ]
 
-                    return rows;
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          </TabsContent>
-        ))}
-      </Tabs>
-    </div>
-  );
+                  // Add class rows if expanded and has classes
+                  if (isExpanded && subdept.hasClasses && subdept.classes) {
+                    subdept.classes.forEach((cls, clsIndex) => {
+                      rows.push(
+                        <TableRow key={`class-${subdept.id}-${clsIndex}`} className="bg-muted/5 hover:bg-muted/10">
+                          <TableCell className="sticky left-0 bg-background border-r pl-12 z-10">
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted-foreground text-sm">└─ {cls.name}</span>
+                              {cls.requirements && cls.requirements.length > 0 && (
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
+                                      <Info className="h-3 w-3 text-blue-500" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-60">
+                                    <div className="space-y-2">
+                                      <h4 className="font-medium text-sm">Class Requirements</h4>
+                                      <div className="space-y-1">
+                                        {cls.requirements.map((req, i) => (
+                                          <div key={i} className="text-xs">
+                                            <span className={req.is_required ? "text-red-600" : "text-muted-foreground"}>
+                                              {req.is_required ? "• " : "○ "}{req.name}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              )}
+                            </div>
+                          </TableCell>
+                          {dept.stages.map(stage => {
+                            const stageAllocation = cls.stages?.find(s => s.stage_id === stage.id)
+                            const hasAllocation = stageAllocation?.applicable || false
+                            const hasDisplay = stageAllocation?.display || false
+                            const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
+
+                            return (
+                              <React.Fragment key={`class-${subdept.id}-${clsIndex}-${stage.id}`}>
+                                <TableCell className="border p-1 text-center text-sm font-mono text-muted-foreground">
+                                  {days}
+                                </TableCell>
+                                <TableCell className="border p-1 text-center text-sm font-mono text-muted-foreground">
+                                  {hours}
+                                </TableCell>
+                                <TableCell className="border p-1 text-center text-sm font-mono text-muted-foreground">
+                                  {minutes}
+                                </TableCell>
+                                <TableCell className="border p-1 text-center text-xs">
+                                  {stage.follow_up ? (
+                                    <Badge variant="outline" className="text-xs opacity-75">
+                                      {stage.follow_up}
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-muted-foreground">-</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="border p-0">
+                                  <Select
+                                    value={hasAllocation ? 'applicable' : 'not-applicable'}
+                                    onValueChange={(value) =>
+                                      handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex)
+                                    }
+                                  >
+                                    <SelectTrigger className="h-8 w-full border-0 shadow-none focus:ring-1 focus:ring-ring">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="applicable">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                          Applicable
+                                        </div>
+                                      </SelectItem>
+                                      <SelectItem value="not-applicable">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                          Not Applicable
+                                        </div>
+                                      </SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </TableCell>
+                                <TableCell className="border p-0">
+                                  <div className="flex items-center justify-center p-2">
+                                    <Checkbox
+                                      checked={hasDisplay}
+                                      onCheckedChange={(checked) =>
+                                        handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex)
+                                      }
+                                      disabled={!hasAllocation}
+                                      className="h-4 w-4"
+                                    />
+                                  </div>
+                                </TableCell>
+                              </React.Fragment>
+                            )
+                          })}
+                        </TableRow>
+                      )
+                    })
+                  }
+
+                  return rows
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </TabsContent>
+    ))}
+  </Tabs>
+
+  <EditStageDialog
+    open={!!editingStage}
+    onOpenChange={(open) => !open && setEditingStage(null)}
+    stage={editingStage}
+    onSave={handleUpdateStage}
+  />
+</div>
+)
 }
