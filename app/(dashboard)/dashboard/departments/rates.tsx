@@ -12,72 +12,88 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
-import { Settings, ChevronDown, Calculator, Plus, Minus } from "lucide-react"
+import { Calendar } from "@/components/ui/calendar"
+import { format } from "date-fns"
+import { CalendarIcon, Calculator, Minus, Plus, Save, DollarSign, Clock, ChevronDown } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
-import { fetchDepartments, type DepartmentWithSubdepartments } from "./database"
+import { fetchDepartments } from "./database"
+import { supabase } from "@/lib/supabase/client"
 
 interface RateData {
   usd: number
   ksh: number
 }
 
-interface RateRow {
+interface RateEntry {
   id: string
+  entityType: 'subdepartment' | 'class' | 'subclass'
+  entityId: string
+  entityName: string
+  entityPath: string // For display hierarchy
+  processingFee: {
+    amount: number
+    currency: 'USD' | 'KSH'
+    rate: number
+  }
+  issuanceFee: {
+    amount: number
+    currency: 'USD' | 'KSH'
+    rate: number
+    periodType: string[]
+    periodCount: string[]
+  }
+  bclConsultancy: {
+    tier1: number
+    tier2: number
+    tier3: number
+  }
+  officer: {
+    bossFixed: number
+    paTier1: number
+    paEditable: number
+  }
+  extraConsideration: {
+    applicable: boolean
+    tccCompanyIgnore: number
+    tccIndividualIgnore: number
+    auditorsFee: number
+    degree: number
+    tfFile: number
+  }
+  convenienceFee: {
+    applicable: boolean
+    alienAssistance: number
+    reEntryApproval: number
+    passportEndorsement: number
+  }
+}
+
+interface RatePeriod {
+  id?: number
   departmentId: string
-  subdepartmentId: string
-  classId?: string
-  subdepartment: string
-  class: string
-  processingFeeAmount: string
-  processingFeeCurrency: string
-  processingFeeRate: string
-  issuanceFeeAmount: string
-  issuanceFeeCurrency: string
-  issuanceFeeRate: string
-  issuancePeriodDenomination: string[]
-  noOfIssuancePeriod: string[]
-  bclTier1: string
-  bclTier2: string
-  bclTier3: string
-  officerBossFixed: string
-  officerPaTier1: string
-  officerPaEditable: string
-  // Extra Consideration
-  extraConsiderationApplicable: string
-  tccCompanyIgnore: string
-  tccIndividualIgnore: string
-  auditorsFee: string
-  degree: string
-  tfFile: string
-  // Convenience Fee
-  convenienceFeeApplicable: string
-  alienAssistance: string
-  reEntryApproval: string
-  passportEndorsement: string
+  effectiveFrom: Date
+  effectiveTo: Date | null
+  data: RateEntry[]
 }
 
-interface GroupedData {
-  subdepartment: string
-  classes: RateRow[]
-  isExpanded: boolean
-}
-
-// Define the type for subdepartments (matching what's used in requirements component)
+// Define the type for subdepartments
 interface Subdepartment {
   id: number
   name: string
   description?: string
   classes?: Array<{
+    id: number | string
     name: string
     description: string | null
-    requirements: Array<{
+    subClasses?: Array<{
+      id: number | string
       name: string
       description: string | null
     }>
   }>
 }
 
-// Define the type for departments (matching what's used in requirements component)
+// Define the type for departments
 interface Department {
   id: string
   name: string
@@ -93,16 +109,29 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
   const [rates, setRates] = useState<RateData>({ usd: 150, ksh: 1 })
   const [tempRates, setTempRates] = useState<RateData>({ usd: 150, ksh: 1 })
   const [isRateDialogOpen, setIsRateDialogOpen] = useState(false)
+  const [isDateDialogOpen, setIsDateDialogOpen] = useState(false)
   const [departments, setDepartments] = useState<Department[]>(initialDepartments || [])
   const [isLoading, setIsLoading] = useState(!initialDepartments)
   const [selectedDepartment, setSelectedDepartment] = useState<string>('')
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [saving, setSaving] = useState(false)
 
-  // Initialize table data from departments
-  const [tableData, setTableData] = useState<RateRow[]>([])
-  const [expandedSubdepartments, setExpandedSubdepartments] = useState<Set<string>>(new Set())
+  // Rate period state
+  const [currentPeriod, setCurrentPeriod] = useState<RatePeriod>({
+    departmentId: '',
+    effectiveFrom: new Date(),
+    effectiveTo: null,
+    data: []
+  })
   
   // Options for dropdowns
-  const yesNoOptions = ["Applicable", "Not Applicable"]
+  const periodOptions = ["months", "years"]
+  const countOptions = ["1", "2", "3", "6", "12"]
+
+  // Generate ID for rate entries
+  const generateRateId = () => {
+    return Date.now().toString() + Math.random().toString(36).substr(2, 9)
+  }
 
   // Fetch departments if not provided as props
   useEffect(() => {
@@ -111,7 +140,6 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
         try {
           setIsLoading(true)
           const fetchedDepartments = await fetchDepartments()
-          // Transform the fetched departments to match our expected structure
           const transformedDepartments = fetchedDepartments.map(dept => ({
             id: dept.id,
             name: dept.name,
@@ -144,275 +172,321 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
     }
   }, [initialDepartments])
 
-  // Generate table data from departments
+  // Load current rates when department changes
   useEffect(() => {
-    if (!selectedDepartment || departments.length === 0) return
+    if (selectedDepartment) {
+      loadCurrentRates(selectedDepartment)
+    }
+  }, [selectedDepartment])
 
-    const currentDepartment = departments.find(dept => dept.id === selectedDepartment)
+  const loadCurrentRates = async (departmentId: string) => {
+    try {
+      // Load the most recent rate period for this department
+      const { data: rateHistory, error } = await supabase
+        .from('rates_history')
+        .select('*')
+        .eq('department_id', departmentId)
+        .order('effective_from', { ascending: false })
+        .limit(1)
+
+      if (error) throw error
+
+      if (rateHistory && rateHistory.length > 0) {
+        const latestRates = rateHistory[0]
+        setCurrentPeriod({
+          id: latestRates.id,
+          departmentId: latestRates.department_id,
+          effectiveFrom: new Date(latestRates.effective_from),
+          effectiveTo: latestRates.effective_to ? new Date(latestRates.effective_to) : null,
+          data: latestRates.data || []
+        })
+      } else {
+        // Generate default rates for the department
+        generateDefaultRates(departmentId)
+      }
+    } catch (error) {
+      console.error('Error loading rates:', error)
+      generateDefaultRates(departmentId)
+    }
+  }
+
+  const generateDefaultRates = (departmentId: string) => {
+    const currentDepartment = departments.find(dept => dept.id === departmentId)
     if (!currentDepartment) return
 
-    const generatedTableData: RateRow[] = []
-    const expandedSubdepts = new Set<string>()
+    const defaultRates: RateEntry[] = []
 
     currentDepartment.tm_subdepartments?.forEach((subdept) => {
-      // If subdepartment has classes, create rows for each class
       if (subdept.classes && subdept.classes.length > 0) {
-        subdept.classes.forEach((cls, classIndex) => {
-          generatedTableData.push({
-            id: `${subdept.id}-${cls.name}-${classIndex}`,
-            departmentId: currentDepartment.id,
-            subdepartmentId: subdept.id.toString(),
-            classId: cls.name,
-            subdepartment: subdept.name,
-            class: cls.name,
-            processingFeeAmount: "5000", // Default values - these should come from database
-            processingFeeCurrency: "ksh",
-            processingFeeRate: "5000",
-            issuanceFeeAmount: "10000",
-            issuanceFeeCurrency: "usd",
-            issuanceFeeRate: "1500000",
-            issuancePeriodDenomination: ["years"],
-            noOfIssuancePeriod: ["1", "2"],
-            bclTier1: "10,000",
-            bclTier2: "20,000",
-            bclTier3: "0",
-            officerBossFixed: "5,000",
-            officerPaTier1: "6,000",
-            officerPaEditable: "0",
-            // Extra Consideration
-            extraConsiderationApplicable: "Not Applicable",
-            tccCompanyIgnore: "5,000",
-            tccIndividualIgnore: "5,000",
-            auditorsFee: "5,000",
-            degree: "5,000",
-            tfFile: "5,000",
-            // Convenience Fee
-            convenienceFeeApplicable: "Not Applicable",
-            alienAssistance: "1,000",
-            reEntryApproval: "1,000",
-            passportEndorsement: "1,000",
-          })
+        subdept.classes.forEach((cls) => {
+          if (cls.subClasses && cls.subClasses.length > 0) {
+            // Has subclasses
+            cls.subClasses.forEach((subCls) => {
+              defaultRates.push(createDefaultRateEntry(
+                'subclass',
+                `${subdept.id}-${cls.id}-${subCls.id}`,
+                subCls.name,
+                `${subdept.name} → ${cls.name} → ${subCls.name}`
+              ))
+            })
+          } else {
+            // No subclasses
+            defaultRates.push(createDefaultRateEntry(
+              'class',
+              `${subdept.id}-${cls.id}`,
+              cls.name,
+              `${subdept.name} → ${cls.name}`
+            ))
+          }
         })
-        // Expand subdepartments with multiple classes by default
-        if (subdept.classes.length > 1) {
-          expandedSubdepts.add(subdept.name)
-        }
       } else {
-        // Create a single row for subdepartment without classes
-        generatedTableData.push({
-          id: `${subdept.id}-general`,
-          departmentId: currentDepartment.id,
-          subdepartmentId: subdept.id.toString(),
-          subdepartment: subdept.name,
-          class: "General",
-          processingFeeAmount: "3000",
-          processingFeeCurrency: "ksh",
-          processingFeeRate: "3000",
-          issuanceFeeAmount: "8000",
-          issuanceFeeCurrency: "ksh",
-          issuanceFeeRate: "8000",
-          issuancePeriodDenomination: ["months"],
-          noOfIssuancePeriod: ["1"],
-          bclTier1: "10,000",
-          bclTier2: "20,000",
-          bclTier3: "0",
-          officerBossFixed: "5,000",
-          officerPaTier1: "6,000",
-          officerPaEditable: "0",
-          // Extra Consideration
-          extraConsiderationApplicable: "Not Applicable",
-          tccCompanyIgnore: "5,000",
-          tccIndividualIgnore: "5,000",
-          auditorsFee: "5,000",
-          degree: "5,000",
-          tfFile: "5,000",
-          // Convenience Fee
-          convenienceFeeApplicable: "Not Applicable",
-          alienAssistance: "1,000",
-          reEntryApproval: "1,000",
-          passportEndorsement: "1,000",
-        })
+        // No classes
+        defaultRates.push(createDefaultRateEntry(
+          'subdepartment',
+          subdept.id.toString(),
+          subdept.name,
+          subdept.name
+        ))
       }
     })
 
-    setTableData(generatedTableData)
-    setExpandedSubdepartments(expandedSubdepts)
-  }, [selectedDepartment, departments])
+    setCurrentPeriod({
+      departmentId,
+      effectiveFrom: new Date(),
+      effectiveTo: null,
+      data: defaultRates
+    })
+  }
 
-  // Group data by subdepartment
-  const groupedData: GroupedData[] = tableData.reduce((acc, row) => {
-    const existingGroup = acc.find((group) => group.subdepartment === row.subdepartment)
-    if (existingGroup) {
-      existingGroup.classes.push(row)
-    } else {
-      acc.push({
-        subdepartment: row.subdepartment,
-        classes: [row],
-        isExpanded: expandedSubdepartments.has(row.subdepartment),
-      })
+  const createDefaultRateEntry = (
+    entityType: 'subdepartment' | 'class' | 'subclass',
+    entityId: string,
+    entityName: string,
+    entityPath: string
+  ): RateEntry => ({
+    id: generateRateId(),
+    entityType,
+    entityId,
+    entityName,
+    entityPath,
+    processingFee: {
+      amount: 5000,
+      currency: 'KSH',
+      rate: 5000
+    },
+    issuanceFee: {
+      amount: 10000,
+      currency: 'KSH',
+      rate: 10000,
+      periodType: ['years'],
+      periodCount: ['1']
+    },
+    bclConsultancy: {
+      tier1: 10000,
+      tier2: 20000,
+      tier3: 0
+    },
+    officer: {
+      bossFixed: 5000,
+      paTier1: 6000,
+      paEditable: 0
+    },
+    extraConsideration: {
+      applicable: false,
+      tccCompanyIgnore: 5000,
+      tccIndividualIgnore: 5000,
+      auditorsFee: 5000,
+      degree: 5000,
+      tfFile: 5000
+    },
+    convenienceFee: {
+      applicable: false,
+      alienAssistance: 1000,
+      reEntryApproval: 1000,
+      passportEndorsement: 1000
     }
-    return acc
-  }, [] as GroupedData[])
+  })
 
-  const toggleSubdepartment = (subdepartment: string) => {
-    setExpandedSubdepartments((prev) => {
+  const toggleRowExpansion = (rowId: string) => {
+    setExpandedRows(prev => {
       const newSet = new Set(prev)
-      if (newSet.has(subdepartment)) {
-        newSet.delete(subdepartment)
+      if (newSet.has(rowId)) {
+        newSet.delete(rowId)
       } else {
-        newSet.add(subdepartment)
+        newSet.add(rowId)
       }
       return newSet
     })
   }
 
-  const updateRate = (rowId: string, field: string, currency: string) => {
-    setTableData((prev) =>
-      prev.map((row) => {
-        if (row.id === rowId) {
-          const amount = field === "processingFeeRate" ? row.processingFeeAmount : row.issuanceFeeAmount
-          const rate = currency === "usd" ? rates.usd : rates.ksh
-          const calculatedRate = currency === "usd" ? (Number.parseFloat(amount) * rate).toString() : amount
-
-          return {
-            ...row,
-            [field]: calculatedRate,
-          }
-        }
-        return row
-      }),
-    )
+  const updateRateEntry = (entryId: string, updates: Partial<RateEntry>) => {
+    setCurrentPeriod(prev => ({
+      ...prev,
+      data: prev.data.map(entry => 
+        entry.id === entryId ? { ...entry, ...updates } : entry
+      )
+    }))
   }
 
-  const handleCurrencyChange = (rowId: string, field: string, currency: string) => {
-    setTableData((prev) =>
-      prev.map((row) => {
-        if (row.id === rowId) {
-          const rateField = field === "processingFeeCurrency" ? "processingFeeRate" : "issuanceFeeRate"
-          const amountField = field === "processingFeeCurrency" ? "processingFeeAmount" : "issuanceFeeAmount"
-          const amount = row[amountField as keyof RateRow] as string
-          const rate = currency === "usd" ? rates.usd : rates.ksh
-          const calculatedRate = currency === "usd" ? (Number.parseFloat(amount) * rate).toString() : amount
+  const updateCurrency = (entryId: string, feeType: 'processingFee' | 'issuanceFee', currency: 'USD' | 'KSH') => {
+    const entry = currentPeriod.data.find(e => e.id === entryId)
+    if (!entry) return
 
-          return {
-            ...row,
-            [field]: currency,
-            [rateField]: calculatedRate,
-          }
-        }
-        return row
-      }),
-    )
+    const rate = currency === 'USD' ? rates.usd : 1
+    const amount = entry[feeType].amount
+    const calculatedRate = currency === 'USD' ? amount * rate : amount
+
+    updateRateEntry(entryId, {
+      [feeType]: {
+        ...entry[feeType],
+        currency,
+        rate: calculatedRate
+      }
+    })
   }
 
-  const handleMultiSelectChange = (rowId: string, field: string, value: string, checked: boolean) => {
-    setTableData((prev) =>
-      prev.map((row) => {
-        if (row.id === rowId) {
-          const currentValues = row[field as keyof RateRow] as string[]
-          const newValues = checked ? [...currentValues, value] : currentValues.filter((v) => v !== value)
+  const updateMultiSelect = (entryId: string, field: 'periodType' | 'periodCount', value: string, checked: boolean) => {
+    const entry = currentPeriod.data.find(e => e.id === entryId)
+    if (!entry) return
 
-          return {
-            ...row,
-            [field]: newValues,
-          }
-        }
-        return row
-      }),
-    )
+    const currentValues = entry.issuanceFee[field]
+    const newValues = checked 
+      ? [...currentValues, value] 
+      : currentValues.filter(v => v !== value)
+
+    updateRateEntry(entryId, {
+      issuanceFee: {
+        ...entry.issuanceFee,
+        [field]: newValues
+      }
+    })
   }
 
-  const handleSaveRates = () => {
-    setRates(tempRates)
-    setIsRateDialogOpen(false)
-    setTableData((prev) =>
-      prev.map((row) => ({
-        ...row,
-        processingFeeRate:
-          row.processingFeeCurrency === "usd"
-            ? (Number.parseFloat(row.processingFeeAmount) * tempRates.usd).toString()
-            : row.processingFeeAmount,
-        issuanceFeeRate:
-          row.issuanceFeeCurrency === "usd"
-            ? (Number.parseFloat(row.issuanceFeeAmount) * tempRates.usd).toString()
-            : row.issuanceFeeAmount,
-      })),
-    )
+  const handleSaveRates = async () => {
+    if (!selectedDepartment || currentPeriod.data.length === 0) {
+      toast({
+        title: "Error",
+        description: "No rates to save.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    setSaving(true)
+    try {
+      // If updating existing period
+      if (currentPeriod.id) {
+        const { error } = await supabase
+          .from('rates_history')
+          .update({
+            data: currentPeriod.data,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', currentPeriod.id)
+
+        if (error) throw error
+      } else {
+        // Creating new period
+        const { error } = await supabase
+          .from('rates_history')
+          .insert({
+            department_id: selectedDepartment,
+            effective_from: currentPeriod.effectiveFrom.toISOString().split('T')[0],
+            effective_to: currentPeriod.effectiveTo?.toISOString().split('T')[0] || null,
+            data: currentPeriod.data
+          })
+
+        if (error) throw error
+      }
+
+      toast({
+        title: "Success",
+        description: "Rates saved successfully.",
+      })
+
+      // Reload current rates
+      await loadCurrentRates(selectedDepartment)
+    } catch (error) {
+      console.error('Error saving rates:', error)
+      toast({
+        title: "Error",
+        description: "Failed to save rates. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setSaving(false)
+    }
   }
 
   const MultiSelectPopover = ({
-    rowId,
+    entryId,
     field,
     options,
     values,
     placeholder,
   }: {
-    rowId: string
-    field: string
+    entryId: string
+    field: 'periodType' | 'periodCount'
     options: string[]
     values: string[]
     placeholder: string
   }) => (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" className="w-full justify-between text-left font-normal h-12">
+        <Button variant="outline" className="w-full justify-between text-left font-normal h-8 text-xs">
           <span className="truncate">
             {values.length === 0 ? (
-              <span className="text-gray-400">{placeholder}</span>
+              <span className="text-muted-foreground">{placeholder}</span>
             ) : values.length === 1 ? (
               values[0]
             ) : (
               `${values.length} selected`
             )}
           </span>
-          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <ChevronDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-56 p-4">
-        <div className="space-y-3">
-          <div className="text-sm font-medium text-gray-700 mb-3">Select Options</div>
+      <PopoverContent className="w-48 p-3">
+        <div className="space-y-2">
+          <div className="text-sm font-medium">Select Options</div>
           {options.map((option) => (
-            <div key={option} className="flex items-center space-x-3">
+            <div key={option} className="flex items-center space-x-2">
               <Checkbox
-                id={`${rowId}-${field}-${option}`}
+                id={`${entryId}-${field}-${option}`}
                 checked={values.includes(option)}
-                onCheckedChange={(checked) => handleMultiSelectChange(rowId, field, option, checked as boolean)}
+                onCheckedChange={(checked) => updateMultiSelect(entryId, field, option, checked as boolean)}
               />
               <Label
-                htmlFor={`${rowId}-${field}-${option}`}
-                className="text-sm font-medium leading-none cursor-pointer text-gray-700 capitalize"
+                htmlFor={`${entryId}-${field}-${option}`}
+                className="text-sm cursor-pointer"
               >
                 {option}
               </Label>
             </div>
           ))}
         </div>
-        {values.length > 0 && (
-          <div className="border-t border-gray-200 pt-3 mt-3">
-            <div className="text-xs font-medium text-gray-500 mb-2">Selected:</div>
-            <div className="flex flex-wrap gap-1">
-              {values.map((value) => (
-                <Badge key={value} variant="secondary" className="text-xs">
-                  {value}
-                </Badge>
-              ))}
-            </div>
-          </div>
-        )}
       </PopoverContent>
     </Popover>
   )
 
+  // Group entries by hierarchy for display
+  const groupedEntries = currentPeriod.data.reduce((acc, entry) => {
+    const parts = entry.entityPath.split(' → ')
+    const subdept = parts[0]
+    
+    if (!acc[subdept]) {
+      acc[subdept] = []
+    }
+    acc[subdept].push(entry)
+    return acc
+  }, {} as Record<string, RateEntry[]>)
+
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 p-6">
-        <div className="container mx-auto space-y-6">
-          <div className="flex items-center justify-center h-64">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
-              <p className="text-gray-600">Loading departments...</p>
-            </div>
-          </div>
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading departments...</p>
         </div>
       </div>
     )
@@ -420,654 +494,636 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
 
   if (departments.length === 0) {
     return (
-      <div className="min-h-screen bg-gray-50 p-6">
-        <div className="container mx-auto space-y-6">
-          <div className="flex items-center justify-center h-64">
-            <div className="text-center">
-              <p className="text-gray-600">No departments found. Please create departments first.</p>
-            </div>
-          </div>
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <p className="text-gray-600">No departments found. Please create departments first.</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="px-4 space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Rates Management</h1>
-            <p className="text-gray-600 mt-1">Configure and manage department rates and fees</p>
-          </div>
+    <div className="w-full space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold">Rates Management</h2>
+          <p className="text-muted-foreground">Configure and manage department rates and fees</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Exchange Rates Dialog */}
           <Dialog open={isRateDialogOpen} onOpenChange={setIsRateDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="bg-gray-800 hover:bg-gray-900 text-white">
-                <Settings className="h-4 w-4 mr-2" />
-                Manage Rates
+              <Button variant="outline" size="sm">
+                <Calculator className="h-4 w-4 mr-2" />
+                Exchange Rates
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle className="flex items-center gap-2 text-gray-800">
+                <DialogTitle className="flex items-center gap-2">
                   <Calculator className="h-5 w-5" />
                   Configure Exchange Rates
                 </DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="usd-rate" className="text-sm font-medium text-gray-700">
-                    USD to KSH Rate
-                  </Label>
+                  <Label htmlFor="usd-rate">USD to KSH Rate</Label>
                   <Input
                     id="usd-rate"
                     type="number"
                     value={tempRates.usd}
-                    onChange={(e) => setTempRates((prev) => ({ ...prev, usd: Number.parseFloat(e.target.value) || 0 }))}
+                    onChange={(e) => setTempRates(prev => ({ ...prev, usd: parseFloat(e.target.value) || 0 }))}
                     placeholder="Enter USD to KSH rate"
-                    className="h-10"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="ksh-rate" className="text-sm font-medium text-gray-700">
-                    KSH Rate (Base)
-                  </Label>
-                  <Input
-                    id="ksh-rate"
-                    type="number"
-                    value={tempRates.ksh}
-                    onChange={(e) => setTempRates((prev) => ({ ...prev, ksh: Number.parseFloat(e.target.value) || 1 }))}
-                    placeholder="Enter KSH base rate"
-                    className="h-10"
-                  />
-                </div>
-                <div className="flex justify-end gap-3 pt-4">
+                <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={() => setIsRateDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <Button onClick={handleSaveRates} className="bg-gray-800 hover:bg-gray-900">
+                  <Button onClick={() => {
+                    setRates(tempRates)
+                    setIsRateDialogOpen(false)
+                  }}>
                     Save Rates
                   </Button>
                 </div>
               </div>
             </DialogContent>
           </Dialog>
+
+          {/* Effective Dates Dialog */}
+          <Dialog open={isDateDialogOpen} onOpenChange={setIsDateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Clock className="h-4 w-4 mr-2" />
+                Effective Period
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Clock className="h-5 w-5" />
+                  Set Effective Period
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Effective From</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-full justify-start">
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {format(currentPeriod.effectiveFrom, "PPP")}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0">
+                      <Calendar
+                        mode="single"
+                        selected={currentPeriod.effectiveFrom}
+                        onSelect={(date) => date && setCurrentPeriod(prev => ({ ...prev, effectiveFrom: date }))}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <div className="space-y-2">
+                  <Label>Effective To (Optional)</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-full justify-start">
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {currentPeriod.effectiveTo ? format(currentPeriod.effectiveTo, "PPP") : "No end date"}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0">
+                      <Calendar
+                        mode="single"
+                        selected={currentPeriod.effectiveTo || undefined}
+                        onSelect={(date) => setCurrentPeriod(prev => ({ ...prev, effectiveTo: date || null }))}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setIsDateDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={() => setIsDateDialogOpen(false)}>
+                    Apply
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Button onClick={handleSaveRates} disabled={saving} size="sm">
+            {saving ? (
+              <>
+                <div className="w-4 h-4 border-2 border-muted border-t-current rounded-full animate-spin mr-2"></div>
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4 mr-2" />
+                Save Rates
+              </>
+            )}
+          </Button>
         </div>
-
-        {/* Tabs */}
-        <Tabs value={selectedDepartment} onValueChange={setSelectedDepartment} className="w-full">
-          <TabsList className="grid w-full bg-white border" style={{ gridTemplateColumns: `repeat(${Math.min(departments.length, 6)}, 1fr)` }}>
-            {departments.slice(0, 6).map((dept) => (
-              <TabsTrigger
-                key={dept.id}
-                value={dept.id}
-                className="data-[state=active]:bg-gray-100 data-[state=active]:text-gray-900 font-medium text-gray-600"
-              >
-                {dept.name}
-                {dept.tm_subdepartments && dept.tm_subdepartments.length > 0 && (
-                  <span className="ml-2 text-xs bg-muted-foreground/10 text-muted-foreground rounded-full px-2 py-0.5">
-                    {dept.tm_subdepartments.length}
-                  </span>
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          {departments.map((dept) => (
-            <TabsContent key={dept.id} value={dept.id}>
-              <Card className="border">
-                <CardHeader className="bg-gray-100 border-b">
-                  <CardTitle className="text-xl font-semibold text-gray-800">{dept.name} Rates</CardTitle>
-                  {dept.description && (
-                    <p className="text-sm text-gray-600">{dept.description}</p>
-                  )}
-                </CardHeader>
-                <CardContent className="p-0">
-                    <div className="relative h-[calc(80vh-200px)] overflow-auto">
-                      <Table className="relative border-collapse w-full">
-                        <TableHeader className="sticky top-0 z-20 bg-blue-800">
-                        <TableRow className="bg-blue-800 hover:bg-blue-800">
-                            <TableHead 
-                              className="sticky left-0 z-30 bg-blue-800 text-white font-semibold border-r border-blue-600 min-w-[60px] h-16 px-4 text-center" 
-                              style={{ position: 'sticky', left: 0, top: 0 }}
-                            >
-                              #
-                            </TableHead>
-                            <TableHead
-                              rowSpan={2}
-                              className="sticky left-[60px] z-30 bg-blue-800 text-white font-semibold border-r border-blue-600 min-w-[160px] h-16 px-4 text-center"
-                              style={{ position: 'sticky', left: '60px', top: 0 }}
-                            >
-                            Subdepartment
-                          </TableHead>
-                          <TableHead
-                            rowSpan={2}
-                            className="text-white font-semibold border-r border-gray-600 min-w-[120px] h-16 px-4 text-center"
-                          >
-                            Class
-                          </TableHead>
-                          <TableHead
-                            colSpan={3}
-                            className="text-center text-white font-semibold border-r border-gray-600 px-4"
-                          >
-                            Processing Fee Website Efns
-                          </TableHead>
-                          <TableHead
-                            colSpan={5}
-                            className="text-center text-white font-semibold border-r border-gray-600 px-4"
-                          >
-                            Issuance Fee Website Efns
-                          </TableHead>
-                          <TableHead
-                            colSpan={3}
-                            className="text-center text-white font-semibold border-r border-gray-600 px-4"
-                          >
-                            BCL Consultancy
-                          </TableHead>
-                          <TableHead colSpan={3} className="text-center text-white font-semibold border-r border-gray-600 px-4">
-                            Officer
-                          </TableHead>
-                          <TableHead colSpan={6} className="text-center text-white font-semibold border-r border-gray-600 px-4">
-                            Extra Consideration
-                          </TableHead>
-                          <TableHead colSpan={4} className="text-center text-white font-semibold px-4">
-                            Convenience Fee
-                          </TableHead>
-                        </TableRow>
-                        <TableRow className="bg-blue-700 hover:bg-blue-700 sticky top-16 z-20">
-                          <TableHead className="text-white text-sm font-medium min-w-[100px] h-12 px-4 border-r border-gray-500 text-center">
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[100px] h-12 px-4 border-r border-gray-500 text-center">
-                            Amount
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
-                            Currency
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium border-r border-gray-600 min-w-[140px] h-12 px-4 text-center">
-                            Rate
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[100px] h-12 px-4 border-r border-gray-500 text-center">
-                            Amount
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
-                            Currency
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[140px] h-12 px-4 border-r border-gray-500 text-center">
-                            Rate
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[130px] h-12 px-4 border-r border-gray-500 text-center">
-                            Period Type
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium border-r border-gray-600 min-w-[130px] h-12 px-4 text-center">
-                            No. of Periods
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
-                            Tier 1
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
-                            Tier 2
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium border-r border-gray-600 min-w-[90px] h-12 px-4 text-center">
-                            Tier 3 Editable
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
-                          Officer Boss Fixed
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
-                            Officer PA Tier 1
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[90px] h-12 px-4 border-r border-gray-500 text-center">
-                          Officer PA Editable
-                          </TableHead>
-                          {/* Extra Consideration Headers */}
-                          <TableHead className="text-white text-sm font-medium min-w-[120px] h-12 px-4 border-r border-gray-500 text-center">
-                            Applicable/Not Applicable
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[140px] h-12 px-4 border-r border-gray-500 text-center">
-                            TCC Company Ignore
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[140px] h-12 px-4 border-r border-gray-500 text-center">
-                            TCC Individual Ignore
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[120px] h-12 px-4 border-r border-gray-500 text-center">
-                            Auditors Fee Balance Sheet
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[140px] h-12 px-4 border-r border-gray-500 text-center">
-                            Degree
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[100px] h-12 px-4 border-r border-gray-600 text-center">
-                            TF File
-                          </TableHead>
-                          {/* Convenience Fee Headers */}
-                          <TableHead className="text-white text-sm font-medium min-w-[120px] h-12 px-4 border-r border-gray-500 text-center">
-                            Applicable/Not Applicable
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[180px] h-12 px-4 border-r border-gray-500 text-center">
-                            Alien Assistance & To attend Without Appointment
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[140px] h-12 px-4 border-r border-gray-500 text-center">
-                            Re-Entry Early Approval
-                          </TableHead>
-                          <TableHead className="text-white text-sm font-medium min-w-[200px] h-12 px-4 text-center">
-                            Passport Endorsement (in Absence of Applicant)
-                          </TableHead>
-                        </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                        {groupedData.length > 0 ? groupedData.map((group, groupIndex) => (
-                          <>
-                            {/* Subdepartment header row */}
-                            <TableRow
-                              key={`header-${group.subdepartment}`}
-                              className="bg-blue-50 hover:bg-blue-50 border-b border-blue-200"
-                            >
-                              <TableCell className="sticky left-0 z-10 bg-blue-50 border-r border-blue-200 font-semibold text-blue-900 h-14 px-4">
-                                {groupIndex + 1}
-                              </TableCell>
-                              <TableCell className="sticky left-[60px] z-10 bg-blue-50 border-r border-blue-200 font-semibold text-blue-900 h-14 px-4">
-                                <div className="flex items-center gap-2">
-
-                                  {group.subdepartment}
-                                  {group.classes.length > 1 && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => toggleSubdepartment(group.subdepartment)}
-                                      className="h-6 w-6 p-0"
-                                    >
-                                      {expandedSubdepartments.has(group.subdepartment) ? (
-                                        <Minus className="h-4 w-4" />
-                                      ) : (
-                                        <Plus className="h-4 w-4" />
-                                      )}
-                                    </Button>
-                                  )}
-                                  <Badge variant="secondary" className="text-xs">
-                                    {group.classes.length}
-                                  </Badge>
-                                </div>
-                              </TableCell>
-                              <TableCell colSpan={13} className="text-gray-500 italic h-14 px-4">
-                                {group.classes.length === 1
-                                  ? ""
-                                  : `${group.classes.length} classes available`}
-                              </TableCell>
-                            </TableRow>
-
-                            {/* Class rows */}
-                            {(expandedSubdepartments.has(group.subdepartment) || group.classes.length === 1) &&
-                              group.classes.map((row, rowIndex) => (
-                                <TableRow
-                                  key={row.id}
-                                  className={`hover:bg-blue-50 border-b border-blue-200 ${rowIndex % 2 === 0 ? "bg-white" : "bg-blue-25"
-                                    }`}
-                                >
-                                  <TableCell className="sticky left-0 z-10 bg-white border-r border-blue-200 text-blue-900 h-16 px-4">
-                                    {groupIndex + 1}.{rowIndex + 1}
-                                  </TableCell>
-                                  <TableCell className="sticky left-[60px] z-10 bg-white border-r border-blue-200 font-medium text-blue-900 h-16 px-4">
-                                    <div className="pl-6 text-sm">↳ {row.subdepartment}</div>
-                                  </TableCell>
-                                  <TableCell className="border-r border-blue-200 font-medium text-blue-800 h-16 px-4 text-center">
-                                    {row.class}
-                                  </TableCell>
-                                  {/* Processing Fee Section */}
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      value={row.processingFeeAmount}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) =>
-                                            r.id === row.id ? { ...r, processingFeeAmount: e.target.value } : r,
-                                          ),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Select
-                                      value={row.processingFeeCurrency}
-                                      onValueChange={(value) =>
-                                        handleCurrencyChange(row.id, "processingFeeCurrency", value)
-                                      }
-                                    >
-                                      <SelectTrigger className="h-10">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="ksh">KSH</SelectItem>
-                                        <SelectItem value="usd">USD</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-                                  <TableCell className="border-r border-gray-300 h-16 px-4">
-                                    <div className="flex items-center gap-2">
-                                      <Input
-                                        value={row.processingFeeRate}
-                                        readOnly
-                                        className="h-10 text-center"
-                                      />
-                                    </div>
-                                  </TableCell>
-
-                                  {/* Issuance Fee Section */}
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      value={row.issuanceFeeAmount}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) =>
-                                            r.id === row.id ? { ...r, issuanceFeeAmount: e.target.value } : r,
-                                          ),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Select
-                                      value={row.issuanceFeeCurrency}
-                                      onValueChange={(value) =>
-                                        handleCurrencyChange(row.id, "issuanceFeeCurrency", value)
-                                      }
-                                    >
-                                      <SelectTrigger className="h-10">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="ksh">KSH</SelectItem>
-                                        <SelectItem value="usd">USD</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <div className="flex items-center gap-2">
-                                      <Input
-                                        value={row.issuanceFeeRate}
-                                        readOnly
-                                        className="h-10 text-center"
-                                      />
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <MultiSelectPopover
-                                      rowId={row.id}
-                                      field="issuancePeriodDenomination"
-                                      options={["months", "years"]}
-                                      values={row.issuancePeriodDenomination}
-                                      placeholder="Select period type"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="border-r border-gray-300 h-16 px-4">
-                                    <MultiSelectPopover
-                                      rowId={row.id}
-                                      field="noOfIssuancePeriod"
-                                      options={["1", "2", "3"]}
-                                      values={row.noOfIssuancePeriod}
-                                      placeholder="Select periods"
-                                    />
-                                  </TableCell>
-
-                                  {/* BCL Consultancy Section */}
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      value={row.bclTier1}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) => (r.id === row.id ? { ...r, bclTier1: e.target.value } : r)),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      value={row.bclTier2}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) => (r.id === row.id ? { ...r, bclTier2: e.target.value } : r)),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="border-r border-gray-300 h-16 px-4">
-                                    <Input
-                                      value={row.bclTier3}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) => (r.id === row.id ? { ...r, bclTier3: e.target.value } : r)),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                    />
-                                  </TableCell>
-
-                                  {/* Officer Section */}
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      value={row.officerBossFixed}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) => (r.id === row.id ? { ...r, officerBossFixed: e.target.value } : r)),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      value={row.officerPaTier1}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) => (r.id === row.id ? { ...r, officerPaTier1: e.target.value } : r)),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      value={row.officerPaEditable}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) =>
-                                            r.id === row.id ? { ...r, officerPaEditable: e.target.value } : r,
-                                          ),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                    />
-                                  </TableCell>
-                                  {/* Extra Consideration Cells */}
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Select
-                                      value={row.extraConsiderationApplicable}
-                                      onValueChange={(value) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) =>
-                                            r.id === row.id ? { ...r, extraConsiderationApplicable: value } : r,
-                                          ),
-                                        )
-                                      }
-                                    >
-                                      <SelectTrigger className="h-10">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {yesNoOptions.map((option) => (
-                                          <SelectItem key={option} value={option}>
-                                            {option}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      type="number"
-                                      value={row.tccCompanyIgnore}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) =>
-                                            r.id === row.id ? { ...r, tccCompanyIgnore: e.target.value } : r,
-                                          ),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                      placeholder="0"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      type="number"
-                                      value={row.tccIndividualIgnore}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) =>
-                                            r.id === row.id ? { ...r, tccIndividualIgnore: e.target.value } : r,
-                                          ),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                      placeholder="0"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      type="number"
-                                      value={row.auditorsFee}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) =>
-                                            r.id === row.id ? { ...r, auditorsFee: e.target.value } : r,
-                                          ),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                      placeholder="0"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      type="number"
-                                      value={row.degree}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) =>
-                                            r.id === row.id ? { ...r, degree: e.target.value } : r,
-                                          ),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                      placeholder="0"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      type="number"
-                                      value={row.tfFile}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) =>
-                                            r.id === row.id ? { ...r, tfFile: e.target.value } : r,
-                                          ),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                      placeholder="0"
-                                    />
-                                  </TableCell>
-                                  {/* Convenience Fee Cells */}
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Select
-                                      value={row.convenienceFeeApplicable}
-                                      onValueChange={(value) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) =>
-                                            r.id === row.id ? { ...r, convenienceFeeApplicable: value } : r,
-                                          ),
-                                        )
-                                      }
-                                    >
-                                      <SelectTrigger className="h-10">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {yesNoOptions.map((option) => (
-                                          <SelectItem key={option} value={option}>
-                                            {option}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      type="number"
-                                      value={row.alienAssistance}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) =>
-                                            r.id === row.id ? { ...r, alienAssistance: e.target.value } : r,
-                                          ),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                      placeholder="0"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4 border-r border-gray-200">
-                                    <Input
-                                      type="number"
-                                      value={row.reEntryApproval}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) =>
-                                            r.id === row.id ? { ...r, reEntryApproval: e.target.value } : r,
-                                          ),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                      placeholder="0"
-                                    />
-                                  </TableCell>
-                                  <TableCell className="h-16 px-4">
-                                    <Input
-                                      type="number"
-                                      value={row.passportEndorsement}
-                                      onChange={(e) =>
-                                        setTableData((prev) =>
-                                          prev.map((r) =>
-                                            r.id === row.id ? { ...r, passportEndorsement: e.target.value } : r,
-                                          ),
-                                        )
-                                      }
-                                      className="h-10 text-center"
-                                      placeholder="0"
-                                    />
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                          </>
-                        )) : (
-                          <TableRow>
-                            <TableCell colSpan={14} className="h-32 text-center text-gray-500">
-                              No subdepartments or classes found for this department.
-                            </TableCell>
-                          </TableRow>
-                        )}
-                        </TableBody>
-                      </Table>
-                    </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          ))}
-        </Tabs>
       </div>
+
+      {/* Period Info */}
+      {selectedDepartment && (
+        <div className="flex items-center gap-4 p-3 bg-muted rounded-lg">
+          <div className="flex items-center gap-2">
+            <DollarSign className="h-4 w-4 text-green-600" />
+            <span className="text-sm font-medium">USD Rate: {rates.usd}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Clock className="h-4 w-4 text-blue-600" />
+            <span className="text-sm">
+              Effective: {format(currentPeriod.effectiveFrom, "PPP")} 
+              {currentPeriod.effectiveTo && ` - ${format(currentPeriod.effectiveTo, "PPP")}`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Tabs */}
+      <Tabs value={selectedDepartment} onValueChange={setSelectedDepartment} className="w-full">
+        <TabsList className="w-full mb-4">
+          {departments.map((dept) => (
+            <TabsTrigger key={dept.id} value={dept.id} className="whitespace-nowrap">
+              {dept.name}
+              {dept.tm_subdepartments && (
+                <Badge variant="secondary" className="ml-2 text-xs">
+                  {dept.tm_subdepartments.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        {departments.map((dept) => (
+          <TabsContent key={dept.id} value={dept.id}>
+            <div className="relative overflow-auto max-h-[calc(100vh-200px)] border rounded-lg">
+              <Table className="min-w-max">
+                <TableHeader className="sticky top-0 z-30">
+                  {/* Main Headers */}
+                  <TableRow className="bg-blue-600 text-white">
+                    <TableHead className="sticky left-0 bg-blue-600 border-r w-16 z-40 text-center text-white">#</TableHead>
+                    <TableHead className="sticky left-16 bg-blue-600 border-r w-64 z-40 text-white">Entity</TableHead>
+                    <TableHead colSpan={3} className="border-r text-center text-white">Processing Fee</TableHead>
+                    <TableHead colSpan={5} className="border-r text-center text-white">Issuance Fee</TableHead>
+                    <TableHead colSpan={3} className="border-r text-center text-white">BCL Consultancy</TableHead>
+                    <TableHead colSpan={3} className="border-r text-center text-white">Officer</TableHead>
+                    <TableHead colSpan={6} className="border-r text-center text-white">Extra Consideration</TableHead>
+                    <TableHead colSpan={4} className="text-center text-white">Convenience Fee</TableHead>
+                  </TableRow>
+                  
+                  {/* Sub Headers */}
+                  <TableRow className="bg-blue-400">
+                    <TableHead className="sticky left-0 bg-blue-400 border-r z-40"></TableHead>
+                    <TableHead className="sticky left-16 bg-blue-400 border-r z-40"></TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Amount</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Currency</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Fee (KSH)</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Amount</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Currency</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Fee (KSH)</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Period Type</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Period Count</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Tier 1</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Tier 2</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Tier 3</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Boss Fixed</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">PA Tier 1</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">PA Editable</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Applicable / Not Applicable</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">TCC Company</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">TCC Individual</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Auditors Fee</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Degree</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">TF File</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Applicable / Not Applicable</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Alien Assistance</TableHead>
+                    <TableHead className="border-r text-center text-xs text-white">Re-Entry</TableHead>
+                    <TableHead className="text-center text-xs text-white">Passport Endorsement</TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {Object.entries(groupedEntries).flatMap(([subdeptName, entries], groupIndex) => {
+                    const rows = []
+                    
+                    // Group header if multiple entries
+                    if (entries.length > 1) {
+                      const groupRowId = `group-${subdeptName}`
+                      const isExpanded = expandedRows.has(groupRowId)
+                      
+                      rows.push(
+                        <TableRow key={groupRowId} className="bg-muted/20 hover:bg-muted/30">
+                          <TableCell className="sticky left-0 bg-muted/20 border-r text-center font-mono text-sm z-30">
+                            {groupIndex + 1}
+                          </TableCell>
+                          <TableCell className="sticky left-16 bg-muted/20 border-r font-medium z-30">
+                            <div className="flex items-center gap-2">                             
+                            <span>{subdeptName}</span>
+                             <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={() => toggleRowExpansion(groupRowId)}
+                              >
+                                {isExpanded ? (
+                                  <Minus className="h-4 w-4" />
+                                ) : (
+                                  <Plus className="h-4 w-4" />
+                                )}
+                              </Button>
+                              <Badge variant="secondary" className="text-xs">
+                                {entries.length}
+                              </Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell colSpan={22} className="text-muted-foreground italic">
+                            {entries.length} rate entries
+                          </TableCell>
+                        </TableRow>
+                      )
+
+                      // Show entries if expanded
+                      if (isExpanded) {
+                        entries.forEach((entry, entryIndex) => {
+                          rows.push(renderRateRow(entry, `${groupIndex + 1}.${entryIndex + 1}`, true))
+                        })
+                      }
+                    } else {
+                      // Single entry, show directly
+                      rows.push(renderRateRow(entries[0], `${groupIndex + 1}`, false))
+                    }
+
+                    return rows
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+        ))}
+      </Tabs>
     </div>
   )
+
+  function renderRateRow(entry: RateEntry, index: string, isChild: boolean) {
+    return (
+      <TableRow key={entry.id} className="hover:bg-muted/50">
+        <TableCell className="sticky left-0 bg-background border-r text-center font-mono text-sm z-30">
+          {index}
+        </TableCell>
+        <TableCell className="sticky left-16 bg-background border-r font-medium z-30">
+          <div className={`${isChild ? 'pl-8' : ''}`}>
+          {isChild && <span className="text-muted-foreground mr-2"></span>}
+           <div className="flex flex-col">
+             <span className="font-medium">{entry.entityName}</span>
+             <span className="text-xs text-muted-foreground">{entry.entityPath}</span>
+           </div>
+         </div>
+       </TableCell>
+       
+       {/* Processing Fee */}
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.processingFee.amount}
+           onChange={(e) => updateRateEntry(entry.id, {
+             processingFee: {
+               ...entry.processingFee,
+               amount: parseFloat(e.target.value) || 0,
+               rate: entry.processingFee.currency === 'USD' 
+                 ? (parseFloat(e.target.value) || 0) * rates.usd 
+                 : parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+         />
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Select
+           value={entry.processingFee.currency}
+           onValueChange={(value: 'USD' | 'KSH') => updateCurrency(entry.id, 'processingFee', value)}
+         >
+           <SelectTrigger className="h-8 text-xs">
+             <SelectValue />
+           </SelectTrigger>
+           <SelectContent>
+             <SelectItem value="KSH">KSH</SelectItem>
+             <SelectItem value="USD">USD</SelectItem>
+           </SelectContent>
+         </Select>
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Input
+           value={entry.processingFee.rate.toFixed(0)}
+           readOnly
+           className="h-8 text-center text-xs bg-muted"
+         />
+       </TableCell>
+       
+       {/* Issuance Fee */}
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.issuanceFee.amount}
+           onChange={(e) => updateRateEntry(entry.id, {
+             issuanceFee: {
+               ...entry.issuanceFee,
+               amount: parseFloat(e.target.value) || 0,
+               rate: entry.issuanceFee.currency === 'USD' 
+                 ? (parseFloat(e.target.value) || 0) * rates.usd 
+                 : parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+         />
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Select
+           value={entry.issuanceFee.currency}
+           onValueChange={(value: 'USD' | 'KSH') => updateCurrency(entry.id, 'issuanceFee', value)}
+         >
+           <SelectTrigger className="h-8 text-xs">
+             <SelectValue />
+           </SelectTrigger>
+           <SelectContent>
+             <SelectItem value="KSH">KSH</SelectItem>
+             <SelectItem value="USD">USD</SelectItem>
+           </SelectContent>
+         </Select>
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Input
+           value={entry.issuanceFee.rate.toFixed(0)}
+           readOnly
+           className="h-8 text-center text-xs bg-muted"
+         />
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <MultiSelectPopover
+           entryId={entry.id}
+           field="periodType"
+           options={periodOptions}
+           values={entry.issuanceFee.periodType}
+           placeholder="Period"
+         />
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <MultiSelectPopover
+           entryId={entry.id}
+           field="periodCount"
+           options={countOptions}
+           values={entry.issuanceFee.periodCount}
+           placeholder="Count"
+         />
+       </TableCell>
+       
+       {/* BCL Consultancy */}
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.bclConsultancy.tier1}
+           onChange={(e) => updateRateEntry(entry.id, {
+             bclConsultancy: {
+               ...entry.bclConsultancy,
+               tier1: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+         />
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.bclConsultancy.tier2}
+           onChange={(e) => updateRateEntry(entry.id, {
+             bclConsultancy: {
+               ...entry.bclConsultancy,
+               tier2: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+         />
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.bclConsultancy.tier3}
+           onChange={(e) => updateRateEntry(entry.id, {
+             bclConsultancy: {
+               ...entry.bclConsultancy,
+               tier3: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+         />
+       </TableCell>
+       
+       {/* Officer */}
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.officer.bossFixed}
+           onChange={(e) => updateRateEntry(entry.id, {
+             officer: {
+               ...entry.officer,
+               bossFixed: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+         />
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.officer.paTier1}
+           onChange={(e) => updateRateEntry(entry.id, {
+             officer: {
+               ...entry.officer,
+               paTier1: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+         />
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.officer.paEditable}
+           onChange={(e) => updateRateEntry(entry.id, {
+             officer: {
+               ...entry.officer,
+               paEditable: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+         />
+       </TableCell>
+       
+       {/* Extra Consideration */}
+       <TableCell className="border-r p-2">
+         <Select
+           value={entry.extraConsideration.applicable ? "applicable" : "not-applicable"}
+           onValueChange={(value) => updateRateEntry(entry.id, {
+             extraConsideration: {
+               ...entry.extraConsideration,
+               applicable: value === "applicable"
+             }
+           })}
+         >
+           <SelectTrigger className="h-8 text-xs">
+             <SelectValue />
+           </SelectTrigger>
+           <SelectContent>
+             <SelectItem value="applicable">Applicable</SelectItem>
+             <SelectItem value="not-applicable">Not Applicable</SelectItem>
+           </SelectContent>
+         </Select>
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.extraConsideration.tccCompanyIgnore}
+           onChange={(e) => updateRateEntry(entry.id, {
+             extraConsideration: {
+               ...entry.extraConsideration,
+               tccCompanyIgnore: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+           disabled={!entry.extraConsideration.applicable}
+         />
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.extraConsideration.tccIndividualIgnore}
+           onChange={(e) => updateRateEntry(entry.id, {
+             extraConsideration: {
+               ...entry.extraConsideration,
+               tccIndividualIgnore: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+           disabled={!entry.extraConsideration.applicable}
+         />
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.extraConsideration.auditorsFee}
+           onChange={(e) => updateRateEntry(entry.id, {
+             extraConsideration: {
+               ...entry.extraConsideration,
+               auditorsFee: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+           disabled={!entry.extraConsideration.applicable}
+         />
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.extraConsideration.degree}
+           onChange={(e) => updateRateEntry(entry.id, {
+             extraConsideration: {
+               ...entry.extraConsideration,
+               degree: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+           disabled={!entry.extraConsideration.applicable}
+         />
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.extraConsideration.tfFile}
+           onChange={(e) => updateRateEntry(entry.id, {
+             extraConsideration: {
+               ...entry.extraConsideration,
+               tfFile: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+           disabled={!entry.extraConsideration.applicable}
+         />
+       </TableCell>
+       
+       {/* Convenience Fee */}
+       <TableCell className="border-r p-2">
+         <Select
+           value={entry.convenienceFee.applicable ? "applicable" : "not-applicable"}
+           onValueChange={(value) => updateRateEntry(entry.id, {
+             convenienceFee: {
+               ...entry.convenienceFee,
+               applicable: value === "applicable"
+             }
+           })}
+         >
+           <SelectTrigger className="h-8 text-xs">
+             <SelectValue />
+           </SelectTrigger>
+           <SelectContent>
+             <SelectItem value="applicable">Applicable</SelectItem>
+             <SelectItem value="not-applicable">Not Applicable</SelectItem>
+           </SelectContent>
+         </Select>
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.convenienceFee.alienAssistance}
+           onChange={(e) => updateRateEntry(entry.id, {
+             convenienceFee: {
+               ...entry.convenienceFee,
+               alienAssistance: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+           disabled={!entry.convenienceFee.applicable}
+         />
+       </TableCell>
+       <TableCell className="border-r p-2">
+         <Input
+           type="number"
+           value={entry.convenienceFee.reEntryApproval}
+           onChange={(e) => updateRateEntry(entry.id, {
+             convenienceFee: {
+               ...entry.convenienceFee,
+               reEntryApproval: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+           disabled={!entry.convenienceFee.applicable}
+         />
+       </TableCell>
+       <TableCell className="p-2">
+         <Input
+           type="number"
+           value={entry.convenienceFee.passportEndorsement}
+           onChange={(e) => updateRateEntry(entry.id, {
+             convenienceFee: {
+               ...entry.convenienceFee,
+               passportEndorsement: parseFloat(e.target.value) || 0
+             }
+           })}
+           className="h-8 text-center text-xs"
+           disabled={!entry.convenienceFee.applicable}
+         />
+       </TableCell>
+     </TableRow>
+   )
+ }
 }

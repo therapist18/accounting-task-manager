@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { ArrowUp, ArrowDown, Pencil, Plus, X, Info, ChevronUp, ChevronDown, Clock, FileText, User } from "lucide-react"
+import { ArrowUp, ArrowDown, Pencil, X, Info, Minus, Plus, Clock, FileText, User } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
@@ -154,7 +154,7 @@ export default function Stages() {
   )
 
   // Handle allocation change
-  const handleAllocationChange = async (subdeptId: number, stageId: string, shouldAllocate: boolean, classIndex: number | null = null) => {
+  const handleAllocationChange = async (subdeptId: number, stageId: string, shouldAllocate: boolean, classIndex: number | null = null, subclassIndex: number | null = null) => {
     try {
       const currentDept = getCurrentDepartment()
       if (!currentDept) return
@@ -336,7 +336,7 @@ export default function Stages() {
   }
 
   // Handle display toggle
-  const handleDisplayToggle = async (subdeptId: number, stageId: string, checked: boolean, classIndex: number | null = null) => {
+  const handleDisplayToggle = async (subdeptId: number, stageId: string, checked: boolean, classIndex: number | null = null, subclassIndex: number | null = null) => {
     try {
       const currentDept = getCurrentDepartment()
       if (!currentDept) return
@@ -509,13 +509,13 @@ export default function Stages() {
         .map((stage, index) => {
           // For special stages, we need to ensure timeConfigs are properly formatted
           if (stage.isSpecial) {
-            const timeConfigs = Array.isArray(stage.timeConfigs) 
+            const timeConfigs = Array.isArray(stage.timeConfigs)
               ? stage.timeConfigs.map(config => ({
-                  applicationType: config.applicationType || 'Default',
-                  days: Number(config.days) || 0,
-                  hours: Number(config.hours) || 0,
-                  minutes: Number(config.minutes) || 0
-                }))
+                applicationType: config.applicationType || 'Default',
+                days: Number(config.days) || 0,
+                hours: Number(config.hours) || 0,
+                minutes: Number(config.minutes) || 0
+              }))
               : [];
 
             // Calculate total minutes from the first config (or default to 0)
@@ -535,7 +535,7 @@ export default function Stages() {
               allocations: {}
             };
           }
-          
+
           // For regular stages, use direct time input
           const days = Number(stage.days) || 0;
           const hours = Number(stage.hours) || 0;
@@ -756,311 +756,135 @@ export default function Stages() {
         </TabsList>
 
         {departments.map(dept => (
-        <TabsContent key={dept.id} value={dept.id} className="space-y-4">
-        {dept.stages.length === 0 ? (
-          <div className="text-center py-12 border-2 border-dashed border-muted rounded-lg">
-            <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-            <h3 className="text-lg font-medium text-muted-foreground mb-2">No stages yet</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Create your first stage to get started with the workflow
-            </p>
-            <Button onClick={() => setIsDialogOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add First Stage
-            </Button>
-          </div>
-        ) : (
-          <div className="relative overflow-auto max-h-[calc(100vh-300px)] border rounded-lg">
-            <Table className="min-w-max">
-              <TableHeader className="sticky top-0 bg-background z-10">
-                {/* Multi-level header for stages */}
-                <TableRow className="bg-muted/50">
-                  <TableHead rowSpan={3} className="sticky left-0 bg-background border-r font-bold w-48 z-20">
-                    <div className="flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
-                      Department / Class
-                    </div>
-                  </TableHead>
-                  {dept.stages.map((stage) => (
-                    <TableHead 
-                      key={stage.id} 
-                      colSpan={6} 
-                      className="border-r text-center font-bold bg-muted/30 min-w-[300px]"
-                    >
-                      <div className="flex flex-col items-center p-2 space-y-2">
+          <TabsContent key={dept.id} value={dept.id} className="space-y-4">
+            {dept.stages.length === 0 ? (
+              <div className="text-center py-12 border-2 border-dashed border-muted rounded-lg">
+                <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                <h3 className="text-lg font-medium text-muted-foreground mb-2">No stages yet</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Create your first stage to get started with the workflow
+                </p>
+                <Button onClick={() => setIsDialogOpen(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add First Stage
+                </Button>
+              </div>
+            ) : (
+              <div className="relative overflow-auto max-h-[calc(100vh-200px)] border rounded-lg">
+                <Table className="min-w-max">
+                  <TableHeader className="sticky top-0 bg-background z-30">
+                    {/* Stage Names Row */}
+                    <TableRow className="bg-muted/50">
+                      <TableHead className="sticky left-0 bg-background border-r font-bold w-16 z-40 text-center" rowSpan={4}>
+                        #
+                      </TableHead>
+                      <TableHead className="sticky left-16 bg-background border-r font-bold w-64 z-40" rowSpan={4}>
                         <div className="flex items-center gap-2">
-                          <span className="font-medium text-sm">{stage.name}</span>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6"
-                              onClick={() => setEditingStage(stage)}
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6"
-                              onClick={() => moveStage(stage.id, 'up')}
-                              disabled={stage.order_num === 1}
-                            >
-                              <ArrowUp className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6"
-                              onClick={() => moveStage(stage.id, 'down')}
-                              disabled={stage.order_num === dept.stages.length}
-                            >
-                              <ArrowDown className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Badge variant="outline" className="text-xs">
-                            #{stage.order_num}
-                          </Badge>
-                          {stage.documents && stage.documents.length > 0 && (
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
-                                  <FileText className="h-3 w-3 text-blue-500" />
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-80">
-                                <div className="space-y-2">
-                                  <h4 className="font-medium">Stage Documents</h4>
-                                  <div className="space-y-2">
-                                    {stage.documents.map((doc, i) => (
-                                      <div key={i} className="bg-muted/50 p-2 rounded text-sm">
-                                        <div className="font-medium flex items-center gap-2">
-                                          {doc.name}
-                                          <Badge variant={doc.isRequired ? "default" : "secondary"} className="text-xs">
-                                            {doc.isRequired ? "Required" : "Optional"}
-                                          </Badge>
-                                        </div>
-                                        <div className="text-muted-foreground text-xs">
-                                          Type: {doc.documentType}
-                                        </div>
-                                        {doc.extractionSpecs && doc.extractionSpecs.length > 0 && (
-                                          <div className="text-xs text-muted-foreground mt-1">
-                                            Extractions: {doc.extractionSpecs.map(spec => spec.fieldName).join(', ')}
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          )}
-                          {stage.isSpecial && (
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
-                                  <Clock className="h-3 w-3 text-orange-500" />
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-80">
-                                <div className="space-y-2">
-                                  <h4 className="font-medium">Special Time Requirements</h4>
-                                  <div className="text-sm text-muted-foreground">
-                                    This stage has different time requirements based on application type:
-                                  </div>
-                                  <div className="space-y-2 mt-2">
-                                    {stage.timeConfigs?.map((config, i) => (
-                                      <div key={i} className="bg-muted/50 p-2 rounded text-sm">
-                                        <div className="font-medium">{config.applicationType || 'Default'}</div>
-                                        <div className="text-muted-foreground">
-                                          {config.days > 0 && `${config.days}d `}
-                                          {config.hours > 0 && `${config.hours}h `}
-                                          {config.minutes > 0 ? `${config.minutes}m` : ''}
-                                          {!config.days && !config.hours && !config.minutes ? '0m' : ''}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          )}
-                        </div>
-                      </div>
-                    </TableHead>
-                  ))}
-                </TableRow>
-                
-                {/* Stage details row */}
-                <TableRow className="bg-muted/30">
-                  {dept.stages.map((stage) => (
-                    <React.Fragment key={`details-${stage.id}`}>
-                      <TableHead colSpan={3} className="border text-center text-xs font-medium">
-                        <div className="flex items-center justify-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          Duration
+                          <FileText className="h-4 w-4" />
+                          Department / Entity
                         </div>
                       </TableHead>
-                      <TableHead className="border text-center text-xs font-medium">
-                        <div className="flex items-center justify-center gap-1">
-                          <User className="h-3 w-3" />
-                          Follow Up
-                        </div>
-                      </TableHead>
-                      <TableHead className="border text-center text-xs font-medium">
-                        Applicable
-                      </TableHead>
-                      <TableHead className="border text-center text-xs font-medium">
-                        Display
-                      </TableHead>
-                    </React.Fragment>
-                  ))}
-                </TableRow>
-                
-                {/* Duration breakdown row */}
-                <TableRow className="bg-muted/20">
-                  {dept.stages.map((stage) => (
-                    <React.Fragment key={`duration-${stage.id}`}>
-                      <TableHead className="border text-center text-xs">Days</TableHead>
-                      <TableHead className="border text-center text-xs">Hours</TableHead>
-                      <TableHead className="border text-center text-xs">Minutes</TableHead>
-                      <TableHead className="border text-center text-xs">Person</TableHead>
-                      <TableHead className="border text-center text-xs">Status</TableHead>
-                      <TableHead className="border text-center text-xs">Show</TableHead>
-                    </React.Fragment>
-                  ))}
-                </TableRow>
-              </TableHeader>
+                      <TableHead className="sticky left-0 bg-background border-r z-40">Stage Name</TableHead>
 
-              <TableBody>
-                {normalizedSubdepartments.flatMap(subdept => {
-                  const subdeptRowId = `subdept-${subdept.id}`
-                  const isExpanded = expandedRows.has(subdeptRowId)
-                  
-                  const rows = [
-                    // Subdepartment row
-                    <TableRow key={subdeptRowId} className="hover:bg-muted/50">
-                      <TableCell className="sticky left-0 bg-background border-r font-medium z-10">
-                        <div className="flex items-center gap-2">
-                          {subdept.hasClasses && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6"
-                              onClick={() => toggleRowExpansion(subdeptRowId)}
-                            >
-                              {isExpanded ? (
-                                <ChevronDown className="h-4 w-4" />
-                              ) : (
-                                <ChevronUp className="h-4 w-4" />
-                              )}
-                            </Button>
-                          )}
-                          <span className="font-medium">{subdept.name}</span>
-                          {subdept.hasClasses && (
-                            <Badge variant="secondary" className="text-xs">
-                              {subdept.classes?.length || 0} classes
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      {dept.stages.map(stage => {
-                        const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id)
-                        const hasAllocation = stageAllocation?.applicable || false
-                        const hasDisplay = stageAllocation?.display || false
-                        const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
-
-                        return (
-                          <React.Fragment key={`subdept-${subdept.id}-${stage.id}`}>
-                            <TableCell className="border p-1 text-center text-sm font-mono">
-                              {days}
-                            </TableCell>
-                            <TableCell className="border p-1 text-center text-sm font-mono">
-                              {hours}
-                            </TableCell>
-                            <TableCell className="border p-1 text-center text-sm font-mono">
-                              {minutes}
-                            </TableCell>
-                            <TableCell className="border p-1 text-center text-xs">
-                              {stage.follow_up ? (
-                                <Badge variant="outline" className="text-xs">
-                                  {stage.follow_up}
-                                </Badge>
-                              ) : (
-                                <span className="text-muted-foreground">-</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="border p-0">
-                              <Select
-                                value={hasAllocation ? 'applicable' : 'not-applicable'}
-                                onValueChange={(value) =>
-                                  handleAllocationChange(subdept.id, stage.id, value === 'applicable')
-                                }
-                              >
-                                <SelectTrigger className="h-8 w-full border-0 shadow-none focus:ring-1 focus:ring-ring">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="applicable">
-                                    <div className="flex items-center gap-2">
-                                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                      Applicable
-                                    </div>
-                                  </SelectItem>
-                                  <SelectItem value="not-applicable">
-                                    <div className="flex items-center gap-2">
-                                      <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                      Not Applicable
-                                    </div>
-                                  </SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-                            <TableCell className="border p-0">
-                              <div className="flex items-center justify-center p-2">
-                                <Checkbox
-                                  checked={hasDisplay}
-                                  onCheckedChange={(checked) =>
-                                    handleDisplayToggle(subdept.id, stage.id, checked as boolean)
-                                  }
-                                  disabled={!hasAllocation}
-                                  className="h-4 w-4"
-                                />
-                              </div>
-                            </TableCell>
-                          </React.Fragment>
-                        )
-                      })}
-                    </TableRow>
-                  ]
-
-                  // Add class rows if expanded and has classes
-                  if (isExpanded && subdept.hasClasses && subdept.classes) {
-                    subdept.classes.forEach((cls, clsIndex) => {
-                      rows.push(
-                        <TableRow key={`class-${subdept.id}-${clsIndex}`} className="bg-muted/5 hover:bg-muted/10">
-                          <TableCell className="sticky left-0 bg-background border-r pl-12 z-10">
+                      {dept.stages.map((stage) => (
+                        <TableHead
+                          key={stage.id}
+                          className="border-r text-center font-bold bg-muted/30 min-w-[200px]"
+                        >
+                          <div className="flex flex-col items-center p-2 space-y-2">
                             <div className="flex items-center gap-2">
-                              <span className="text-muted-foreground text-sm">└─ {cls.name}</span>
-                              {cls.requirements && cls.requirements.length > 0 && (
+                              <span className="font-medium text-sm">{stage.name}</span>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => setEditingStage(stage)}
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => moveStage(stage.id, 'up')}
+                                  disabled={stage.order_num === 1}
+                                >
+                                  <ArrowUp className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => moveStage(stage.id, 'down')}
+                                  disabled={stage.order_num === dept.stages.length}
+                                >
+                                  <ArrowDown className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <Badge variant="outline" className="text-xs">
+                                #{stage.order_num}
+                              </Badge>
+                              {stage.documents && stage.documents.length > 0 && (
                                 <Popover>
                                   <PopoverTrigger asChild>
                                     <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
-                                      <Info className="h-3 w-3 text-blue-500" />
+                                      <FileText className="h-3 w-3 text-blue-500" />
                                     </Button>
                                   </PopoverTrigger>
-                                  <PopoverContent className="w-60">
+                                  <PopoverContent className="w-80">
                                     <div className="space-y-2">
-                                      <h4 className="font-medium text-sm">Class Requirements</h4>
-                                      <div className="space-y-1">
-                                        {cls.requirements.map((req, i) => (
-                                          <div key={i} className="text-xs">
-                                            <span className={req.is_required ? "text-red-600" : "text-muted-foreground"}>
-                                              {req.is_required ? "• " : "○ "}{req.name}
-                                            </span>
+                                      <h4 className="font-medium">Stage Documents</h4>
+                                      <div className="space-y-2">
+                                        {stage.documents.map((doc, i) => (
+                                          <div key={i} className="bg-muted/50 p-2 rounded text-sm">
+                                            <div className="font-medium flex items-center gap-2">
+                                              {doc.name}
+                                              <Badge variant={doc.isRequired ? "default" : "secondary"} className="text-xs">
+                                                {doc.isRequired ? "Required" : "Optional"}
+                                              </Badge>
+                                            </div>
+                                            <div className="text-muted-foreground text-xs">
+                                              Type: {doc.documentType}
+                                            </div>
+                                            {doc.extractionSpecs && doc.extractionSpecs.length > 0 && (
+                                              <div className="text-xs text-muted-foreground mt-1">
+                                                Extractions: {doc.extractionSpecs.map(spec => spec.fieldName).join(', ')}
+                                              </div>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              )}
+                              {stage.isSpecial && (
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
+                                      <Clock className="h-3 w-3 text-orange-500" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-80">
+                                    <div className="space-y-2">
+                                      <h4 className="font-medium">Special Time Requirements</h4>
+                                      <div className="text-sm text-muted-foreground">
+                                        This stage has different time requirements based on application type:
+                                      </div>
+                                      <div className="space-y-2 mt-2">
+                                        {stage.timeConfigs?.map((config, i) => (
+                                          <div key={i} className="bg-muted/50 p-2 rounded text-sm">
+                                            <div className="font-medium">{config.applicationType || 'Default'}</div>
+                                            <div className="text-muted-foreground">
+                                              {config.days > 0 && `${config.days}d `}
+                                              {config.hours > 0 && `${config.hours}h `}
+                                              {config.minutes > 0 ? `${config.minutes}m` : ''}
+                                              {!config.days && !config.hours && !config.minutes ? '0m' : ''}
+                                            </div>
                                           </div>
                                         ))}
                                       </div>
@@ -1069,95 +893,339 @@ export default function Stages() {
                                 </Popover>
                               )}
                             </div>
+                          </div>
+                        </TableHead>
+                      ))}
+                    </TableRow>
+
+                    {/* Duration Row */}
+                    <TableRow className="bg-muted/30">
+                      <TableHead className="sticky left-0 bg-background border-r z-40">Duration</TableHead>
+                      {dept.stages.map((stage) => {
+                        const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
+                        return (
+                          <TableHead key={`duration-${stage.id}`} className="border-r text-center">
+                            <div className="font-mono font-bold text-sm">
+                              {days > 0 && `${days}d `}
+                              {hours > 0 && `${hours}h `}
+                              {minutes > 0 ? `${minutes}m` : ''}
+                              {!days && !hours && !minutes && '0m'}
+                            </div>
+                          </TableHead>
+                        )
+                      })}
+                    </TableRow>
+
+                    {/* Follow Up Row */}
+                    <TableRow className="bg-muted/20">
+                      <TableHead className="sticky left-0 bg-background border-r z-40">Follow Up</TableHead>
+                      {dept.stages.map((stage) => (
+                        <TableHead key={`followup-${stage.id}`} className="border-r text-center">
+                          <div className="font-bold text-sm">
+                            {stage.follow_up || '-'}
+                          </div>
+                        </TableHead>
+                      ))}
+                    </TableRow>
+
+                    {/* Applicable/Display Headers Row */}
+                    <TableRow className="bg-muted/10">
+                      <TableHead className="sticky left-0 bg-background border-r z-40"></TableHead>
+                      {dept.stages.map((stage) => (
+                        <TableHead key={`controls-${stage.id}`} className="border-r">
+                          <div className="grid grid-cols-2 gap-1 p-1">
+                            <div className="text-center text-xs font-medium">
+                              Applicable
+                            </div>
+                            <div className="text-center text-xs font-medium">
+                              Display
+                            </div>
+                          </div>
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+
+                  <TableBody>
+                    {normalizedSubdepartments.flatMap((subdept, subdeptIndex) => {
+                      const subdeptRowId = `subdept-${subdept.id}`
+                      const isExpanded = expandedRows.has(subdeptRowId)
+                      const rows = []
+                      let rowIndex = subdeptIndex + 1
+
+                      // Subdepartment row (only show applicable/display if no classes)
+                      const hasClasses = subdept.classes && subdept.classes.length > 0
+
+                      rows.push(
+                        <TableRow key={subdeptRowId} className="hover:bg-muted/50">
+                          <TableCell className="sticky left-0 bg-background border-r text-center font-mono text-sm z-30">
+                            {rowIndex}
                           </TableCell>
+                          <TableCell className="sticky left-16 bg-background border-r font-medium z-30">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{subdept.name}</span>
+                              {hasClasses && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => toggleRowExpansion(subdeptRowId)}
+                                >
+                                  {isExpanded ? (
+                                    <Minus className="h-4 w-4" />
+                                  ) : (
+                                    <Plus className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              )}
+                              {hasClasses && (
+                                <Badge variant="secondary" className="text-xs">
+                                  {subdept.classes?.length || 0} classes
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="sticky bg-background border-r text-center font-mono text-sm z-30"></TableCell>
                           {dept.stages.map(stage => {
-                            const stageAllocation = cls.stages?.find(s => s.stage_id === stage.id)
+                            const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id)
                             const hasAllocation = stageAllocation?.applicable || false
                             const hasDisplay = stageAllocation?.display || false
-                            const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
 
                             return (
-                              <React.Fragment key={`class-${subdept.id}-${clsIndex}-${stage.id}`}>
-                                <TableCell className="border p-1 text-center text-sm font-mono text-muted-foreground">
-                                  {days}
-                                </TableCell>
-                                <TableCell className="border p-1 text-center text-sm font-mono text-muted-foreground">
-                                  {hours}
-                                </TableCell>
-                                <TableCell className="border p-1 text-center text-sm font-mono text-muted-foreground">
-                                  {minutes}
-                                </TableCell>
-                                <TableCell className="border p-1 text-center text-xs">
-                                  {stage.follow_up ? (
-                                    <Badge variant="outline" className="text-xs opacity-75">
-                                      {stage.follow_up}
-                                    </Badge>
-                                  ) : (
-                                    <span className="text-muted-foreground">-</span>
-                                  )}
-                                </TableCell>
-                                <TableCell className="border p-0">
-                                  <Select
-                                    value={hasAllocation ? 'applicable' : 'not-applicable'}
-                                    onValueChange={(value) =>
-                                      handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex)
-                                    }
-                                  >
-                                    <SelectTrigger className="h-8 w-full border-0 shadow-none focus:ring-1 focus:ring-ring">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="applicable">
-                                        <div className="flex items-center gap-2">
-                                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                          Applicable
-                                        </div>
-                                      </SelectItem>
-                                      <SelectItem value="not-applicable">
-                                        <div className="flex items-center gap-2">
-                                          <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                          Not Applicable
-                                        </div>
-                                      </SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </TableCell>
-                                <TableCell className="border p-0">
-                                  <div className="flex items-center justify-center p-2">
-                                    <Checkbox
-                                      checked={hasDisplay}
-                                      onCheckedChange={(checked) =>
-                                        handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex)
-                                      }
-                                      disabled={!hasAllocation}
-                                      className="h-4 w-4"
-                                    />
+                              <TableCell key={`subdept-${subdept.id}-${stage.id}`} className="border-r p-0">
+                                {!hasClasses ? (
+                                  // Show controls only if no classes
+                                  <div className="grid grid-cols-2 gap-1 p-1">
+                                    <div className="flex justify-center">
+                                      <Select
+                                        value={hasAllocation ? 'applicable' : 'not-applicable'}
+                                        onValueChange={(value) =>
+                                          handleAllocationChange(subdept.id, stage.id, value === 'applicable')
+                                        }
+                                      >
+                                        <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="applicable">
+                                            <div className="flex items-center gap-2">
+                                              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                              Applicable
+                                            </div>
+                                          </SelectItem>
+                                          <SelectItem value="not-applicable">
+                                            <div className="flex items-center gap-2">
+                                              <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                              Not Applicable
+                                            </div>
+                                          </SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <div className="flex justify-center items-center">
+                                      <Checkbox
+                                        checked={hasDisplay}
+                                        onCheckedChange={(checked) =>
+                                          handleDisplayToggle(subdept.id, stage.id, checked as boolean)
+                                        }
+                                        disabled={!hasAllocation}
+                                        className="h-4 w-4"
+                                      />
+                                    </div>
                                   </div>
-                                </TableCell>
-                              </React.Fragment>
+                                ) : (
+                                  // Show dash if has classes
+                                  <div className="flex items-center justify-center p-2 text-muted-foreground">
+                                    -
+                                  </div>
+                                )}
+                              </TableCell>
                             )
                           })}
                         </TableRow>
                       )
-                    })
-                  }
 
-                  return rows
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </TabsContent>
-    ))}
-  </Tabs>
+                      // Add class rows if expanded
+                      if (isExpanded && hasClasses) {
+                        subdept.classes?.forEach((cls, clsIndex) => {
+                          const hasSubClasses = cls.subClasses && cls.subClasses.length > 0
+                          const classRowId = `class-${subdept.id}-${cls.id}`
+                          const isClassExpanded = expandedRows.has(classRowId)
 
-  <EditStageDialog
-    open={!!editingStage}
-    onOpenChange={(open) => !open && setEditingStage(null)}
-    stage={editingStage}
-    onSave={handleUpdateStage}
-  />
-</div>
-)
+                          rows.push(
+                            <TableRow key={classRowId} className="bg-muted/5 hover:bg-muted/10">
+                              <TableCell className="sticky left-0 bg-background border-r text-center font-mono text-sm z-30">
+                                {rowIndex}.{clsIndex + 1}
+                              </TableCell>
+                              <TableCell className="sticky left-16 bg-background border-r pl-8 z-30">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground text-sm">{cls.name}</span>
+                                  {hasSubClasses && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-5 w-5"
+                                      onClick={() => toggleRowExpansion(classRowId)}
+                                    >
+                                      {isClassExpanded ? (
+                                        <Minus className="h-3 w-3" />
+                                      ) : (
+                                        <Plus className="h-3 w-3" />
+                                      )}
+                                    </Button>
+                                  )}
+                                  {hasSubClasses && (
+                                    <Badge variant="outline" className="text-xs">
+                                      {cls.subClasses?.length || 0} subclasses
+                                    </Badge>
+                                  )}
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="sticky bg-background border-r text-center font-mono text-sm z-30"></TableCell>
+                              {dept.stages.map(stage => {
+                                const stageAllocation = cls.stages?.find(s => s.stage_id === stage.id)
+                                const hasAllocation = stageAllocation?.applicable || false
+                                const hasDisplay = stageAllocation?.display || false
+
+                                return (
+                                  <TableCell key={`class-${subdept.id}-${cls.id}-${stage.id}`} className="border-r p-0">
+                                    {!hasSubClasses ? (
+                                      // Show controls only if no subclasses
+                                      <div className="grid grid-cols-2 gap-1 p-1">
+                                        <div className="flex justify-center">
+                                          <Select
+                                            value={hasAllocation ? 'applicable' : 'not-applicable'}
+                                            onValueChange={(value) =>
+                                              handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex)
+                                            }
+                                          >
+                                            <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs">
+                                              <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="applicable">
+                                                <div className="flex items-center gap-2">
+                                                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                                  Applicable
+                                                </div>
+                                              </SelectItem>
+                                              <SelectItem value="not-applicable">
+                                                <div className="flex items-center gap-2">
+                                                  <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                                  Not Applicable
+                                                </div>
+                                              </SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                        <div className="flex justify-center items-center">
+                                          <Checkbox
+                                            checked={hasDisplay}
+                                            onCheckedChange={(checked) =>
+                                              handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex)
+                                            }
+                                            disabled={!hasAllocation}
+                                            className="h-4 w-4"
+                                          />
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      // Show dash if has subclasses
+                                      <div className="flex items-center justify-center p-2 text-muted-foreground">
+                                        -
+                                      </div>
+                                    )}
+                                  </TableCell>
+                                )
+                              })}
+                            </TableRow>
+                          )
+
+                          // Add subclass rows if class is expanded
+                          if (isClassExpanded && hasSubClasses) {
+                            cls.subClasses?.forEach((subCls, subClsIndex) => {
+                              rows.push(
+                                <TableRow key={`subclass-${subdept.id}-${cls.id}-${subCls.id}`} className="bg-muted/10 hover:bg-muted/15">
+                                  <TableCell className="sticky left-0 bg-background border-r text-center font-mono text-sm z-30">
+                                    {rowIndex}.{clsIndex + 1}.{subClsIndex + 1}
+                                  </TableCell>
+                                  <TableCell className="sticky left-16 bg-background border-r pl-16 z-30">
+                                    <span className="text-muted-foreground text-sm">{subCls.name}</span>
+                                  </TableCell>
+
+                                  <TableCell className="sticky bg-background border-r text-center font-mono text-sm z-30"></TableCell>
+                                  {dept.stages.map(stage => {
+                                    const stageAllocation = subCls.stages?.find(s => s.stage_id === stage.id)
+                                    const hasAllocation = stageAllocation?.applicable || false
+                                    const hasDisplay = stageAllocation?.display || false
+
+                                    return (
+                                      <TableCell key={`subclass-${subdept.id}-${cls.id}-${subCls.id}-${stage.id}`} className="border-r p-0">
+                                        <div className="grid grid-cols-2 gap-1 p-1">
+                                          <div className="flex justify-center">
+                                            <Select
+                                              value={hasAllocation ? 'applicable' : 'not-applicable'}
+                                              onValueChange={(value) =>
+                                                handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex, subClsIndex)
+                                              }
+                                            >
+                                              <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs">
+                                                <SelectValue />
+                                              </SelectTrigger>
+                                              <SelectContent>
+                                                <SelectItem value="applicable">
+                                                  <div className="flex items-center gap-2">
+                                                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                                    Applicable
+                                                  </div>
+                                                </SelectItem>
+                                                <SelectItem value="not-applicable">
+                                                  <div className="flex items-center gap-2">
+                                                    <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                                    Not Applicable
+                                                  </div>
+                                                </SelectItem>
+                                              </SelectContent>
+                                            </Select>
+                                          </div>
+                                          <div className="flex justify-center items-center">
+                                            <Checkbox
+                                              checked={hasDisplay}
+                                              onCheckedChange={(checked) =>
+                                                handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex, subClsIndex)
+                                              }
+                                              disabled={!hasAllocation}
+                                              className="h-4 w-4"
+                                            />
+                                          </div>
+                                        </div>
+                                      </TableCell>
+                                    )
+                                  })}
+                                </TableRow>
+                              )
+                            })
+                          }
+                        })
+                      }
+
+                      return rows
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </TabsContent>
+        ))}
+      </Tabs>
+
+      <EditStageDialog
+        open={!!editingStage}
+        onOpenChange={(open) => !open && setEditingStage(null)}
+        stage={editingStage}
+        onSave={handleUpdateStage}
+      />
+    </div>
+  )
 }
