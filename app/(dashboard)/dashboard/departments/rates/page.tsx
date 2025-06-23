@@ -16,7 +16,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { format } from "date-fns"
 import { CalendarIcon, Calculator, Minus, Plus, Save, DollarSign, Clock, ChevronDown } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
-import { fetchDepartments } from "./database"
+import { fetchDepartments } from "../departments/database"
 import { supabase } from "@/lib/supabase/client"
 
 interface RateData {
@@ -106,8 +106,8 @@ interface RatesPageProps {
 }
 
 export default function RatesPage({ departments: initialDepartments }: RatesPageProps) {
-  const [rates, setRates] = useState<RateData>({ usd: 150, ksh: 1 })
-  const [tempRates, setTempRates] = useState<RateData>({ usd: 150, ksh: 1 })
+  const [rates, setRates] = useState<RateData>({ usd: 130, ksh: 1 })
+  const [tempRates, setTempRates] = useState<RateData>({ usd: 130, ksh: 1 })
   const [isRateDialogOpen, setIsRateDialogOpen] = useState(false)
   const [isDateDialogOpen, setIsDateDialogOpen] = useState(false)
   const [departments, setDepartments] = useState<Department[]>(initialDepartments || [])
@@ -634,9 +634,23 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
         </div>
       </div>
 
-      {/* Period Info */}
-      {selectedDepartment && (
-        <div className="flex items-center gap-4 p-3 bg-muted rounded-lg">
+      {/* Tabs */}
+      <Tabs value={selectedDepartment} onValueChange={setSelectedDepartment} className="w-full">
+       <div className="flex justify-between gap-4 ">
+       <TabsList className="mb-4">
+          {departments.map((dept) => (
+            <TabsTrigger key={dept.id} value={dept.id} className="whitespace-nowrap">
+              {dept.name}
+              {dept.tm_subdepartments && (
+                <Badge variant="secondary" className="ml-2 text-xs">
+                  {dept.tm_subdepartments.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {selectedDepartment && (
+        <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <DollarSign className="h-4 w-4 text-green-600" />
             <span className="text-sm font-medium">USD Rate: {rates.usd}</span>
@@ -650,31 +664,16 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
           </div>
         </div>
       )}
-
-      {/* Tabs */}
-      <Tabs value={selectedDepartment} onValueChange={setSelectedDepartment} className="w-full">
-        <TabsList className="w-full mb-4">
-          {departments.map((dept) => (
-            <TabsTrigger key={dept.id} value={dept.id} className="whitespace-nowrap">
-              {dept.name}
-              {dept.tm_subdepartments && (
-                <Badge variant="secondary" className="ml-2 text-xs">
-                  {dept.tm_subdepartments.length}
-                </Badge>
-              )}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
+       </div>
         {departments.map((dept) => (
           <TabsContent key={dept.id} value={dept.id}>
             <div className="relative overflow-auto max-h-[calc(100vh-200px)] border rounded-lg">
-              <Table className="min-w-max">
-                <TableHeader className="sticky top-0 z-30">
+              <Table className="min-w-max border-collapse">
+                <TableHeader className="sticky top-0 z-50 bg-background">
                   {/* Main Headers */}
                   <TableRow className="bg-blue-600 text-white">
-                    <TableHead className="sticky left-0 bg-blue-600 border-r w-16 z-40 text-center text-white">#</TableHead>
-                    <TableHead className="sticky left-16 bg-blue-600 border-r w-64 z-40 text-white">Entity</TableHead>
+                    <TableHead className="sticky left-0 bg-blue-600 border-r w-16 z-50 text-center text-white">#</TableHead>
+                    <TableHead className="sticky left-16 bg-blue-600 border-r w-64 z-50 text-white">Entity</TableHead>
                     <TableHead colSpan={3} className="border-r text-center text-white">Processing Fee</TableHead>
                     <TableHead colSpan={5} className="border-r text-center text-white">Issuance Fee</TableHead>
                     <TableHead colSpan={3} className="border-r text-center text-white">BCL Consultancy</TableHead>
@@ -684,9 +683,9 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                   </TableRow>
                   
                   {/* Sub Headers */}
-                  <TableRow className="bg-blue-400">
-                    <TableHead className="sticky left-0 bg-blue-400 border-r z-40"></TableHead>
-                    <TableHead className="sticky left-16 bg-blue-400 border-r z-40"></TableHead>
+                  <TableRow className="bg-blue-500">
+                    <TableHead className="sticky left-0 bg-blue-500 border-r z-50"></TableHead>
+                    <TableHead className="sticky left-16 bg-blue-500 border-r z-50"></TableHead>
                     <TableHead className="border-r text-center text-xs text-white">Amount</TableHead>
                     <TableHead className="border-r text-center text-xs text-white">Currency</TableHead>
                     <TableHead className="border-r text-center text-xs text-white">Fee (KSH)</TableHead>
@@ -713,7 +712,6 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                     <TableHead className="text-center text-xs text-white">Passport Endorsement</TableHead>
                   </TableRow>
                 </TableHeader>
-
                 <TableBody>
                   {Object.entries(groupedEntries).flatMap(([subdeptName, entries], groupIndex) => {
                     const rows = []
@@ -724,14 +722,14 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                       const isExpanded = expandedRows.has(groupRowId)
                       
                       rows.push(
-                        <TableRow key={groupRowId} className="bg-muted/20 hover:bg-muted/30">
-                          <TableCell className="sticky left-0 bg-muted/20 border-r text-center font-mono text-sm z-30">
+                        <TableRow key={groupRowId} className="bg-muted/20">
+                          <TableCell className="sticky left-0 bg-muted/20 border-r text-center font-medium text-sm z-30">
                             {groupIndex + 1}
                           </TableCell>
                           <TableCell className="sticky left-16 bg-muted/20 border-r font-medium z-30">
                             <div className="flex items-center gap-2">                             
-                            <span>{subdeptName}</span>
-                             <Button
+                              <span>{subdeptName}</span>
+                              <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-6 w-6"

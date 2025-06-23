@@ -19,10 +19,10 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Checkbox } from "@/components/ui/checkbox"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import { saveClassRequirements, saveSubdepartmentRequirements } from "./database"
+import { saveClassRequirements, saveSubUploadRequirements } from "./database"
 import type { Department, Requirement, RequirementForm } from "./database"
 
-interface DepartmentRequirementsProps {
+interface UploadRequirementsProps {
   departments: Department[]
 }
 
@@ -64,7 +64,7 @@ const generateRequirementId = (index: number, existingRequirements: ApiRequireme
   return (maxId + 1 + index).toString();
 }
 
-export default function DepartmentRequirements({ departments: initialDepartments }: DepartmentRequirementsProps) {
+export default function UploadRequirements({ departments: initialDepartments }: UploadRequirementsProps) {
   const [departments, setDepartments] = useState<Department[]>(initialDepartments)
   const [activeDept, setActiveDept] = useState<string>('')
   const [activeSubdept, setActiveSubdept] = useState<Record<string, string>>({})
@@ -763,9 +763,6 @@ export default function DepartmentRequirements({ departments: initialDepartments
     )
   }
 
-  // Rest of the component remains the same as your previous version...
-  // (renderSidebarView, renderMainContent, and the final JSX)
-  
   const renderSidebarView = () => {
     return (
       <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-hidden">
@@ -944,7 +941,7 @@ export default function DepartmentRequirements({ departments: initialDepartments
                                                   className={cn(
                                                     "w-full flex items-center justify-between p-1.5 text-left rounded-md transition-colors",
                                                     isActiveSubclass
-                                                      ? "bg-orange-100 dark:bg-orange-900/30 text-orange-900 dark:text-orange-100"
+                                                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100"
                                                       : "hover:bg-gray-50 dark:hover:bg-gray-700"
                                                   )}
                                                   onClick={() => {
@@ -959,7 +956,7 @@ export default function DepartmentRequirements({ departments: initialDepartments
                                                   }}
                                                 >
                                                   <div className="flex items-center space-x-2">
-                                                    <span className="font-mono text-xs text-gray-500 bg-orange-200 dark:bg-orange-700 px-1.5 py-0.5 rounded">
+                                                    <span className="font-mono text-xs text-gray-500 px-1.5 py-0.5">
                                                       {subClassNumber}
                                                     </span>
                                                     <span className="text-xs">{subCls.name}</span>

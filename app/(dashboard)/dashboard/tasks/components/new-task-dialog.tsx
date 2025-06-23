@@ -13,7 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { User, Building2, Users, FileText, Loader2, Info } from "lucide-react"
 import supabase from "@/lib/supabase/client"
-import { Department, DepartmentWithDetails, Subdepartment, fetchDepartments, TaskManagerAssistant } from "@/app/(dashboard)/dashboard/departments/database"
+import { Department, DepartmentWithDetails, Subdepartment, fetchDepartments, TaskManagerAssistant } from "@/app/(dashboard)/dashboard/departments/departments/database"
 
 interface Officer {
   id: string

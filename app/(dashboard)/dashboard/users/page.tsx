@@ -19,7 +19,7 @@ import {
 } from './database'
 import { OfficersTable, type Officer } from "./officers-table"
 import { UsersTable } from "./users-table"
-import { fetchDepartments } from '../departments/database'
+import { fetchDepartments } from '../departments/departments/database'
 import {
   Dialog,
   DialogContent,

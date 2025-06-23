@@ -27,7 +27,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/use-toast'
 import { createUser, updateOfficerDepartment } from './database'
-import { fetchDepartments } from '../departments/database'
+import { fetchDepartments } from '../departments/departments/database'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const officerFormSchema = z.object({

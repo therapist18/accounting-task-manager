@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Plus, Trash2, FileText } from "lucide-react"
-import type { StageDocument, DocumentExtraction } from "./database"
+import type { StageDocument, DocumentExtraction } from "../departments/database"
 
 interface StageDocumentsProps {
   documents: StageDocument[]

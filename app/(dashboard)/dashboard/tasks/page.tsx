@@ -20,7 +20,7 @@ import { getStages } from "@/lib/supabase/stages"
 import { supabase } from "@/lib/supabase/client"
 import type { Database } from "@/lib/supabase/database.types"
 import type { Stage, Department } from "@/lib/supabase/departments"
-import { fetchDepartments } from "../departments/database"
+import { fetchDepartments } from "../departments/departments/database"
 
 type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
   department?: { id: string; name: string } | null
