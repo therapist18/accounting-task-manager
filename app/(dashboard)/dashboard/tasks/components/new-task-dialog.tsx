@@ -22,20 +22,44 @@ interface Officer {
   role: string
 }
 
+interface ClassRequirement {
+  name: string
+  description: string | null
+  is_required?: boolean
+  type?: 'standard' | 'conditional' | 'optional'
+  order?: number
+  isVisible?: boolean
+}
+
+interface SubClass {
+  id: number
+  name: string
+  order: number
+  isVisible: boolean
+  description: string | null
+  requirements?: ClassRequirement[]
+}
+
+interface Class {
+  id: number
+  name: string
+  order: number
+  isVisible: boolean
+  description: string | null
+  subClasses: SubClass[]
+  requirements?: ClassRequirement[]
+}
+
 interface Subdepartment extends Department {
   department_id: string
   task_manager?: { id: number; start_date?: string; end_date?: string | null }
   task_assistant?: { id: number; start_date?: string; end_date?: string | null }
-  stages?: number[] // Array of stage IDs
-  classes?: Array<{
-    name: string
-    description: string | null
-    requirements: Array<{
-      name: string
-      description: string | null
-      is_required?: boolean
-    }>
+  stages?: Array<{
+    display: boolean
+    stage_id: string
+    applicable: boolean
   }>
+  classes?: Class[]
   created_at: string
   updated_at: string
 }
@@ -96,15 +120,22 @@ interface FormData {
   // Client
   client_id: string
   client_name: string
+  // Class & Subclass
+  class_id: string
+  class_name: string
+  class_description: string | null
+  subclass_id: string
+  subclass_name: string
+  subclass_description: string | null
   // Other fields
   status: string
   date_initiated: string
-  class_id: string
-  class_name: string
   renewal_status: 'New' | 'Renewal'
   account_used: string
   applied_by: string
   batch: string
+  individual_name: string
+  r_number: string
   dependent_name: string
   application_type: ApplicationType
   principal_member_id: string // For dependent applications
@@ -136,6 +167,16 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       start_date?: string;
       end_date?: string | null;
     } | null;
+    task_manager?: {
+      id: number;
+      start_date?: string;
+      end_date?: string | null;
+    } | null;
+    task_assistant?: {
+      id: number;
+      start_date?: string;
+      end_date?: string | null;
+    } | null;
     classes?: Array<{
       name: string;
       description: string | null;
@@ -158,40 +199,38 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   const [loading, setLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
   const [departmentMap, setDepartmentMap] = useState<Map<string, Department>>(new Map());
-
   const [formData, setFormData] = useState<FormData>(() => ({
     job_description: '',
-    // Department
     department_id: '',
     department_name: '',
-    // Subdepartment
     subdepartment_id: '',
     subdepartment_name: '',
-    // Task Manager
-    task_manager_id: '',
-    task_manager_name: '',
-    // Task Assistant
-    task_assistant_id: '',
-    task_assistant_name: '',
-    // Officer
-    officer_id: '',
-    officer_name: '',
-    // Client
-    client_id: '',
-    client_name: '',
-    // Other fields
-    status: 'registered',
-    date_initiated: new Date().toISOString().split('T')[0],
     class_id: '',
     class_name: '',
+    class_description: null,
+    subclass_id: '',
+    subclass_name: '',
+    subclass_description: null,
+    task_manager_id: 'none',
+    task_manager_name: '',
+    task_assistant_id: 'none',
+    task_assistant_name: '',
+    officer_id: 'none',
+    officer_name: '',
+    client_id: '',
+    client_name: '',
+    individual_name: '',
+    r_number: '',
+    principal_member_id: '',
+    principal_member_name: '',
+    status: 'registered',
+    date_initiated: new Date().toISOString().split('T')[0],
     renewal_status: 'New',
     account_used: '',
     applied_by: '',
     batch: '',
     dependent_name: '',
-    application_type: 'principal',
-    principal_member_id: '',
-    principal_member_name: ''
+    application_type: 'principal' as ApplicationType
   }))
 
   // Optimized data fetching with proper error handling
@@ -247,6 +286,93 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   useEffect(() => {
     fetchInitialData()
   }, [fetchInitialData])
+
+  // Memoize the selected subdepartment for better performance
+  const selectedSubdepartment = useMemo(() => {
+    return subdepartments.find(sd => sd.id.toString() === formData.subdepartment_id);
+  }, [subdepartments, formData.subdepartment_id]);
+
+  // Memoize available task managers and assistants based on selected subdepartment
+  const availableTaskManagers = useMemo(() => {
+    // Check both taskManager and task_manager properties
+    const manager = selectedSubdepartment?.taskManager || selectedSubdepartment?.task_manager;
+    if (!manager?.id) return [];
+    
+    const managerId = manager.id.toString();
+    const managerUser = allUsers.find(u => u.id === managerId);
+    
+    // If we have a direct name on the manager object, use it
+    const managerName = manager.name || managerUser?.name || 'Unnamed Manager';
+    
+    return [{
+      id: managerId,
+      name: managerName,
+      email: managerUser?.email || manager.email || ''
+    }];
+  }, [selectedSubdepartment, allUsers]);
+
+  const availableTaskAssistants = useMemo(() => {
+    // Check both taskAssistants and task_assistant arrays
+    const assistants = selectedSubdepartment?.taskAssistants || selectedSubdepartment?.task_assistant || [];
+    if (!Array.isArray(assistants) || assistants.length === 0) return [];
+    
+    return assistants.map(assistant => {
+      // Get the user ID from either userId or id field
+      const assistantId = (assistant.userId || assistant.id)?.toString();
+      if (!assistantId) return null;
+      
+      // Find the user in allUsers - ensure we're comparing strings
+      const assistantUser = allUsers.find(u => u.id.toString() === assistantId.toString());
+      
+      if (!assistantUser) {
+        console.warn(`Could not find user with ID: ${assistantId}`);
+        return null;
+      }
+      
+      return {
+        id: assistantId,
+        name: assistantUser.name || `User ${assistantId}`,
+        email: assistantUser.email || ''
+      };
+    }).filter(Boolean); // Remove any null entries
+  }, [selectedSubdepartment, allUsers]);
+  
+  // Available officers (users linked to the selected department or with officer role)
+  const availableOfficers = useMemo(() => {
+    if (!selectedSubdepartment?.department_id) return [];
+    
+    return allUsers
+      .filter(user => {
+        if (!user) return false;
+        
+        // Include users who are either:
+        // 1. Assigned to this department (if department_id is a string, convert to number for comparison)
+        const isInDepartment = user.department_id?.toString() === selectedSubdepartment.department_id.toString();
+        
+        // 2. Have a role of officer or staff
+        const role = (user.role || '').toLowerCase();
+        const isOfficerOrStaff = role.includes('officer') || role.includes('staff');
+        
+        return isInDepartment || isOfficerOrStaff;
+      })
+      .map(officer => {
+        if (!officer) return null;
+        
+        return {
+          id: officer.id.toString(),
+          name: officer.name || `User ${officer.id}`,
+          email: officer.email || ''
+        };
+      })
+      .filter(Boolean); // Remove any null entries
+  }, [allUsers, selectedSubdepartment?.department_id]);
+  
+  // Log for debugging
+  useEffect(() => {
+    console.log('Available assistants:', availableTaskAssistants);
+    console.log('Available officers:', availableOfficers);
+    console.log('Current form data:', formData);
+  }, [availableTaskAssistants, availableOfficers, formData]);
 
   // Get subdepartments from the department map
   const fetchSubdepartments = useCallback((departmentId: string) => {
@@ -436,11 +562,29 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       // If changing class
       if (field === 'class_id') {
         const selectedSubdept = subdepartments.find(s => s.id.toString() === prev.subdepartment_id.toString());
-        const selectedClass = selectedSubdept?.classes?.find(c => c.name === value);
+        const selectedClass = selectedSubdept?.classes?.find(c => c.id.toString() === value);
         return {
           ...prev,
           class_id: value,
-          class_name: selectedClass?.name || ''
+          class_name: selectedClass?.name || '',
+          class_description: selectedClass?.description || null,
+          subclass_id: '',
+          subclass_name: '',
+          subclass_description: null
+        };
+      }
+
+      // If changing subclass
+      if (field === 'subclass_id') {
+        const selectedSubdept = subdepartments.find(s => s.id.toString() === prev.subdepartment_id.toString());
+        const selectedClass = selectedSubdept?.classes?.find(c => c.id.toString() === prev.class_id);
+        const selectedSubclass = selectedClass?.subClasses?.find(sc => sc.id.toString() === value);
+        
+        return {
+          ...prev,
+          subclass_id: value,
+          subclass_name: selectedSubclass?.name || '',
+          subclass_description: selectedSubclass?.description || null
         };
       }
 
@@ -474,6 +618,38 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         ? formData.principal_member_name
         : formData.client_name;
 
+      // Get the selected class and subclass details
+      const selectedClass = selectedSubdept?.classes?.find(c => c.id.toString() === formData.class_id);
+      const selectedSubclass = selectedClass?.subClasses?.find(sc => sc.id.toString() === formData.subclass_id);
+
+      // Memoize the selected department and subdepartment for better performance
+      const selectedDepartment = useMemo(() => {
+        return departments.find(d => d.id === formData.department_id);
+      }, [departments, formData.department_id]);
+
+      const selectedSubdepartment = useMemo(() => {
+        return subdepartments.find(sd => sd.id === formData.subdepartment_id);
+      }, [subdepartments, formData.subdepartment_id]);
+
+      // Memoize available task managers and assistants based on selected subdepartment
+      const availableTaskManagers = useMemo(() => {
+        if (!selectedSubdepartment?.taskManager) return [];
+        return [{
+          id: selectedSubdepartment.taskManager.id.toString(),
+          name: selectedSubdepartment.taskManager.name || 'Unnamed Manager',
+          email: selectedSubdepartment.taskManager.email || ''
+        }];
+      }, [selectedSubdepartment]);
+
+      const availableTaskAssistants = useMemo(() => {
+        if (!selectedSubdepartment?.taskAssistant) return [];
+        return [{
+          id: selectedSubdepartment.taskAssistant.id.toString(),
+          name: selectedSubdepartment.taskAssistant.name || 'Unnamed Assistant',
+          email: selectedSubdepartment.taskAssistant.email || ''
+        }];
+      }, [selectedSubdepartment]);
+
       const taskData = {
         // Basic task info
         job_description: formData.job_description,
@@ -502,9 +678,15 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         client_id: actualClientId,
         client_name: actualClientName,
         
-        // Class and type info
+        // Class and Subclass info
         class_id: formData.class_id || null,
         class_name: formData.class_name || null,
+        class_description: formData.class_description || null,
+        subclass_id: formData.subclass_id || null,
+        subclass_name: formData.subclass_name || null,
+        subclass_description: formData.subclass_description || null,
+        
+        // Application type and status
         renewal_status: formData.renewal_status,
         application_type: formData.application_type,
         
@@ -512,11 +694,14 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         account_used: formData.account_used,
         applied_by: formData.applied_by,
         batch: formData.batch,
+        individual_name: formData.individual_name,
+        r_number: formData.r_number,
         dependent_name: formData.application_type === 'dependent' ? formData.dependent_name : null,
         
         // Timestamps
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        
         // Include additional data for the task creation callback
         department: selectedDept ? { id: selectedDept.id, name: selectedDept.name } : null,
         subdepartment: selectedSubdept ? { 
@@ -524,6 +709,18 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
           name: selectedSubdept.name,
           task_manager: selectedSubdept.taskManager,
           task_assistant: selectedSubdept.taskAssistant
+        } : null,
+        class: selectedClass ? {
+          id: selectedClass.id,
+          name: selectedClass.name,
+          description: selectedClass.description,
+          requirements: selectedClass.requirements || []
+        } : null,
+        subclass: selectedSubclass ? {
+          id: selectedSubclass.id,
+          name: selectedSubclass.name,
+          description: selectedSubclass.description,
+          requirements: selectedSubclass.requirements || []
         } : null,
         task_manager: availableTaskManagers[0] || null,
         task_assistant: availableTaskAssistants[0] || null,
@@ -566,21 +763,35 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       setFormData({
         job_description: '',
         department_id: '',
+        department_name: '',
         subdepartment_id: '',
+        subdepartment_name: '',
         task_manager_id: '',
+        task_manager_name: '',
         task_assistant_id: '',
+        task_assistant_name: '',
         officer_id: '',
+        officer_name: '',
         client_id: '',
+        client_name: '',
+        class_id: '',
+        class_name: '',
+        class_description: null,
+        subclass_id: '',
+        subclass_name: '',
+        subclass_description: null,
         status: 'registered',
         date_initiated: new Date().toISOString().split('T')[0],
-        class_id: '',
         renewal_status: 'New',
         account_used: '',
         applied_by: '',
         batch: '',
+        individual_name: '',
+        r_number: '',
         dependent_name: '',
         application_type: 'principal',
-        principal_member_id: ''
+        principal_member_id: '',
+        principal_member_name: ''
       })
       setSelectedClient(null)
       setSelectedPrincipalMember(null)
@@ -590,44 +801,37 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       setLoading(false)
     }
   }, [formData, loading, onOpenChange, onCreate])
-
-  // Memoized computed values with proper type safety and debugging
-  const selectedSubdepartment = useMemo(() => {
-    if (!formData.subdepartment_id) return null;
-    const sub = subdepartments.find(sd => sd.id.toString() === formData.subdepartment_id.toString());
-    console.log('Selected subdepartment:', sub);
-    return sub || null;
-  }, [subdepartments, formData.subdepartment_id]);
-
-  // Get task manager details from subdepartment
-  const availableTaskManagers = useMemo<Officer[]>(() => {
-    if (!selectedSubdepartment || !selectedSubdepartment.taskManager) return [];
-    
-    const manager = allUsers.find(user => user.id === selectedSubdepartment.taskManager?.id);
-    if (!manager) {
-      console.warn('Task manager not found for subdepartment:', selectedSubdepartment.id);
-      return [];
-    }
-    return [manager];
-  }, [selectedSubdepartment, allUsers])
-
-  // Get task assistant details from subdepartment
-  const availableTaskAssistants = useMemo<Officer[]>(() => {
-    if (!selectedSubdepartment || !selectedSubdepartment.taskAssistant) return [];
-    
-    const assistant = allUsers.find(user => user.id === selectedSubdepartment.taskAssistant?.id);
-    if (!assistant) {
-      console.warn('Task assistant not found for subdepartment:', selectedSubdepartment.id);
-      return [];
-    }
-    return [assistant];
-  }, [selectedSubdepartment, allUsers])
-
+ 
+  const selectedDepartment = useMemo(() => {
+    if (!formData.department_id) return null;
+    const dept = departments.find(d => d.id.toString() === formData.department_id.toString());
+    console.log('Selected department:', dept);
+    return dept || null;
+  }, [departments, formData.department_id]);
+  
   // Get available classes from the selected subdepartment
   const availableClasses = useMemo(() => {
     if (!selectedSubdepartment) return [];
-    return selectedSubdepartment.classes || [];
+    return (selectedSubdepartment.classes || []).map(cls => ({
+      id: cls.id.toString(),
+      name: cls.name,
+      description: cls.description,
+      requirements: cls.requirements || [],
+      subClasses: cls.subClasses || []
+    }));
   }, [selectedSubdepartment])
+
+  // Get available subdepartments from the selected department
+  const availableSubdepartments = useMemo(() => {
+    if (!selectedDepartment) return [];
+    return (selectedDepartment.subdepartments || []).map(sd => ({
+      id: sd.id.toString(),
+      name: sd.name,
+      description: sd.description,
+      classes: sd.classes || [],
+      subClasses: sd.subClasses || []
+    }));
+  }, [selectedDepartment])
 
   // Get dependents for the selected principal member
   const availableDependents = useMemo(() => {
@@ -637,6 +841,21 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       ? selectedPrincipalMember.dependents
       : [];
   }, [formData.application_type, selectedPrincipalMember]);
+
+  // Get available subclasses from the selected class
+  const availableSubclasses = useMemo(() => {
+    if (!formData.class_id || !selectedSubdepartment?.classes) return [];
+    
+    const selectedClass = selectedSubdepartment.classes.find(c => c.id.toString() === formData.class_id);
+    if (!selectedClass?.subClasses) return [];
+    
+    return selectedClass.subClasses.map(subClass => ({
+      id: subClass.id.toString(),
+      name: subClass.name,
+      description: subClass.description,
+      requirements: subClass.requirements || []
+    }));
+  }, [formData.class_id, selectedSubdepartment]);
 
   const clientDetails = useMemo(() => {
     const client = formData.application_type === 'dependent' ? selectedPrincipalMember : selectedClient;
@@ -705,6 +924,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
           <div className="px-6 py-2 space-y-6 overflow-y-auto flex-1">
+            
             {/* Job Details Section */}
             <div className="space-y-4 rounded-lg border p-4 bg-white shadow-sm">
               <div className="flex items-center gap-2">
@@ -714,14 +934,9 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
               <div className="grid gap-6">
                 <div className="grid gap-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="job-description" className="text-sm font-medium text-gray-700">
-                      Job Description *
-                    </Label>
-                    <span className="text-xs text-gray-500">
-                      {formData.job_description.length}/500
-                    </span>
-                  </div>
+                  <Label htmlFor="job-description" className="text-sm font-medium text-gray-700">
+                    Job Description *
+                  </Label>
                   <Textarea
                     id="job-description"
                     value={formData.job_description}
@@ -743,7 +958,6 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                       type="date"
                       value={formData.date_initiated}
                       onChange={(e) => handleChange('date_initiated', e.target.value)}
-                      className="w-full"
                       required
                     />
                   </div>
@@ -756,22 +970,12 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                       onValueChange={(value: 'New' | 'Renewal') => handleChange('renewal_status', value)}
                       required
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger>
                         <SelectValue placeholder="Select status" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="New">
-                          <div className="flex items-center gap-2">
-                            <span className="h-2 w-2 rounded-full bg-green-500"></span>
-                            <span>New</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="Renewal">
-                          <div className="flex items-center gap-2">
-                            <span className="h-2 w-2 rounded-full bg-blue-500"></span>
-                            <span>Renewal</span>
-                          </div>
-                        </SelectItem>
+                        <SelectItem value="New">New</SelectItem>
+                        <SelectItem value="Renewal">Renewal</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -796,35 +1000,75 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                     <RadioGroupItem value="principal" id="principal" className="peer sr-only" />
                     <Label
                       htmlFor="principal"
-                      className={`flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground cursor-pointer ${formData.application_type === 'principal' ? 'border-primary bg-blue-50' : ''
-                        }`}
+                      className={`flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground cursor-pointer ${
+                        formData.application_type === 'principal' ? 'border-primary bg-blue-50' : ''
+                      }`}
                     >
                       <User className="h-6 w-6 mb-2 text-blue-600" />
-                      <span className="font-medium">Principal Member</span>
-                      <p className="text-sm text-muted-foreground text-center mt-1">
-                        For new or existing principal applicants
-                      </p>
+                      <span className="font-medium">Principal</span>
                     </Label>
                   </div>
                   <div>
                     <RadioGroupItem value="dependent" id="dependent" className="peer sr-only" />
                     <Label
                       htmlFor="dependent"
-                      className={`flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground cursor-pointer ${formData.application_type === 'dependent' ? 'border-primary bg-blue-50' : ''
-                        }`}
+                      className={`flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground cursor-pointer ${
+                        formData.application_type === 'dependent' ? 'border-primary bg-blue-50' : ''
+                      }`}
                     >
                       <Users className="h-6 w-6 mb-2 text-blue-600" />
                       <span className="font-medium">Dependent</span>
-                      <p className="text-sm text-muted-foreground text-center mt-1">
-                        For dependents of principal members
-                      </p>
                     </Label>
                   </div>
                 </RadioGroup>
+
+                {/* Individual Details */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="individual-name" className="text-sm font-medium text-gray-700">
+                      Individual Name *
+                    </Label>
+                    <Input
+                      id="individual-name"
+                      value={formData.individual_name}
+                      onChange={(e) => handleChange('individual_name', e.target.value)}
+                      placeholder="Enter individual's full name"
+                      required
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="r-number" className="text-sm font-medium text-gray-700">
+                      R Number *
+                    </Label>
+                    <Input
+                      id="r-number"
+                      value={formData.r_number}
+                      onChange={(e) => handleChange('r_number', e.target.value)}
+                      placeholder="Enter R number"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Principal Member Name for Dependents */}
+                {formData.application_type === 'dependent' && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="principal-member" className="text-sm font-medium text-gray-700">
+                      Principal Member Name *
+                    </Label>
+                    <Input
+                      id="principal-member"
+                      value={formData.principal_member_name}
+                      onChange={(e) => handleChange('principal_member_name', e.target.value)}
+                      placeholder="Enter principal member's name"
+                      required={formData.application_type === 'dependent'}
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Department Section */}
+            {/* Department & Subdepartment Section */}
             <div className="space-y-4 rounded-lg border p-4 bg-white shadow-sm">
               <div className="flex items-center gap-2">
                 <Building2 className="h-5 w-5 text-blue-600" />
@@ -838,26 +1082,51 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                   </Label>
                   <Select
                     value={formData.department_id}
-                    onValueChange={(value: string) => handleChange('department_id', value)}
+                    onValueChange={(value: string) => {
+                      const selectedDept = departments.find(d => d.id === value);
+                      if (selectedDept) {
+                        handleChange('department_id', value);
+                        handleChange('department_name', selectedDept.name);
+                        handleChange('subdepartment_id', '');
+                        handleChange('subdepartment_name', '');
+                        handleChange('class_id', '');
+                        handleChange('class_name', '');
+                        handleChange('task_manager_id', '');
+                        handleChange('task_manager_name', '');
+                        handleChange('task_assistant_id', '');
+                        handleChange('task_assistant_name', '');
+                        handleChange('officer_id', '');
+                        handleChange('officer_name', '');
+                      }
+                    }}
+                    disabled={departments.length === 0}
                     required
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select department" />
+                      <SelectValue 
+                        placeholder={
+                          departments.length === 0 
+                            ? "Loading departments..." 
+                            : "Select department"
+                        } 
+                      />
                     </SelectTrigger>
                     <SelectContent>
                       {departments.map((dept) => (
                         <SelectItem key={dept.id} value={dept.id}>
-                          <div className="flex items-center gap-2">
-                            <span className="h-2 w-2 rounded-full bg-blue-500"></span>
-                            <span>{dept.name}</span>
-                          </div>
+                          {dept.name}
+                          {dept.description && (
+                            <span className="text-xs text-muted-foreground ml-2">
+                              {dept.description}
+                            </span>
+                          )}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
 
-                <div className="grid gap-2">
+                {/* <div className="grid gap-2">
                   <Label htmlFor="subdepartment" className="text-sm font-medium text-gray-700">
                     Subdepartment *
                   </Label>
@@ -868,340 +1137,320 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                     required
                   >
                     <SelectTrigger>
-                      <SelectValue>
-                        {formData.subdepartment_id ? (
-                          <div className="flex items-center gap-2">
-                            <span className="h-2 w-2 rounded-full bg-green-500"></span>
-                            <span>{subdepartments.find(s => s.id === formData.subdepartment_id)?.name || 'Select subdepartment'}</span>
-                          </div>
-                        ) : formData.department_id ? (
-                          'Select subdepartment'
-                        ) : (
-                          'Select department first'
-                        )}
-                      </SelectValue>
+                      <SelectValue placeholder={!formData.department_id ? "Select department first" : "Select subdepartment"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {subdepartments.length > 0 ? (
-                        subdepartments.map((sub) => (
-                          <SelectItem key={sub.id} value={sub.id}>
-                            <div className="flex items-center gap-2">
-                              <span className="h-2 w-2 rounded-full bg-green-500"></span>
-                              <span>{sub.name}</span>
-                            </div>
-                          </SelectItem>
-                        ))
-                      ) : (
-                        <div className="px-3 py-2 text-sm text-muted-foreground">
-                          No subdepartments found
-                        </div>
-                      )}
+                      {subdepartments.map((sub) => (
+                        <SelectItem key={sub.id} value={sub.id}>
+                          {sub.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div> */}
+                <div className="grid gap-2">
+                  <Label htmlFor="subdepartment" className="text-sm font-medium text-gray-700">
+                  Subdepartment *
+                  </Label>
+                  <Select
+                    value={formData.subdepartment_id}
+                    onValueChange={(value: string) => {
+                      const selectedSubdept = availableSubdepartments.find(sd => sd.id === value);
+                      if (selectedSubdept) {
+                        handleChange('subdepartment_id', value);
+                        handleChange('subdepartment_name', selectedSubdept.name);
+                        handleChange('class_id', '');
+                        handleChange('class_name', '');
+                        handleChange('task_manager_id', '');
+                        handleChange('task_manager_name', '');
+                        handleChange('task_assistant_id', '');
+                        handleChange('task_assistant_name', '');
+                        handleChange('officer_id', '');
+                        handleChange('officer_name', '');
+                      }
+                    }}
+                    disabled={!formData.department_id || availableSubdepartments.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue 
+                        placeholder={
+                          !formData.department_id 
+                            ? "Select department first" 
+                            : availableSubdepartments.length === 0 
+                              ? "No subdepartments available" 
+                              : "Select subdepartment"
+                        } 
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableSubdepartments.map((subdept) => (
+                        <SelectItem key={subdept.id} value={subdept.id}>
+                          {subdept.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="class" className="text-sm font-medium text-gray-700">
+                    Class
+                  </Label>
+                  <Select
+                    value={formData.class_id}
+                    onValueChange={(value: string) => {
+                      const selectedClass = availableClasses.find(c => c.id === value);
+                      if (selectedClass) {
+                        handleChange('class_id', value);
+                        handleChange('class_name', selectedClass.name);
+                        handleChange('class_description', selectedClass.description || null);
+                        handleChange('subclass_id', '');
+                        handleChange('subclass_name', '');
+                        handleChange('subclass_description', null);
+                      }
+                    }}
+                    disabled={!formData.subdepartment_id || availableClasses.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue 
+                        placeholder={
+                          !formData.subdepartment_id 
+                            ? "Select subdepartment first" 
+                            : availableClasses.length === 0 
+                              ? "No classes available" 
+                              : "Select class"
+                        } 
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableClasses.map((cls) => (
+                        <SelectItem key={cls.id} value={cls.id}>
+                          {cls.name}
+                          {cls.description && (
+                            <span className="text-xs text-muted-foreground ml-2">
+                              {cls.description}
+                            </span>
+                          )}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="subclass" className="text-sm font-medium text-gray-700">
+                    Subclass
+                  </Label>
+                  <Select
+                    value={formData.subclass_id}
+                    onValueChange={(value: string) => {
+                      const selectedSubclass = availableSubclasses.find(sc => sc.id === value);
+                      if (selectedSubclass) {
+                        handleChange('subclass_id', value);
+                        handleChange('subclass_name', selectedSubclass.name);
+                        handleChange('subclass_description', selectedSubclass.description || null);
+                      }
+                    }}
+                    disabled={!formData.class_id || availableSubclasses.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue 
+                        placeholder={
+                          !formData.class_id 
+                            ? "Select class first" 
+                            : availableSubclasses.length === 0
+                              ? "No subclasses available"
+                              : "Select subclass"
+                        } 
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableSubclasses.map((subcls) => (
+                        <SelectItem key={subcls.id} value={subcls.id}>
+                          {subcls.name}
+                          {subcls.description && (
+                            <span className="text-xs text-muted-foreground ml-2">
+                              {subcls.description}
+                            </span>
+                          )}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
             </div>
 
-            {/* Task Assignment - Auto-populated from subdepartment */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-medium">Task Assignment</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg">
+            {/* Task Assignment Section */}
+            <div className="space-y-4 rounded-lg border p-4 bg-white shadow-sm">
+              <div className="flex items-center gap-2">
+                <Users className="h-5 w-5 text-blue-600" />
+                <h3 className="text-lg font-semibold text-gray-900">Task Assignment</h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="task-manager" className="font-medium text-sm">Task Manager *</Label>
+                  <Label htmlFor="task-manager" className="text-sm font-medium text-gray-700">
+                    Task Manager *
+                  </Label>
                   <Select
-                    value={formData.task_manager_id}
-                    onValueChange={(value: string) => handleChange('task_manager_id', value)}
+                    value={formData.task_manager_id || 'none'}
+                    onValueChange={(value: string) => {
+                      const selectedManager = availableTaskManagers.find(m => m.id === value);
+                      if (selectedManager) {
+                        handleChange('task_manager_id', value);
+                        handleChange('task_manager_name', selectedManager.name || '');
+                      } else {
+                        handleChange('task_manager_id', 'none');
+                        handleChange('task_manager_name', '');
+                      }
+                    }}
                     disabled={!formData.subdepartment_id}
                     required
                   >
-                    <SelectTrigger className="w-full">
-                      <SelectValue>
-                        {formData.task_manager_id ? (
-                          <div className="flex flex-col">
-                            <span>{allUsers.find(u => u.id === formData.task_manager_id)?.name || 'Unnamed Manager'}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {allUsers.find(u => u.id === formData.task_manager_id)?.email}
-                            </span>
-                          </div>
-                        ) : !formData.subdepartment_id ? (
-                          'Select subdepartment first'
-                        ) : availableTaskManagers.length === 0 ? (
-                          'No managers available'
-                        ) : (
-                          'Select manager'
-                        )}
-                      </SelectValue>
+                    <SelectTrigger>
+                      <SelectValue placeholder={!formData.subdepartment_id ? "Select subdepartment first" : "Select task manager"} />
                     </SelectTrigger>
                     <SelectContent>
                       {availableTaskManagers.map((manager) => (
                         <SelectItem key={manager.id} value={manager.id}>
-                          <div className="flex flex-col">
-                            <span>{manager.name || 'Unnamed Manager'}</span>
-                            {manager.email && <span className="text-xs text-muted-foreground">{manager.email}</span>}
-                          </div>
+                          {manager.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {availableTaskManagers.length === 0 && formData.subdepartment_id && (
-                    <p className="text-xs text-amber-600">
-                      No task managers assigned to this subdepartment
-                    </p>
-                  )}
                 </div>
 
                 <div className="grid gap-2">
-                  <Label htmlFor="task-assistant" className="font-medium text-sm">Task Assistant</Label>
+                  <Label htmlFor="task-assistant" className="text-sm font-medium text-gray-700">
+                    Task Assistant
+                  </Label>
                   <Select
                     value={formData.task_assistant_id || 'none'}
-                    onValueChange={(value: string) => handleChange('task_assistant_id', value === 'none' ? '' : value)}
+                    onValueChange={(value: string) => {
+                      const selectedAssistant = availableTaskAssistants.find(a => a.id === value);
+                      if (selectedAssistant) {
+                        handleChange('task_assistant_id', value);
+                        handleChange('task_assistant_name', selectedAssistant.name || '');
+                      } else {
+                        handleChange('task_assistant_id', 'none');
+                        handleChange('task_assistant_name', '');
+                      }
+                    }}
                     disabled={!formData.subdepartment_id}
                   >
-                    <SelectTrigger className="w-full">
-                      <SelectValue>
-                        {formData.task_assistant_id ? (
-                          <div className="flex flex-col">
-                            <span>{allUsers.find(u => u.id === formData.task_assistant_id)?.name || 'Unnamed Assistant'}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {allUsers.find(u => u.id === formData.task_assistant_id)?.email}
-                            </span>
-                          </div>
-                        ) : !formData.subdepartment_id ? (
-                          'Select subdepartment first'
-                        ) : availableTaskAssistants.length === 0 ? (
-                          'No assistants available'
-                        ) : (
-                          'Select assistant'
-                        )}
-                      </SelectValue>
+                    <SelectTrigger>
+                      <SelectValue placeholder={!formData.subdepartment_id ? "Select subdepartment first" : "Select task assistant"} />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
                       {availableTaskAssistants.map((assistant) => (
                         <SelectItem key={assistant.id} value={assistant.id}>
-                          <div className="flex flex-col">
-                            <span>{assistant.name || 'Unnamed Assistant'}</span>
-                            {assistant.email && <span className="text-xs text-muted-foreground">{assistant.email}</span>}
-                          </div>
+                          {assistant.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {availableTaskAssistants.length === 0 && formData.subdepartment_id && (
-                    <p className="text-xs text-amber-600">
-                      No task assistants assigned to this subdepartment
-                    </p>
-                  )}
                 </div>
 
                 <div className="grid gap-2">
-                  <Label htmlFor="officer" className="font-medium text-sm">Officer</Label>
+                  <Label htmlFor="officer" className="text-sm font-medium text-gray-700">
+                    Officer
+                  </Label>
                   <Select
                     value={formData.officer_id || 'none'}
-                    onValueChange={(value: string) => handleChange('officer_id', value === 'none' ? '' : value)}
+                    onValueChange={(value: string) => {
+                      if (value === 'none') {
+                        handleChange('officer_id', '');
+                        handleChange('officer_name', '');
+                      } else {
+                        const selectedOfficer = availableOfficers.find(o => o.id === value);
+                        if (selectedOfficer) {
+                          handleChange('officer_id', value);
+                          handleChange('officer_name', selectedOfficer.name);
+                        }
+                      }
+                    }}
+                    required
                   >
-                    <SelectTrigger className="w-full">
-                      <SelectValue>
-                        {formData.officer_id ? (
-                          <div className="flex flex-col">
-                            <span>{allUsers.find(u => u.id === formData.officer_id)?.name || 'Unnamed Officer'}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {allUsers.find(u => u.id === formData.officer_id)?.email}
-                            </span>
-                          </div>
-                        ) : (
-                          'Select officer'
-                        )}
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select officer">
+                        {formData.officer_id && formData.officer_id !== 'none' 
+                          ? availableOfficers.find(o => o.id === formData.officer_id)?.name || 'Select officer'
+                          : 'Select officer'}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      {officers
-                        .filter(officer => officer.role === 'officer' || officer.role === 'admin')
-                        .map((officer) => (
-                          <SelectItem key={officer.id} value={officer.id}>
-                            <div className="flex flex-col">
-                              <span>{officer.name || 'Unnamed Officer'}</span>
-                              {officer.email && <span className="text-xs text-muted-foreground">{officer.email}</span>}
-                            </div>
-                          </SelectItem>
-                        ))}
+                      {availableOfficers.map((officer) => (
+                        <SelectItem key={officer.id} value={officer.id}>
+                          {officer.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
             </div>
-            {/* Class Selection */}
-            <div className="grid gap-2">
-              <Label htmlFor="class">Class</Label>
-              <Select
-                value={formData.class_id}
-                onValueChange={(value: string) => handleChange('class_id', value)}
-                disabled={!formData.subdepartment_id}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={
-                    !formData.subdepartment_id ? 'Select subdepartment first' :
-                      availableClasses.length === 0 ? 'No classes available' : 'Select class'
-                  } />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableClasses.map((cls) => (
-                    <SelectItem key={cls.name} value={cls.name}>
-                      <div className="flex flex-col">
-                        <span>{cls.name}</span>
-                        {cls.description && (
-                          <span className="text-xs text-muted-foreground">{cls.description}</span>
-                        )}
-                        {cls.requirements && cls.requirements.length > 0 && (
-                          <Badge variant="outline" className="text-xs mt-1 w-fit">
-                            {cls.requirements.length} requirements
-                          </Badge>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {availableClasses.length === 0 && formData.subdepartment_id && (
-                <p className="text-xs text-amber-600">
-                  No classes configured for this subdepartment
-                </p>
-              )}
-            </div>
 
-            {/* Selected Details Summary */}
-            <div className="space-y-4 rounded-lg border p-4 bg-muted/10">
-              <h4 className="font-medium text-sm flex items-center gap-2">
-                <Info className="h-4 w-4" />
-                Selected Details
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-muted-foreground">Department:</span>
-                    <span className="text-sm">
-                      {formData.department_name || departments.find(d => d.id === formData.department_id)?.name || 'Not selected'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-muted-foreground">Subdepartment:</span>
-                    <span className="text-sm">
-                      {formData.subdepartment_name || selectedSubdepartment?.name || 'Not selected'}
-                    </span>
-                  </div>
+            {/* Additional Fields Section */}
+            <div className="space-y-4 rounded-lg border p-4 bg-white shadow-sm">
+              <h3 className="text-lg font-semibold text-gray-900">Additional Fields</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="account-used" className="text-sm font-medium text-gray-700">
+                    Account Used
+                  </Label>
+                  <Input
+                    id="account-used"
+                    value={formData.account_used}
+                    onChange={(e) => handleChange('account_used', e.target.value)}
+                    placeholder="Enter account used"
+                  />
                 </div>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-muted-foreground">Task Manager:</span>
-                    <span className="text-sm">
-                      {formData.task_manager_name || 
-                        (formData.task_manager_id 
-                          ? availableTaskManagers.find(m => m.id === formData.task_manager_id)?.name 
-                          : 'Not assigned')}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-muted-foreground">Task Assistant:</span>
-                    <span className="text-sm">
-                      {formData.task_assistant_name || 
-                        (formData.task_assistant_id 
-                          ? availableTaskAssistants.find(a => a.id === formData.task_assistant_id)?.name 
-                          : 'Not assigned')}
-                    </span>
-                  </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="applied-by" className="text-sm font-medium text-gray-700">
+                    Applied by Who
+                  </Label>
+                  <Input
+                    id="applied-by"
+                    value={formData.applied_by}
+                    onChange={(e) => handleChange('applied_by', e.target.value)}
+                    placeholder="Enter who applied"
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="batch" className="text-sm font-medium text-gray-700">
+                    Batch
+                  </Label>
+                  <Input
+                    id="batch"
+                    value={formData.batch}
+                    onChange={(e) => handleChange('batch', e.target.value)}
+                    placeholder="Enter batch number"
+                  />
                 </div>
               </div>
-              {selectedSubdepartment?.classes?.length > 0 && (
-                <div className="mt-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-muted-foreground">Selected Class:</span>
-                    <span className="text-sm font-medium">
-                      {formData.class_name || formData.class_id || 'Not selected'}
-                    </span>
-                  </div>
-                  {formData.class_id && selectedSubdepartment.classes?.find(c => c.name === formData.class_id)?.description && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {selectedSubdepartment.classes.find(c => c.name === formData.class_id)?.description}
-                    </p>
-                  )}
-                </div>
-              )}
             </div>
-
-            {/* Additional Fields */}
-            <div className="grid grid-cols-3 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="account-used">Account Used</Label>
-                <Input
-                  id="account-used"
-                  value={formData.account_used}
-                  onChange={(e) => handleChange('account_used', e.target.value)}
-                  placeholder="Enter account used"
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="applied-by">Applied by Who</Label>
-                <Input
-                  id="applied-by"
-                  value={formData.applied_by}
-                  onChange={(e) => handleChange('applied_by', e.target.value)}
-                  placeholder="Enter who applied"
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="batch">Batch</Label>
-                <Input
-                  id="batch"
-                  value={formData.batch}
-                  onChange={(e) => handleChange('batch', e.target.value)}
-                  placeholder="Enter batch number"
-                />
-              </div>
-            </div>
-
-            {/* Form Summary */}
-            {(formData.application_type && formData.subdepartment_id) && (
-              <Card className="bg-blue-50 border-blue-200">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm text-blue-800">Task Summary</CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm space-y-1">
-                  <div><strong>Application Type:</strong> {formData.application_type === 'principal' ? 'Principal Member' : 'Dependent'}</div>
-                  <div><strong>Department:</strong> {formData.department_name || departments.find(d => d.id === formData.department_id)?.name || 'Not selected'}</div>
-                  <div><strong>Subdepartment:</strong> {formData.subdepartment_name || subdepartments.find(s => s.id === formData.subdepartment_id)?.name || 'Not selected'}</div>
-                  {(formData.task_manager_id || formData.task_manager_name) && (
-                    <div><strong>Task Manager:</strong> {formData.task_manager_name || allUsers.find(u => u.id === formData.task_manager_id)?.name || 'Unknown'}</div>
-                  )}
-                  {(formData.task_assistant_id || formData.task_assistant_name) && (
-                    <div><strong>Task Assistant:</strong> {formData.task_assistant_name || allUsers.find(u => u.id === formData.task_assistant_id)?.name || 'Unknown'}</div>
-                  )}
-                  {formData.class_id && (
-                    <div><strong>Class:</strong> {formData.class_name || formData.class_id}</div>
-                  )}
-                  {formData.application_type === 'dependent' && formData.dependent_name && (
-                    <div><strong>Dependent:</strong> {formData.dependent_name}</div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={loading || !formData.job_description || !formData.department_id || !formData.subdepartment_id ||
-                  (formData.application_type === 'principal' && !formData.client_id) ||
-                  (formData.application_type === 'dependent' && (!formData.principal_member_id || !formData.dependent_name))}
-              >
-                {loading ? 'Creating...' : 'Create Task'}
-              </Button>
-            </DialogFooter>
           </div>
+
+          <DialogFooter className="p-6 pt-0 flex-shrink-0">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={loading || !formData.job_description || !formData.department_id || !formData.subdepartment_id || !formData.individual_name || !formData.r_number}
+            >
+              {loading ? 'Creating...' : 'Create Task'}
+            </Button>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

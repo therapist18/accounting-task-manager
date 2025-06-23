@@ -36,6 +36,8 @@ interface DepartmentSidebarProps {
   departments: Department[];
   activeDept: string;
   activeSubdept: string;
+  activeClass?: string;
+  activeSubclass?: string;
   onDeptClick: (deptId: string) => void;
   onSubdeptClick: (deptId: string, subdeptId: string) => void;
   onClassClick?: (deptId: string, subdeptId: string, classId: string) => void;
@@ -48,6 +50,8 @@ export function DepartmentSidebar({
   departments,
   activeDept,
   activeSubdept,
+  activeClass = '',
+  activeSubclass = '',
   onDeptClick,
   onSubdeptClick,
   onClassClick = () => {},
@@ -165,7 +169,9 @@ export function DepartmentSidebar({
                                       <button
                                         className={cn(
                                           "w-full flex items-center justify-between p-1.5 pl-3 text-sm rounded-md transition-colors",
-                                          "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                          activeClass === cls.id.toString()
+                                            ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-100"
+                                            : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                                         )}
                                         onClick={(e) => {
                                           e.stopPropagation()
@@ -196,7 +202,12 @@ export function DepartmentSidebar({
                                       {subClasses.map((subClass) => (
                                         <button
                                           key={subClass.id}
-                                          className="w-full text-left p-1.5 pl-4 text-sm rounded-md text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                          className={cn(
+                                            "w-full text-left p-1.5 pl-4 text-sm rounded-md transition-colors",
+                                            activeSubclass === subClass.id.toString()
+                                              ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-100"
+                                              : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                          )}
                                           onClick={(e) => {
                                             e.stopPropagation()
                                             onSubclassClick(

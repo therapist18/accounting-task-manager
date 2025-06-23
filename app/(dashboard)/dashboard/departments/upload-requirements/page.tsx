@@ -91,6 +91,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     isRequired: true,
     isVisible: true
   }])
+  const [bulkInput, setBulkInput] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editForm, setEditForm] = useState({
@@ -140,6 +141,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
 
   const openRequirementsDialog = (context: EditingContext) => {
     setEditingContext(context)
+    setBulkInput('')
     setNewRequirements([{
       name: '',
       description: '',
@@ -241,19 +243,44 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       requirementType = 'subclass';
     }
 
-    const { error } = await supabase
+    // First, check if the record exists
+    const { data: existingRecord, error: fetchError } = await supabase
       .from('tm_class_requirements')
-      .upsert({
-        class_id: classId,
-        type: requirementType,
-        requirements: requirements,
-        updated_at: new Date().toISOString(),
-        is_mandatory: true
-      }, {
-        onConflict: 'class_id,type'
-      });
+      .select('*')
+      .eq('class_id', classId)
+      .eq('type', requirementType)
+      .single();
 
-    if (error) throw error;
+    if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "No rows found"
+      throw fetchError;
+    }
+
+    if (existingRecord) {
+      // Update existing record
+      const { error: updateError } = await supabase
+        .from('tm_class_requirements')
+        .update({
+          requirements: requirements,
+          updated_at: new Date().toISOString()
+        })
+        .eq('class_id', classId)
+        .eq('type', requirementType);
+
+      if (updateError) throw updateError;
+    } else {
+      // Insert new record
+      const { error: insertError } = await supabase
+        .from('tm_class_requirements')
+        .insert({
+          class_id: classId,
+          type: requirementType,
+          requirements: requirements,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+
+      if (insertError) throw insertError;
+    }
   }
 
   const refreshDepartments = async () => {
@@ -394,10 +421,40 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     }
   }
 
-  const handleNewRequirementChange = (index: number, field: keyof typeof newRequirements[0], value: any) => {
+  const handleNewRequirementChange = (index: number, field: string, value: any) => {
     const updated = [...newRequirements]
     updated[index] = { ...updated[index], [field]: value }
     setNewRequirements(updated)
+  }
+
+  const handleBulkInput = (text: string) => {
+    setBulkInput(text)
+
+    if (!text.trim()) {
+      // If text is empty, reset to single empty requirement
+      setNewRequirements([{
+        name: '',
+        description: '',
+        type: 'standard',
+        isRequired: true,
+        isVisible: true
+      }])
+      return
+    }
+
+    // Split by new lines and filter out empty lines
+    const lines = text.split('\n').filter(line => line.trim() !== '')
+
+    // Map each line to a requirement object
+    const requirements = lines.map(line => ({
+      name: line.trim(),
+      description: '',
+      type: 'standard' as const,
+      isRequired: true,
+      isVisible: true
+    }))
+
+    setNewRequirements(requirements)
   }
 
   const handleAddMultipleRequirements = async () => {
@@ -428,13 +485,18 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         requirementType = 'subclass';
       }
 
-      // Get existing requirements from tm_class_requirements
-      const { data: existingReqs } = await supabase
+      // First, try to get existing requirements
+      const { data: existingReqs, error: fetchError } = await supabase
         .from('tm_class_requirements')
         .select('*')
         .eq('class_id', classId)
         .eq('type', requirementType)
         .single();
+
+      if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "No rows found"
+        throw fetchError;
+      }
+
 
       existingRequirements = existingReqs?.requirements || [];
 
@@ -455,18 +517,20 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       // Combine existing and new requirements
       const updatedRequirements = [...existingRequirements, ...newRequirementsWithIds];
 
-      // Save to tm_class_requirements following API structure
+      // Prepare the data to upsert
+      const recordData = {
+        class_id: classId,
+        type: requirementType,
+        requirements: updatedRequirements,
+        updated_at: new Date().toISOString()
+      };
+
+      // Use upsert with onConflict to handle the unique constraint
       const { error } = await supabase
         .from('tm_class_requirements')
-        .upsert({
-          class_id: classId,
-          type: requirementType,
-          requirements: updatedRequirements,
-          updated_at: new Date().toISOString(),
-          is_mandatory: true
-        }, {
-          onConflict: 'class_id,type',
-          returning: 'minimal'
+        .upsert(recordData, {
+          onConflict: 'class_id',
+          ignoreDuplicates: false
         });
 
       if (error) throw error;
@@ -496,8 +560,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const renderRequirements = (requirements: RequirementTableEntry[] | null | undefined, context: EditingContext) => {
     // Ensure requirements is always an array
     const safeRequirements = requirements || [];
-
-
 
     const handleEdit = (index: number) => {
       setEditingIndex(index)
@@ -574,26 +636,25 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     return (
       <div className="relative h-[calc(80vh-200px)] border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm">
         <Table>
-          <TableHeader className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800">
+          <TableHeader className="sticky top-0 z-10 bg-blue-600 dark:bg-blue-800">
             <TableRow>
-              <TableHead className="w-12">#</TableHead>
-              <TableHead>Requirement</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead className="w-20">Type</TableHead>
-              <TableHead className="w-20">Status</TableHead>
-              <TableHead className="w-56">Actions</TableHead>
+              <TableHead className="w-12 text-white border-r">#</TableHead>
+              <TableHead className="text-white border-r">Requirement</TableHead>
+              <TableHead className="text-white border-r">Description</TableHead>
+              {/* <TableHead className="w-20">Status</TableHead> */}
+              <TableHead className="w-56 text-white">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {safeRequirements.length > 0 ? (
               safeRequirements.map((req, idx) => (
                 <TableRow key={req.id || req.tempId || idx} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                  <TableCell className="font-medium">
+                  <TableCell className="font-medium border-r ">
                     <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs">
                       {idx + 1}
                     </span>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="border-r ">
                     {editingIndex === idx ? (
                       <Input
                         value={editForm.name}
@@ -605,7 +666,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                       <span className="font-medium">{req.name}</span>
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="border-r ">
                     {editingIndex === idx ? (
                       <Input
                         value={editForm.description}
@@ -620,24 +681,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                       </span>
                     )}
                   </TableCell>
-                  <TableCell>
-                    {editingIndex === idx ? (
-                      <select
-                        value={editForm.type}
-                        onChange={(e) => setEditForm({ ...editForm, type: e.target.value as any })}
-                        className="h-9 px-2 border rounded"
-                      >
-                        <option value="standard">Standard</option>
-                        <option value="conditional">Conditional</option>
-                        <option value="optional">Optional</option>
-                      </select>
-                    ) : (
-                      <Badge variant={req.type === 'standard' ? 'default' : req.type === 'conditional' ? 'secondary' : 'outline'}>
-                        {req.type}
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
+                  {/* <TableCell className="border-r ">
                     {editingIndex === idx ? (
                       <div className="flex flex-col space-y-1">
                         <label className="flex items-center space-x-1">
@@ -675,8 +719,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                         </div>
                       </div>
                     )}
-                  </TableCell>
-                  <TableCell>
+                  </TableCell> */}
+                  <TableCell className="border-r ">
                     <div className="flex items-center space-x-1">
                       {editingIndex === idx ? (
                         <>
@@ -775,13 +819,13 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => {
     const activeClassKey = `${deptId}-${subdeptId}`;
     const activeSubclassKey = `${activeClassKey}-${classId}`;
-    
+
     setActiveSubclass(prev => ({ ...prev, [activeSubclassKey]: subclassId }))
-    
+
     setActiveClass(prev => ({ ...prev, [activeClassKey]: classId }))
-    
+
     setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }));
-    
+
     if (activeDept !== deptId) setActiveDept(deptId)
   };
 
@@ -798,10 +842,10 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         </div>
       )
     }
- 
+
     const currentSubdeptId = activeSubdept[currentDept.id]
     const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id.toString() === currentSubdeptId)
- 
+
     if (!currentSubdept) {
       return (
         <div className="space-y-6">
@@ -821,15 +865,15 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         </div>
       )
     }
- 
+
     const activeClassKey = `${currentDept.id}-${currentSubdept.id}`
     const currentClassId = activeClass[activeClassKey]
     const currentClass = currentSubdept.classes?.find(c => c.id.toString() === currentClassId)
- 
+
     const activeSubclassKey = `${activeClassKey}-${currentClassId}`
     const currentSubclassId = activeSubclass[activeSubclassKey]
     const currentSubclass = currentClass?.subClasses?.find(sc => sc.id.toString() === currentSubclassId)
- 
+
     return (
       <div className="space-y-6">
         {/* Header */}
@@ -848,7 +892,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
             </div>
           )}
         </div>
- 
+
         {/* Content based on current selection */}
         {currentSubclass ? (
           // Show subclass requirements
@@ -938,7 +982,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       </div>
     )
   }
- 
+
   if (!departments || departments.length === 0) {
     return (
       <div className="flex items-center justify-center p-8">
@@ -950,9 +994,11 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       </div>
     )
   }
- 
+
   return (
     <div className="space-y-4">
+      <h2 className="text-2xl font-bold">GOVT Upload Processing Requirements</h2>
+      <p className="text-sm text-gray-500">Manage GOVT upload processing requirements for each departments, subdepartments, classes and subclasses</p>
       <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-hidden">
         <DepartmentSidebar
           departments={departments}
@@ -995,23 +1041,60 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           </DialogFooter>
         </DialogContent>
       </Dialog>
- 
+
       {/* Add Requirements Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <Dialog open={isDialogOpen && !!editingContext} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-4xl">
           <DialogHeader>
-            <DialogTitle>Add Multiple Requirements</DialogTitle>
+            <DialogTitle>Add Requirements</DialogTitle>
             <DialogDescription>
-              Add multiple requirements to {editingContext?.type === 'subdepartment' ? 'subdepartment' :
+              Add requirements to {editingContext?.type === 'subdepartment' ? 'subdepartment' :
                 editingContext?.type === 'class' ? 'class' : 'sub-class'}
             </DialogDescription>
           </DialogHeader>
- 
-          <div className="space-y-4 max-h-96 overflow-y-auto">
+
+          <Tabs defaultValue="single" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="single">Single Entry</TabsTrigger>
+              <TabsTrigger value="bulk">Bulk Entry</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="single" className="space-y-4 pt-4">
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => addNewRequirement()}
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Row
+                </Button>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="bulk" className="space-y-4 pt-4">
+              <div className="space-y-2">
+                <Label htmlFor="bulk-requirements">Paste multiple requirements (one per line)</Label>
+                <Textarea
+                  id="bulk-requirements"
+                  value={bulkInput}
+                  onChange={(e) => handleBulkInput(e.target.value)}
+                  placeholder={`Requirement 1\nRequirement 2\nRequirement 3`}
+                  className="min-h-[150px]"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Enter one requirement per line. Each line will become a separate requirement.
+                </p>
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          <div className="space-y-4 max-h-96 overflow-y-auto border rounded-lg p-4 mt-4">
             {newRequirements.map((req, idx) => (
               <div key={idx} className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-3">
                 <div className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-4">
+                  <div className="col-span-6">
                     <Label htmlFor={`name-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
                       Requirement Name
                     </Label>
@@ -1022,7 +1105,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                       placeholder="Enter requirement name"
                     />
                   </div>
-                  <div className="col-span-4">
+                  <div className="col-span-5">
                     <Label htmlFor={`desc-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
                       Description
                     </Label>
@@ -1032,21 +1115,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                       onChange={(e) => handleNewRequirementChange(idx, 'description', e.target.value)}
                       placeholder="Description (optional)"
                     />
-                  </div>
-                  <div className="col-span-2">
-                    <Label htmlFor={`type-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
-                      Type
-                    </Label>
-                    <select
-                      id={`type-${idx}`}
-                      value={req.type}
-                      onChange={(e) => handleNewRequirementChange(idx, 'type', e.target.value)}
-                      className="h-10 px-3 py-2 border border-input bg-background rounded-md"
-                    >
-                      <option value="standard">Standard</option>
-                      <option value="conditional">Conditional</option>
-                      <option value="optional">Optional</option>
-                    </select>
                   </div>
                   <div className="col-span-1">
                     <Button
@@ -1061,39 +1129,9 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                     </Button>
                   </div>
                 </div>
- 
-                {/* Checkboxes for properties */}
-                <div className="flex items-center space-x-4">
-                  <label className="flex items-center space-x-2">
-                    <Checkbox
-                      checked={req.isRequired}
-                      onCheckedChange={(checked) => handleNewRequirementChange(idx, 'isRequired', Boolean(checked))}
-                    />
-                    <span className="text-sm">Required</span>
-                  </label>
-                  <label className="flex items-center space-x-2">
-                    <Checkbox
-                      checked={req.isVisible}
-                      onCheckedChange={(checked) => handleNewRequirementChange(idx, 'isVisible', Boolean(checked))}
-                    />
-                    <span className="text-sm">Visible</span>
-                  </label>
-                </div>
               </div>
             ))}
           </div>
- 
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={addNewRequirement}
-            className="w-full"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Add Another Requirement
-          </Button>
- 
           <DialogFooter>
             <Button variant="outline" onClick={handleCloseDialog}>
               Cancel

@@ -93,7 +93,7 @@ export default function DepartmentsPage() {
         <TabsTrigger value="departments">Departments</TabsTrigger>
         <TabsTrigger value="stages">Stages</TabsTrigger>
         <TabsTrigger value="rates">Rates</TabsTrigger>  
-        <TabsTrigger value="requirements">GOVT Upload Processing Requirements</TabsTrigger>
+        <TabsTrigger value="requirements">GOVT Upload Req</TabsTrigger>
         <TabsTrigger value="webdata">Web Data</TabsTrigger>  
         <TabsTrigger value="guidelines">Guidelines</TabsTrigger>  
         <TabsTrigger value="payments">Payments</TabsTrigger>  

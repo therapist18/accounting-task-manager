@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -21,12 +21,13 @@ import { supabase } from "@/lib/supabase/client"
 import type { Database } from "@/lib/supabase/database.types"
 import type { Stage, Department } from "@/lib/supabase/departments"
 import { fetchDepartments } from "../departments/departments/database"
+import { DepartmentSidebar } from "../departments/main-shared-components/department-sidebar"
 
 type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
   department?: { id: string; name: string } | null
-  subdepartment?: { 
-    id: string; 
-    name: string; 
+  subdepartment?: {
+    id: string;
+    name: string;
     department_id: string;
     classes?: Array<{
       name: string;
@@ -35,6 +36,16 @@ type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
         name: string;
         description: string | null;
         is_required: boolean;
+      }>
+      subClasses?: Array<{
+        id: string;
+        name: string;
+        description?: string | null;
+        requirements?: Array<{
+          name: string;
+          description: string | null;
+          is_required: boolean;
+        }>
       }>
     }>
     stages?: Array<{
@@ -47,9 +58,9 @@ type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
   task_manager?: { id: string; full_name: string | null; email: string } | null
   task_assistant?: { id: string; full_name: string | null; email: string } | null
   officer?: { id: string; full_name: string | null; email: string } | null
-  client?: { 
-    id: string; 
-    full_name: string | null; 
+  client?: {
+    id: string;
+    full_name: string | null;
     email: string | null;
     bill_to?: {
       company_name?: string;
@@ -57,9 +68,9 @@ type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
       contact_person?: string;
     } | null;
   } | null
-  current_stage?: { 
-    id: string; 
-    name: string; 
+  current_stage?: {
+    id: string;
+    name: string;
     estimated_time: number;
     order_num: number;
   } | null
@@ -70,6 +81,7 @@ type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
   created_at?: string
   status: string
   class_name?: string | null
+  subclass_name?: string | null
   renewal_status?: string | null
   account_used?: string | null
   applied_by?: string | null
@@ -78,14 +90,17 @@ type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
 }
 
 // Table columns for stages view
+// Add to your stage columns
 const stageColumns = [
   { key: 'index', header: '#', width: '50px' },
   { key: 'website', header: 'Website', width: '120px' },
   { key: 'job_description', header: 'Job', width: '150px' },
   { key: 'job_head', header: 'Job Head', width: '120px' },
   { key: 'class', header: 'Class', width: '100px' },
+  { key: 'subclass', header: 'Subclass', width: '100px' },
   { key: 'documents', header: 'All Submitted Documents', width: '180px' },
   { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
+  { key: 'individual_name_registry', header: 'Individual Name (Registry)', width: '180px' },
   { key: 'company_name', header: 'Company Name', width: '150px' },
   { key: 'dependent_name', header: 'Dependent Name', width: '150px' },
   { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
@@ -93,8 +108,32 @@ const stageColumns = [
   { key: 'account_used', header: 'Account Used', width: '120px' },
   { key: 'applied_by', header: 'Applied by Who', width: '120px' },
   { key: 'batch', header: 'Batch', width: '100px' },
+  {
+    key: 'actions',
+    header: 'Actions',
+    width: '120px',
+    render: (value: any, task: Task) => (
+      <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => handleEditTask(task.id)}
+          className="h-8 w-8 p-0"
+        >
+          <Edit className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => handleDeleteTask(task.id)}
+          className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+    )
+  }
 ]
-
 // Table columns for requirements view
 const requirementColumns = [
   { key: 'index', header: '#', width: '50px' },
@@ -102,6 +141,7 @@ const requirementColumns = [
   { key: 'job_description', header: 'Job', width: '150px' },
   { key: 'job_head', header: 'Job Head', width: '120px' },
   { key: 'class', header: 'Class', width: '100px' },
+  { key: 'subclass', header: 'Subclass', width: '100px' },
   { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
   { key: 'company_name', header: 'Company Name', width: '150px' },
   { key: 'dependent_name', header: 'Dependent Name', width: '150px' },
@@ -124,6 +164,9 @@ export default function TasksPage() {
   const [newTaskDialogOpen, setNewTaskDialogOpen] = useState(false)
   const [selectedDepartment, setSelectedDepartment] = useState<string>('')
   const [selectedSubdepartment, setSelectedSubdepartment] = useState<string>('')
+  const [selectedClass, setSelectedClass] = useState<string>('')
+  const [selectedSubclass, setSelectedSubclass] = useState<string>('')
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     const loadData = async () => {
@@ -141,15 +184,23 @@ export default function TasksPage() {
         setDepartments(departmentsData)
         setUsers(usersData || [])
         setStages(stagesData)
-        
+
         // Set default department/subdepartment
         if (departmentsData.length > 0) {
           setSelectedDepartment(departmentsData[0].id)
           if (departmentsData[0].subdepartments.length > 0) {
             setSelectedSubdepartment(departmentsData[0].subdepartments[0].id)
+            // Set default class if available
+            if (departmentsData[0].subdepartments[0].classes?.length > 0) {
+              setSelectedClass(departmentsData[0].subdepartments[0].classes[0].name)
+              // Set default subclass if available
+              if (departmentsData[0].subdepartments[0].classes[0].subClasses?.length > 0) {
+                setSelectedSubclass(departmentsData[0].subdepartments[0].classes[0].subClasses[0].id)
+              }
+            }
           }
         }
-        
+
         setError(null)
       } catch (error) {
         console.error('Error loading data:', error)
@@ -162,11 +213,13 @@ export default function TasksPage() {
     loadData()
   }, [])
 
-  // Get filtered tasks based on selected department/subdepartment
+  // Get filtered tasks based on selected department/subdepartment/class/subclass
   const getFilteredTasks = (status?: string) => {
     let filtered = tasks.filter(task => {
       if (selectedDepartment && task.department?.id !== selectedDepartment) return false
       if (selectedSubdepartment && task.subdepartment?.id !== selectedSubdepartment) return false
+      if (selectedClass && task.class_name !== selectedClass) return false
+      if (selectedSubclass && task.subclass_name !== selectedSubclass) return false
       return true
     })
 
@@ -181,23 +234,138 @@ export default function TasksPage() {
   const getCurrentSubdepartment = (): Subdepartment | undefined => {
     const dept = departments.find(d => d.id === selectedDepartment)
     const subdept = dept?.subdepartments?.find(s => s.id === selectedSubdepartment)
-    
+
     console.log('Current Department:', dept?.name, 'Subdepartment:', subdept?.name)
     console.log('Subdepartment classes:', subdept?.classes)
-    
-    // If subdepartment has classes but no display_stages, use the first class's display_stages as fallback
-    if (subdept?.classes?.length && (!subdept.display_stages || subdept.display_stages.length === 0)) {
-      const firstClassWithStages = subdept.classes.find(c => c.display_stages?.length)
-      if (firstClassWithStages?.display_stages) {
-        return {
-          ...subdept,
-          display_stages: firstClassWithStages.display_stages
-        }
-      }
-    }
-    
+
     return subdept
   }
+
+  // Get current selection level for determining data source
+  const getCurrentSelectionLevel = () => {
+    if (selectedSubclass) return 'subclass'
+    if (selectedClass) return 'class'
+    if (selectedSubdepartment) return 'subdepartment'
+    if (selectedDepartment) return 'department'
+    return 'none'
+  }
+
+  // Get requirements based on current selection level (child data level)
+  const getCurrentRequirements = () => {
+    const subdept = getCurrentSubdepartment()
+    if (!subdept?.classes) return []
+
+    const currentClass = subdept.classes.find(c => c.name === selectedClass)
+    if (!currentClass) return []
+
+    // If subclass is selected, get requirements from subclass (child level)
+    if (selectedSubclass) {
+      const subclass = currentClass.subClasses?.find(sc => sc.id === selectedSubclass)
+      return subclass?.requirements || []
+    }
+
+    // Otherwise get requirements from class level
+    return currentClass.requirements || []
+  }
+
+  // Get stages based on department level
+  const getCurrentStages = () => {
+    const dept = departments.find(d => d.id === selectedDepartment)
+    const subdept = dept?.subdepartments?.find(s => s.id === selectedSubdepartment)
+
+    // Stages are department-dependent
+    const deptStages = dept?.stages || []
+    const subdeptStages = subdept?.stages || []
+
+    // Combine and remove duplicates by name
+    const allStages = [...deptStages, ...subdeptStages]
+    const uniqueStages = Array.from(new Map(allStages.map(stage => [stage.name, stage])).values())
+
+    // Sort stages by order_num
+    return uniqueStages.sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
+  }
+
+  // Handle sidebar navigation
+  const handleDeptClick = (deptId: string) => {
+    setSelectedDepartment(deptId)
+    const dept = departments.find(d => d.id === deptId)
+    if (dept?.subdepartments?.length > 0) {
+      setSelectedSubdepartment(dept.subdepartments[0].id)
+      // Reset class and subclass selection
+      if (dept.subdepartments[0].classes?.length > 0) {
+        setSelectedClass(dept.subdepartments[0].classes[0].name)
+        if (dept.subdepartments[0].classes[0].subClasses?.length > 0) {
+          setSelectedSubclass(dept.subdepartments[0].classes[0].subClasses[0].id)
+        } else {
+          setSelectedSubclass('')
+        }
+      } else {
+        setSelectedClass('')
+        setSelectedSubclass('')
+      }
+    }
+  }
+
+  const handleSubdeptClick = (deptId: string, subdeptId: string) => {
+    setSelectedDepartment(deptId)
+    setSelectedSubdepartment(subdeptId)
+    const dept = departments.find(d => d.id === deptId)
+    const subdept = dept?.subdepartments?.find(s => s.id === subdeptId)
+    // Reset class and subclass selection
+    if (subdept?.classes?.length > 0) {
+      setSelectedClass(subdept.classes[0].name)
+      if (subdept.classes[0].subClasses?.length > 0) {
+        setSelectedSubclass(subdept.classes[0].subClasses[0].id)
+      } else {
+        setSelectedSubclass('')
+      }
+    } else {
+      setSelectedClass('')
+      setSelectedSubclass('')
+    }
+  }
+
+  const handleClassClick = (deptId: string, subdeptId: string, classId: string) => {
+    setSelectedDepartment(deptId)
+    setSelectedSubdepartment(subdeptId)
+    setSelectedClass(classId)
+    // Reset subclass selection and set first subclass if available
+    const dept = departments.find(d => d.id === deptId)
+    const subdept = dept?.subdepartments?.find(s => s.id === subdeptId)
+    const cls = subdept?.classes?.find(c => c.name === classId)
+    if (cls?.subClasses?.length > 0) {
+      setSelectedSubclass(cls.subClasses[0].id)
+    } else {
+      setSelectedSubclass('')
+    }
+  }
+
+  const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => {
+    setSelectedDepartment(deptId)
+    setSelectedSubdepartment(subdeptId)
+    setSelectedClass(classId)
+    setSelectedSubclass(subclassId)
+  }
+
+  const handleToggleExpand = (key: string) => {
+    setExpandedItems(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }))
+  }
+
+  // Transform departments for sidebar
+  const transformedDepartments = departments.map(dept => ({
+    ...dept,
+    subdepartments: dept.subdepartments?.map(subdept => ({
+      ...subdept,
+      classes: subdept.classes?.map(cls => ({
+        ...cls,
+        id: cls.name, // Use name as id for classes
+        subClasses: cls.subClasses || []
+      }))
+    }))
+  }))
 
   // Format task data for display
   const formatTaskData = (task: Task, index: number) => {
@@ -217,30 +385,18 @@ export default function TasksPage() {
       return task.client?.full_name || 'N/A'
     }
 
-    // Get requirements for the current task
+    // Get requirements for the current task based on child data level
     const getRequirements = () => {
-      const subdept = getCurrentSubdepartment()
-      console.log('Getting requirements for subdepartment:', subdept?.name)
-      
-      if (!subdept?.classes) {
-        console.log('No classes found in subdepartment')
+      const requirements = getCurrentRequirements()
+
+      console.log('Current requirements from child level:', requirements)
+
+      if (!requirements || requirements.length === 0) {
+        console.log('No requirements found')
         return {}
       }
-      
-      // Get the class name from the task or use the selected class
-      const className = task.class_name || task.class
-      console.log('Looking for class:', className, 'in classes:', subdept.classes.map(c => c.name))
-      
-      const taskClass = subdept.classes.find(c => c.name === className)
-      
-      if (!taskClass?.requirements || taskClass.requirements.length === 0) {
-        console.log('No requirements found for class:', className)
-        return {}
-      }
-      
-      console.log('Found requirements for class:', className, ':', taskClass.requirements)
-      
-      const requirements = taskClass.requirements.reduce((acc, req) => {
+
+      const processedRequirements = requirements.reduce((acc, req) => {
         if (!req.name) return acc; // Skip if requirement has no name
         const key = req.name.replace(/\s+/g, '_').toLowerCase()
         acc[key] = {
@@ -249,9 +405,9 @@ export default function TasksPage() {
         }
         return acc
       }, {} as Record<string, { status: string; description: string }>)
-      
-      console.log('Processed requirements:', requirements)
-      return requirements
+
+      console.log('Processed requirements:', processedRequirements)
+      return processedRequirements
     }
 
     const requirements = getRequirements()
@@ -263,6 +419,7 @@ export default function TasksPage() {
       job_description: task.job_description || '',
       job_head: task.task_manager?.full_name || 'Unassigned',
       class: task.class_name || 'N/A',
+      subclass: task.subclass_name || 'N/A',
       documents: 'View Documents',
       applicant_name: task.client?.full_name || 'N/A',
       company_name: getCompanyName(),
@@ -275,47 +432,53 @@ export default function TasksPage() {
     }
   }
 
-  // Generate dynamic stage columns based on current department and subdepartment
+  // Generate dynamic stage columns based on department (stages are department-dependent)
   const generateStageColumns = () => {
-    const dept = departments.find(d => d.id === selectedDepartment)
-    const subdept = dept?.subdepartments?.find(s => s.id === selectedSubdepartment)
-    
-    // Get stages from department and subdepartment
-    const deptStages = dept?.stages || []
-    const subdeptStages = subdept?.stages || []
-    
-    // Combine and remove duplicates by name (since we might have the same stage name in both)
-    const allStages = [...deptStages, ...subdeptStages]
-    const uniqueStages = Array.from(new Map(allStages.map(stage => [stage.name, stage])).values())
-    
-    // Sort stages by order_num
-    uniqueStages.sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
+    const stages = getCurrentStages()
 
-    // Create stage columns with proper rendering
-    const dynamicStageColumns = uniqueStages.map(stage => ({
+    if (!stages || stages.length === 0) {
+      // If no stages, return base columns with a "No Stages" indicator
+      const renewalStatusIndex = stageColumns.findIndex(col => col.key === 'renewal_status')
+      const baseColumns = stageColumns.slice(0, renewalStatusIndex + 1)
+      const endColumns = stageColumns.slice(renewalStatusIndex + 1)
+
+      const noStagesColumn = {
+        key: 'no_stages',
+        header: 'Stages',
+        width: '150px',
+        render: () => (
+          <div className="text-center text-muted-foreground text-sm">
+            No stages configured
+          </div>
+        )
+      }
+
+      return [...baseColumns, noStagesColumn, ...endColumns]
+    }
+
+    // Create nested stage columns with proper rendering
+    const dynamicStageColumns = stages.map(stage => ({
       key: `stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`,
       header: stage.name,
       width: '150px',
+      parentHeader: 'Stages', // Add parent header for grouping
       render: (value: any, task: Task) => {
         const isCurrentStage = task.current_stage?.name === stage.name
-        const isCompleted = task.current_stage && 
+        const isCompleted = task.current_stage &&
           (task.current_stage.order_num || 0) > (stage.order_num || 0)
-        const isPending = !isCurrentStage && !isCompleted
-        
-        // Calculate status based on task's current stage
+
         let status = 'Pending'
         let variant: 'default' | 'secondary' | 'outline' = 'outline'
-        
+
         if (isCurrentStage) {
           status = 'In Progress'
           variant = 'default'
-          // Add timer for current stage
           return (
             <div className="flex flex-col gap-1">
               <Badge variant={variant} className="w-fit">{status}</Badge>
               {task.current_stage_started_at && (
-                <StageTimer 
-                  startTime={task.current_stage_started_at} 
+                <StageTimer
+                  startTime={task.current_stage_started_at}
                   estimatedTime={stage.estimated_time}
                 />
               )}
@@ -325,7 +488,7 @@ export default function TasksPage() {
           status = 'Completed'
           variant = 'secondary'
         }
-        
+
         return <Badge variant={variant} className="w-fit">{status}</Badge>
       }
     }))
@@ -334,31 +497,23 @@ export default function TasksPage() {
     const renewalStatusIndex = stageColumns.findIndex(col => col.key === 'renewal_status')
     const baseColumns = stageColumns.slice(0, renewalStatusIndex + 1)
     const endColumns = stageColumns.slice(renewalStatusIndex + 1)
-    
+
     return [...baseColumns, ...dynamicStageColumns, ...endColumns]
   }
 
-  // Generate dynamic requirement columns based on current subdepartment and class
-  const generateRequirementColumns = (className?: string) => {
-    console.log('Generating requirement columns for class:', className)
-    const subdept = getCurrentSubdepartment()
-    
-    if (!subdept?.classes) {
-      console.log('No classes found in subdepartment')
+  // Generate dynamic requirement columns based on child data level
+  const generateRequirementColumns = () => {
+    console.log('Generating requirement columns for current selection')
+    const requirements = getCurrentRequirements()
+
+    if (!requirements || requirements.length === 0) {
+      console.log('No requirements found for current selection')
       return requirementColumns
     }
 
-    console.log('Looking for class:', className, 'in:', subdept.classes.map(c => c.name))
-    const selectedClass = subdept.classes.find(c => c.name === className)
-    
-    if (!selectedClass?.requirements) {
-      console.log('No requirements found for class:', className)
-      return requirementColumns
-    }
+    console.log('Found requirements:', requirements)
 
-    console.log('Found requirements for class:', className, ':', selectedClass.requirements)
-    
-    const dynamicRequirementColumns = selectedClass.requirements.map(req => {
+    const dynamicRequirementColumns = requirements.map(req => {
       const column = {
         key: `req_${req.name.replace(/\s+/g, '_').toLowerCase()}`,
         header: req.name,
@@ -380,11 +535,11 @@ export default function TasksPage() {
     })
 
     console.log('Generated requirement columns:', dynamicRequirementColumns)
-    
+
     // Insert requirement columns after the base columns
     const baseColumns = requirementColumns
     const result = [...baseColumns, ...dynamicRequirementColumns]
-    
+
     console.log('Final columns:', result)
     return result
   }
@@ -407,7 +562,7 @@ export default function TasksPage() {
   const handleStageTransition = (taskId: string) => {
     const task = tasks.find(t => t.id === taskId)
     if (!task) return
-    
+
     setSelectedTask(task)
     setStageTransitionDialogOpen(true)
   }
@@ -423,91 +578,132 @@ export default function TasksPage() {
     return <Badge variant={variants[status as keyof typeof variants] || "secondary"}>{status}</Badge>
   }
 
-  const renderTaskTable = (tasks: Task[], columns: any[], showRequirements = false, selectedClass?: string) => {
-    console.log('Rendering task table. Show requirements:', showRequirements, 'Selected class:', selectedClass)
-    
-    // Get the class from the first task if not provided
-    const effectiveClass = selectedClass || (tasks.length > 0 ? tasks[0].class_name || tasks[0].class : undefined)
-    console.log('Effective class for requirements:', effectiveClass)
-    
-    const finalColumns = showRequirements ? generateRequirementColumns(effectiveClass) : generateStageColumns()
-    
-    console.log('Final columns for table:', finalColumns)
-    
+  const renderTaskTable = (tasks: Task[], columns: any[], showRequirements = false) => {
+    const finalColumns = showRequirements ? generateRequirementColumns() : generateStageColumns()
+
+    // Group columns by parent header
+    const groupedColumns = finalColumns.reduce((acc, col) => {
+      if (col.parentHeader) {
+        if (!acc[col.parentHeader]) acc[col.parentHeader] = []
+        acc[col.parentHeader].push(col)
+      } else {
+        if (!acc.ungrouped) acc.ungrouped = []
+        acc.ungrouped.push(col)
+      }
+      return acc
+    }, {} as Record<string, any[]>)
+
     return (
       <div className="rounded-md border w-full flex flex-col bg-background" style={{ maxHeight: '70vh', maxWidth: '90vw' }}>
         <div className="overflow-hidden flex-1 flex flex-col">
           <div className="overflow-auto flex-1 relative">
             <Table className="min-w-[1400px] w-full border-collapse">
               <TableHeader className="sticky top-0 z-10">
-                <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  {finalColumns.map((column) => (
-                    <TableHead 
-                      key={column.key} 
-                      className="whitespace-nowrap border-r border-border last:border-r-0 font-semibold text-foreground"
-                      style={{ 
+                {/* First row - parent headers */}
+                <TableRow className="bg-muted/30 hover:bg-muted/30">
+                  {groupedColumns.ungrouped?.map((column) => (
+                    <TableHead
+                      key={column.key}
+                      rowSpan={2}
+                      className="whitespace-nowrap border-r border-border font-semibold text-foreground text-center"
+                      style={{
                         width: column.width,
                         position: 'sticky',
                         top: 0,
                         zIndex: 10,
                         backgroundColor: 'hsl(var(--background))',
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                        height: '40px',
                         verticalAlign: 'middle'
                       }}
                     >
-                      <div className="flex items-center h-full px-2">
-                        {column.header}
-                      </div>
+                      {column.header}
                     </TableHead>
                   ))}
+                  {Object.entries(groupedColumns).map(([groupName, cols]) => {
+                    if (groupName === 'ungrouped') return null
+                    return (
+                      <TableHead
+                        key={groupName}
+                        colSpan={cols.length}
+                        className="whitespace-nowrap border-r border-border font-semibold text-foreground text-center bg-blue-50"
+                        style={{
+                          position: 'sticky',
+                          top: 0,
+                          zIndex: 10,
+                          backgroundColor: 'hsl(var(--blue-50))',
+                        }}
+                      >
+                        {groupName}
+                      </TableHead>
+                    )
+                  })}
+                </TableRow>
+
+                {/* Second row - sub headers */}
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  {Object.entries(groupedColumns).map(([groupName, cols]) => {
+                    if (groupName === 'ungrouped') return null
+                    return cols.map((column) => (
+                      <TableHead
+                        key={column.key}
+                        className="whitespace-nowrap border-r border-border font-medium text-foreground text-center"
+                        style={{
+                          width: column.width,
+                          position: 'sticky',
+                          top: '40px', // Height of first row
+                          zIndex: 10,
+                          backgroundColor: 'hsl(var(--background))',
+                        }}
+                      >
+                        {column.header}
+                      </TableHead>
+                    ))
+                  })}
                 </TableRow>
               </TableHeader>
+
               <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={finalColumns.length} className="h-24 text-center">
-                    Loading tasks...
-                  </TableCell>
-                </TableRow>
-              ) : error ? (
-                <TableRow>
-                  <TableCell colSpan={finalColumns.length} className="h-24 text-center text-destructive">
-                    {error}
-                  </TableCell>
-                </TableRow>
-              ) : tasks.length > 0 ? (
-                tasks.map((task, index) => {
-                  const formattedTask = formatTaskData(task, index)
-                  return (
-                    <TableRow 
-                      key={task.id}
-                      className="hover:bg-muted/50"
-                    >
-                      {finalColumns.map((column) => (
-                        <TableCell 
-                          key={`${task.id}-${column.key}`} 
-                          className="whitespace-nowrap border-r border-border last:border-r-0 py-2"
-                        >
-                          {column.render 
-                            ? column.render(
-                                formattedTask[column.key as keyof typeof formattedTask], 
+                {/* Rest of your table body logic remains the same */}
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={finalColumns.length} className="h-24 text-center">
+                      Loading tasks...
+                    </TableCell>
+                  </TableRow>
+                ) : error ? (
+                  <TableRow>
+                    <TableCell colSpan={finalColumns.length} className="h-24 text-center text-destructive">
+                      {error}
+                    </TableCell>
+                  </TableRow>
+                ) : tasks.length > 0 ? (
+                  tasks.map((task, index) => {
+                    const formattedTask = formatTaskData(task, index)
+                    return (
+                      <TableRow key={task.id} className="hover:bg-muted/50">
+                        {finalColumns.map((column) => (
+                          <TableCell
+                            key={`${task.id}-${column.key}`}
+                            className="whitespace-nowrap border-r border-border last:border-r-0 py-2"
+                          >
+                            {column.render
+                              ? column.render(
+                                formattedTask[column.key as keyof typeof formattedTask],
                                 formattedTask,
                                 index
                               )
-                            : (formattedTask[column.key as keyof typeof formattedTask] || '-')}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  )
-                })
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={finalColumns.length} className="h-24 text-center">
-                    No tasks found.
-                  </TableCell>
-                </TableRow>
-              )}
+                              : (formattedTask[column.key as keyof typeof formattedTask] || '-')}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    )
+                  })
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={finalColumns.length} className="h-24 text-center">
+                      No tasks found.
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </div>
@@ -515,6 +711,61 @@ export default function TasksPage() {
       </div>
     )
   }
+  // Get current selection details for display
+  const getCurrentSelectionDetails = () => {
+    const dept = departments.find(d => d.id === selectedDepartment)
+    const subdept = dept?.subdepartments?.find(s => s.id === selectedSubdepartment)
+    const cls = subdept?.classes?.find(c => c.name === selectedClass)
+    const subcls = cls?.subClasses?.find(sc => sc.id === selectedSubclass)
+
+    return { dept, subdept, cls, subcls }
+  }
+
+  // Get display title based on current selection
+  const getDisplayTitle = () => {
+    const { dept, subdept, cls, subcls } = getCurrentSelectionDetails()
+    const selectionLevel = getCurrentSelectionLevel()
+
+    switch (selectionLevel) {
+      case 'subclass':
+        return `${subcls?.name} (${cls?.name} - ${subdept?.name})`
+      case 'class':
+        return `${cls?.name} (${subdept?.name})`
+      case 'subdepartment':
+        return subdept?.name
+      case 'department':
+        return dept?.name
+      default:
+        return 'Task Management'
+    }
+  }
+  // Add these functions to your main tasks component
+  const handleEditTask = useCallback((taskId: string) => {
+    const task = tasks.find(t => t.id === taskId)
+    if (task) {
+      // Open edit dialog or navigate to edit page
+      console.log('Edit task:', task)
+      // You can implement an edit dialog similar to the new task dialog
+    }
+  }, [tasks])
+
+  const handleDeleteTask = useCallback(async (taskId: string) => {
+    if (window.confirm('Are you sure you want to delete this task?')) {
+      try {
+        const { error } = await supabase
+          .from('tm_tasks')
+          .delete()
+          .eq('id', taskId)
+
+        if (error) throw error
+
+        // Remove from local state
+        setTasks(prev => prev.filter(t => t.id !== taskId))
+      } catch (error) {
+        console.error('Error deleting task:', error)
+      }
+    }
+  }, [])
 
   if (loading) {
     return (
@@ -529,387 +780,387 @@ export default function TasksPage() {
     )
   }
 
+  const { dept, subdept, cls, subcls } = getCurrentSelectionDetails()
+  const selectionLevel = getCurrentSelectionLevel()
+
   return (
-    <div className="flex-1 space-y-4 p-2">
-      <div className="flex items-center justify-between space-y-2">
-        <h2 className="text-3xl font-bold tracking-tight">Task Management</h2>
-        <div className="flex items-center space-x-2">
-          <Button 
-            onClick={() => setNewTaskDialogOpen(true)}
-            className="flex items-center gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            New Task
-          </Button>
-        </div>
-      </div>
-
-      <Tabs defaultValue={departments[0]?.id || 'default'} className="space-y-4">
-        <TabsList>
-          {departments.map((dept) => (
-            <TabsTrigger 
-              key={dept.id} 
-              value={dept.id}
-              onClick={() => {
-                setSelectedDepartment(dept.id)
-                if (dept.subdepartments.length > 0) {
-                  setSelectedSubdepartment(dept.subdepartments[0].id)
-                }
-              }}
-            >
-              {dept.name}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        {departments.map((dept) => (
-          <TabsContent key={dept.id} value={dept.id} className="space-y-4">
-            <Tabs 
-              defaultValue={dept.subdepartments[0]?.id || 'default'} 
-              className="space-y-4"
-              onValueChange={(value) => setSelectedSubdepartment(value)}
-            >
-              <TabsList>
-                {dept.subdepartments.map((subdept) => (
-                  <TabsTrigger 
-                    key={subdept.id} 
-                    value={subdept.id}
-                  >
-                    {subdept.name}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-
-              {dept.subdepartments.map((subdept) => (
-                <TabsContent key={subdept.id} value={subdept.id} className="space-y-4">
-                  {/* Show classes tabs if they exist, otherwise show direct WIP/Completed tabs */}
-                  {subdept.classes && subdept.classes.length > 0 ? (
-                    <Tabs 
-                      defaultValue={subdept.classes[0]?.name || ''} 
-                      className="space-y-4"
-                    >
-                      <TabsList>
-                        {subdept.classes.map((cls) => (
-                          <TabsTrigger key={cls.name} value={cls.name}>
-                            {cls.name}
-                          </TabsTrigger>
-                        ))}
-                      </TabsList>
-
-                      {subdept.classes.map((cls) => (
-                        <TabsContent key={cls.name} value={cls.name} className="space-y-4">
-                          <Tabs defaultValue="work-in-progress" className="space-y-4">
-                            <TabsList>
-                              <TabsTrigger value="work-in-progress">Work in Progress</TabsTrigger>
-                              <TabsTrigger value="completed">Completed</TabsTrigger>
-                            </TabsList>
-
-                            <TabsContent value="work-in-progress" className="space-y-4">
-                              <Tabs defaultValue="stages" className="space-y-4">
-                                <TabsList>
-                                  <TabsTrigger value="stages">
-                                    <FileText className="h-4 w-4 mr-2" />
-                                    Stages
-                                  </TabsTrigger>
-                                  <TabsTrigger value="upload-requirements">
-                                    <Upload className="h-4 w-4 mr-2" />
-                                    Upload Requirements
-                                  </TabsTrigger>
-                                  <TabsTrigger value="webdata">
-                                    <Upload className="h-4 w-4 mr-2" />
-                                    Web Data
-                                  </TabsTrigger>
-                                </TabsList>
-
-                                <TabsContent value="stages" className="space-y-4">
-                                  <Card>
-                                    <CardHeader>
-                                      <CardTitle>Stages Progress - {subdept.name} - {cls.name}</CardTitle>
-                                      <CardDescription>
-                                        Track tasks through various stages of completion
-                                      </CardDescription>
-                                    </CardHeader>
-                                    <CardContent className="p-4">
-                                      {renderTaskTable(
-                                        tasks.filter(task => 
-                                          task.status === 'in_progress' && 
-                                          task.class_name === cls.name &&
-                                          task.subdepartment_id === subdept.id
-                                        ), 
-                                        stageColumns, 
-                                        false
-                                      )}
-                                    </CardContent>
-                                  </Card>
-                                </TabsContent>
-
-                                <TabsContent value="upload-requirements" className="space-y-4">
-                                  <Card>
-                                    <CardHeader>
-                                      <CardTitle>Upload Requirements - {cls.name}</CardTitle>
-                                      <CardDescription>
-                                        {cls.description || `Manage document requirements for ${cls.name}`}
-                                      </CardDescription>
-                                    </CardHeader>
-                                    <CardContent className="p-4">
-                                      {renderTaskTable(
-                                        tasks.filter(task => 
-                                          task.status === 'in_progress' && 
-                                          task.class_name === cls.name &&
-                                          task.subdepartment_id === subdept.id
-                                        ), 
-                                        requirementColumns, 
-                                        true, 
-                                        cls.name
-                                      )}
-                                    </CardContent>
-                                  </Card>
-                                </TabsContent>
-
-                                <TabsContent value="webdata" className="space-y-4">
-                                  <Card>
-                                    <CardHeader>
-                                      <CardTitle>Web Data - {cls.name}</CardTitle>
-                                      <CardDescription>
-                                        {cls.description || `Web data for ${cls.name}`}
-                                      </CardDescription>
-                                    </CardHeader>
-                                    <CardContent className="p-4">
-                                      {renderTaskTable(
-                                        tasks.filter(task => 
-                                          task.status === 'in_progress' && 
-                                          task.class_name === cls.name &&
-                                          task.subdepartment_id === subdept.id
-                                        ), 
-                                        requirementColumns, 
-                                        true, 
-                                        cls.name
-                                      )}
-                                    </CardContent>
-                                  </Card>
-                                </TabsContent>
-                              </Tabs>
-                            </TabsContent>
-
-                            <TabsContent value="completed" className="space-y-4">
-                              <Card>
-                                <CardHeader>
-                                  <CardTitle>Completed Tasks - {subdept.name} - {cls.name}</CardTitle>
-                                  <CardDescription>Successfully completed tasks with performance metrics</CardDescription>
-                                </CardHeader>
-                                <CardContent className="p-4">
-                                  {renderTaskTable(
-                                    tasks.filter(task => 
-                                      task.status === 'completed' && 
-                                      task.class_name === cls.name &&
-                                      task.subdepartment_id === subdept.id
-                                    ), 
-                                    stageColumns, 
-                                    false
-                                  )}
-                                </CardContent>
-                              </Card>
-                            </TabsContent>
-                          </Tabs>
-                        </TabsContent>
-                      ))}
-                    </Tabs>
-                  ) : (
-                    <Tabs defaultValue="work-in-progress" className="space-y-4">
-                      <TabsList>
-                        <TabsTrigger value="work-in-progress">Work in Progress</TabsTrigger>
-                        <TabsTrigger value="completed">Completed</TabsTrigger>
-                      </TabsList>
-
-                      <TabsContent value="work-in-progress" className="space-y-4">
-                        <Tabs defaultValue="stages" className="space-y-4">
-                          <TabsList>
-                            <TabsTrigger value="stages">
-                              <FileText className="h-4 w-4 mr-2" />
-                              Stages
-                            </TabsTrigger>
-                            <TabsTrigger value="upload-requirements">
-                              <Upload className="h-4 w-4 mr-2" />
-                              Upload Requirements
-                            </TabsTrigger>
-                            <TabsTrigger value="webdata">
-                              <Upload className="h-4 w-4 mr-2" />
-                              Web Data
-                            </TabsTrigger>
-                          </TabsList>
-
-                          <TabsContent value="stages" className="space-y-4">
-                            <Card>
-                              <CardHeader>
-                                <CardTitle>Stages Progress - {subdept.name}</CardTitle>
-                                <CardDescription>
-                                  Track tasks through various stages of completion
-                                </CardDescription>
-                              </CardHeader>
-                              <CardContent className="p-4">
-                                {renderTaskTable(
-                                  tasks.filter(task => 
-                                    task.status === 'in_progress' &&
-                                    task.subdepartment_id === subdept.id
-                                  ), 
-                                  stageColumns, 
-                                  false
-                                )}
-                              </CardContent>
-                            </Card>
-                          </TabsContent>
-
-                          <TabsContent value="upload-requirements" className="space-y-4">
-                            <Card>
-                              <CardHeader>
-                                <CardTitle>Upload Requirements</CardTitle>
-                                <CardDescription>
-                                  Manage document requirements for this subdepartment
-                                </CardDescription>
-                              </CardHeader>
-                              <CardContent className="p-4">
-                                {renderTaskTable(
-                                  tasks.filter(task => 
-                                    task.status === 'in_progress' &&
-                                    task.subdepartment_id === subdept.id
-                                  ), 
-                                  requirementColumns, 
-                                  true
-                                )}
-                              </CardContent>
-                            </Card>
-                          </TabsContent>
-
-                          <TabsContent value="webdata" className="space-y-4">
-                            <Card>
-                              <CardHeader>
-                                <CardTitle>Web Data</CardTitle>
-                                <CardDescription>
-                                  Web data for this subdepartment
-                                </CardDescription>
-                              </CardHeader>
-                              <CardContent className="p-4">
-                                {renderTaskTable(
-                                  tasks.filter(task => 
-                                    task.status === 'in_progress' &&
-                                    task.subdepartment_id === subdept.id
-                                  ), 
-                                  requirementColumns, 
-                                  true
-                                )}
-                              </CardContent>
-                            </Card>
-                          </TabsContent>
-                        </Tabs>
-                      </TabsContent>
-
-                      <TabsContent value="completed" className="space-y-4">
-                        <Card>
-                          <CardHeader>
-                            <CardTitle>Completed Tasks - {subdept.name}</CardTitle>
-                            <CardDescription>Successfully completed tasks with performance metrics</CardDescription>
-                          </CardHeader>
-                          <CardContent className="p-4">
-                            {renderTaskTable(
-                              tasks.filter(task => 
-                                task.status === 'completed' &&
-                                task.subdepartment_id === subdept.id
-                              ), 
-                              stageColumns, 
-                              false
-                            )}
-                          </CardContent>
-                        </Card>
-                      </TabsContent>
-                    </Tabs>
-                  )}
-                </TabsContent>
-              ))}
-            </Tabs>
-          </TabsContent>
-        ))}
-      </Tabs>
-      {/* Dialogs */}
-      <NewTaskDialog
-        open={newTaskDialogOpen}
-        onOpenChange={setNewTaskDialogOpen}
-        onCreate={(newTask) => {
-          setTasks(prev => [newTask, ...prev])
-        }}
+    <div className="flex h-screen">
+      {/* Sidebar */}
+      <DepartmentSidebar
+        departments={transformedDepartments}
+        activeDept={selectedDepartment}
+        activeSubdept={selectedSubdepartment}
+        onDeptClick={handleDeptClick}
+        onSubdeptClick={handleSubdeptClick}
+        onClassClick={handleClassClick}
+        onSubclassClick={handleSubclassClick}
+        onToggleExpand={handleToggleExpand}
+        expandedItems={expandedItems}
       />
 
-      {selectedTask && (
-        <TaskAssignmentDialog
-          open={assignmentDialogOpen}
-          onOpenChange={setAssignmentDialogOpen}
-          task={selectedTask}
-          users={users.map(u => ({
-            id: u.id,
-            username: u.name || u.email,
-            email: u.email
-          }))}
-          onAssign={async (assignments) => {
-            try {
-              const updatedTask = await updateTaskAssignment(selectedTask.id, {
-                taskManager: assignments.taskManager,
-                taskAssistant: assignments.taskAssistant
-              })
-              
-              setTasks(tasks.map(t => 
-                t.id === selectedTask.id 
-                  ? { ...t, ...updatedTask } 
-                  : t
-              ))
-              
-              setAssignmentDialogOpen(false)
-            } catch (err) {
-              console.error("Error updating task assignment:", err)
-            }
-          }}
-        />
-      )}
+      {/* Main Content */}
+      <div className="flex-1 overflow-hidden">
+        <div className="flex-1 space-y-4 p-4 h-full overflow-auto">
+          <div className="flex items-center justify-between space-y-2">
+            <div>
+              <h2 className="text-3xl font-bold tracking-tight">Task Management</h2>
+              <p className="text-muted-foreground">
+                {dept?.name} {subdept && `> ${subdept.name}`} {cls && `> ${cls.name}`} {subcls && `> ${subcls.name}`}
+              </p>
+              <div className="mt-1">
+                <Badge variant="outline" className="text-xs">
+                  Current Level: {selectionLevel.charAt(0).toUpperCase() + selectionLevel.slice(1)}
+                </Badge>
+                <Badge variant="outline" className="text-xs ml-2">
+                  Stages: Department-based | Requirements: {selectionLevel === 'subclass' ? 'Subclass-based' : 'Class-based'}
+                </Badge>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Button
+                onClick={() => setNewTaskDialogOpen(true)}
+                className="flex items-center gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                New Task
+              </Button>
+            </div>
+          </div>
 
-      {selectedTask && (
-        <StageTransitionDialog
-          open={stageTransitionDialogOpen}
-          onOpenChange={setStageTransitionDialogOpen}
-          currentStage={{
-            id: selectedTask.current_stage?.id?.toString() || '',
-            name: selectedTask.current_stage?.name || 'Not Started',
-            estimatedDuration: selectedTask.current_stage?.estimated_time || 0,
-            actualDuration: selectedTask.current_stage_started_at
-              ? (new Date().getTime() - new Date(selectedTask.current_stage_started_at).getTime()) / (1000 * 60)
-              : 0
-          }}
-          stages={stages}
-          currentStageId={selectedTask.current_stage?.id?.toString()}
-          onTransition={async (data) => {
-            try {
-              const { data: updatedTask, error } = await supabase
-                .from('tm_tasks')
-                .update({
-                  current_stage_id: data.nextStageId ? parseInt(data.nextStageId) : null,
-                  current_stage_started_at: data.nextStageId ? new Date().toISOString() : null,
-                  status: data.nextStageId ? 'in_progress' : 'completed',
-                  updated_at: new Date().toISOString()
-                })
-                .eq('id', selectedTask.id)
-                .select('*')
-                .single()
+          {/* Content based on selection */}
+          {(selectedClass || selectedSubclass) ? (
+            // Show class/subclass-specific content with tabs
+            <Tabs defaultValue="work-in-progress" className="space-y-4">
+              <TabsList>
+                <TabsTrigger value="work-in-progress">Work in Progress</TabsTrigger>
+                <TabsTrigger value="completed">Completed</TabsTrigger>
+              </TabsList>
 
-              if (error) throw error
+              <TabsContent value="work-in-progress" className="space-y-4">
+                <Tabs defaultValue="stages" className="space-y-4">
+                  <TabsList>
+                    <TabsTrigger value="stages">
+                      <FileText className="h-4 w-4 mr-2" />
+                      Stages (Department-based)
+                    </TabsTrigger>
+                    <TabsTrigger value="upload-requirements">
+                      <Upload className="h-4 w-4 mr-2" />
+                      Upload Requirements ({selectionLevel === 'subclass' ? 'Subclass' : 'Class'}-based)
+                    </TabsTrigger>
+                    <TabsTrigger value="webdata">
+                      <Upload className="h-4 w-4 mr-2" />
+                      Web Data
+                    </TabsTrigger>
+                  </TabsList>
 
-              setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t))
-              
-              const [tasksData] = await Promise.all([getTasks()])
-              setTasks(tasksData)
-              setStageTransitionDialogOpen(false)
-            } catch (err) {
-              console.error("Error updating stage:", err)
-            }
-          }}
-        />
-      )}
+                  <TabsContent value="stages" className="space-y-4">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Stages Progress - {getDisplayTitle()}</CardTitle>
+                        <CardDescription>
+                          Track tasks through various stages of completion (Department-level stages)
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="p-4">
+                        {renderTaskTable(
+                          getFilteredTasks('in_progress'),
+                          stageColumns,
+                          false
+                        )}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+
+                  <TabsContent value="upload-requirements" className="space-y-4">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Upload Requirements - {getDisplayTitle()}</CardTitle>
+                        <CardDescription>
+                          {selectionLevel === 'subclass'
+                            ? `Manage document requirements for ${subcls?.name} (Subclass-level requirements)`
+                            : `Manage document requirements for ${cls?.name} (Class-level requirements)`
+                          }
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="p-4">
+                        {renderTaskTable(
+                          getFilteredTasks('in_progress'),
+                          requirementColumns,
+                          true
+                        )}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+
+                  <TabsContent value="webdata" className="space-y-4">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Web Data - {getDisplayTitle()}</CardTitle>
+                        <CardDescription>
+                          Web data for {getDisplayTitle()}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="p-4">
+                        {renderTaskTable(
+                          getFilteredTasks('in_progress'),
+                          requirementColumns,
+                          true
+                        )}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+                </Tabs>
+              </TabsContent>
+
+              <TabsContent value="completed" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Completed Tasks - {getDisplayTitle()}</CardTitle>
+                    <CardDescription>Successfully completed tasks with performance metrics</CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-4">
+                    {renderTaskTable(
+                      getFilteredTasks('completed'),
+                      stageColumns,
+                      false
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          ) : selectedSubdepartment ? (
+            // Show subdepartment-level content
+            <Tabs defaultValue="work-in-progress" className="space-y-4">
+              <TabsList>
+                <TabsTrigger value="work-in-progress">Work in Progress</TabsTrigger>
+                <TabsTrigger value="completed">Completed</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="work-in-progress" className="space-y-4">
+                <Tabs defaultValue="stages" className="space-y-4">
+                  <TabsList>
+                    <TabsTrigger value="stages">
+                      <FileText className="h-4 w-4 mr-2" />
+                      Stages (Department-based)
+                    </TabsTrigger>
+                    <TabsTrigger value="upload-requirements">
+                      <Upload className="h-4 w-4 mr-2" />
+                      Upload Requirements (Class-based)
+                    </TabsTrigger>
+                    <TabsTrigger value="webdata">
+                      <Upload className="h-4 w-4 mr-2" />
+                      Web Data
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="stages" className="space-y-4">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Stages Progress - {subdept?.name}</CardTitle>
+                        <CardDescription>
+                          Track tasks through various stages of completion (Department-level stages)
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="p-4">
+                        {renderTaskTable(
+                          getFilteredTasks('in_progress'),
+                          stageColumns,
+                          false
+                        )}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+
+                  <TabsContent value="upload-requirements" className="space-y-4">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Upload Requirements - {subdept?.name}</CardTitle>
+                        <CardDescription>
+                          Manage document requirements for this subdepartment (Class/Subclass-level requirements)
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="p-4">
+                        {renderTaskTable(
+                          getFilteredTasks('in_progress'),
+                          requirementColumns,
+                          true
+                        )}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+
+                  <TabsContent value="webdata" className="space-y-4">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Web Data - {subdept?.name}</CardTitle>
+                        <CardDescription>
+                          Web data for this subdepartment
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="p-4">
+                        {renderTaskTable(
+                          getFilteredTasks('in_progress'),
+                          requirementColumns,
+                          true
+                        )}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+                </Tabs>
+              </TabsContent>
+
+              <TabsContent value="completed" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Completed Tasks - {subdept?.name}</CardTitle>
+                    <CardDescription>Successfully completed tasks with performance metrics</CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-4">
+                    {renderTaskTable(
+                      getFilteredTasks('completed'),
+                      stageColumns,
+                      false
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          ) : selectedDepartment ? (
+            // Show department-level content
+            <Card>
+              <CardHeader>
+                <CardTitle>Department Overview - {dept?.name}</CardTitle>
+                <CardDescription>
+                  Select a subdepartment from the sidebar to view tasks
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-4">
+                <div className="text-center py-8">
+                  <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <div className="space-y-2">
+                    <p className="text-muted-foreground">
+                      Choose a subdepartment from the sidebar to view and manage tasks
+                    </p>
+                    <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md inline-block">
+                      <div className="font-medium mb-1">Data Dependencies:</div>
+                      <div>• Stages: Based on Department level</div>
+                      <div>• Requirements: Based on Class/Subclass level</div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            // Show default content when nothing is selected
+            <Card>
+              <CardHeader>
+                <CardTitle>Task Management Dashboard</CardTitle>
+                <CardDescription>
+                  Select a department from the sidebar to get started
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-4">
+                <div className="text-center py-8">
+                  <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <div className="space-y-2">
+                    <p className="text-muted-foreground">
+                      Choose a department from the sidebar to view and manage tasks
+                    </p>
+                    <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md inline-block">
+                      <div className="font-medium mb-1">System Overview:</div>
+                      <div>• Departments → Subdepartments → Classes → Subclasses</div>
+                      <div>• Stages: Department-dependent</div>
+                      <div>• Requirements: Class/Subclass-dependent</div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Dialogs */}
+          <NewTaskDialog
+            open={newTaskDialogOpen}
+            onOpenChange={setNewTaskDialogOpen}
+            onCreate={(newTask) => {
+              setTasks(prev => [newTask, ...prev])
+            }}
+          />
+
+          {selectedTask && (
+            <TaskAssignmentDialog
+              open={assignmentDialogOpen}
+              onOpenChange={setAssignmentDialogOpen}
+              task={selectedTask}
+              users={users.map(u => ({
+                id: u.id,
+                username: u.name || u.email,
+                email: u.email
+              }))}
+              onAssign={async (assignments) => {
+                try {
+                  const updatedTask = await updateTaskAssignment(selectedTask.id, {
+                    taskManager: assignments.taskManager,
+                    taskAssistant: assignments.taskAssistant
+                  })
+
+                  setTasks(tasks.map(t =>
+                    t.id === selectedTask.id
+                      ? { ...t, ...updatedTask }
+                      : t
+                  ))
+
+                  setAssignmentDialogOpen(false)
+                } catch (err) {
+                  console.error("Error updating task assignment:", err)
+                }
+              }}
+            />
+          )}
+
+          {selectedTask && (
+            <StageTransitionDialog
+              open={stageTransitionDialogOpen}
+              onOpenChange={setStageTransitionDialogOpen}
+              currentStage={{
+                id: selectedTask.current_stage?.id?.toString() || '',
+                name: selectedTask.current_stage?.name || 'Not Started',
+                estimatedDuration: selectedTask.current_stage?.estimated_time || 0,
+                actualDuration: selectedTask.current_stage_started_at
+                  ? (new Date().getTime() - new Date(selectedTask.current_stage_started_at).getTime()) / (1000 * 60)
+                  : 0
+              }}
+              stages={stages}
+              currentStageId={selectedTask.current_stage?.id?.toString()}
+              onTransition={async (data) => {
+                try {
+                  const { data: updatedTask, error } = await supabase
+                    .from('tm_tasks')
+                    .update({
+                      current_stage_id: data.nextStageId ? parseInt(data.nextStageId) : null,
+                      current_stage_started_at: data.nextStageId ? new Date().toISOString() : null,
+                      status: data.nextStageId ? 'in_progress' : 'completed',
+                      updated_at: new Date().toISOString()
+                    })
+                    .eq('id', selectedTask.id)
+                    .select('*')
+                    .single()
+
+                  if (error) throw error
+
+                  setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t))
+
+                  const [tasksData] = await Promise.all([getTasks()])
+                  setTasks(tasksData)
+                  setStageTransitionDialogOpen(false)
+                } catch (err) {
+                  console.error("Error updating stage:", err)
+                }
+              }}
+            />
+          )}
+        </div>
+      </div>
     </div>
   )
 }

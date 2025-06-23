@@ -20,6 +20,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Checkbox } from "@/components/ui/checkbox"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
+import { DepartmentSidebar } from "../main-shared-components/department-sidebar"
 import type { Department } from "./database"
 
 interface DepartmentGuidelinesProps {
@@ -32,22 +33,6 @@ interface EditingContext {
   subdepartmentId: string
   classId?: string
   subclassId?: string
-}
-
-// Guidelines interface based on similar API structure to requirements
-interface ApiGuideline {
-  id?: string
-  title: string
-  content: string
-  type: 'general' | 'process' | 'warning' | 'tip'
-  order: number
-  isVisible: boolean
-  isImportant: boolean
-  category?: string
-}
-
-interface GuidelineTableEntry extends ApiGuideline {
-  tempId?: string
 }
 
 // Function to generate sequential guideline IDs
@@ -72,6 +57,39 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
   const [activeClass, setActiveClass] = useState<Record<string, string>>({})
   const [activeSubclass, setActiveSubclass] = useState<Record<string, string>>({})
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
+
+  // Handlers for sidebar interactions
+  const handleDeptClick = (deptId: string) => {
+    setActiveDept(deptId)
+    // Reset subdepartment selection when changing department
+    setActiveSubdept(prev => ({ ...prev, [deptId]: '' }))
+  }
+
+  const handleSubdeptClick = (deptId: string, subdeptId: string) => {
+    setActiveDept(deptId)
+    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }))
+  }
+
+  const handleClassClick = (deptId: string, subdeptId: string, classId: string) => {
+    const subdeptKey = `${deptId}-${subdeptId}`
+    setActiveDept(deptId)
+    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }))
+    setActiveClass(prev => ({ ...prev, [subdeptKey]: classId }))
+  }
+
+  const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => {
+    const subdeptKey = `${deptId}-${subdeptId}`
+    const classKey = `${subdeptKey}-${classId}`
+    setActiveDept(deptId)
+    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }))
+    setActiveClass(prev => ({ ...prev, [subdeptKey]: classId }))
+    setActiveSubclass(prev => ({ ...prev, [classKey]: subclassId }))
+  }
+
+  // Toggle expanded state for collapsible items
+  const handleToggleExpand = (key: string) => {
+    setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))
+  }
 
   // Dialog states
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -835,238 +853,30 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
   )
 }
 
-// Sidebar and main content rendering (similar to requirements component)
+// Main content area with sidebar and guidelines
 const renderSidebarView = () => {
   return (
     <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-hidden">
-      {/* Enhanced Sidebar */}
-      <div className="w-80 border-r bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900">
-        <ScrollArea className="h-full">
-          <div className="p-4 space-y-2">
-            <div className="flex items-center space-x-2 mb-4">
-              <BookOpen className="h-5 w-5 text-purple-600" />
-              <h3 className="font-semibold text-gray-900 dark:text-gray-100">Guidelines Structure</h3>
-            </div>
-
-            {departments.map((dept, deptIndex) => {
-              const deptNumber = deptIndex + 1
-              const deptKey = `dept-${dept.id}`
-              const isDeptExpanded = expandedItems[deptKey] ?? true
-
-              return (
-                <div key={dept.id} className="space-y-1">
-                  <Collapsible open={isDeptExpanded} onOpenChange={() => toggleExpanded(deptKey)}>
-                    <CollapsibleTrigger asChild>
-                      <button
-                        className={cn(
-                          "w-full flex items-center justify-between p-3 text-left rounded-lg transition-all duration-200",
-                          activeDept === dept.id
-                            ? "bg-purple-100 dark:bg-purple-900/30 text-purple-900 dark:text-purple-100 shadow-sm"
-                            : "hover:bg-white dark:hover:bg-gray-800 hover:shadow-sm"
-                        )}
-                        onClick={() => setActiveDept(dept.id)}
-                      >
-                        <div className="flex items-center space-x-3">
-                          <div className="flex items-center space-x-2">
-                            {isDeptExpanded ? (
-                              <ChevronDown className="h-4 w-4 text-gray-500" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4 text-gray-500" />
-                            )}
-                            <span className="font-mono text-xs text-gray-500 bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">
-                              {deptNumber}
-                            </span>
-                          </div>
-                          <div>
-                            <div className="font-medium text-sm">{dept.name}</div>
-                            {dept.description && (
-                              <div className="text-xs text-gray-500 truncate max-w-[180px]">
-                                {dept.description}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        <Badge variant="secondary" className="text-xs">
-                          {dept.tm_subdepartments?.length || 0}
-                        </Badge>
-                      </button>
-                    </CollapsibleTrigger>
-
-                    <CollapsibleContent className="ml-4 mt-2 space-y-1">
-                      {dept.tm_subdepartments?.map((subdept, subdeptIndex) => {
-                        const subdeptNumber = `${deptNumber}.${subdeptIndex + 1}`
-                        const subdeptKey = `subdept-${subdept.id}`
-                        const isSubdeptExpanded = expandedItems[subdeptKey] ?? false
-                        const isActiveSubdept = activeSubdept[dept.id] === subdept.id.toString()
-
-                        return (
-                          <div key={subdept.id} className="space-y-1">
-                            <Collapsible open={isSubdeptExpanded} onOpenChange={() => toggleExpanded(subdeptKey)}>
-                              <CollapsibleTrigger asChild>
-                                <button
-                                  className={cn(
-                                    "w-full flex items-center justify-between p-2 text-left rounded-md transition-colors",
-                                    isActiveSubdept
-                                      ? "bg-green-100 dark:bg-green-900/30 text-green-900 dark:text-green-100"
-                                      : "hover:bg-gray-100 dark:hover:bg-gray-700"
-                                  )}
-                                  onClick={() => {
-                                    setActiveSubdept(prev => ({ ...prev, [dept.id]: subdept.id.toString() }))
-                                    if (activeDept !== dept.id) setActiveDept(dept.id)
-                                  }}
-                                >
-                                  <div className="flex items-center space-x-2">
-                                    {subdept.classes && subdept.classes.length > 0 && (
-                                      <>
-                                        {isSubdeptExpanded ? (
-                                          <ChevronDown className="h-3 w-3 text-gray-400" />
-                                        ) : (
-                                          <ChevronRight className="h-3 w-3 text-gray-400" />
-                                        )}
-                                      </>
-                                    )}
-                                    <span className="font-mono text-xs text-gray-500 bg-gray-200 dark:bg-gray-600 px-1.5 py-0.5 rounded">
-                                      {subdeptNumber}
-                                    </span>
-                                    <span className="text-sm font-medium">{subdept.name}</span>
-                                  </div>
-                                  <div className="flex items-center space-x-1">
-                                    {(subdept.upload_guidelines?.length || 0) > 0 && (
-                                      <Badge variant="outline" className="text-xs">
-                                        {subdept.upload_guidelines?.length} guides
-                                      </Badge>
-                                    )}
-                                    {subdept.classes && subdept.classes.length > 0 && (
-                                      <Badge variant="secondary" className="text-xs">
-                                        {subdept.classes.length} classes
-                                      </Badge>
-                                    )}
-                                  </div>
-                                </button>
-                              </CollapsibleTrigger>
-
-                              <CollapsibleContent className="ml-6 mt-1 space-y-1">
-                                {subdept.classes?.map((cls, classIndex) => {
-                                  const classNumber = `${subdeptNumber}.${classIndex + 1}`
-                                  const classKey = `class-${dept.id}-${subdept.id}-${cls.id}`
-                                  const isClassExpanded = expandedItems[classKey] ?? false
-                                  const activeClassKey = `${dept.id}-${subdept.id}`
-                                  const isActiveClass = activeClass[activeClassKey] === cls.id.toString()
-
-                                  return (
-                                    <div key={cls.id} className="space-y-1">
-                                      <Collapsible open={isClassExpanded} onOpenChange={() => toggleExpanded(classKey)}>
-                                        <CollapsibleTrigger asChild>
-                                          <button
-                                            className={cn(
-                                              "w-full flex items-center justify-between p-2 text-left rounded-md transition-colors",
-                                              isActiveClass
-                                                ? "bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100"
-                                                : "hover:bg-gray-50 dark:hover:bg-gray-700"
-                                            )}
-                                            onClick={() => {
-                                              setActiveClass(prev => ({ ...prev, [activeClassKey]: cls.id.toString() }))
-                                              if (!isActiveSubdept) {
-                                                setActiveSubdept(prev => ({ ...prev, [dept.id]: subdept.id.toString() }))
-                                              }
-                                              if (activeDept !== dept.id) setActiveDept(dept.id)
-                                            }}
-                                          >
-                                            <div className="flex items-center space-x-2">
-                                              {cls.subClasses && cls.subClasses.length > 0 && (
-                                                <>
-                                                  {isClassExpanded ? (
-                                                    <ChevronDown className="h-3 w-3 text-gray-400" />
-                                                  ) : (
-                                                    <ChevronRight className="h-3 w-3 text-gray-400" />
-                                                  )}
-                                                </>
-                                              )}
-                                              <span className="font-mono text-xs text-gray-500 bg-blue-200 dark:bg-blue-700 px-1.5 py-0.5 rounded">
-                                                {classNumber}
-                                              </span>
-                                              <span className="text-sm">{cls.name}</span>
-                                            </div>
-                                            <div className="flex items-center space-x-1">
-                                              {(cls.guidelines?.length || 0) > 0 && (
-                                                <Badge variant="outline" className="text-xs">
-                                                  {cls.guidelines?.length} guides
-                                                </Badge>
-                                              )}
-                                              {cls.subClasses && cls.subClasses.length > 0 && (
-                                                <Badge variant="secondary" className="text-xs">
-                                                  {cls.subClasses.length} subs
-                                                </Badge>
-                                              )}
-                                            </div>
-                                          </button>
-                                        </CollapsibleTrigger>
-
-                                        <CollapsibleContent className="ml-6 mt-1 space-y-1">
-                                          {cls.subClasses?.map((subCls, subClassIndex) => {
-                                            const subClassNumber = `${classNumber}.${subClassIndex + 1}`
-                                            const activeSubclassKey = `${activeClassKey}-${cls.id}`
-                                            const isActiveSubclass = activeSubclass[activeSubclassKey] === subCls.id.toString()
-
-                                            return (
-                                              <button
-                                                key={subCls.id}
-                                                className={cn(
-                                                  "w-full flex items-center justify-between p-1.5 text-left rounded-md transition-colors",
-                                                  isActiveSubclass
-                                                    ? "bg-orange-100 dark:bg-orange-900/30 text-orange-900 dark:text-orange-100"
-                                                    : "hover:bg-gray-50 dark:hover:bg-gray-700"
-                                                )}
-                                                onClick={() => {
-                                                  setActiveSubclass(prev => ({ ...prev, [activeSubclassKey]: subCls.id.toString() }))
-                                                  if (!isActiveClass) {
-                                                    setActiveClass(prev => ({ ...prev, [activeClassKey]: cls.id.toString() }))
-                                                  }
-                                                  if (!isActiveSubdept) {
-                                                    setActiveSubdept(prev => ({ ...prev, [dept.id]: subdept.id.toString() }))
-                                                  }
-                                                  if (activeDept !== dept.id) setActiveDept(dept.id)
-                                                }}
-                                              >
-                                                <div className="flex items-center space-x-2">
-                                                  <span className="font-mono text-xs text-gray-500 bg-orange-200 dark:bg-orange-700 px-1.5 py-0.5 rounded">
-                                                    {subClassNumber}
-                                                  </span>
-                                                  <span className="text-xs">{subCls.name}</span>
-                                                </div>
-                                                {(subCls.guidelines?.length || 0) > 0 && (
-                                                  <Badge variant="outline" className="text-xs">
-                                                    {subCls.guidelines?.length}
-                                                  </Badge>
-                                                )}
-                                              </button>
-                                            )
-                                          })}
-                                        </CollapsibleContent>
-                                      </Collapsible>
-                                    </div>
-                                  )
-                                })}
-                              </CollapsibleContent>
-                            </Collapsible>
-                          </div>
-                        )
-                      })}
-                    </CollapsibleContent>
-                  </Collapsible>
-                </div>
-              )
-            })}
-          </div>
-        </ScrollArea>
-      </div>
+      {/* Department Sidebar */}
+      <DepartmentSidebar
+        departments={departments}
+        activeDept={activeDept}
+        activeSubdept={activeSubdept[activeDept] || ''}
+        onDeptClick={handleDeptClick}
+        onSubdeptClick={handleSubdeptClick}
+        onClassClick={handleClassClick}
+        onSubclassClick={handleSubclassClick}
+        onToggleExpand={handleToggleExpand}
+        expandedItems={expandedItems}
+      />
 
       {/* Main Content */}
       <div className="flex-1 p-6 bg-white dark:bg-gray-900">
         {renderMainContent()}
       </div>
-    </div>
-  )
+</div>
+     
+    )
 }
 
 const renderMainContent = () => {
@@ -1235,11 +1045,16 @@ if (!departments || departments.length === 0) {
   )
 }
 
-return (
-  <div className="space-y-4">
-    {renderSidebarView()}
+  return (
+    <div className="container mx-auto py-6">
+      <div className="flex flex-col space-y-6">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold">Department Guidelines</h1>
+        </div>
+        {renderSidebarView()}
+      </div>
 
-    {/* Delete Confirmation Dialog */}
+      {/* Delete Confirmation Dialog */}
     <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
       <DialogContent>
         <DialogHeader>
