@@ -5,9 +5,10 @@ import { useCallback, useEffect, useState, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Users, AlertTriangle, CheckCircle, ArrowRight, Calendar, Upload, FileText, Edit, Trash2 } from "lucide-react"
+import { Plus, Users, AlertTriangle, CheckCircle, ArrowRight, Calendar, Upload, FileText, Edit, Trash2, X, File, Check, XCircle } from "lucide-react"
 import { format, parseISO } from "date-fns"
 import { taskColumns } from "./components/tasksfields"
 import { StageTimer } from "@/components/stage-timer"
@@ -136,68 +137,6 @@ type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
   date_initiated: string | null;
 }
 
-// Table columns for stages view
-// Add to your stage columns
-const stageColumns = [
-  { key: 'index', header: '#', width: '50px' },
-  { key: 'website', header: 'Website', width: '120px' },
-  { key: 'job_description', header: 'Job', width: '150px' },
-  { key: 'task_manager', header: 'Task Manager', width: '120px' },
-  { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
-  { key: 'officer', header: 'Officer', width: '120px' },
-  { key: 'documents', header: 'All Submitted Documents', width: '180px' },
-  { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
-  { key: 'principal_member_name', header: 'Principal Member Name', width: '180px' },
-  { key: 'company_name', header: 'Company Name', width: '150px' },
-  { key: 'dependent_name', header: 'Dependent Name', width: '150px' },
-  { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
-  // Dynamic stage columns will be added here
-  { key: 'account_used', header: 'Account Used', width: '120px' },
-  { key: 'applied_by', header: 'Applied by Who', width: '120px' },
-  { key: 'batch', header: 'Batch', width: '100px' },
-  {
-    key: 'actions',
-    header: 'Actions',
-    width: '120px',
-    render: (value: any, task: Task) => (
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => handleEditTask(task.id)}
-          className="h-8 w-8 p-0"
-        >
-          <Edit className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => handleDeleteTask(task.id)}
-          className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </div>
-    )
-  }
-]
-// Table columns for requirements view
-const requirementColumns = [
-  { key: 'index', header: '#', width: '50px' },
-  { key: 'website', header: 'Website', width: '120px' },
-  { key: 'job_description', header: 'Job', width: '150px' },
-  { key: 'task_manager', header: 'Job Head', width: '120px' },
-  { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
-  { key: 'officer', header: 'Officer', width: '120px' },
-  { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
-  { key: 'company_name', header: 'Company Name', width: '150px' },
-  { key: 'dependent_name', header: 'Dependent Name', width: '150px' },
-  { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
-  { key: 'account_used', header: 'Account Used', width: '120px' },
-  { key: 'applied_by', header: 'Applied by Who', width: '120px' },
-  { key: 'batch', header: 'Batch', width: '100px' },
-]
-
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
@@ -206,7 +145,6 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [stageTransitionDialogOpen, setStageTransitionDialogOpen] = useState(false)
   const [newTaskDialogOpen, setNewTaskDialogOpen] = useState(false)
   const [selectedDepartment, setSelectedDepartment] = useState<string>('')
@@ -214,6 +152,84 @@ export default function TasksPage() {
   const [selectedClass, setSelectedClass] = useState<string>('')
   const [selectedSubclass, setSelectedSubclass] = useState<string>('')
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
+  const [documentsDialogOpen, setDocumentsDialogOpen] = useState(false)
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+
+  // Define stage columns inside the component to access component methods
+  const stageColumns = [
+    { key: 'index', header: '#', width: '50px' },
+    { key: 'website', header: 'Website', width: '120px' },
+    { key: 'job_description', header: 'Job', width: '150px' },
+    { key: 'task_manager', header: 'Task Manager', width: '120px' },
+    { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
+    { key: 'officer', header: 'Officer', width: '120px' },
+    { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
+    { key: 'principal_member_name', header: 'Principal Member Name', width: '180px' },
+    { key: 'company_name', header: 'Company Name', width: '150px' },
+    { key: 'dependent_name', header: 'Dependent Name', width: '150px' },
+    { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
+    // Dynamic stage columns will be added here by generateStageColumns()
+    { key: 'account_used', header: 'Account Used', width: '120px' },
+    { key: 'applied_by', header: 'Applied by Who', width: '120px' },
+    { key: 'batch', header: 'Batch', width: '100px' },
+    { 
+      key: 'documents', 
+      header: 'Documents', 
+      width: '80px',
+      render: (value: any, task: Task) => (
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+          onClick={() => handleViewDocuments(task)}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      )
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      width: '120px',
+      render: (value: any, task: Task) => (
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleEditTask(task.id)}
+            className="h-8 w-8 p-0"
+          >
+            <Edit className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleDeleteTask(task.id)}
+            className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      )
+    }
+  ]
+
+  // Define requirement columns
+  const requirementColumns = [
+    { key: 'index', header: '#', width: '50px' },
+    { key: 'website', header: 'Website', width: '120px' },
+    { key: 'job_description', header: 'Job', width: '150px' },
+    { key: 'task_manager', header: 'Task Manager', width: '120px' },
+    { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
+    { key: 'officer', header: 'Officer', width: '120px' },
+    { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
+    { key: 'company_name', header: 'Company Name', width: '150px' },
+    { key: 'dependent_name', header: 'Dependent Name', width: '150px' },
+    { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
+    { key: 'account_used', header: 'Account Used', width: '120px' },
+    { key: 'applied_by', header: 'Applied by Who', width: '120px' },
+    { key: 'batch', header: 'Batch', width: '100px' },
+  ]
 
   // Transform departments data to ensure consistent ID types and structure
   const transformDepartments = (departments: any[]) => {
@@ -419,80 +435,44 @@ export default function TasksPage() {
   }
 
   // Get requirements based on current selection level (child data level)
-  const getCurrentRequirements = () => {
-    console.log('Getting requirements for:', { selectedClass, selectedSubclass });
-    
-    // Helper function to compare IDs consistently
-    const idsMatch = (id1: string | number | undefined, id2: string | number | undefined) => {
-      if (id1 === undefined || id2 === undefined) return false;
-      return id1.toString() === id2.toString();
-    };
-    
+  const getCurrentRequirements = useCallback(() => {
     if (selectedSubclass) {
       console.log('Looking for subclass with ID:', selectedSubclass);
-      console.log('Available departments:', JSON.stringify(departments, null, 2));
+      const subclass = departments
+        .flatMap(d => d.tm_subdepartments || [])
+        .flatMap(sd => sd.classes || [])
+        .flatMap(c => c.subClasses || [])
+        .find(sc => sc.id === selectedSubclass);
       
-      // Find the subclass with matching ID
-      let foundSubclass = null;
-      
-      departmentsLoop:
-      for (const dept of departments) {
-        if (!dept.subdepartments) continue;
-        
-        for (const subdept of dept.subdepartments) {
-          if (!subdept.classes) continue;
-          
-          for (const cls of subdept.classes) {
-            if (!cls.subClasses) continue;
-            
-            const matchingSubclass = cls.subClasses.find(
-              sc => idsMatch(sc.id, selectedSubclass)
-            );
-            
-            if (matchingSubclass) {
-              foundSubclass = matchingSubclass;
-              console.log(`Found matching subclass in department ${dept.name}, subdepartment ${subdept.name}, class ${cls.name}`);
-              break departmentsLoop;
-            }
-          }
-        }
-      }
-      
-      console.log('Found subclass:', foundSubclass);
-      return foundSubclass?.requirements || [];
-      
+      console.log('Found subclass:', subclass);
+      return subclass?.requirements || [];
     } else if (selectedClass) {
       console.log('Looking for class with ID:', selectedClass);
+      const cls = departments
+        .flatMap(d => d.tm_subdepartments || [])
+        .flatMap(sd => sd.classes || [])
+        .find(c => c.id === selectedClass);
       
-      // Find the class with matching ID
-      let foundClass = null;
+      console.log('Found class:', cls);
+      return cls?.requirements || [];
+    } else if (selectedSubdepartment) {
+      console.log('Looking for subdepartment with ID:', selectedSubdepartment);
+      const subdept = departments
+        .flatMap(d => d.tm_subdepartments || [])
+        .find(sd => sd.id === selectedSubdepartment);
       
-      classLoop:
-      for (const dept of departments) {
-        if (!dept.subdepartments) continue;
-        
-        for (const subdept of dept.subdepartments) {
-          if (!subdept.classes) continue;
-          
-          const matchingClass = subdept.classes.find(
-            c => idsMatch(c.id, selectedClass)
-          );
-          
-          if (matchingClass) {
-            foundClass = matchingClass;
-            console.log(`Found matching class in department ${dept.name}, subdepartment ${subdept.name}`);
-            break classLoop;
-          }
-        }
-      }
-      
-      console.log('Found class:', foundClass);
-      return foundClass?.requirements || [];
+      console.log('Found subdepartment:', subdept);
+      return subdept?.requirements || [];
+    } else if (selectedDepartment) {
+      console.log('Looking for department with ID:', selectedDepartment);
+      const dept = departments.find(d => d.id === selectedDepartment);
+      console.log('Found department:', dept);
+      return dept?.requirements || [];
     }
     
-    console.log('No class or subclass selected, returning empty requirements');
+    console.log('No selection level specified, returning empty requirements');
     return [];
-  };
+  }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
 
   // Get stages based on department level
   const getCurrentStages = () => {
@@ -571,6 +551,11 @@ export default function TasksPage() {
     setSelectedSubdepartment(subdeptId)
     setSelectedClass(classId)
     setSelectedSubclass(subclassId)
+  }
+
+  const handleViewDocuments = (task: Task) => {
+    setSelectedTask(task)
+    setDocumentsDialogOpen(true)
   }
 
   const handleToggleExpand = (key: string) => {
@@ -684,7 +669,7 @@ export default function TasksPage() {
 
   // Generate dynamic stage columns based on department (stages are department-dependent)
   const generateStageColumns = () => {
-   const stages = getCurrentStages()
+    const stages = getCurrentStages()
 
     if (!stages || stages.length === 0) {
       // If no stages, return base columns with a "No Stages" indicator
@@ -702,7 +687,6 @@ export default function TasksPage() {
           </div>
         )
       }
-
       return [...baseColumns, noStagesColumn, ...endColumns]
     }
 
@@ -711,7 +695,7 @@ export default function TasksPage() {
       key: `stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`,
       header: stage.name,
       width: '150px',
-      parentHeader: 'Stages', // Add parent header for grouping
+      parentHeader: 'Stages',
       render: (value: any, task: Task) => {
         const isCurrentStage = task.current_stage?.name === stage.name
         const isCompleted = task.current_stage &&
@@ -743,11 +727,23 @@ export default function TasksPage() {
       }
     }))
 
-    // Insert stage columns after the renewal_status column
+    // Get the index of renewal_status column
     const renewalStatusIndex = stageColumns.findIndex(col => col.key === 'renewal_status')
+    
+    // Get the index of the first column that comes after the stage columns
+    const accountUsedIndex = stageColumns.findIndex(col => col.key === 'account_used')
+    
+    // If we found both indices, insert the stage columns between them
+    if (renewalStatusIndex !== -1 && accountUsedIndex !== -1) {
+      const baseColumns = stageColumns.slice(0, renewalStatusIndex + 1)
+      const endColumns = stageColumns.slice(accountUsedIndex)
+      return [...baseColumns, ...dynamicStageColumns, ...endColumns]
+    }
+    
+    // Fallback to the original behavior if we can't find the columns
+    console.warn('Could not find required columns for proper stage column insertion')
     const baseColumns = stageColumns.slice(0, renewalStatusIndex + 1)
     const endColumns = stageColumns.slice(renewalStatusIndex + 1)
-
     return [...baseColumns, ...dynamicStageColumns, ...endColumns]
   }
 
@@ -1335,38 +1331,6 @@ export default function TasksPage() {
               setTasks(prev => [newTask, ...prev])
             }}
           />
-
-          {selectedTask && (
-            <TaskAssignmentDialog
-              open={assignmentDialogOpen}
-              onOpenChange={setAssignmentDialogOpen}
-              task={selectedTask}
-              users={users.map(u => ({
-                id: u.id,
-                username: u.name || u.email,
-                email: u.email
-              }))}
-              onAssign={async (assignments) => {
-                try {
-                  const updatedTask = await updateTaskAssignment(selectedTask.id, {
-                    taskManager: assignments.taskManager,
-                    taskAssistant: assignments.taskAssistant
-                  })
-
-                  setTasks(tasks.map(t =>
-                    t.id === selectedTask.id
-                      ? { ...t, ...updatedTask }
-                      : t
-                  ))
-
-                  setAssignmentDialogOpen(false)
-                } catch (err) {
-                  console.error("Error updating task assignment:", err)
-                }
-              }}
-            />
-          )}
-
           {selectedTask && (
             <StageTransitionDialog
               open={stageTransitionDialogOpen}
@@ -1408,6 +1372,45 @@ export default function TasksPage() {
               }}
             />
           )}
+
+          {/* Documents Dialog */}
+          <Dialog open={documentsDialogOpen} onOpenChange={setDocumentsDialogOpen}>
+            <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Upload Requirements</DialogTitle>
+                <DialogDescription>
+                  {selectedTask?.job_description} - {selectedTask?.applicant_name}
+                </DialogDescription>
+              </DialogHeader>
+              
+              <div className="space-y-4">
+                {getCurrentRequirements().map((req, index) => (
+                  <div key={index} className="flex items-center justify-between p-3 border rounded-md">
+                    <div className="flex items-center space-x-3">
+                      <div className="p-2 rounded-full bg-muted">
+                        <File className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className="font-medium">{req.name}</p>
+                        {req.description && (
+                          <p className="text-sm text-muted-foreground">{req.description}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Button variant="outline" size="sm" className="gap-2">
+                        <Upload className="h-4 w-4" />
+                        Upload
+                      </Button>
+                      <Button variant="ghost" size="icon" className="text-muted-foreground">
+                        <XCircle className="h-5 w-5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     </div>

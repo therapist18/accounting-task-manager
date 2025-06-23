@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -42,7 +42,6 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
     timeConfigs: [{ applicationType: 'Default', days: 0, hours: 0, minutes: 0 }],
     documents: []
   })
-  
   const [activeTab, setActiveTab] = useState('general')
   const [saving, setSaving] = useState(false)
 
@@ -101,13 +100,12 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
     }
   }
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value, type } = e.target
-    const target = e.target as HTMLInputElement
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target
     
     setFormData(prev => ({
       ...prev,
-      [name]: type === 'number' ? Number(value) : value
+      [name]: value
     }))
   }
 
@@ -200,15 +198,19 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
     }))
   }
 
-  const addExtractionField = (docId: string) => {
-    const newField: DocumentExtraction = {
-      id: `field-${Date.now()}`,
-      fieldName: '',
-      description: '',
-      isRequired: true,
-      fieldType: 'text'
-    }
+  const addExtractionField = useCallback((docId: string) => {
     setFormData(prev => {
+      const doc = prev.documents?.find(d => d.id === docId);
+      if (!doc) return prev;
+      
+      const newField: DocumentExtraction = {
+        id: `field-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        fieldName: '',
+        description: '',
+        isRequired: true,
+        fieldType: 'text'
+      };
+      
       const updatedDocs = prev.documents?.map(doc => 
         doc.id === docId 
           ? { 
@@ -216,50 +218,79 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
               extractionSpecs: [...(doc.extractionSpecs || []), newField] 
             }
           : doc
-      ) || []
+      ) || [];
       
       // Auto-scroll to the new field
-      setTimeout(() => {
-        const fieldElement = document.querySelector(`[name^="doc-${docId}-extraction-"][name$="-name"]:last-of-type`)
+      requestAnimationFrame(() => {
+        const fieldElement = document.querySelector(
+          `[name^="doc-${docId}-extraction-"][name$="-name"]:last-of-type`
+        ) as HTMLInputElement | null;
+        
         if (fieldElement) {
-          fieldElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-          // @ts-ignore - focus after scroll
-          fieldElement.focus()
+          fieldElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          fieldElement.focus();
+          
+          // Set cursor to end of input
+          const length = fieldElement.value.length;
+          fieldElement.setSelectionRange(length, length);
         }
-      }, 100)
+      });
       
-      return { ...prev, documents: updatedDocs }
-    })
-  }
+      return { ...prev, documents: updatedDocs };
+    });
+  }, []);
 
-  const updateExtraction = (docId: string, extractionIndex: number, updates: Partial<DocumentExtraction>) => {
-    setFormData(prev => ({
-      ...prev,
-      documents: prev.documents?.map(doc => {
+  const updateExtraction = useCallback((docId: string, extractionId: string, updates: Partial<DocumentExtraction>) => {
+    setFormData(prev => {
+      // Only update if there are actual changes
+      const doc = prev.documents?.find(d => d.id === docId);
+      if (!doc) return prev;
+      
+      const extraction = doc.extractionSpecs?.find(e => e.id === extractionId);
+      if (!extraction) return prev;
+      
+      // Check if any of the updated values are actually different
+      const hasChanges = Object.entries(updates).some(
+        ([key, value]) => extraction[key as keyof DocumentExtraction] !== value
+      );
+      
+      if (!hasChanges) return prev;
+      
+      const updatedDocs = prev.documents?.map(doc => {
         if (doc.id === docId) {
-          const updatedExtractions = [...(doc.extractionSpecs || [])]
-          updatedExtractions[extractionIndex] = { ...updatedExtractions[extractionIndex], ...updates }
+          const updatedExtractions = (doc.extractionSpecs || []).map(ext => 
+            ext.id === extractionId ? { ...ext, ...updates } : ext
+          )
           return { ...doc, extractionSpecs: updatedExtractions }
         }
         return doc
-      })
-    }))
-  }
+      }) || [];
+      
+      return { ...prev, documents: updatedDocs };
+    });
+  }, []);
 
-  const removeExtraction = (docId: string, extractionIndex: number) => {
-    setFormData(prev => ({
-      ...prev,
-      documents: prev.documents?.map(doc => {
-        if (doc.id === docId) {
-          return {
-            ...doc,
-            extractionSpecs: doc.extractionSpecs?.filter((_, i) => i !== extractionIndex)
+  const removeExtraction = useCallback((docId: string, extractionId: string) => {
+    setFormData(prev => {
+      const doc = prev.documents?.find(d => d.id === docId);
+      if (!doc || !doc.extractionSpecs?.some(e => e.id === extractionId)) {
+        return prev;
+      }
+      
+      return {
+        ...prev,
+        documents: prev.documents?.map(doc => {
+          if (doc.id === docId) {
+            return {
+              ...doc,
+              extractionSpecs: doc.extractionSpecs?.filter(ext => ext.id !== extractionId) || []
+            }
           }
-        }
-        return doc
-      })
-    }))
-  }
+          return doc
+        }) || []
+      };
+    });
+  }, []);
 
   const DocumentsTab = () => (
     <div className="space-y-6">
@@ -378,7 +409,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                    <Button 
                      variant="outline" 
                      size="sm"
-                     onClick={() => addExtraction(doc.id)}
+                     onClick={() => addExtractionField(doc.id)}
                    >
                      <Plus className="h-4 w-4 mr-2" />
                      Add Field
@@ -394,7 +425,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                            <Input
                              name={`doc-${doc.id}-extraction-${extraction.id}-name`}
                              value={extraction.fieldName || ''}
-                             onChange={(e) => updateExtraction(doc.id, extractionIndex, { fieldName: e.target.value })}
+                             onChange={(e) => updateExtraction(doc.id, extraction.id, { fieldName: e.target.value })}
                              placeholder="e.g., Application Date"
                              className="h-8"
                            />
@@ -404,7 +435,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                            <Select
                              value={extraction.fieldType}
                              onValueChange={(value: 'text' | 'date' | 'number' | 'boolean' | 'file') => 
-                               updateExtraction(doc.id, extractionIndex, { fieldType: value })
+                               updateExtraction(doc.id, extraction.id, { fieldType: value })
                              }
                            >
                              <SelectTrigger className="h-8">
@@ -424,7 +455,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                            <Input
                              name={`doc-${doc.id}-extraction-${extraction.id}-description`}
                              value={extraction.description || ''}
-                             onChange={(e) => updateExtraction(doc.id, extractionIndex, { description: e.target.value })}
+                             onChange={(e) => updateExtraction(doc.id, extraction.id, { description: e.target.value })}
                              placeholder="Optional description"
                              className="h-8"
                            />
@@ -433,7 +464,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                            <Checkbox
                              checked={extraction.isRequired || false}
                              onCheckedChange={(checked) => 
-                               updateExtraction(doc.id, extractionIndex, { isRequired: Boolean(checked) })
+                               updateExtraction(doc.id, extraction.id, { isRequired: Boolean(checked) })
                              }
                            />
                            <Label className="text-xs">Required</Label>
@@ -443,7 +474,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                              variant="ghost"
                              size="icon"
                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                             onClick={() => removeExtraction(doc.id, extractionIndex)}
+                             onClick={() => removeExtraction(doc.id, extraction.id)}
                            >
                              <X className="h-4 w-4" />
                            </Button>

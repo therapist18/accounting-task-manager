@@ -613,11 +613,11 @@ export default function Stages() {
     try {
       const currentDept = getCurrentDepartment()
       if (!currentDept) return
-
+  
       const updatedStages = currentDept.stages.map(s =>
         s.id === updatedStage.id ? updatedStage : s
       )
-
+  
       // Update department stages in Supabase
       const { error } = await supabase
         .from('tm_departments')
@@ -626,23 +626,24 @@ export default function Stages() {
           updated_at: new Date().toISOString()
         })
         .eq('id', activeTab)
-
+  
       if (error) throw error
-
+  
       // Update local state
       setDepartments(prev => prev.map(dept =>
         dept.id === activeTab
           ? { ...dept, stages: updatedStages }
           : dept
       ))
-
+  
       toast({
         title: "Success",
         description: "Stage updated successfully",
       })
-
-      setIsEditDialogOpen(false)
+  
+      // Clear both states
       setEditingStage(null)
+      setIsEditDialogOpen(false)
     } catch (err) {
       console.error('Error updating stage:', err)
       toast({
@@ -753,19 +754,19 @@ export default function Stages() {
               {dept.name}
             </TabsTrigger>
           ))}
-          </TabsList>
+        </TabsList>
 
-          {departments.map(dept => (
-            <TabsContent key={dept.id} value={dept.id} className="space-y-4">
-              {dept.stages.length === 0 ? (
-                <div className="text-center py-12 border-2 border-dashed border-muted rounded-lg">
-                  <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-                  <h3 className="text-lg font-medium text-muted-foreground mb-2">No stages yet</h3>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Create your first stage to get started with the workflow
-                  </p>
-                  <Button onClick={() => setIsDialogOpen(true)}>
-                    <Plus className="h-4 w-4 mr-2" />
+        {departments.map(dept => (
+          <TabsContent key={dept.id} value={dept.id} className="space-y-4">
+            {dept.stages.length === 0 ? (
+              <div className="text-center py-12 border-2 border-dashed border-muted rounded-lg">
+                <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                <h3 className="text-lg font-medium text-muted-foreground mb-2">No stages yet</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Create your first stage to get started with the workflow
+                </p>
+                <Button onClick={() => setIsDialogOpen(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
                   Add First Stage
                 </Button>
               </div>
@@ -795,14 +796,14 @@ export default function Stages() {
                             <div className="flex items-center gap-2">
                               <span className="font-medium text-sm">{stage.name}</span>
                               <div className="flex items-center gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6"
-                                  onClick={() => setEditingStage(stage)}
-                                >
-                                  <Pencil className="h-3 w-3" />
-                                </Button>
+                              <Button
+  variant="ghost"
+  size="icon"
+  className="h-6 w-6"
+  onClick={() => setEditingStage(stage)}
+>
+  <Pencil className="h-3 w-3" />
+</Button>
                                 <Button
                                   variant="ghost"
                                   size="icon"
@@ -828,20 +829,29 @@ export default function Stages() {
                               <Badge variant="outline" className="text-xs">
                                 #{stage.order_num}
                               </Badge>
+
+                              {/* Document Indicator */}
                               {stage.documents && stage.documents.length > 0 && (
                                 <Popover>
                                   <PopoverTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
+                                    <Button variant="ghost" size="icon" className="h-5 w-5 p-0 relative">
                                       <FileText className="h-3 w-3 text-blue-500" />
+                                      <Badge
+                                        variant="secondary"
+                                        className="absolute -top-1 -right-1 h-4 w-4 text-xs p-0 flex items-center justify-center"
+                                      >
+                                        {stage.documents.length}
+                                      </Badge>
                                     </Button>
                                   </PopoverTrigger>
                                   <PopoverContent className="w-80">
                                     <div className="space-y-2">
-                                      <h4 className="font-medium">Stage Documents</h4>
+                                      <h4 className="font-medium">Stage Documents ({stage.documents.length})</h4>
                                       <div className="space-y-2">
                                         {stage.documents.map((doc, i) => (
                                           <div key={i} className="bg-muted/50 p-2 rounded text-sm">
                                             <div className="font-medium flex items-center gap-2">
+                                              <FileText className="h-3 w-3" />
                                               {doc.name}
                                               <Badge variant={doc.isRequired ? "default" : "secondary"} className="text-xs">
                                                 {doc.isRequired ? "Required" : "Optional"}
@@ -850,9 +860,17 @@ export default function Stages() {
                                             <div className="text-muted-foreground text-xs">
                                               Type: {doc.documentType}
                                             </div>
+                                            {doc.description && (
+                                              <div className="text-muted-foreground text-xs mt-1">
+                                                {doc.description}
+                                              </div>
+                                            )}
                                             {doc.extractionSpecs && doc.extractionSpecs.length > 0 && (
                                               <div className="text-xs text-muted-foreground mt-1">
-                                                Extractions: {doc.extractionSpecs.map(spec => spec.fieldName).join(', ')}
+                                                <div className="flex items-center gap-1">
+                                                  <Info className="h-3 w-3" />
+                                                  Extractions: {doc.extractionSpecs.map(spec => spec.fieldName).join(', ')}
+                                                </div>
                                               </div>
                                             )}
                                           </div>
@@ -862,6 +880,8 @@ export default function Stages() {
                                   </PopoverContent>
                                 </Popover>
                               )}
+
+                              {/* Special Time Config Indicator */}
                               {stage.isSpecial && (
                                 <Popover>
                                   <PopoverTrigger asChild>
@@ -1219,13 +1239,17 @@ export default function Stages() {
           </TabsContent>
         ))}
       </Tabs>
-
       <EditStageDialog
-        open={!!editingStage}
-        onOpenChange={(open) => !open && setEditingStage(null)}
-        stage={editingStage}
-        onSave={handleUpdateStage}
-      />
+  open={!!editingStage}
+  onOpenChange={(open) => {
+    if (!open) {
+      setEditingStage(null)
+      setIsEditDialogOpen(false)
+    }
+  }}
+  stage={editingStage}
+  onSave={handleUpdateStage}
+/>
     </div>
   )
 }
