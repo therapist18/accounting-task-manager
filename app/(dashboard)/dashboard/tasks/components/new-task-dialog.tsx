@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { User, Building2, Users, FileText, Loader2, Info } from "lucide-react"
 import supabase from "@/lib/supabase/client"
 import { Department, DepartmentWithDetails, Subdepartment, fetchDepartments, TaskManagerAssistant } from "@/app/(dashboard)/dashboard/departments/departments/database"
+import { toast } from "@/hooks/use-toast"
 
 interface Officer {
   id: string
@@ -102,42 +103,32 @@ type ApplicationType = 'principal' | 'dependent'
 
 interface FormData {
   job_description: string
-  // Department
   department_id: string
   department_name: string
-  // Subdepartment
   subdepartment_id: string
   subdepartment_name: string
-  // Task Manager
   task_manager_id: string
   task_manager_name: string
-  // Task Assistant
   task_assistant_id: string
   task_assistant_name: string
-  // Officer
   officer_id: string
   officer_name: string
-  // Client
-  client_id: string
   client_name: string
-  // Class & Subclass
   class_id: string
   class_name: string
   class_description: string | null
   subclass_id: string
   subclass_name: string
   subclass_description: string | null
-  // Other fields
   status: string
   date_initiated: string
   renewal_status: 'New' | 'Renewal'
   account_used: string
   applied_by: string
   batch: string
-  individual_name: string
+  applicant_name: string
   r_number: string
-  dependent_name: string
-  application_type: ApplicationType
+  applicant_type: ApplicationType
   principal_member_id: string // For dependent applications
   principal_member_name: string
 }
@@ -217,9 +208,8 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     task_assistant_name: '',
     officer_id: 'none',
     officer_name: '',
-    client_id: '',
     client_name: '',
-    individual_name: '',
+    applicant_name: '',
     r_number: '',
     principal_member_id: '',
     principal_member_name: '',
@@ -229,8 +219,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     account_used: '',
     applied_by: '',
     batch: '',
-    dependent_name: '',
-    application_type: 'principal' as ApplicationType
+    applicant_type: 'principal' as ApplicationType
   }))
 
   // Optimized data fetching with proper error handling
@@ -456,16 +445,14 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     console.log(`Changing ${field} to:`, value);
 
     setFormData(prev => {
-      // If changing application type, reset related fields
-      if (field === 'application_type') {
+      // If changing applicant type, reset related fields
+      if (field === 'applicant_type') {
         return {
           ...prev,
-          application_type: value,
-          client_id: '',
+          applicant_type: value,
           client_name: '',
           principal_member_id: '',
           principal_member_name: '',
-          dependent_name: ''
         };
       }
 
@@ -502,19 +489,6 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
           task_assistant_name: selectedSubdept?.taskAssistant?.name || '',
           class_id: '',
           class_name: ''
-        };
-      }
-
-      // If changing client, update the selected client
-      if (field === 'client_id') {
-        const client = clients.find(c => c.id === value) || null;
-        setSelectedClient(client);
-        return {
-          ...prev,
-          client_id: value,
-          client_name: client?.full_name || '',
-          principal_member_id: '',
-          principal_member_name: ''
         };
       }
 
@@ -599,116 +573,133 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     });
   }, [clients, subdepartments, allUsers, officers, departments]);
 
+  // Function to reset the form to initial state
+  const resetForm = useCallback(() => {
+    setFormData({
+      job_description: '',
+      department_id: '',
+      department_name: '',
+      subdepartment_id: '',
+      subdepartment_name: '',
+      class_id: '',
+      class_name: '',
+      class_description: null,
+      subclass_id: '',
+      subclass_name: '',
+      subclass_description: null,
+      task_manager_id: 'none',
+      task_manager_name: '',
+      task_assistant_id: 'none',
+      task_assistant_name: '',
+      officer_id: 'none',
+      officer_name: '',
+      client_name: '',
+      applicant_name: '',
+      r_number: '',
+      principal_member_id: '',
+      principal_member_name: '',
+      status: 'registered',
+      date_initiated: new Date().toISOString().split('T')[0],
+      renewal_status: 'New',
+      account_used: '',
+      applied_by: '',
+      batch: '',
+      applicant_type: 'principal' as ApplicationType
+    });
+    setSelectedClient(null);
+    setSelectedPrincipalMember(null);
+  }, []);
+
   // Optimized submit handler
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (loading) return
+    e.preventDefault();
+    if (loading) return;
 
     try {
-      setLoading(true)
+      setLoading(true);
 
-      console.log('Submitting form data:', formData)
+      console.log('Submitting form data:', formData);
 
-      // Determine the actual client ID and name based on application type
-      const actualClientId = formData.application_type === 'dependent'
+      // Determine the actual client ID and name based on applicant type
+      const actualClientId = formData.applicant_type === 'dependent'
         ? formData.principal_member_id
-        : formData.client_id;
+        : null;
       
-      const actualClientName = formData.application_type === 'dependent'
-        ? formData.principal_member_name
-        : formData.client_name;
+      // Find the selected subdepartment and department
+      const selectedSubdept = subdepartments.find(sd => sd.id.toString() === formData.subdepartment_id);
+      const selectedDept = departments.find(d => d.id === formData.department_id);
+      
+      if (!selectedSubdept || !selectedDept) {
+        throw new Error('Selected department or subdepartment not found');
+      }
 
       // Get the selected class and subclass details
-      const selectedClass = selectedSubdept?.classes?.find(c => c.id.toString() === formData.class_id);
+      const selectedClass = selectedSubdept.classes?.find(c => c.id.toString() === formData.class_id);
       const selectedSubclass = selectedClass?.subClasses?.find(sc => sc.id.toString() === formData.subclass_id);
 
-      // Memoize the selected department and subdepartment for better performance
-      const selectedDepartment = useMemo(() => {
-        return departments.find(d => d.id === formData.department_id);
-      }, [departments, formData.department_id]);
-
-      const selectedSubdepartment = useMemo(() => {
-        return subdepartments.find(sd => sd.id === formData.subdepartment_id);
-      }, [subdepartments, formData.subdepartment_id]);
-
-      // Memoize available task managers and assistants based on selected subdepartment
-      const availableTaskManagers = useMemo(() => {
-        if (!selectedSubdepartment?.taskManager) return [];
-        return [{
-          id: selectedSubdepartment.taskManager.id.toString(),
-          name: selectedSubdepartment.taskManager.name || 'Unnamed Manager',
-          email: selectedSubdepartment.taskManager.email || ''
-        }];
-      }, [selectedSubdepartment]);
-
-      const availableTaskAssistants = useMemo(() => {
-        if (!selectedSubdepartment?.taskAssistant) return [];
-        return [{
-          id: selectedSubdepartment.taskAssistant.id.toString(),
-          name: selectedSubdepartment.taskAssistant.name || 'Unnamed Assistant',
-          email: selectedSubdepartment.taskAssistant.email || ''
-        }];
-      }, [selectedSubdepartment]);
-
+      // Prepare task data with only necessary IDs for the database
       const taskData = {
         // Basic task info
         job_description: formData.job_description,
-        status: 'registered',
-        date_initiated: new Date(formData.date_initiated).toISOString(),
+        status: formData.status || 'registered',
+        date_initiated: formData.date_initiated 
+          ? new Date(formData.date_initiated).toISOString() 
+          : new Date().toISOString(),
         
-        // Department info
-        department_id: formData.department_id,
-        department_name: formData.department_name,
+        // Relationship IDs
+        department_id: Number(formData.department_id),
+        subdepartment_id: Number(formData.subdepartment_id),
+        class_id: formData.class_id ? Number(formData.class_id) : null,
+        subclass_id: formData.subclass_id ? Number(formData.subclass_id) : null,
+        task_manager_id: formData.task_manager_id ? Number(formData.task_manager_id) : null,
+        task_assistant_id: formData.task_assistant_id ? Number(formData.task_assistant_id) : null,
+        officer_id: formData.officer_id ? Number(formData.officer_id) : null,
         
-        // Subdepartment info
-        subdepartment_id: formData.subdepartment_id,
-        subdepartment_name: formData.subdepartment_name,
-        
-        // Task assignment
-        task_manager_id: formData.task_manager_id || null,
-        task_manager_name: formData.task_manager_name || null,
-        task_assistant_id: formData.task_assistant_id || null,
-        task_assistant_name: formData.task_assistant_name || null,
-        
-        // Officer info
-        officer_id: formData.officer_id || null,
-        officer_name: formData.officer_name || null,
-        
-        // Client info
-        client_id: actualClientId,
-        client_name: actualClientName,
-        
-        // Class and Subclass info
-        class_id: formData.class_id || null,
-        class_name: formData.class_name || null,
-        class_description: formData.class_description || null,
-        subclass_id: formData.subclass_id || null,
-        subclass_name: formData.subclass_name || null,
-        subclass_description: formData.subclass_description || null,
-        
-        // Application type and status
-        renewal_status: formData.renewal_status,
-        application_type: formData.application_type,
+        // Application specific fields
+        applicant_type: formData.applicant_type,
+        applicant_name: formData.applicant_name || null,
+        r_number: formData.r_number || null,
+        principal_member_name: formData.principal_member_name || null,
         
         // Additional fields
-        account_used: formData.account_used,
-        applied_by: formData.applied_by,
-        batch: formData.batch,
-        individual_name: formData.individual_name,
-        r_number: formData.r_number,
-        dependent_name: formData.application_type === 'dependent' ? formData.dependent_name : null,
-        
-        // Timestamps
+        renewal_status: formData.renewal_status || 'New',
+        account_used: formData.account_used || null,
+        applied_by: formData.applied_by || null,
+        batch: formData.batch || null,
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        
-        // Include additional data for the task creation callback
-        department: selectedDept ? { id: selectedDept.id, name: selectedDept.name } : null,
+        updated_at: new Date().toISOString()
+      };
+      
+      console.log('Prepared task data for submission:', taskData);
+      
+      // Call the API to create the task
+      const { data: newTask, error } = await supabase
+        .from('tm_tasks')
+        .insert([taskData])
+        .select('*')
+        .single();
+
+      if (error) {
+        console.error('Error creating task:', error);
+        throw error;
+      }
+
+      if (!newTask) {
+        throw new Error('No data returned from task creation');
+      }
+
+      // Create a complete task object with all relationships for the callback
+      const taskWithRelationships = {
+        ...newTask,
+        department: selectedDept ? { 
+          id: selectedDept.id, 
+          name: selectedDept.name 
+        } : null,
         subdepartment: selectedSubdept ? { 
           id: selectedSubdept.id, 
           name: selectedSubdept.name,
-          task_manager: selectedSubdept.taskManager,
-          task_assistant: selectedSubdept.taskAssistant
+          task_manager: selectedSubdept.task_manager,
+          task_assistant: selectedSubdept.task_assistant
         } : null,
         class: selectedClass ? {
           id: selectedClass.id,
@@ -722,85 +713,48 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
           description: selectedSubclass.description,
           requirements: selectedSubclass.requirements || []
         } : null,
-        task_manager: availableTaskManagers[0] || null,
-        task_assistant: availableTaskAssistants[0] || null,
-        officer: officers.find(o => o.id === formData.officer_id) || null,
-        client: clients.find(c => c.id === actualClientId) || null
-      };
-
-      const { data, error } = await supabase
-        .from('tm_tasks')
-        .insert([taskData])
-        .select('*')
-        .single()
-
-      if (error) throw error
-      if (!data) throw new Error('No data returned from task creation')
-
-      onCreate(data)
-      onOpenChange(false)
-
-      // Create a complete task object with all relationships
-      const taskWithRelationships = {
-        ...data,
-        department: selectedDept ? { id: selectedDept.id, name: selectedDept.name } : null,
-        subdepartment: selectedSubdept ? { 
-          id: selectedSubdept.id, 
-          name: selectedSubdept.name,
-          task_manager: selectedSubdept.taskManager,
-          task_assistant: selectedSubdept.taskAssistant
+        task_manager: formData.task_manager_id ? {
+          id: formData.task_manager_id,
+          name: formData.task_manager_name
         } : null,
-        task_manager: availableTaskManagers[0] || null,
-        task_assistant: availableTaskAssistants[0] || null,
-        officer: officers.find(o => o.id === formData.officer_id) || null,
-        client: clients.find(c => c.id === actualClientId) || null
+        task_assistant: formData.task_assistant_id ? {
+          id: formData.task_assistant_id,
+          name: formData.task_assistant_name
+        } : null,
+        officer: formData.officer_id ? {
+          id: formData.officer_id,
+          name: formData.officer_name
+        } : null,
+        client: actualClientId ? {
+          id: actualClientId,
+          full_name: formData.client_name
+        } : null
       };
 
-      // Call the onCreate callback with the complete task data
-      onCreate(taskWithRelationships);
+      // Show success message
+      toast({
+        title: 'Success',
+        description: 'Task created successfully!',
+        variant: 'default'
+      });
 
-      // Reset form
-      setFormData({
-        job_description: '',
-        department_id: '',
-        department_name: '',
-        subdepartment_id: '',
-        subdepartment_name: '',
-        task_manager_id: '',
-        task_manager_name: '',
-        task_assistant_id: '',
-        task_assistant_name: '',
-        officer_id: '',
-        officer_name: '',
-        client_id: '',
-        client_name: '',
-        class_id: '',
-        class_name: '',
-        class_description: null,
-        subclass_id: '',
-        subclass_name: '',
-        subclass_description: null,
-        status: 'registered',
-        date_initiated: new Date().toISOString().split('T')[0],
-        renewal_status: 'New',
-        account_used: '',
-        applied_by: '',
-        batch: '',
-        individual_name: '',
-        r_number: '',
-        dependent_name: '',
-        application_type: 'principal',
-        principal_member_id: '',
-        principal_member_name: ''
-      })
-      setSelectedClient(null)
-      setSelectedPrincipalMember(null)
+      // Reset the form and close the dialog
+      resetForm();
+      onOpenChange(false);
+      
+      // Call the onCreate callback with the complete task data
+      onCreate?.(taskWithRelationships);
     } catch (error) {
-      console.error('Error creating task:', error)
+      console.error('Error creating task:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to create task. Please try again.',
+        variant: 'destructive'
+      });
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [formData, loading, onOpenChange, onCreate])
+  }, [formData, loading, onOpenChange, onCreate, resetForm])
  
   const selectedDepartment = useMemo(() => {
     if (!formData.department_id) return null;
@@ -835,12 +789,12 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
   // Get dependents for the selected principal member
   const availableDependents = useMemo(() => {
-    if (formData.application_type !== 'dependent' || !selectedPrincipalMember) return [];
+    if (formData.applicant_type !== 'dependent' || !selectedPrincipalMember) return [];
 
     return Array.isArray(selectedPrincipalMember.dependents)
       ? selectedPrincipalMember.dependents
       : [];
-  }, [formData.application_type, selectedPrincipalMember]);
+  }, [formData.applicant_type, selectedPrincipalMember]);
 
   // Get available subclasses from the selected class
   const availableSubclasses = useMemo(() => {
@@ -858,14 +812,14 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   }, [formData.class_id, selectedSubdepartment]);
 
   const clientDetails = useMemo(() => {
-    const client = formData.application_type === 'dependent' ? selectedPrincipalMember : selectedClient;
+    const client = formData.applicant_type === 'dependent' ? selectedPrincipalMember : selectedClient;
     if (!client) return null
 
     return (
       <Card className="mt-2">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm flex items-center gap-2">
-            {formData.application_type === 'dependent' ? (
+            {formData.applicant_type === 'dependent' ? (
               <>
                 <User className="h-4 w-4" />
                 Principal Member Details
@@ -901,7 +855,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         </CardContent>
       </Card>
     )
-  }, [selectedClient, selectedPrincipalMember, formData.application_type])
+  }, [selectedClient, selectedPrincipalMember, formData.applicant_type])
 
   // Debug logging
   useEffect(() => {
@@ -983,17 +937,17 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
               </div>
             </div>
 
-            {/* Application Type Section */}
+            {/* Applicant Type Section */}
             <div className="space-y-4 rounded-lg border p-4 bg-white shadow-sm">
               <div className="flex items-center gap-2">
                 <Users className="h-5 w-5 text-blue-600" />
-                <h3 className="text-lg font-semibold text-gray-900">Application Type</h3>
+                <h3 className="text-lg font-semibold text-gray-900">Applicant Type</h3>
               </div>
 
               <div className="space-y-4">
                 <RadioGroup
-                  value={formData.application_type}
-                  onValueChange={(value: ApplicationType) => handleChange('application_type', value)}
+                  value={formData.applicant_type}
+                  onValueChange={(value: ApplicationType) => handleChange('applicant_type', value)}
                   className="grid grid-cols-1 md:grid-cols-2 gap-4"
                 >
                   <div>
@@ -1001,7 +955,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                     <Label
                       htmlFor="principal"
                       className={`flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground cursor-pointer ${
-                        formData.application_type === 'principal' ? 'border-primary bg-blue-50' : ''
+                        formData.applicant_type === 'principal' ? 'border-primary bg-blue-50' : ''
                       }`}
                     >
                       <User className="h-6 w-6 mb-2 text-blue-600" />
@@ -1013,7 +967,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                     <Label
                       htmlFor="dependent"
                       className={`flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground cursor-pointer ${
-                        formData.application_type === 'dependent' ? 'border-primary bg-blue-50' : ''
+                        formData.applicant_type === 'dependent' ? 'border-primary bg-blue-50' : ''
                       }`}
                     >
                       <Users className="h-6 w-6 mb-2 text-blue-600" />
@@ -1030,8 +984,8 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                     </Label>
                     <Input
                       id="individual-name"
-                      value={formData.individual_name}
-                      onChange={(e) => handleChange('individual_name', e.target.value)}
+                      value={formData.applicant_name}
+                      onChange={(e) => handleChange('applicant_name', e.target.value)}
                       placeholder="Enter individual's full name"
                       required
                     />
@@ -1051,7 +1005,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                 </div>
 
                 {/* Principal Member Name for Dependents */}
-                {formData.application_type === 'dependent' && (
+                {formData.applicant_type === 'dependent' && (
                   <div className="grid gap-2">
                     <Label htmlFor="principal-member" className="text-sm font-medium text-gray-700">
                       Principal Member Name *
@@ -1061,7 +1015,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                       value={formData.principal_member_name}
                       onChange={(e) => handleChange('principal_member_name', e.target.value)}
                       placeholder="Enter principal member's name"
-                      required={formData.application_type === 'dependent'}
+                      required={formData.applicant_type === 'dependent'}
                     />
                   </div>
                 )}
@@ -1125,29 +1079,6 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                     </SelectContent>
                   </Select>
                 </div>
-
-                {/* <div className="grid gap-2">
-                  <Label htmlFor="subdepartment" className="text-sm font-medium text-gray-700">
-                    Subdepartment *
-                  </Label>
-                  <Select
-                    value={formData.subdepartment_id}
-                    onValueChange={(value: string) => handleChange('subdepartment_id', value)}
-                    disabled={!formData.department_id}
-                    required
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder={!formData.department_id ? "Select department first" : "Select subdepartment"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {subdepartments.map((sub) => (
-                        <SelectItem key={sub.id} value={sub.id}>
-                          {sub.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div> */}
                 <div className="grid gap-2">
                   <Label htmlFor="subdepartment" className="text-sm font-medium text-gray-700">
                   Subdepartment *
@@ -1446,7 +1377,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
             </Button>
             <Button
               type="submit"
-              disabled={loading || !formData.job_description || !formData.department_id || !formData.subdepartment_id || !formData.individual_name || !formData.r_number}
+              disabled={loading || !formData.job_description || !formData.department_id || !formData.subdepartment_id || !formData.applicant_name || !formData.r_number}
             >
               {loading ? 'Creating...' : 'Create Task'}
             </Button>

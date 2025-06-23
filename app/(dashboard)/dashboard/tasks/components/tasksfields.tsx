@@ -237,12 +237,16 @@ export const taskColumns: TaskColumn[] = [
     header: "Job",
   },
   {
-    key: "job_head",
-    header: "Job Head",
+    key: "task_manager",
+    header: "Task Manager",
   },
   {
-    key: "class",
-    header: "Class",
+    key: "task_assistant",
+    header: "Task Assistant",
+  },
+  {
+    key: "officer",
+    header: "Officer",
   },
   {
     key: "submitted_documents",

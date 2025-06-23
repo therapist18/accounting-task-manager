@@ -1,13 +1,13 @@
 // @ts-nocheck
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Users, AlertTriangle, CheckCircle, ArrowRight, Calendar, Upload, FileText } from "lucide-react"
+import { Plus, Users, AlertTriangle, CheckCircle, ArrowRight, Calendar, Upload, FileText, Edit, Trash2 } from "lucide-react"
 import { format, parseISO } from "date-fns"
 import { taskColumns } from "./components/tasksfields"
 import { StageTimer } from "@/components/stage-timer"
@@ -24,69 +24,116 @@ import { fetchDepartments } from "../departments/departments/database"
 import { DepartmentSidebar } from "../departments/main-shared-components/department-sidebar"
 
 type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
-  department?: { id: string; name: string } | null
-  subdepartment?: {
-    id: string;
+  department?: {
+    id: number;
     name: string;
-    department_id: string;
-    classes?: Array<{
-      name: string;
-      description: string | null;
-      requirements: Array<{
-        name: string;
-        description: string | null;
-        is_required: boolean;
-      }>
-      subClasses?: Array<{
-        id: string;
-        name: string;
-        description?: string | null;
-        requirements?: Array<{
-          name: string;
-          description: string | null;
-          is_required: boolean;
-        }>
-      }>
-    }>
+    description?: string | null;
+    created_at?: string;
+    updated_at?: string;
     stages?: Array<{
       id: string;
       name: string;
+      description: string;
+      documents: Array<any>;
+      follow_up: string;
+      isSpecial: boolean;
       order_num: number;
+      allocations: Record<string, any>;
       estimated_time: number;
-    }>
-  } | null
-  task_manager?: { id: string; full_name: string | null; email: string } | null
-  task_assistant?: { id: string; full_name: string | null; email: string } | null
-  officer?: { id: string; full_name: string | null; email: string } | null
-  client?: {
-    id: string;
-    full_name: string | null;
-    email: string | null;
-    bill_to?: {
-      company_name?: string;
-      company_address?: string;
-      contact_person?: string;
+    }>;
+  } | null;
+  subdepartment?: {
+    id: number;
+    name: string;
+    description?: string | null;
+    department_id: number;
+    created_at: string;
+    updated_at: string;
+    classes?: Array<{
+      id: number;
+      name: string;
+      order: number;
+      isVisible: boolean;
+      description: string | null;
+      requirements?: Array<{
+        name: string;
+        description: string | null;
+        is_required?: boolean;
+        type?: 'standard' | 'conditional' | 'optional';
+        order?: number;
+      }>;
+      subClasses?: Array<{
+        id: number;
+        name: string;
+        order: number;
+        isVisible: boolean;
+        description: string | null;
+        requirements?: Array<{
+          name: string;
+          description: string | null;
+          is_required?: boolean;
+          type?: 'standard' | 'conditional' | 'optional';
+          order?: number;
+        }>;
+      }>;
+    }>;
+    stages?: Array<{
+      display: boolean;
+      stage_id: string;
+      applicable: boolean;
+    }>;
+    task_manager?: {
+      id: number;
+      start_date?: string;
+      end_date?: string | null;
     } | null;
-  } | null
+    task_assistant?: Array<{
+      id: number;
+      start_date?: string;
+      end_date?: string | null;
+    }> | null;
+  } | null;
+  task_manager?: {
+    id: number;
+    name: string | null;
+    email: string;
+  } | null;
+  task_assistant?: {
+    id: number;
+    name: string | null;
+    email: string;
+  } | null;
+  officer?: {
+    id: number;
+    name: string | null;
+    email: string;
+  } | null;
   current_stage?: {
     id: string;
     name: string;
-    estimated_time: number;
+    description: string;
+    documents: any[];
+    follow_up: string;
+    isSpecial: boolean;
     order_num: number;
-  } | null
-  current_stage_started_at?: string | null
-  subdepartment_id?: string | null
-  job_description?: string | null
-  date_initiated?: string | null
-  created_at?: string
-  status: string
-  class_name?: string | null
-  subclass_name?: string | null
-  renewal_status?: string | null
-  account_used?: string | null
-  applied_by?: string | null
-  batch?: string | null
-  dependent_name?: string | null
+    allocations: Record<string, any>;
+    estimated_time: number;
+  } | null;
+  applicant_name?: string | null;
+  r_number?: string | null;
+  class_id?: string | null;
+  subclass_id?: string | null;
+  renewal_status?: 'New' | 'Renewal' | null;
+  account_used?: string | null;
+  applied_by?: string | null;
+  batch?: string | null;
+  principal_member_name?: string | null;
+  current_stage_started_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  status: string;
+  job_description: string;
+  date_initiated: string | null;
 }
 
 // Table columns for stages view
@@ -95,12 +142,12 @@ const stageColumns = [
   { key: 'index', header: '#', width: '50px' },
   { key: 'website', header: 'Website', width: '120px' },
   { key: 'job_description', header: 'Job', width: '150px' },
-  { key: 'job_head', header: 'Job Head', width: '120px' },
-  { key: 'class', header: 'Class', width: '100px' },
-  { key: 'subclass', header: 'Subclass', width: '100px' },
+  { key: 'task_manager', header: 'Task Manager', width: '120px' },
+  { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
+  { key: 'officer', header: 'Officer', width: '120px' },
   { key: 'documents', header: 'All Submitted Documents', width: '180px' },
   { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
-  { key: 'individual_name_registry', header: 'Individual Name (Registry)', width: '180px' },
+  { key: 'principal_member_name', header: 'Principal Member Name', width: '180px' },
   { key: 'company_name', header: 'Company Name', width: '150px' },
   { key: 'dependent_name', header: 'Dependent Name', width: '150px' },
   { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
@@ -139,9 +186,9 @@ const requirementColumns = [
   { key: 'index', header: '#', width: '50px' },
   { key: 'website', header: 'Website', width: '120px' },
   { key: 'job_description', header: 'Job', width: '150px' },
-  { key: 'job_head', header: 'Job Head', width: '120px' },
-  { key: 'class', header: 'Class', width: '100px' },
-  { key: 'subclass', header: 'Subclass', width: '100px' },
+  { key: 'task_manager', header: 'Job Head', width: '120px' },
+  { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
+  { key: 'officer', header: 'Officer', width: '120px' },
   { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
   { key: 'company_name', header: 'Company Name', width: '150px' },
   { key: 'dependent_name', header: 'Dependent Name', width: '150px' },
@@ -168,67 +215,175 @@ export default function TasksPage() {
   const [selectedSubclass, setSelectedSubclass] = useState<string>('')
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
 
+  // Transform departments data to ensure consistent ID types and structure
+  const transformDepartments = (departments: any[]) => {
+    if (!departments || !Array.isArray(departments)) {
+      console.error('Invalid departments data:', departments);
+      return [];
+    }
+
+    return departments.map(dept => {
+      if (!dept) return null;
+      
+      const transformedDept = {
+        ...dept,
+        id: String(dept.id),
+        tm_subdepartments: Array.isArray(dept.tm_subdepartments) 
+          ? dept.tm_subdepartments
+              .filter(Boolean)
+              .map(subDept => ({
+                ...subDept,
+                id: String(subDept.id),
+                department_id: String(subDept.department_id || dept.id),
+                classes: Array.isArray(subDept.classes)
+                  ? subDept.classes
+                      .filter(Boolean)
+                      .map(cls => ({
+                        ...cls,
+                        id: String(cls.id),
+                        subdepartment_id: String(subDept.id),
+                        subClasses: Array.isArray(cls.subClasses)
+                          ? cls.subClasses
+                              .filter(Boolean)
+                              .map(subCls => ({
+                                ...subCls,
+                                id: String(subCls.id),
+                                class_id: String(cls.id)
+                              }))
+                          : []
+                      }))
+                  : []
+              }))
+          : []
+      };
+
+      console.log(`Processed department ${transformedDept.name} with ${transformedDept.tm_subdepartments.length} subdepartments`);
+      return transformedDept;
+    }).filter(Boolean);
+  };
+
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [tasksData, departmentsData, { data: usersData, error: usersError }, stagesData] = await Promise.all([
+        setLoading(true);
+        console.log('Loading tasks, departments, users, and stages...');
+        
+        const [tasksData, deptsData, usersData, stagesData] = await Promise.all([
           getTasks(),
           fetchDepartments(),
           supabase.from('tm_users').select('id, name, email, role'),
-          getStages()
-        ])
+          getStages(),
+        ]);
 
-        if (usersError) throw usersError
+        console.log('Raw tasks data:', tasksData);
+        console.log('Raw departments data:', deptsData);
+        console.log('Raw users data:', usersData);
+        console.log('Raw stages data:', stagesData);
 
-        setTasks(tasksData)
-        setDepartments(departmentsData)
-        setUsers(usersData || [])
-        setStages(stagesData)
+        // Transform departments data
+        const transformedDepts = transformDepartments(deptsData);
+        console.log('Transformed departments:', transformedDepts);
 
-        // Set default department/subdepartment
-        if (departmentsData.length > 0) {
-          setSelectedDepartment(departmentsData[0].id)
-          if (departmentsData[0].subdepartments.length > 0) {
-            setSelectedSubdepartment(departmentsData[0].subdepartments[0].id)
-            // Set default class if available
-            if (departmentsData[0].subdepartments[0].classes?.length > 0) {
-              setSelectedClass(departmentsData[0].subdepartments[0].classes[0].name)
-              // Set default subclass if available
-              if (departmentsData[0].subdepartments[0].classes[0].subClasses?.length > 0) {
-                setSelectedSubclass(departmentsData[0].subdepartments[0].classes[0].subClasses[0].id)
-              }
-            }
-          }
+        setTasks(tasksData);
+        setDepartments(transformedDepts);
+        setUsers(usersData);
+        setStages(stagesData);
+
+        // Log the first task's structure for debugging
+        if (tasksData.length > 0) {
+          console.log('First task structure:', tasksData[0]);
+          console.log('First task department:', tasksData[0].department);
+          console.log('First task subdepartment:', tasksData[0].subdepartment);
         }
-
-        setError(null)
       } catch (error) {
-        console.error('Error loading data:', error)
-        setError('Failed to load tasks. Please try again later.')
+        console.error('Error loading data:', error);
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    }
+    };
 
-    loadData()
-  }, [])
+    loadData();
+  }, []);
 
   // Get filtered tasks based on selected department/subdepartment/class/subclass
-  const getFilteredTasks = (status?: string) => {
-    let filtered = tasks.filter(task => {
-      if (selectedDepartment && task.department?.id !== selectedDepartment) return false
-      if (selectedSubdepartment && task.subdepartment?.id !== selectedSubdepartment) return false
-      if (selectedClass && task.class_name !== selectedClass) return false
-      if (selectedSubclass && task.subclass_name !== selectedSubclass) return false
-      return true
-    })
+  const getFilteredTasks = useCallback((status?: string) => {
+    console.log('Filtering tasks with selection:', {
+      selectedDepartment,
+      selectedSubdepartment,
+      selectedClass,
+      selectedSubclass,
+      tasksCount: tasks.length
+    });
 
-    if (status) {
-      filtered = filtered.filter(task => task.status === status)
+    // If no filters are selected, return all tasks
+    if (!selectedDepartment && !selectedSubdepartment && !selectedClass && !selectedSubclass) {
+      const allTasks = status ? tasks.filter(task => task.status === status) : [...tasks];
+      console.log('No filters selected, returning all tasks:', allTasks);
+      return allTasks;
     }
 
-    return filtered
-  }
+    // Helper function to compare IDs safely
+    const idsMatch = (id1: any, id2: any): boolean => {
+      if (id1 === undefined || id2 === undefined) return false;
+      return String(id1) === String(id2);
+    };
+
+    return tasks.filter(task => {
+      // Log task details for debugging
+      const taskInfo = {
+        taskId: task.id,
+        taskDept: task.department?.id,
+        taskSubdept: task.subdepartment?.id,
+        taskClass: task.class_id,
+        taskSubclass: task.subclass_id
+      };
+      console.log('Checking task:', taskInfo);
+
+      // Check department match if department is selected
+      if (selectedDepartment) {
+        const deptMatch = idsMatch(task.department?.id, selectedDepartment);
+        if (!deptMatch) {
+          console.log(`Task ${task.id} filtered out - department mismatch`);
+          return false;
+        }
+      }
+      
+      // Check subdepartment match if subdepartment is selected
+      if (selectedSubdepartment) {
+        const subdeptMatch = idsMatch(task.subdepartment?.id, selectedSubdepartment);
+        if (!subdeptMatch) {
+          console.log(`Task ${task.id} filtered out - subdepartment mismatch`);
+          return false;
+        }
+      }
+      
+      // Check class match if class is selected
+      if (selectedClass) {
+        const classMatch = idsMatch(task.class_id, selectedClass);
+        if (!classMatch) {
+          console.log(`Task ${task.id} filtered out - class mismatch`);
+          return false;
+        }
+      }
+      
+      // Check subclass match if subclass is selected
+      if (selectedSubclass) {
+        const subclassMatch = idsMatch(task.subclass_id, selectedSubclass);
+        if (!subclassMatch) {
+          console.log(`Task ${task.id} filtered out - subclass mismatch`);
+          return false;
+        }
+      }
+      
+      console.log(`Task ${task.id} passed all filters`);
+      return true;
+    });
+  }, [tasks, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
+
+  // Memoize filtered tasks to prevent unnecessary recalculations
+  const filteredTasks = useMemo(() => {
+    return getFilteredTasks();
+  }, [getFilteredTasks]);
 
   // Get current subdepartment details with proper typing
   const getCurrentSubdepartment = (): Subdepartment | undefined => {
@@ -243,30 +398,101 @@ export default function TasksPage() {
 
   // Get current selection level for determining data source
   const getCurrentSelectionLevel = () => {
-    if (selectedSubclass) return 'subclass'
-    if (selectedClass) return 'class'
-    if (selectedSubdepartment) return 'subdepartment'
-    if (selectedDepartment) return 'department'
-    return 'none'
+    if (selectedSubclass) {
+      console.log('Current selection level: subclass');
+      return 'subclass';
+    }
+    if (selectedClass) {
+      console.log('Current selection level: class');
+      return 'class';
+    }
+    if (selectedSubdepartment) {
+      console.log('Current selection level: subdepartment');
+      return 'subdepartment';
+    }
+    if (selectedDepartment) {
+      console.log('Current selection level: department');
+      return 'department';
+    }
+    console.log('Current selection level: none');
+    return 'none';
   }
 
   // Get requirements based on current selection level (child data level)
   const getCurrentRequirements = () => {
-    const subdept = getCurrentSubdepartment()
-    if (!subdept?.classes) return []
-
-    const currentClass = subdept.classes.find(c => c.name === selectedClass)
-    if (!currentClass) return []
-
-    // If subclass is selected, get requirements from subclass (child level)
+    console.log('Getting requirements for:', { selectedClass, selectedSubclass });
+    
+    // Helper function to compare IDs consistently
+    const idsMatch = (id1: string | number | undefined, id2: string | number | undefined) => {
+      if (id1 === undefined || id2 === undefined) return false;
+      return id1.toString() === id2.toString();
+    };
+    
     if (selectedSubclass) {
-      const subclass = currentClass.subClasses?.find(sc => sc.id === selectedSubclass)
-      return subclass?.requirements || []
+      console.log('Looking for subclass with ID:', selectedSubclass);
+      console.log('Available departments:', JSON.stringify(departments, null, 2));
+      
+      // Find the subclass with matching ID
+      let foundSubclass = null;
+      
+      departmentsLoop:
+      for (const dept of departments) {
+        if (!dept.subdepartments) continue;
+        
+        for (const subdept of dept.subdepartments) {
+          if (!subdept.classes) continue;
+          
+          for (const cls of subdept.classes) {
+            if (!cls.subClasses) continue;
+            
+            const matchingSubclass = cls.subClasses.find(
+              sc => idsMatch(sc.id, selectedSubclass)
+            );
+            
+            if (matchingSubclass) {
+              foundSubclass = matchingSubclass;
+              console.log(`Found matching subclass in department ${dept.name}, subdepartment ${subdept.name}, class ${cls.name}`);
+              break departmentsLoop;
+            }
+          }
+        }
+      }
+      
+      console.log('Found subclass:', foundSubclass);
+      return foundSubclass?.requirements || [];
+      
+    } else if (selectedClass) {
+      console.log('Looking for class with ID:', selectedClass);
+      
+      // Find the class with matching ID
+      let foundClass = null;
+      
+      classLoop:
+      for (const dept of departments) {
+        if (!dept.subdepartments) continue;
+        
+        for (const subdept of dept.subdepartments) {
+          if (!subdept.classes) continue;
+          
+          const matchingClass = subdept.classes.find(
+            c => idsMatch(c.id, selectedClass)
+          );
+          
+          if (matchingClass) {
+            foundClass = matchingClass;
+            console.log(`Found matching class in department ${dept.name}, subdepartment ${subdept.name}`);
+            break classLoop;
+          }
+        }
+      }
+      
+      console.log('Found class:', foundClass);
+      return foundClass?.requirements || [];
     }
-
-    // Otherwise get requirements from class level
-    return currentClass.requirements || []
-  }
+    
+    console.log('No class or subclass selected, returning empty requirements');
+    return [];
+  };
 
   // Get stages based on department level
   const getCurrentStages = () => {
@@ -354,87 +580,111 @@ export default function TasksPage() {
     }))
   }
 
-  // Transform departments for sidebar
-  const transformedDepartments = departments.map(dept => ({
-    ...dept,
-    subdepartments: dept.subdepartments?.map(subdept => ({
-      ...subdept,
-      classes: subdept.classes?.map(cls => ({
-        ...cls,
-        id: cls.name, // Use name as id for classes
-        subClasses: cls.subClasses || []
-      }))
-    }))
-  }))
+  // Transform departments for sidebar with proper ID mapping and type handling
+  const transformedDepartments = departments.map(dept => {
+    console.log(`Processing department: ${dept.name} (ID: ${dept.id})`);
+    const transformedDept = {
+      ...dept,
+      id: dept.id.toString(), // Ensure department ID is string
+      subdepartments: dept.subdepartments?.map(subdept => {
+        console.log(`  - Processing subdepartment: ${subdept.name} (ID: ${subdept.id})`);
+        console.log(`  - Subdepartment classes:`, subdept.classes);
+        
+        const transformedSubdept = {
+          ...subdept,
+          id: subdept.id.toString(), // Ensure subdepartment ID is string
+          department_id: subdept.department_id?.toString(), // Ensure department_id is string
+          classes: subdept.classes?.map(cls => {
+            console.log(`    - Processing class: ${cls.name} (ID: ${cls.id})`);
+            console.log(`    - Class subclasses:`, cls.subClasses);
+            
+            return {
+              ...cls,
+              id: cls.id?.toString(), // Ensure class ID is string
+              subClasses: (cls.subClasses || []).map(subCls => ({
+                ...subCls,
+                id: subCls.id?.toString(), // Ensure subclass ID is string
+                // Ensure parentClassId is properly set if it exists
+                ...(subCls.parentClassId && { parentClassId: subCls.parentClassId.toString() })
+              }))
+            };
+          })
+        };
+        
+        return transformedSubdept;
+      })
+    };
+    
+    return transformedDept;
+  });
+  
+  console.log('Transformed departments:', JSON.stringify(transformedDepartments, null, 2));
 
   // Format task data for display
   const formatTaskData = (task: Task, index: number) => {
     const formatDate = (dateString?: string | null) => {
-      if (!dateString) return ''
+      if (!dateString) return '';
       try {
-        return format(parseISO(dateString), 'yyyy-MM-dd')
+        return format(parseISO(dateString), 'yyyy-MM-dd');
       } catch (e) {
-        return dateString
+        return dateString;
       }
-    }
-
-    const getCompanyName = () => {
-      if (task.client?.bill_to?.company_name) {
-        return task.client.bill_to.company_name
-      }
-      return task.client?.full_name || 'N/A'
-    }
+    };
 
     // Get requirements for the current task based on child data level
     const getRequirements = () => {
-      const requirements = getCurrentRequirements()
-
-      console.log('Current requirements from child level:', requirements)
+      const requirements = getCurrentRequirements();
 
       if (!requirements || requirements.length === 0) {
-        console.log('No requirements found')
-        return {}
+        return {};
       }
 
-      const processedRequirements = requirements.reduce((acc, req) => {
-        if (!req.name) return acc; // Skip if requirement has no name
-        const key = req.name.replace(/\s+/g, '_').toLowerCase()
+      return requirements.reduce((acc, req) => {
+        if (!req.name) return acc;
+        const key = req.name.replace(/\s+/g, '_').toLowerCase();
         acc[key] = {
           status: req.is_required ? 'Required' : 'Optional',
           description: req.description || ''
-        }
-        return acc
-      }, {} as Record<string, { status: string; description: string }>)
+        };
+        return acc;
+      }, {} as Record<string, { status: string; description: string }>);
+    };
 
-      console.log('Processed requirements:', processedRequirements)
-      return processedRequirements
-    }
-
-    const requirements = getRequirements()
+    const requirements = getRequirements();
+    const taskManagerName = task.task_manager?.name || task.task_manager?.email || 'Unassigned';
+    const taskAssistantName = task.task_assistant?.name || task.task_assistant?.email || 'None';
+    const officerName = task.officer?.name || task.officer?.email || 'None';
 
     return {
       ...task,
       index: index + 1,
-      website: task.client?.website || '',
-      job_description: task.job_description || '',
-      job_head: task.task_manager?.full_name || 'Unassigned',
-      class: task.class_name || 'N/A',
-      subclass: task.subclass_name || 'N/A',
+      website: task.website || '',
+      job_description: task.job_description || 'No description',
+      task_manager: taskManagerName,
+      task_assistant: taskAssistantName,
+      officer: officerName,
+      class: task.class_id || 'Missing',
+      subclass: task.subclass_id || 'Missing',
       documents: 'View Documents',
-      applicant_name: task.client?.full_name || 'N/A',
-      company_name: getCompanyName(),
-      dependent_name: task.dependent_name || '',
+      applicant_name: task.applicant_name || 'Missing',
+      company_name: task.company_name || 'Missing',
+      dependent_name: task.dependent_name || 'Missing',
+      principal_member_name: task.principal_member_name || 'Missing',
       renewal_status: task.renewal_status || 'New',
-      account_used: task.account_used || '',
+      account_used: task.account_used || 'Missing',
       applied_by: task.applied_by || 'System',
-      batch: task.batch || '',
+      batch: task.batch || 'Missing',
+      current_stage: task.current_stage?.name || 'Not Started',
+      date_initiated: task.date_initiated ? formatDate(task.date_initiated) : 'Missing',
+      created_at: formatDate(task.created_at),
+      updated_at: formatDate(task.updated_at),
       ...requirements
-    }
-  }
+    };
+  };
 
   // Generate dynamic stage columns based on department (stages are department-dependent)
   const generateStageColumns = () => {
-    const stages = getCurrentStages()
+   const stages = getCurrentStages()
 
     if (!stages || stages.length === 0) {
       // If no stages, return base columns with a "No Stages" indicator
@@ -578,7 +828,7 @@ export default function TasksPage() {
     return <Badge variant={variants[status as keyof typeof variants] || "secondary"}>{status}</Badge>
   }
 
-  const renderTaskTable = (tasks: Task[], columns: any[], showRequirements = false) => {
+  const renderTaskTable = (tasksToRender: Task[], columns: any[], showRequirements = false) => {
     const finalColumns = showRequirements ? generateRequirementColumns() : generateStageColumns()
 
     // Group columns by parent header
@@ -600,18 +850,18 @@ export default function TasksPage() {
             <Table className="min-w-[1400px] w-full border-collapse">
               <TableHeader className="sticky top-0 z-10">
                 {/* First row - parent headers */}
-                <TableRow className="bg-muted/30 hover:bg-muted/30">
+                <TableRow className="bg-blue-600">
                   {groupedColumns.ungrouped?.map((column) => (
                     <TableHead
                       key={column.key}
                       rowSpan={2}
-                      className="whitespace-nowrap border-r border-border font-semibold text-foreground text-center"
+                      className="whitespace-nowrap border-r border-border font-semibold text-white bg-blue-600"
                       style={{
                         width: column.width,
                         position: 'sticky',
                         top: 0,
                         zIndex: 10,
-                        backgroundColor: 'hsl(var(--background))',
+                        backgroundColor: 'hsl(var(--blue-50))',
                         verticalAlign: 'middle'
                       }}
                     >
@@ -624,7 +874,7 @@ export default function TasksPage() {
                       <TableHead
                         key={groupName}
                         colSpan={cols.length}
-                        className="whitespace-nowrap border-r border-border font-semibold text-foreground text-center bg-blue-50"
+                        className="whitespace-nowrap border-r border-border font-semibold text-white text-center"
                         style={{
                           position: 'sticky',
                           top: 0,
@@ -639,19 +889,19 @@ export default function TasksPage() {
                 </TableRow>
 
                 {/* Second row - sub headers */}
-                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                <TableRow className="bg-blue-600">
                   {Object.entries(groupedColumns).map(([groupName, cols]) => {
                     if (groupName === 'ungrouped') return null
                     return cols.map((column) => (
                       <TableHead
                         key={column.key}
-                        className="whitespace-nowrap border-r border-border font-medium text-foreground text-center"
+                        className="whitespace-nowrap border-r border-border font-medium text-white text-center"
                         style={{
                           width: column.width,
                           position: 'sticky',
                           top: '40px', // Height of first row
                           zIndex: 10,
-                          backgroundColor: 'hsl(var(--background))',
+                          backgroundColor: 'hsl(var(--blue-50))',
                         }}
                       >
                         {column.header}
@@ -662,7 +912,6 @@ export default function TasksPage() {
               </TableHeader>
 
               <TableBody>
-                {/* Rest of your table body logic remains the same */}
                 {loading ? (
                   <TableRow>
                     <TableCell colSpan={finalColumns.length} className="h-24 text-center">
@@ -675,8 +924,8 @@ export default function TasksPage() {
                       {error}
                     </TableCell>
                   </TableRow>
-                ) : tasks.length > 0 ? (
-                  tasks.map((task, index) => {
+                ) : tasksToRender.length > 0 ? (
+                  tasksToRender.map((task, index) => {
                     const formattedTask = formatTaskData(task, index)
                     return (
                       <TableRow key={task.id} className="hover:bg-muted/50">

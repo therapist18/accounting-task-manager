@@ -72,21 +72,55 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const trimmedName = formData.name.trim()
+    if (!trimmedName) {
+      // Optionally set an error state or show a toast
+      return
+    }
     setSaving(true)
     try {
-      await onSave(formData)
+      await onSave({
+        ...formData,
+        name: trimmedName,
+        description: formData.description?.trim() || undefined,
+        // Clean up any empty strings in the time configs
+        timeConfigs: formData.timeConfigs?.map(tc => ({
+          ...tc,
+          applicationType: tc.applicationType || 'Default',
+          days: tc.days || 0,
+          hours: tc.hours || 0,
+          minutes: tc.minutes || 0
+        })) || []
+      })
+      onOpenChange(false)
+    } catch (error) {
+      console.error('Error saving stage:', error)
+      // Optionally show error toast
     } finally {
       setSaving(false)
     }
   }
 
-  const updateTimeConfig = (index: number, updates: Partial<TimeConfig>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target
+    const target = e.target as HTMLInputElement
+    
     setFormData(prev => ({
       ...prev,
-      timeConfigs: prev.timeConfigs?.map((config, i) => 
-        i === index ? { ...config, ...updates } : config
-      )
+      [name]: type === 'number' ? Number(value) : value
     }))
+  }
+
+  const updateTimeConfig = (index: number, updates: Partial<TimeConfig>) => {
+    setFormData(prev => {
+      const updatedTimeConfigs = [...(prev.timeConfigs || [])]
+      updatedTimeConfigs[index] = { ...updatedTimeConfigs[index], ...updates }
+      
+      return {
+        ...prev,
+        timeConfigs: updatedTimeConfigs
+      }
+    })
   }
 
   const addTimeConfig = () => {
@@ -121,17 +155,21 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
   
   const { days: totalDays, hours: totalHours, minutes: totalMins } = getTimeFromMinutes(formData.estimated_time)
   
-  const handleTimeChange = (days: number, hours: number, minutes: number) => {
-    setFormData(prev => ({
-      ...prev,
-      estimated_time: calculateTotalMinutes(days, hours, minutes)
-    }))
+  const handleTimeChange = (field: 'days' | 'hours' | 'minutes', value: number) => {
+    setFormData(prev => {
+      const currentTime = getTimeFromMinutes(prev.estimated_time || 0)
+      const newTime = { ...currentTime, [field]: value }
+      return {
+        ...prev,
+        estimated_time: calculateTotalMinutes(newTime.days, newTime.hours, newTime.minutes)
+      }
+    })
   }
 
   // Document management functions
   const addDocument = () => {
     const newDoc: StageDocument = {
-      id: generateId(),
+      id: `doc-${Date.now()}`,
       name: '',
       description: '',
       isRequired: false,
@@ -142,6 +180,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
       ...prev,
       documents: [...(prev.documents || []), newDoc]
     }))
+    // Switch to the Documents tab when adding a new document
+    setActiveTab('documents')
   }
 
   const updateDocument = (docId: string, updates: Partial<StageDocument>) => {
@@ -160,27 +200,36 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
     }))
   }
 
-  const addExtraction = (docId: string) => {
-    const newExtraction: DocumentExtraction = {
-      id: generateId(),
+  const addExtractionField = (docId: string) => {
+    const newField: DocumentExtraction = {
+      id: `field-${Date.now()}`,
       fieldName: '',
-      fieldType: 'text',
-      isRequired: false,
-      description: ''
+      description: '',
+      isRequired: true,
+      fieldType: 'text'
     }
-    
-    setFormData(prev => ({
-      ...prev,
-      documents: prev.documents?.map(doc => {
-        if (doc.id === docId) {
-          return {
-            ...doc,
-            extractionSpecs: [...(doc.extractionSpecs || []), newExtraction]
-          }
+    setFormData(prev => {
+      const updatedDocs = prev.documents?.map(doc => 
+        doc.id === docId 
+          ? { 
+              ...doc, 
+              extractionSpecs: [...(doc.extractionSpecs || []), newField] 
+            }
+          : doc
+      ) || []
+      
+      // Auto-scroll to the new field
+      setTimeout(() => {
+        const fieldElement = document.querySelector(`[name^="doc-${docId}-extraction-"][name$="-name"]:last-of-type`)
+        if (fieldElement) {
+          fieldElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+          // @ts-ignore - focus after scroll
+          fieldElement.focus()
         }
-        return doc
-      })
-    }))
+      }, 100)
+      
+      return { ...prev, documents: updatedDocs }
+    })
   }
 
   const updateExtraction = (docId: string, extractionIndex: number, updates: Partial<DocumentExtraction>) => {
@@ -255,7 +304,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                 <div className="space-y-2">
                   <Label>Document Name *</Label>
                   <Input
-                    value={doc.name}
+                    name={`doc-${doc.id}-name`}
+                    value={doc.name || ''}
                     onChange={(e) => updateDocument(doc.id, { name: e.target.value })}
                     placeholder="e.g., Application Form, Passport Copy"
                   />
@@ -299,10 +349,11 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
               <div className="space-y-2">
                 <Label>Description</Label>
                 <Textarea
+                  name={`doc-${doc.id}-description`}
                   value={doc.description || ''}
                   onChange={(e) => updateDocument(doc.id, { description: e.target.value })}
                   placeholder="Brief description of this document's purpose..."
-                  className="resize-none"
+                  className="resize-none min-h-[80px]"
                   rows={2}
                 />
               </div>
@@ -341,7 +392,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                          <div className="space-y-1">
                            <Label className="text-xs">Field Name</Label>
                            <Input
-                             value={extraction.fieldName}
+                             name={`doc-${doc.id}-extraction-${extraction.id}-name`}
+                             value={extraction.fieldName || ''}
                              onChange={(e) => updateExtraction(doc.id, extractionIndex, { fieldName: e.target.value })}
                              placeholder="e.g., Application Date"
                              className="h-8"
@@ -370,6 +422,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                          <div className="space-y-1">
                            <Label className="text-xs">Description</Label>
                            <Input
+                             name={`doc-${doc.id}-extraction-${extraction.id}-description`}
                              value={extraction.description || ''}
                              onChange={(e) => updateExtraction(doc.id, extractionIndex, { description: e.target.value })}
                              placeholder="Optional description"
@@ -378,9 +431,9 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                          </div>
                          <div className="flex items-center space-x-2 pt-4">
                            <Checkbox
-                             checked={extraction.isRequired}
+                             checked={extraction.isRequired || false}
                              onCheckedChange={(checked) => 
-                               updateExtraction(doc.id, extractionIndex, { isRequired: checked as boolean })
+                               updateExtraction(doc.id, extractionIndex, { isRequired: Boolean(checked) })
                              }
                            />
                            <Label className="text-xs">Required</Label>
@@ -480,8 +533,9 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                <div className="md:col-span-3">
                  <Input
                    id="name"
-                   value={formData.name}
-                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                   name="name"
+                   value={formData.name || ''}
+                   onChange={handleInputChange}
                    placeholder="e.g., Application Review, Document Verification"
                    required
                  />
@@ -500,10 +554,11 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                <div className="md:col-span-3">
                  <Textarea
                    id="description"
+                   name="description"
                    value={formData.description || ''}
-                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                   onChange={handleInputChange}
                    placeholder="Describe the purpose and activities of this stage..."
-                   className="resize-none"
+                   className="resize-none min-h-[100px]"
                    rows={3}
                  />
                </div>
@@ -549,7 +604,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                        <div className="md:col-span-2">
                          <Label className="text-sm">Application Type</Label>
                          <Input
-                           value={config.applicationType}
+                           name={`timeConfigs[${index}].applicationType`}
+                           value={config.applicationType || ''}
                            onChange={(e) => updateTimeConfig(index, { applicationType: e.target.value })}
                            placeholder="e.g., Standard, Express, Renewal"
                            required
@@ -559,8 +615,9 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                          <Label className="text-sm">Days</Label>
                          <Input
                            type="number"
+                           name={`timeConfigs[${index}].days`}
                            min="0"
-                           value={config.days}
+                           value={config.days || 0}
                            onChange={(e) => updateTimeConfig(index, { days: parseInt(e.target.value) || 0 })}
                            className="text-center"
                          />
@@ -569,9 +626,10 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                          <Label className="text-sm">Hours</Label>
                          <Input
                            type="number"
+                           name={`timeConfigs[${index}].hours`}
                            min="0"
                            max="23"
-                           value={config.hours}
+                           value={config.hours || 0}
                            onChange={(e) => updateTimeConfig(index, { hours: Math.min(23, parseInt(e.target.value) || 0) })}
                            className="text-center"
                          />
@@ -580,9 +638,10 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                          <Label className="text-sm">Minutes</Label>
                          <Input
                            type="number"
+                           name={`timeConfigs[${index}].minutes`}
                            min="0"
                            max="59"
-                           value={config.minutes}
+                           value={config.minutes || 0}
                            onChange={(e) => updateTimeConfig(index, { minutes: Math.min(59, parseInt(e.target.value) || 0) })}
                            className="text-center"
                          />
@@ -620,8 +679,9 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                            type="number"
                            min="0"
                            value={totalDays}
-                           onChange={(e) => handleTimeChange(parseInt(e.target.value) || 0, totalHours, totalMins)}
-                           className="text-center"
+                           onChange={(e) => handleTimeChange('days', parseInt(e.target.value) || 0)}
+                           onFocus={(e) => e.target.select()}
+                           className="text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                          />
                          <Label className="block text-center text-xs text-muted-foreground mt-1">Days</Label>
                        </div>
@@ -631,8 +691,9 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                            min="0"
                            max="23"
                            value={totalHours}
-                           onChange={(e) => handleTimeChange(totalDays, Math.min(23, parseInt(e.target.value) || 0), totalMins)}
-                           className="text-center"
+                           onChange={(e) => handleTimeChange('hours', Math.min(23, parseInt(e.target.value) || 0))}
+                           onFocus={(e) => e.target.select()}
+                           className="text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                          />
                          <Label className="block text-center text-xs text-muted-foreground mt-1">Hours</Label>
                        </div>
@@ -642,8 +703,9 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                            min="0"
                            max="59"
                            value={totalMins}
-                           onChange={(e) => handleTimeChange(totalDays, totalHours, Math.min(59, parseInt(e.target.value) || 0))}
-                           className="text-center"
+                           onChange={(e) => handleTimeChange('minutes', Math.min(59, parseInt(e.target.value) || 0))}
+                           onFocus={(e) => e.target.select()}
+                           className="text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                          />
                          <Label className="block text-center text-xs text-muted-foreground mt-1">Minutes</Label>
                        </div>
