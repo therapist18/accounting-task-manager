@@ -1246,6 +1246,7 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
                       <SelectValue placeholder={!formData.subdepartment_id ? "Select subdepartment first" : "Select task manager"} />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
                       {availableTaskManagers.map((manager) => (
                         <SelectItem key={manager.id} value={manager.id}>
                           {manager.name}

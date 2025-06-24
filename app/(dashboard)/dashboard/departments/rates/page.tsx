@@ -727,7 +727,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                             {groupIndex + 1}
                           </TableCell>
                           <TableCell className="sticky left-16 bg-muted/20 border-r font-medium z-30">
-                            <div className="flex items-center gap-2">                             
+                            <div className="flex justify-between items-center gap-2">                             
                               <span>{subdeptName}</span>
                               <Button
                                 variant="ghost"
@@ -741,9 +741,6 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                                   <Plus className="h-4 w-4" />
                                 )}
                               </Button>
-                              <Badge variant="secondary" className="text-xs">
-                                {entries.length}
-                              </Badge>
                             </div>
                           </TableCell>
                           <TableCell colSpan={22} className="text-muted-foreground italic">

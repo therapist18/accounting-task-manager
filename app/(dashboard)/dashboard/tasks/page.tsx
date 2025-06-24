@@ -166,20 +166,14 @@ export default function TasksPage() {
     { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
     { key: 'principal_member_name', header: 'Principal Member Name', width: '180px' },
     { key: 'company_name', header: 'Company Name', width: '150px' },
-    { key: 'dependent_name', header: 'Dependent Name', width: '150px' },
-    { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
-    // Dynamic stage columns will be added here by generateStageColumns()
-    { key: 'account_used', header: 'Account Used', width: '120px' },
-    { key: 'applied_by', header: 'Applied by Who', width: '120px' },
-    { key: 'batch', header: 'Batch', width: '100px' },
-    { 
-      key: 'documents', 
-      header: 'Documents', 
+    {
+      key: 'documents',
+      header: 'All Submitted Documents',
       width: '80px',
       render: (value: any, task: Task) => (
-        <Button 
-          variant="ghost" 
-          size="icon" 
+        <Button
+          variant="ghost"
+          size="icon"
           className="h-8 w-8 p-0 text-destructive hover:text-destructive"
           onClick={() => handleViewDocuments(task)}
         >
@@ -187,6 +181,12 @@ export default function TasksPage() {
         </Button>
       )
     },
+    { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
+    // Dynamic stage columns will be added here by generateStageColumns()
+    { key: 'account_used', header: 'Account Used', width: '120px' },
+    { key: 'applied_by', header: 'Applied by Who', width: '120px' },
+    { key: 'batch', header: 'Batch', width: '100px' },
+
     {
       key: 'actions',
       header: 'Actions',
@@ -224,7 +224,6 @@ export default function TasksPage() {
     { key: 'officer', header: 'Officer', width: '120px' },
     { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
     { key: 'company_name', header: 'Company Name', width: '150px' },
-    { key: 'dependent_name', header: 'Dependent Name', width: '150px' },
     { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
     { key: 'account_used', header: 'Account Used', width: '120px' },
     { key: 'applied_by', header: 'Applied by Who', width: '120px' },
@@ -240,36 +239,36 @@ export default function TasksPage() {
 
     return departments.map(dept => {
       if (!dept) return null;
-      
+
       const transformedDept = {
         ...dept,
         id: String(dept.id),
-        tm_subdepartments: Array.isArray(dept.tm_subdepartments) 
+        tm_subdepartments: Array.isArray(dept.tm_subdepartments)
           ? dept.tm_subdepartments
-              .filter(Boolean)
-              .map(subDept => ({
-                ...subDept,
-                id: String(subDept.id),
-                department_id: String(subDept.department_id || dept.id),
-                classes: Array.isArray(subDept.classes)
-                  ? subDept.classes
-                      .filter(Boolean)
-                      .map(cls => ({
-                        ...cls,
-                        id: String(cls.id),
-                        subdepartment_id: String(subDept.id),
-                        subClasses: Array.isArray(cls.subClasses)
-                          ? cls.subClasses
-                              .filter(Boolean)
-                              .map(subCls => ({
-                                ...subCls,
-                                id: String(subCls.id),
-                                class_id: String(cls.id)
-                              }))
-                          : []
-                      }))
-                  : []
-              }))
+            .filter(Boolean)
+            .map(subDept => ({
+              ...subDept,
+              id: String(subDept.id),
+              department_id: String(subDept.department_id || dept.id),
+              classes: Array.isArray(subDept.classes)
+                ? subDept.classes
+                  .filter(Boolean)
+                  .map(cls => ({
+                    ...cls,
+                    id: String(cls.id),
+                    subdepartment_id: String(subDept.id),
+                    subClasses: Array.isArray(cls.subClasses)
+                      ? cls.subClasses
+                        .filter(Boolean)
+                        .map(subCls => ({
+                          ...subCls,
+                          id: String(subCls.id),
+                          class_id: String(cls.id)
+                        }))
+                      : []
+                  }))
+                : []
+            }))
           : []
       };
 
@@ -283,7 +282,7 @@ export default function TasksPage() {
       try {
         setLoading(true);
         console.log('Loading tasks, departments, users, and stages...');
-        
+
         const [tasksData, deptsData, usersData, stagesData] = await Promise.all([
           getTasks(),
           fetchDepartments(),
@@ -363,7 +362,7 @@ export default function TasksPage() {
           return false;
         }
       }
-      
+
       // Check subdepartment match if subdepartment is selected
       if (selectedSubdepartment) {
         const subdeptMatch = idsMatch(task.subdepartment?.id, selectedSubdepartment);
@@ -372,7 +371,7 @@ export default function TasksPage() {
           return false;
         }
       }
-      
+
       // Check class match if class is selected
       if (selectedClass) {
         const classMatch = idsMatch(task.class_id, selectedClass);
@@ -381,7 +380,7 @@ export default function TasksPage() {
           return false;
         }
       }
-      
+
       // Check subclass match if subclass is selected
       if (selectedSubclass) {
         const subclassMatch = idsMatch(task.subclass_id, selectedSubclass);
@@ -390,7 +389,7 @@ export default function TasksPage() {
           return false;
         }
       }
-      
+
       console.log(`Task ${task.id} passed all filters`);
       return true;
     });
@@ -443,7 +442,7 @@ export default function TasksPage() {
         .flatMap(sd => sd.classes || [])
         .flatMap(c => c.subClasses || [])
         .find(sc => sc.id === selectedSubclass);
-      
+
       console.log('Found subclass:', subclass);
       return subclass?.requirements || [];
     } else if (selectedClass) {
@@ -452,7 +451,7 @@ export default function TasksPage() {
         .flatMap(d => d.tm_subdepartments || [])
         .flatMap(sd => sd.classes || [])
         .find(c => c.id === selectedClass);
-      
+
       console.log('Found class:', cls);
       return cls?.requirements || [];
     } else if (selectedSubdepartment) {
@@ -460,7 +459,7 @@ export default function TasksPage() {
       const subdept = departments
         .flatMap(d => d.tm_subdepartments || [])
         .find(sd => sd.id === selectedSubdepartment);
-      
+
       console.log('Found subdepartment:', subdept);
       return subdept?.requirements || [];
     } else if (selectedDepartment) {
@@ -469,7 +468,7 @@ export default function TasksPage() {
       console.log('Found department:', dept);
       return dept?.requirements || [];
     }
-    
+
     console.log('No selection level specified, returning empty requirements');
     return [];
   }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
@@ -574,7 +573,7 @@ export default function TasksPage() {
       subdepartments: dept.subdepartments?.map(subdept => {
         console.log(`  - Processing subdepartment: ${subdept.name} (ID: ${subdept.id})`);
         console.log(`  - Subdepartment classes:`, subdept.classes);
-        
+
         const transformedSubdept = {
           ...subdept,
           id: subdept.id.toString(), // Ensure subdepartment ID is string
@@ -582,7 +581,7 @@ export default function TasksPage() {
           classes: subdept.classes?.map(cls => {
             console.log(`    - Processing class: ${cls.name} (ID: ${cls.id})`);
             console.log(`    - Class subclasses:`, cls.subClasses);
-            
+
             return {
               ...cls,
               id: cls.id?.toString(), // Ensure class ID is string
@@ -595,14 +594,14 @@ export default function TasksPage() {
             };
           })
         };
-        
+
         return transformedSubdept;
       })
     };
-    
+
     return transformedDept;
   });
-  
+
   console.log('Transformed departments:', JSON.stringify(transformedDepartments, null, 2));
 
   // Format task data for display
@@ -653,7 +652,6 @@ export default function TasksPage() {
       documents: 'View Documents',
       applicant_name: task.applicant_name || 'Missing',
       company_name: task.company_name || 'Missing',
-      dependent_name: task.dependent_name || 'Missing',
       principal_member_name: task.principal_member_name || 'Missing',
       renewal_status: task.renewal_status || 'New',
       account_used: task.account_used || 'Missing',
@@ -671,16 +669,23 @@ export default function TasksPage() {
   const generateStageColumns = () => {
     const stages = getCurrentStages()
 
-    if (!stages || stages.length === 0) {
-      // If no stages, return base columns with a "No Stages" indicator
-      const renewalStatusIndex = stageColumns.findIndex(col => col.key === 'renewal_status')
-      const baseColumns = stageColumns.slice(0, renewalStatusIndex + 1)
-      const endColumns = stageColumns.slice(renewalStatusIndex + 1)
+    // Create columns up to and including renewal_status
+    const renewalStatusIndex = stageColumns.findIndex(col => col.key === 'renewal_status')
+    const baseColumns = stageColumns.slice(0, renewalStatusIndex + 1)
 
+    // Get the remaining columns that come after the stages
+    const accountUsedIndex = stageColumns.findIndex(col => col.key === 'account_used')
+    const endColumns = accountUsedIndex !== -1
+      ? stageColumns.slice(accountUsedIndex)
+      : stageColumns.slice(renewalStatusIndex + 1)
+
+    // If no stages, return base columns with a "No Stages" indicator
+    if (!stages || stages.length === 0) {
       const noStagesColumn = {
         key: 'no_stages',
         header: 'Stages',
         width: '150px',
+        parentHeader: 'Stages',
         render: () => (
           <div className="text-center text-muted-foreground text-sm">
             No stages configured
@@ -727,23 +732,8 @@ export default function TasksPage() {
       }
     }))
 
-    // Get the index of renewal_status column
-    const renewalStatusIndex = stageColumns.findIndex(col => col.key === 'renewal_status')
-    
-    // Get the index of the first column that comes after the stage columns
-    const accountUsedIndex = stageColumns.findIndex(col => col.key === 'account_used')
-    
-    // If we found both indices, insert the stage columns between them
-    if (renewalStatusIndex !== -1 && accountUsedIndex !== -1) {
-      const baseColumns = stageColumns.slice(0, renewalStatusIndex + 1)
-      const endColumns = stageColumns.slice(accountUsedIndex)
-      return [...baseColumns, ...dynamicStageColumns, ...endColumns]
-    }
-    
-    // Fallback to the original behavior if we can't find the columns
-    console.warn('Could not find required columns for proper stage column insertion')
-    const baseColumns = stageColumns.slice(0, renewalStatusIndex + 1)
-    const endColumns = stageColumns.slice(renewalStatusIndex + 1)
+
+    // Return the columns in the correct order: base columns -> stage columns -> end columns
     return [...baseColumns, ...dynamicStageColumns, ...endColumns]
   }
 
@@ -1382,7 +1372,7 @@ export default function TasksPage() {
                   {selectedTask?.job_description} - {selectedTask?.applicant_name}
                 </DialogDescription>
               </DialogHeader>
-              
+
               <div className="space-y-4">
                 {getCurrentRequirements().map((req, index) => (
                   <div key={index} className="flex items-center justify-between p-3 border rounded-md">

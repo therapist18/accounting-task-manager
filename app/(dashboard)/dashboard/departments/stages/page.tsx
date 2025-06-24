@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { ArrowUp, ArrowDown, Pencil, X, Info, Minus, Plus, Clock, FileText, User } from "lucide-react"
+import { ArrowUp, ArrowDown, Pencil, X, Info, Minus, Plus, Clock, FileText, User, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
@@ -613,11 +613,11 @@ export default function Stages() {
     try {
       const currentDept = getCurrentDepartment()
       if (!currentDept) return
-  
+
       const updatedStages = currentDept.stages.map(s =>
         s.id === updatedStage.id ? updatedStage : s
       )
-  
+
       // Update department stages in Supabase
       const { error } = await supabase
         .from('tm_departments')
@@ -626,21 +626,21 @@ export default function Stages() {
           updated_at: new Date().toISOString()
         })
         .eq('id', activeTab)
-  
+
       if (error) throw error
-  
+
       // Update local state
       setDepartments(prev => prev.map(dept =>
         dept.id === activeTab
           ? { ...dept, stages: updatedStages }
           : dept
       ))
-  
+
       toast({
         title: "Success",
         description: "Stage updated successfully",
       })
-  
+
       // Clear both states
       setEditingStage(null)
       setIsEditDialogOpen(false)
@@ -772,38 +772,30 @@ export default function Stages() {
               </div>
             ) : (
               <div className="relative overflow-auto max-h-[calc(100vh-200px)] border rounded-lg">
-                <Table className="min-w-max">
-                  <TableHeader className="sticky top-0 bg-background z-30">
+                <Table className="min-w-max bg-white">
+                  <TableHeader className="sticky top-0 bg-blue-600 text-white z-30">
                     {/* Stage Names Row */}
-                    <TableRow className="bg-muted/50">
-                      <TableHead className="sticky left-0 bg-background border-r font-bold w-16 z-40 text-center" rowSpan={4}>
+                    <TableRow className="bg-blue-600">
+                      <TableHead className="sticky left-0 bg-blue-600 border-r font-bold w-16 z-40 text-center text-white" rowSpan={4}>
                         #
                       </TableHead>
-                      <TableHead className="sticky left-16 bg-background border-r font-bold w-64 z-40" rowSpan={4}>
+                      <TableHead className="sticky left-16 bg-blue-600 border-r font-bold w-64 z-40 text-white" rowSpan={4}>
                         <div className="flex items-center gap-2">
                           <FileText className="h-4 w-4" />
                           Department / Entity
                         </div>
                       </TableHead>
-                      <TableHead className="sticky left-0 bg-background border-r z-40">Stage Name</TableHead>
+                      <TableHead className="sticky left-26 bg-blue-600 border-r z-40 text-white">Stage Name</TableHead>
 
                       {dept.stages.map((stage) => (
                         <TableHead
                           key={stage.id}
-                          className="border-r text-center font-bold bg-muted/30 min-w-[200px]"
+                          className="border-r text-center font-bold bg-blue-600 text-white min-w-[200px]"
                         >
                           <div className="flex flex-col items-center p-2 space-y-2">
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-sm">{stage.name}</span>
+                              <span className="font-medium text-sm">{stage.order_num}. {stage.name}</span>
                               <div className="flex items-center gap-1">
-                              <Button
-  variant="ghost"
-  size="icon"
-  className="h-6 w-6"
-  onClick={() => setEditingStage(stage)}
->
-  <Pencil className="h-3 w-3" />
-</Button>
                                 <Button
                                   variant="ghost"
                                   size="icon"
@@ -811,7 +803,7 @@ export default function Stages() {
                                   onClick={() => moveStage(stage.id, 'up')}
                                   disabled={stage.order_num === 1}
                                 >
-                                  <ArrowUp className="h-3 w-3" />
+                                  <ChevronLeft className="h-3 w-3" />
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -820,16 +812,21 @@ export default function Stages() {
                                   onClick={() => moveStage(stage.id, 'down')}
                                   disabled={stage.order_num === dept.stages.length}
                                 >
-                                  <ArrowDown className="h-3 w-3" />
+                                  <ChevronRight className="h-3 w-3" />
+                                </Button>
+                                
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => setEditingStage(stage)}
+                                >
+                                  <Pencil className="h-3 w-3" />
                                 </Button>
                               </div>
                             </div>
 
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <Badge variant="outline" className="text-xs">
-                                #{stage.order_num}
-                              </Badge>
-
                               {/* Document Indicator */}
                               {stage.documents && stage.documents.length > 0 && (
                                 <Popover>
@@ -919,13 +916,13 @@ export default function Stages() {
                     </TableRow>
 
                     {/* Duration Row */}
-                    <TableRow className="bg-muted/30">
-                      <TableHead className="sticky left-0 bg-background border-r z-40">Duration</TableHead>
+                    <TableRow className="bg-blue-50">
+                      <TableHead className="sticky left-0 bg-blue-600 border-r z-40 text-white">Duration</TableHead>
                       {dept.stages.map((stage) => {
                         const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
                         return (
-                          <TableHead key={`duration-${stage.id}`} className="border-r text-center">
-                            <div className="font-mono font-bold text-sm">
+                          <TableHead key={`duration-${stage.id}`} className="border-r text-center bg-blue-500">
+                            <div className="font-mono font-bold text-sm text-white">
                               {days > 0 && `${days}d `}
                               {hours > 0 && `${hours}h `}
                               {minutes > 0 ? `${minutes}m` : ''}
@@ -937,11 +934,11 @@ export default function Stages() {
                     </TableRow>
 
                     {/* Follow Up Row */}
-                    <TableRow className="bg-muted/20">
-                      <TableHead className="sticky left-0 bg-background border-r z-40">Follow Up</TableHead>
+                    <TableRow className="bg-blue-50">
+                      <TableHead className="sticky left-0 bg-blue-600 border-r z-40 text-white">Follow Up</TableHead>
                       {dept.stages.map((stage) => (
-                        <TableHead key={`followup-${stage.id}`} className="border-r text-center">
-                          <div className="font-bold text-sm">
+                        <TableHead key={`followup-${stage.id}`} className="border-r text-center bg-blue-500">
+                          <div className="font-bold text-sm text-white">
                             {stage.follow_up || '-'}
                           </div>
                         </TableHead>
@@ -949,15 +946,15 @@ export default function Stages() {
                     </TableRow>
 
                     {/* Applicable/Display Headers Row */}
-                    <TableRow className="bg-muted/10">
-                      <TableHead className="sticky left-0 bg-background border-r z-40"></TableHead>
+                    <TableRow className="bg-blue-100">
+                      <TableHead className="sticky left-0 bg-blue-600 border-r z-40"></TableHead>
                       {dept.stages.map((stage) => (
-                        <TableHead key={`controls-${stage.id}`} className="border-r">
+                        <TableHead key={`controls-${stage.id}`} className="border-r bg-blue-500">
                           <div className="grid grid-cols-2 gap-1 p-1">
-                            <div className="text-center text-xs font-medium">
+                            <div className="text-center text-xs font-medium text-white">
                               Applicable
                             </div>
-                            <div className="text-center text-xs font-medium">
+                            <div className="text-center text-xs font-medium text-white">
                               Display
                             </div>
                           </div>
@@ -981,8 +978,8 @@ export default function Stages() {
                           <TableCell className="sticky left-0 bg-background border-r text-center font-mono text-sm z-30">
                             {rowIndex}
                           </TableCell>
-                          <TableCell className="sticky left-16 bg-background border-r font-medium z-30">
-                            <div className="flex items-center gap-2">
+                          <TableCell className="sticky left-16 bg-white border-r font-medium z-30">
+                            <div className="justify-between flex gap-2">
                               <span className="font-medium">{subdept.name}</span>
                               {hasClasses && (
                                 <Button
@@ -997,11 +994,6 @@ export default function Stages() {
                                     <Plus className="h-4 w-4" />
                                   )}
                                 </Button>
-                              )}
-                              {hasClasses && (
-                                <Badge variant="secondary" className="text-xs">
-                                  {subdept.classes?.length || 0} classes
-                                </Badge>
                               )}
                             </div>
                           </TableCell>
@@ -1078,7 +1070,7 @@ export default function Stages() {
                                 {rowIndex}.{clsIndex + 1}
                               </TableCell>
                               <TableCell className="sticky left-16 bg-background border-r pl-8 z-30">
-                                <div className="flex items-center gap-2">
+                                <div className="flex justify-between items-center gap-2">
                                   <span className="text-muted-foreground text-sm">{cls.name}</span>
                                   {hasSubClasses && (
                                     <Button
@@ -1093,11 +1085,6 @@ export default function Stages() {
                                         <Plus className="h-3 w-3" />
                                       )}
                                     </Button>
-                                  )}
-                                  {hasSubClasses && (
-                                    <Badge variant="outline" className="text-xs">
-                                      {cls.subClasses?.length || 0} subclasses
-                                    </Badge>
                                   )}
                                 </div>
                               </TableCell>
@@ -1240,16 +1227,16 @@ export default function Stages() {
         ))}
       </Tabs>
       <EditStageDialog
-  open={!!editingStage}
-  onOpenChange={(open) => {
-    if (!open) {
-      setEditingStage(null)
-      setIsEditDialogOpen(false)
-    }
-  }}
-  stage={editingStage}
-  onSave={handleUpdateStage}
-/>
+        open={!!editingStage}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingStage(null)
+            setIsEditDialogOpen(false)
+          }
+        }}
+        stage={editingStage}
+        onSave={handleUpdateStage}
+      />
     </div>
   )
 }
