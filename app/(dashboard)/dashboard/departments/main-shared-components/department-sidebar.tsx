@@ -50,25 +50,95 @@ interface DepartmentSidebarProps {
   expandedItems?: Record<string, boolean>;
 }
 
-// Helper component to render index
-const IndexBadge = ({ index, isActive }: { index: string; isActive: boolean }) => (
-  <span className={cn(
-    "flex items-center justify-center w-5 h-5 rounded-full text-xs font-medium mr-2 flex-shrink-0 transition-colors",
-    isActive 
-      ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200"
-      : "bg-gray-100 text-gray-600 dark:bg-gray-800/50 dark:text-gray-400"
-  )}>
-    {index}
-  </span>
-)
+// Helper component to render index with level-based colors
+const IndexBadge = ({ 
+  index, 
+  isActive, 
+  level = 'department' 
+}: { 
+  index: string; 
+  isActive: boolean;
+  level?: 'department' | 'subdepartment' | 'class' | 'subclass';
+}) => {
+  const levelColors = {
+    department: {
+      bg: 'bg-blue-100 dark:bg-blue-900/50',
+      text: 'text-blue-700 dark:text-blue-200',
+      activeBg: 'bg-blue-100 dark:bg-blue-900/50',
+      activeText: 'text-blue-700 dark:text-blue-200',
+    },
+    subdepartment: {
+      bg: 'bg-emerald-100 dark:bg-emerald-900/40',
+      text: 'text-emerald-700 dark:text-emerald-200',
+      activeBg: 'bg-emerald-100 dark:bg-emerald-900/40',
+      activeText: 'text-emerald-700 dark:text-emerald-200',
+    },
+    class: {
+      bg: 'bg-amber-100 dark:bg-amber-900/30',
+      text: 'text-amber-700 dark:text-amber-200',
+      activeBg: 'bg-amber-100 dark:bg-amber-900/30',
+      activeText: 'text-amber-700 dark:text-amber-200',
+    },
+    subclass: {
+      bg: 'bg-purple-100 dark:bg-purple-900/30',
+      text: 'text-purple-700 dark:text-purple-200',
+      activeBg: 'bg-purple-100 dark:bg-purple-900/30',
+      activeText: 'text-purple-700 dark:text-purple-200',
+    },
+  }
 
-// Helper component for truncated text with tooltip
-const TruncatedText = ({ text, className = "" }: { text: string; className?: string }) => {
+  const colors = levelColors[level] || levelColors.department
+
+  return (
+    <span className={cn(
+      "flex items-center justify-center w-5 h-5 rounded-full text-xs font-medium mr-2 flex-shrink-0 transition-all",
+      isActive ? colors.activeBg : colors.bg,
+      isActive ? colors.activeText : colors.text
+    )}>
+      {index}
+    </span>
+  )
+}
+
+// Helper component for truncated text with tooltip and level-based styling
+const TruncatedText = ({ 
+  text, 
+  className = "", 
+  level = 'department',
+  isActive = false 
+}: { 
+  text: string; 
+  className?: string;
+  level?: 'department' | 'subdepartment' | 'class' | 'subclass';
+  isActive?: boolean;
+}) => {
+  const levelColors = {
+    department: {
+      text: 'text-gray-800 dark:text-gray-200',
+      activeText: 'text-blue-700 dark:text-blue-100',
+    },
+    subdepartment: {
+      text: 'text-gray-700 dark:text-gray-200',
+      activeText: 'text-emerald-700 dark:text-emerald-100',
+    },
+    class: {
+      text: 'text-gray-600 dark:text-gray-300',
+      activeText: 'text-amber-700 dark:text-amber-100',
+    },
+    subclass: {
+      text: 'text-gray-600 dark:text-gray-400',
+      activeText: 'text-purple-700 dark:text-purple-100',
+    },
+  }
+
+  const colors = levelColors[level] || levelColors.department
+  const textColor = isActive ? colors.activeText : colors.text
+
   return (
     <TooltipProvider delayDuration={200}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className={`truncate block ${className}`}>
+          <span className={`truncate block ${textColor} ${className}`}>
             {text}
           </span>
         </TooltipTrigger>
@@ -221,7 +291,8 @@ export function DepartmentSidebar({
                       <div className="flex items-center">
                         <IndexBadge 
                           index={`${deptIndex + 1}`} 
-                          isActive={activeDept === dept.id}
+                          isActive={activeDept === dept.id && !activeSubdept && !activeClass && !activeSubclass}
+                          level="department"
                         />
                         <TooltipProvider>
                           <Tooltip>
@@ -263,11 +334,11 @@ export function DepartmentSidebar({
                               className={cn(
                                 "w-full flex items-center justify-between p-2 pl-7 pr-2 text-sm transition-colors duration-200 group relative",
                                 isActive
-                                  ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-100 font-medium shadow-sm"
-                                  : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800/50",
+                                  ? "bg-emerald-100/70 dark:bg-emerald-900/40 shadow-sm border border-emerald-200 dark:border-emerald-800"
+                                  : "text-gray-600 dark:text-gray-300 hover:bg-gray-100/50 dark:hover:bg-gray-800/40",
                                 "before:absolute before:left-4 before:top-1/2 before:-translate-y-1/2 before:w-1.5 before:h-1.5 before:rounded-full",
                                 isActive 
-                                  ? "before:bg-blue-500 before:ring-2 before:ring-blue-200 dark:before:ring-blue-900/50" 
+                                  ? "before:bg-emerald-500 before:ring-2 before:ring-emerald-200 dark:before:ring-emerald-900/50" 
                                   : "before:bg-gray-300 dark:before:bg-gray-600"
                               )}
                               onClick={(e) => {
@@ -288,9 +359,15 @@ export function DepartmentSidebar({
                                 <div className="flex items-center">
                                   <IndexBadge 
                                     index={`${deptIndex + 1}.${subdeptIndex + 1}`} 
-                                    isActive={isActive}
+                                    isActive={isActive && !activeClass && !activeSubclass}
+                                    level="subdepartment"
                                   />
-                                  <TruncatedText text={subdept.name} className="max-w-[100px]" />
+                                  <TruncatedText 
+                                    text={subdept.name} 
+                                    className="max-w-[100px]" 
+                                    level="subdepartment"
+                                    isActive={isActive && !activeClass && !activeSubclass}
+                                  />
                                 </div>
                               </div>
                               {classes.length > 0 && (
@@ -318,11 +395,11 @@ export function DepartmentSidebar({
                                         className={cn(
                                           "w-full flex items-center justify-between p-1.5 pl-8 pr-2 text-sm rounded-lg transition-colors duration-200 relative",
                                           activeClass === cls.id.toString()
-                                            ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-100 font-medium shadow-sm"
-                                            : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800/50",
+                                            ? "bg-amber-100/70 dark:bg-amber-900/40 shadow-sm border border-amber-200 dark:border-amber-800"
+                                            : "text-gray-600 dark:text-gray-400 hover:bg-gray-100/50 dark:hover:bg-gray-800/40",
                                           "before:absolute before:left-6 before:top-1/2 before:-translate-y-1/2 before:w-1.5 before:h-1.5 before:rounded-full",
                                           activeClass === cls.id.toString()
-                                            ? "before:bg-blue-500 before:ring-2 before:ring-blue-200 dark:before:ring-blue-900/50"
+                                            ? "before:bg-amber-500 before:ring-2 before:ring-amber-200 dark:before:ring-amber-900/50"
                                             : "before:bg-gray-300 dark:before:bg-gray-600"
                                         )}
                                         onClick={(e) => {
@@ -343,9 +420,15 @@ export function DepartmentSidebar({
                                           <div className="flex items-center">
                                             <IndexBadge 
                                               index={`${deptIndex + 1}.${subdeptIndex + 1}.${classIndex + 1}`} 
-                                              isActive={activeClass === cls.id.toString()}
+                                              isActive={activeClass === cls.id.toString() && !activeSubclass}
+                                              level="class"
                                             />
-                                            <TruncatedText text={cls.name} className="max-w-[80px]" />
+                                            <TruncatedText 
+                                              text={cls.name} 
+                                              className="max-w-[80px]" 
+                                              level="class"
+                                              isActive={activeClass === cls.id.toString() && !activeSubclass}
+                                            />
                                           </div>
                                         </div>
                                         {subClasses.length > 0 && (
@@ -361,14 +444,14 @@ export function DepartmentSidebar({
                                         <button
                                           key={subClass.id}
                                           className={cn(
-                                            "w-full text-left p-1.5 pl-14 pr-2 text-sm rounded-lg transition-colors duration-200 relative group",
+                                            "w-full text-left p-1.5 pl-12 pr-2 text-sm rounded-md transition-all duration-200 relative group",
                                             activeSubclass === subClass.id.toString()
-                                              ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-100 font-medium shadow-sm"
-                                              : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800/50",
-                                            "before:absolute before:left-8 before:top-1/2 before:-translate-y-1/2 before:w-1.5 before:h-1.5 before:rounded-full before:transition-colors",
+                                              ? "bg-purple-50/80 dark:bg-purple-900/30 shadow-sm border border-purple-100 dark:border-purple-800/50"
+                                              : "text-gray-600 dark:text-gray-400 hover:bg-gray-100/40 dark:hover:bg-gray-800/30",
+                                            "before:absolute before:left-8 before:top-1/2 before:-translate-y-1/2 before:w-1.5 before:h-1.5 before:rounded-full before:transition-all",
                                             activeSubclass === subClass.id.toString()
-                                              ? "before:bg-blue-500 before:ring-2 before:ring-blue-200 dark:before:ring-blue-900/50"
-                                              : "before:bg-gray-300 dark:before:bg-gray-600 group-hover:before:bg-gray-400 dark:group-hover:before:bg-gray-500"
+                                              ? "before:bg-purple-500 before:ring-2 before:ring-purple-200 dark:before:ring-purple-900/40"
+                                              : "before:bg-gray-300/70 dark:before:bg-gray-500/50 group-hover:before:bg-gray-400/70 dark:group-hover:before:bg-gray-400/50"
                                           )}
                                           onClick={(e) => {
                                             e.stopPropagation()
@@ -380,7 +463,12 @@ export function DepartmentSidebar({
                                             )
                                           }}
                                         >
-                                          <TruncatedText text={subClass.name} className="max-w-[70px]" />
+                                          <TruncatedText 
+                                            text={subClass.name} 
+                                            className="max-w-[70px]" 
+                                            level="subclass"
+                                            isActive={activeSubclass === subClass.id.toString()}
+                                          />
                                         </button>
                                       ))}
                                     </CollapsibleContent>
