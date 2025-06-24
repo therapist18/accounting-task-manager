@@ -420,7 +420,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                    <div className="space-y-3">
                      {doc.extractionSpecs.map((extraction, extractionIndex) => (
                        <div key={extraction.id} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end p-3 bg-muted/20 rounded-lg">
-                         <div className="space-y-1">
+                         <div className="space-y-1 col-span-2">
                            <Label className="text-xs">Field Name</Label>
                            <Input
                              name={`doc-${doc.id}-extraction-${extraction.id}-name`}
@@ -430,27 +430,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                              className="h-8"
                            />
                          </div>
-                         <div className="space-y-1">
-                           <Label className="text-xs">Data Type</Label>
-                           <Select
-                             value={extraction.fieldType}
-                             onValueChange={(value: 'text' | 'date' | 'number' | 'boolean' | 'file') => 
-                               updateExtraction(doc.id, extraction.id, { fieldType: value })
-                             }
-                           >
-                             <SelectTrigger className="h-8">
-                               <SelectValue />
-                             </SelectTrigger>
-                             <SelectContent>
-                               <SelectItem value="text">Text</SelectItem>
-                               <SelectItem value="date">Date</SelectItem>
-                               <SelectItem value="number">Number</SelectItem>
-                               <SelectItem value="boolean">Yes/No</SelectItem>
-                               <SelectItem value="file">File Upload</SelectItem>
-                             </SelectContent>
-                           </Select>
-                         </div>
-                         <div className="space-y-1">
+                         <div className="space-y-1 col-span-2">
                            <Label className="text-xs">Description</Label>
                            <Input
                              name={`doc-${doc.id}-extraction-${extraction.id}-description`}
@@ -460,16 +440,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                              className="h-8"
                            />
                          </div>
-                         <div className="flex items-center space-x-2 pt-4">
-                           <Checkbox
-                             checked={extraction.isRequired || false}
-                             onCheckedChange={(checked) => 
-                               updateExtraction(doc.id, extraction.id, { isRequired: Boolean(checked) })
-                             }
-                           />
-                           <Label className="text-xs">Required</Label>
-                         </div>
-                         <div className="pt-4">
+                         <div className="pt-4 col-span-1 justify-end">
                            <Button
                              variant="ghost"
                              size="icon"

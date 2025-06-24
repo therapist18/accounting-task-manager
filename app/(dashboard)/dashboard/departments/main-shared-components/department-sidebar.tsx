@@ -146,7 +146,7 @@ export function DepartmentSidebar({
             onClick={toggleAll}
           >
             <ChevronsUpDown className="h-3.5 w-3.5 mr-1.5" />
-            {isAllCollapsed ? 'Expand All' : 'Collapse All'}
+            {isAllCollapsed ? 'Collapse All' : 'Expand All'}
           </Button>
         </div>
         

@@ -795,35 +795,6 @@ export default function Stages() {
                           <div className="flex flex-col items-center p-2 space-y-2">
                             <div className="flex items-center gap-2">
                               <span className="font-medium text-sm">{stage.order_num}. {stage.name}</span>
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6"
-                                  onClick={() => moveStage(stage.id, 'up')}
-                                  disabled={stage.order_num === 1}
-                                >
-                                  <ChevronLeft className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6"
-                                  onClick={() => moveStage(stage.id, 'down')}
-                                  disabled={stage.order_num === dept.stages.length}
-                                >
-                                  <ChevronRight className="h-3 w-3" />
-                                </Button>
-                                
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6"
-                                  onClick={() => setEditingStage(stage)}
-                                >
-                                  <Pencil className="h-3 w-3" />
-                                </Button>
-                              </div>
                             </div>
 
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -831,13 +802,15 @@ export default function Stages() {
                               {stage.documents && stage.documents.length > 0 && (
                                 <Popover>
                                   <PopoverTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-5 w-5 p-0 relative">
+                                    <Button variant="ghost" size="icon" className="h-5 w-5 p-0 relative bg-purple-600 shadow-sm">
                                       <FileText className="h-3 w-3 text-blue-500" />
                                       <Badge
                                         variant="secondary"
-                                        className="absolute -top-1 -right-1 h-4 w-4 text-xs p-0 flex items-center justify-center"
+                                        className="absolute -top-1 -right-1 h-4 w-4 text-xs p-0 flex items-center justify-center rounded-full"
                                       >
-                                        {stage.documents.length}
+                                        <div className="flex items-center justify-center h-full w-full">
+                                          {stage.documents.length}
+                                        </div>
                                       </Badge>
                                     </Button>
                                   </PopoverTrigger>
@@ -909,6 +882,35 @@ export default function Stages() {
                                   </PopoverContent>
                                 </Popover>
                               )}
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => moveStage(stage.id, 'up')}
+                                  disabled={stage.order_num === 1}
+                                >
+                                  <ChevronLeft className="h-3 w-3 text-white" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => moveStage(stage.id, 'down')}
+                                  disabled={stage.order_num === dept.stages.length}
+                                >
+                                  <ChevronRight className="h-3 w-3 text-white" />
+                                </Button>
+
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => setEditingStage(stage)}
+                                >
+                                  <Pencil className="h-3 w-3 text-white" />
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         </TableHead>

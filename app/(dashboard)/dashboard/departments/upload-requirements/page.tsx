@@ -31,8 +31,11 @@ interface EditingContext {
   type: 'subdepartment' | 'class' | 'subclass'
   departmentId: string
   subdepartmentId: string
+  subdepartmentName?: string
   classId?: string
+  className?: string
   subclassId?: string
+  subclassName?: string
 }
 
 // Enhanced requirement interface based on API structure
@@ -140,7 +143,55 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   }
 
   const openRequirementsDialog = (context: EditingContext) => {
-    setEditingContext(context)
+    // Find the department and subdepartment
+    const dept = departments.find(d => d.id === context.departmentId);
+    
+    // Convert subdepartmentId to number for comparison if needed
+    const subdeptId = typeof context.subdepartmentId === 'string' 
+      ? parseInt(context.subdepartmentId, 10) 
+      : context.subdepartmentId;
+      
+    const subdept = dept?.tm_subdepartments?.find(s => 
+      s.id === subdeptId || s.id.toString() === context.subdepartmentId.toString()
+    );
+    
+    // Get class and subclass names if they exist
+    let className = '';
+    let subclassName = '';
+    
+    if (context.classId && subdept) {
+      const classItem = subdept.classes?.find(c => 
+        c.id.toString() === context.classId?.toString() || 
+        c.id === context.classId
+      );
+      
+      if (classItem) {
+        className = classItem.name;
+        
+        if (context.subclassId) {
+          const subclassItem = classItem.subClasses?.find(sc => 
+            sc.id.toString() === context.subclassId?.toString() || 
+            sc.id === context.subclassId
+          );
+          
+          if (subclassItem) {
+            subclassName = subclassItem.name;
+          }
+        }
+      }
+    }
+    
+    // Create enhanced context with names
+    const enhancedContext = {
+      ...context,
+      subdepartmentName: subdept?.name || '',
+      className,
+      subclassName
+    };
+    
+    setEditingContext(enhancedContext)
+    
+    setEditingContext(enhancedContext)
     setBulkInput('')
     setNewRequirements([{
       name: '',
@@ -879,18 +930,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         {/* Header */}
         <div className="border-b pb-4">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
-          <h3 className="text-lg text-gray-600 dark:text-gray-400">{currentSubdept.name}</h3>
-          {currentClass && (
-            <div className="flex items-center space-x-2 mt-2">
-              <Badge variant="outline">{currentClass.name}</Badge>
-              {currentSubclass && (
-                <>
-                  <ChevronRight className="h-4 w-4 text-gray-400" />
-                  <Badge variant="outline">{currentSubclass.name}</Badge>
-                </>
-              )}
-            </div>
-          )}
+          <h3 className="text-lg text-gray-600 dark:text-gray-400">{currentSubdept.name} - <span className="text-sm text-gray-500">{currentSubdept.description}</span></h3> 
         </div>
 
         {/* Content based on current selection */}
@@ -900,7 +940,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
             <div className="flex items-center justify-between">
               <h4 className="text-lg font-medium flex items-center space-x-2">
                 <Layers className="h-5 w-5 text-orange-600" />
-                <span>Sub-class Requirements: {currentSubclass.name}</span>
+                <span>Sub-class Requirements: {currentSubclass.name} - <span className="text-sm text-gray-500">{currentSubclass.description}</span></span>
               </h4>
               <Button
                 onClick={() => openRequirementsDialog({
@@ -930,7 +970,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
             <div className="flex items-center justify-between">
               <h4 className="text-lg font-medium flex items-center space-x-2">
                 <Layers className="h-5 w-5 text-purple-600" />
-                <span>Class Requirements: {currentClass.name}</span>
+                <span>Class Requirements: {currentClass.name} - <span className="text-sm text-gray-500">{currentClass.description}</span></span>
               </h4>
               <Button
                 onClick={() => openRequirementsDialog({
@@ -1047,9 +1087,71 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Add Requirements</DialogTitle>
-            <DialogDescription>
-              Add requirements to {editingContext?.type === 'subdepartment' ? 'subdepartment' :
-                editingContext?.type === 'class' ? 'class' : 'sub-class'}
+            <DialogDescription className="space-y-2">
+              <div className="space-y-1">
+                <div className="font-medium">
+                  {editingContext?.type === 'subdepartment' ? (
+                    `Adding requirements to ${editingContext?.subdepartmentName || 'subdepartment'}`
+                  ) : editingContext?.type === 'class' ? (
+                    `Adding requirements to class: ${editingContext?.className || ''}`
+                  ) : (
+                    `Adding requirements to sub-class: ${editingContext?.subclassName || ''}`
+                  )}
+                </div>
+                <div className="text-sm text-gray-600">
+                  {editingContext?.subdepartmentName && (
+                    <span>{editingContext.subdepartmentName} </span>
+                  )}
+                  {editingContext?.className && (
+                    <span>› {editingContext.className} </span>
+                  )}
+                  {editingContext?.subclassName && (
+                    <span>› {editingContext.subclassName}</span>
+                  )}
+                </div>
+              </div>
+              
+              {editingContext && (() => {
+                const dept = departments.find(d => d.id === editingContext.departmentId);
+                if (!dept) return null;
+                
+                const subdept = dept.tm_subdepartments?.find(s => s.id.toString() === editingContext.subdepartmentId);
+                if (!subdept) return null;
+                
+                let classItem = null;
+                let subclassItem = null;
+                
+                if (editingContext.classId) {
+                  classItem = subdept.classes?.find(c => c.id.toString() === editingContext.classId);
+                  
+                  if (editingContext.subclassId && classItem) {
+                    subclassItem = classItem.subClasses?.find(sc => sc.id.toString() === editingContext.subclassId);
+                  }
+                }
+                
+                return (
+                  <div className="space-y-1 pt-2 text-sm">
+                    <div className="font-medium">{dept.name} &gt; {subdept.name}</div>
+                    {classItem && (
+                      <div className="pl-4">
+                        • {classItem.name}
+                        {subclassItem && (
+                          <span> &gt; {subclassItem.name}</span>
+                        )}
+                      </div>
+                    )}
+                    {editingContext.type === 'subdepartment' && (
+                      <div className="text-xs text-gray-500">{subdept.description}</div>
+                    )}
+                    {editingContext.type === 'class' && classItem?.description && (
+                      <div className="text-xs text-gray-500">{classItem.description}</div>
+                    )}
+                    {editingContext.type === 'subclass' && subclassItem?.description && (
+                      <div className="text-xs text-gray-500">{subclassItem.description}</div>
+                    )}
+                  </div>
+                );
+              })()}
             </DialogDescription>
           </DialogHeader>
 
