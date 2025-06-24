@@ -64,18 +64,21 @@ export type TaskAssignment = {
 }
 
 export type DocumentExtraction = {
-  fieldName: string
-  fieldType: 'text' | 'date' | 'number' | 'boolean'
-  isRequired: boolean
-  description?: string
+  id: string;
+  fieldName: string;
+  description?: string;
+  isRequired: boolean;
+  fieldType: 'text' | 'date' | 'number' | 'email' | 'phone';
 }
 
 export type StageDocument = {
-  id: string
-  name: string
-  description?: string
-  isRequired: boolean
-  extractionSpecs?: DocumentExtraction[]
+  id: string;
+  name: string;
+  description?: string;
+  isRequired: boolean;
+  documentType: 'upload' | 'extraction' | 'both';
+  inputType: 'file' | 'message' | 'both'; // New field
+  extractionSpecs?: DocumentExtraction[];
 }
 
 export type StageAllocation = {

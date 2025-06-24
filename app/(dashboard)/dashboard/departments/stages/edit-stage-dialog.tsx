@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, X, Clock, User, FileText, Info, Pencil } from "lucide-react"
+import { Plus, X, Clock, User, FileText, Info, Pencil, MessageSquare } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
@@ -102,7 +102,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
-    
+
     setFormData(prev => ({
       ...prev,
       [name]: value
@@ -113,7 +113,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
     setFormData(prev => {
       const updatedTimeConfigs = [...(prev.timeConfigs || [])]
       updatedTimeConfigs[index] = { ...updatedTimeConfigs[index], ...updates }
-      
+
       return {
         ...prev,
         timeConfigs: updatedTimeConfigs
@@ -150,9 +150,9 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
     const mins = remainingMinutes % 60
     return { days, hours, minutes: mins }
   }
-  
+
   const { days: totalDays, hours: totalHours, minutes: totalMins } = getTimeFromMinutes(formData.estimated_time)
-  
+
   const handleTimeChange = (field: 'days' | 'hours' | 'minutes', value: number) => {
     setFormData(prev => {
       const currentTime = getTimeFromMinutes(prev.estimated_time || 0)
@@ -185,7 +185,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
   const updateDocument = (docId: string, updates: Partial<StageDocument>) => {
     setFormData(prev => ({
       ...prev,
-      documents: prev.documents?.map(doc => 
+      documents: prev.documents?.map(doc =>
         doc.id === docId ? { ...doc, ...updates } : doc
       )
     }))
@@ -202,7 +202,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
     setFormData(prev => {
       const doc = prev.documents?.find(d => d.id === docId);
       if (!doc) return prev;
-      
+
       const newField: DocumentExtraction = {
         id: `field-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         fieldName: '',
@@ -210,32 +210,32 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
         isRequired: true,
         fieldType: 'text'
       };
-      
-      const updatedDocs = prev.documents?.map(doc => 
-        doc.id === docId 
-          ? { 
-              ...doc, 
-              extractionSpecs: [...(doc.extractionSpecs || []), newField] 
-            }
+
+      const updatedDocs = prev.documents?.map(doc =>
+        doc.id === docId
+          ? {
+            ...doc,
+            extractionSpecs: [...(doc.extractionSpecs || []), newField]
+          }
           : doc
       ) || [];
-      
+
       // Auto-scroll to the new field
       requestAnimationFrame(() => {
         const fieldElement = document.querySelector(
           `[name^="doc-${docId}-extraction-"][name$="-name"]:last-of-type`
         ) as HTMLInputElement | null;
-        
+
         if (fieldElement) {
           fieldElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           fieldElement.focus();
-          
+
           // Set cursor to end of input
           const length = fieldElement.value.length;
           fieldElement.setSelectionRange(length, length);
         }
       });
-      
+
       return { ...prev, documents: updatedDocs };
     });
   }, []);
@@ -245,27 +245,27 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
       // Only update if there are actual changes
       const doc = prev.documents?.find(d => d.id === docId);
       if (!doc) return prev;
-      
+
       const extraction = doc.extractionSpecs?.find(e => e.id === extractionId);
       if (!extraction) return prev;
-      
+
       // Check if any of the updated values are actually different
       const hasChanges = Object.entries(updates).some(
         ([key, value]) => extraction[key as keyof DocumentExtraction] !== value
       );
-      
+
       if (!hasChanges) return prev;
-      
+
       const updatedDocs = prev.documents?.map(doc => {
         if (doc.id === docId) {
-          const updatedExtractions = (doc.extractionSpecs || []).map(ext => 
+          const updatedExtractions = (doc.extractionSpecs || []).map(ext =>
             ext.id === extractionId ? { ...ext, ...updates } : ext
           )
           return { ...doc, extractionSpecs: updatedExtractions }
         }
         return doc
       }) || [];
-      
+
       return { ...prev, documents: updatedDocs };
     });
   }, []);
@@ -276,7 +276,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
       if (!doc || !doc.extractionSpecs?.some(e => e.id === extractionId)) {
         return prev;
       }
-      
+
       return {
         ...prev,
         documents: prev.documents?.map(doc => {
@@ -321,8 +321,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                     {doc.documentType}
                   </Badge>
                 </div>
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   size="icon"
                   onClick={() => removeDocument(doc.id)}
                   className="text-muted-foreground hover:text-destructive"
@@ -331,7 +331,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                 </Button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Document Name *</Label>
                   <Input
@@ -345,7 +345,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                   <Label>Document Type</Label>
                   <Select
                     value={doc.documentType}
-                    onValueChange={(value: 'upload' | 'extraction' | 'both') => 
+                    onValueChange={(value: 'upload' | 'extraction' | 'both') =>
                       updateDocument(doc.id, { documentType: value })
                     }
                   >
@@ -375,6 +375,40 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-2">
+                  <Label>Input Type</Label>
+                  <Select
+                    value={doc.inputType || 'file'}
+                    onValueChange={(value: 'file' | 'message' | 'both') =>
+                      updateDocument(doc.id, { inputType: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="file">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4" />
+                          File Upload
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="message">
+                        <div className="flex items-center gap-2">
+                          <MessageSquare className="h-4 w-4" />
+                          Message/Text
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="both">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4" />
+                          <MessageSquare className="h-4 w-4" />
+                          Both
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -399,400 +433,400 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
 
               {(doc.documentType === 'extraction' || doc.documentType === 'both') && (
                 <div className="space-y-4 border-t pt-4">
-                 <div className="flex justify-between items-center">
-                   <div>
-                     <Label className="text-sm font-medium">Data Extraction Fields</Label>
-                     <p className="text-xs text-muted-foreground">
-                       Define what data should be extracted from this document
-                     </p>
-                   </div>
-                   <Button 
-                     variant="outline" 
-                     size="sm"
-                     onClick={() => addExtractionField(doc.id)}
-                   >
-                     <Plus className="h-4 w-4 mr-2" />
-                     Add Field
-                   </Button>
-                 </div>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <Label className="text-sm font-medium">Data Extraction Fields</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Define what data should be extracted from this document
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addExtractionField(doc.id)}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Field
+                    </Button>
+                  </div>
 
-                 {doc.extractionSpecs && doc.extractionSpecs.length > 0 ? (
-                   <div className="space-y-3">
-                     {doc.extractionSpecs.map((extraction, extractionIndex) => (
-                       <div key={extraction.id} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end p-3 bg-muted/20 rounded-lg">
-                         <div className="space-y-1 col-span-2">
-                           <Label className="text-xs">Field Name</Label>
-                           <Input
-                             name={`doc-${doc.id}-extraction-${extraction.id}-name`}
-                             value={extraction.fieldName || ''}
-                             onChange={(e) => updateExtraction(doc.id, extraction.id, { fieldName: e.target.value })}
-                             placeholder="e.g., Application Date"
-                             className="h-8"
-                           />
-                         </div>
-                         <div className="space-y-1 col-span-2">
-                           <Label className="text-xs">Description</Label>
-                           <Input
-                             name={`doc-${doc.id}-extraction-${extraction.id}-description`}
-                             value={extraction.description || ''}
-                             onChange={(e) => updateExtraction(doc.id, extraction.id, { description: e.target.value })}
-                             placeholder="Optional description"
-                             className="h-8"
-                           />
-                         </div>
-                         <div className="pt-4 col-span-1 justify-end">
-                           <Button
-                             variant="ghost"
-                             size="icon"
-                             className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                             onClick={() => removeExtraction(doc.id, extraction.id)}
-                           >
-                             <X className="h-4 w-4" />
-                           </Button>
-                         </div>
-                       </div>
-                     ))}
-                   </div>
-                 ) : (
-                   <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg">
-                     <Info className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                     <p className="text-sm">No extraction fields defined</p>
-                     <p className="text-xs">Add fields to specify what data should be extracted</p>
-                   </div>
-                 )}
-               </div>
-             )}
-           </div>
-         ))}
-       </div>
-     ) : (
-       <div className="text-center py-12 border-2 border-dashed border-muted rounded-lg">
-         <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-         <h3 className="text-lg font-medium text-muted-foreground mb-2">No documents added yet</h3>
-         <p className="text-sm text-muted-foreground mb-4">
-           Add documents that are required for this stage
-         </p>
-         <Button onClick={addDocument} variant="outline">
-           <Plus className="h-4 w-4 mr-2" />
-           Add First Document
-         </Button>
-       </div>
-     )}
-   </div>
- )
+                  {doc.extractionSpecs && doc.extractionSpecs.length > 0 ? (
+                    <div className="space-y-3">
+                      {doc.extractionSpecs.map((extraction, extractionIndex) => (
+                        <div key={extraction.id} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end p-3 bg-muted/20 rounded-lg">
+                          <div className="space-y-1 col-span-2">
+                            <Label className="text-xs">Field Name</Label>
+                            <Input
+                              name={`doc-${doc.id}-extraction-${extraction.id}-name`}
+                              value={extraction.fieldName || ''}
+                              onChange={(e) => updateExtraction(doc.id, extraction.id, { fieldName: e.target.value })}
+                              placeholder="e.g., Application Date"
+                              className="h-8"
+                            />
+                          </div>
+                          <div className="space-y-1 col-span-2">
+                            <Label className="text-xs">Description</Label>
+                            <Input
+                              name={`doc-${doc.id}-extraction-${extraction.id}-description`}
+                              value={extraction.description || ''}
+                              onChange={(e) => updateExtraction(doc.id, extraction.id, { description: e.target.value })}
+                              placeholder="Optional description"
+                              className="h-8"
+                            />
+                          </div>
+                          <div className="pt-4 col-span-1 justify-end">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={() => removeExtraction(doc.id, extraction.id)}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg">
+                      <Info className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No extraction fields defined</p>
+                      <p className="text-xs">Add fields to specify what data should be extracted</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-12 border-2 border-dashed border-muted rounded-lg">
+          <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+          <h3 className="text-lg font-medium text-muted-foreground mb-2">No documents added yet</h3>
+          <p className="text-sm text-muted-foreground mb-4">
+            Add documents that are required for this stage
+          </p>
+          <Button onClick={addDocument} variant="outline">
+            <Plus className="h-4 w-4 mr-2" />
+            Add First Document
+          </Button>
+        </div>
+      )}
+    </div>
+  )
 
- return (
-   <Dialog open={open} onOpenChange={onOpenChange}>
-     <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-       <DialogHeader>
-         <DialogTitle className="flex items-center gap-2">
-           {stage ? (
-             <>
-               <Pencil className="h-5 w-5" />
-               Edit Stage: {stage.name}
-             </>
-           ) : (
-             <>
-               <Plus className="h-5 w-5" />
-               Create New Stage
-             </>
-           )}
-         </DialogTitle>
-         <DialogDescription>
-           {stage ? 'Update the stage details below' : 'Fill in the details to create a new stage'}
-         </DialogDescription>
-       </DialogHeader>
-       
-       <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
-         <TabsList className="grid w-full grid-cols-2">
-           <TabsTrigger value="general" className="flex items-center gap-2">
-             <Clock className="h-4 w-4" />
-             General
-           </TabsTrigger>
-           <TabsTrigger value="documents" className="flex items-center gap-2">
-             <FileText className="h-4 w-4" />
-             Documents
-             {formData.documents && formData.documents.length > 0 && (
-               <Badge variant="secondary" className="ml-1 h-5 text-xs">
-                 {formData.documents.length}
-               </Badge>
-             )}
-           </TabsTrigger>
-         </TabsList>
-         
-         <form onSubmit={handleSubmit} className="space-y-6 mt-6">
-           <TabsContent value="general" className="space-y-6">
-             <div className="grid grid-cols-1 md:grid-cols-4 items-start gap-4">
-               <div className="space-y-1">
-                 <Label htmlFor="name" className="flex items-center gap-1">
-                   Stage Name
-                   <span className="text-destructive">*</span>
-                 </Label>
-                 <p className="text-xs text-muted-foreground">
-                   Give this stage a clear, descriptive name
-                 </p>
-               </div>
-               <div className="md:col-span-3">
-                 <Input
-                   id="name"
-                   name="name"
-                   value={formData.name || ''}
-                   onChange={handleInputChange}
-                   placeholder="e.g., Application Review, Document Verification"
-                   required
-                 />
-               </div>
-             </div>
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            {stage ? (
+              <>
+                <Pencil className="h-5 w-5" />
+                Edit Stage: {stage.name}
+              </>
+            ) : (
+              <>
+                <Plus className="h-5 w-5" />
+                Create New Stage
+              </>
+            )}
+          </DialogTitle>
+          <DialogDescription>
+            {stage ? 'Update the stage details below' : 'Fill in the details to create a new stage'}
+          </DialogDescription>
+        </DialogHeader>
 
-             <div className="grid grid-cols-1 md:grid-cols-4 items-start gap-4">
-               <div className="space-y-1">
-                 <Label htmlFor="description">
-                   Description
-                 </Label>
-                 <p className="text-xs text-muted-foreground">
-                   Explain what happens in this stage
-                 </p>
-               </div>
-               <div className="md:col-span-3">
-                 <Textarea
-                   id="description"
-                   name="description"
-                   value={formData.description || ''}
-                   onChange={handleInputChange}
-                   placeholder="Describe the purpose and activities of this stage..."
-                   className="resize-none min-h-[100px]"
-                   rows={3}
-                 />
-               </div>
-             </div>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="general" className="flex items-center gap-2">
+              <Clock className="h-4 w-4" />
+              General
+            </TabsTrigger>
+            <TabsTrigger value="documents" className="flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Documents
+              {formData.documents && formData.documents.length > 0 && (
+                <Badge variant="secondary" className="ml-1 h-5 text-xs">
+                  {formData.documents.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+          </TabsList>
 
-             <div className="space-y-4 border-t pt-6">
-               <div className="flex items-center space-x-2">
-                 <Checkbox
-                   id="isSpecial"
-                   checked={formData.isSpecial}
-                   onCheckedChange={(checked) => setFormData(prev => ({ ...prev, isSpecial: Boolean(checked) }))}
-                 />
-                 <div>
-                   <Label htmlFor="isSpecial" className="font-medium">
-                     Special Time Requirements
-                   </Label>
-                   <p className="text-sm text-muted-foreground">
-                     This stage has different time requirements based on application type
-                   </p>
-                 </div>
-               </div>
+          <form onSubmit={handleSubmit} className="space-y-6 mt-6">
+            <TabsContent value="general" className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 items-start gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="name" className="flex items-center gap-1">
+                    Stage Name
+                    <span className="text-destructive">*</span>
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Give this stage a clear, descriptive name
+                  </p>
+                </div>
+                <div className="md:col-span-3">
+                  <Input
+                    id="name"
+                    name="name"
+                    value={formData.name || ''}
+                    onChange={handleInputChange}
+                    placeholder="e.g., Application Review, Document Verification"
+                    required
+                  />
+                </div>
+              </div>
 
-               {formData.isSpecial ? (
-                 <div className="space-y-4 border rounded-lg p-4 bg-muted/20">
-                   <div className="flex justify-between items-center">
-                     <h4 className="font-medium flex items-center gap-2">
-                       <Clock className="h-4 w-4" />
-                       Time Configurations
-                     </h4>
-                     <Button
-                       type="button"
-                       variant="outline"
-                       size="sm"
-                       onClick={addTimeConfig}
-                     >
-                       <Plus className="h-4 w-4 mr-2" />
-                       Add Configuration
-                     </Button>
-                   </div>
-                   
-                   {formData.timeConfigs?.map((config, index) => (
-                     <div key={index} className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end p-4 border rounded-lg bg-background">
-                       <div className="md:col-span-2">
-                         <Label className="text-sm">Application Type</Label>
-                         <Input
-                           name={`timeConfigs[${index}].applicationType`}
-                           value={config.applicationType || ''}
-                           onChange={(e) => updateTimeConfig(index, { applicationType: e.target.value })}
-                           placeholder="e.g., Standard, Express, Renewal"
-                           required
-                         />
-                       </div>
-                       <div>
-                         <Label className="text-sm">Days</Label>
-                         <Input
-                           type="number"
-                           name={`timeConfigs[${index}].days`}
-                           min="0"
-                           value={config.days || 0}
-                           onChange={(e) => updateTimeConfig(index, { days: parseInt(e.target.value) || 0 })}
-                           className="text-center"
-                         />
-                       </div>
-                       <div>
-                         <Label className="text-sm">Hours</Label>
-                         <Input
-                           type="number"
-                           name={`timeConfigs[${index}].hours`}
-                           min="0"
-                           max="23"
-                           value={config.hours || 0}
-                           onChange={(e) => updateTimeConfig(index, { hours: Math.min(23, parseInt(e.target.value) || 0) })}
-                           className="text-center"
-                         />
-                       </div>
-                       <div>
-                         <Label className="text-sm">Minutes</Label>
-                         <Input
-                           type="number"
-                           name={`timeConfigs[${index}].minutes`}
-                           min="0"
-                           max="59"
-                           value={config.minutes || 0}
-                           onChange={(e) => updateTimeConfig(index, { minutes: Math.min(59, parseInt(e.target.value) || 0) })}
-                           className="text-center"
-                         />
-                       </div>
-                       <div className="flex justify-end">
-                         <Button
-                           type="button"
-                           variant="outline"
-                           size="icon"
-                           onClick={() => removeTimeConfig(index)}
-                           disabled={formData.timeConfigs?.length === 1}
-                           className="text-muted-foreground hover:text-destructive"
-                         >
-                           <X className="h-4 w-4" />
-                         </Button>
-                       </div>
-                     </div>
-                   ))}
-                 </div>
-               ) : (
-                 <div className="grid grid-cols-1 md:grid-cols-4 items-start gap-4">
-                   <div className="space-y-1">
-                     <Label className="flex items-center gap-2">
-                       <Clock className="h-4 w-4" />
-                       Estimated Duration
-                     </Label>
-                     <p className="text-xs text-muted-foreground">
-                       How long should this stage typically take?
-                     </p>
-                   </div>
-                   <div className="md:col-span-3">
-                     <div className="grid grid-cols-3 gap-3">
-                       <div>
-                         <Input
-                           type="number"
-                           min="0"
-                           value={totalDays}
-                           onChange={(e) => handleTimeChange('days', parseInt(e.target.value) || 0)}
-                           onFocus={(e) => e.target.select()}
-                           className="text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                         />
-                         <Label className="block text-center text-xs text-muted-foreground mt-1">Days</Label>
-                       </div>
-                       <div>
-                         <Input
-                           type="number"
-                           min="0"
-                           max="23"
-                           value={totalHours}
-                           onChange={(e) => handleTimeChange('hours', Math.min(23, parseInt(e.target.value) || 0))}
-                           onFocus={(e) => e.target.select()}
-                           className="text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                         />
-                         <Label className="block text-center text-xs text-muted-foreground mt-1">Hours</Label>
-                       </div>
-                       <div>
-                         <Input
-                           type="number"
-                           min="0"
-                           max="59"
-                           value={totalMins}
-                           onChange={(e) => handleTimeChange('minutes', Math.min(59, parseInt(e.target.value) || 0))}
-                           onFocus={(e) => e.target.select()}
-                           className="text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                         />
-                         <Label className="block text-center text-xs text-muted-foreground mt-1">Minutes</Label>
-                       </div>
-                     </div>
-                   </div>
-                 </div>
-               )}
-             </div>
+              <div className="grid grid-cols-1 md:grid-cols-4 items-start gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="description">
+                    Description
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Explain what happens in this stage
+                  </p>
+                </div>
+                <div className="md:col-span-3">
+                  <Textarea
+                    id="description"
+                    name="description"
+                    value={formData.description || ''}
+                    onChange={handleInputChange}
+                    placeholder="Describe the purpose and activities of this stage..."
+                    className="resize-none min-h-[100px]"
+                    rows={3}
+                  />
+                </div>
+              </div>
 
-             <div className="grid grid-cols-1 md:grid-cols-4 items-start gap-4 border-t pt-6">
-               <div className="space-y-1">
-                 <Label className="flex items-center gap-2">
-                   <User className="h-4 w-4" />
-                   Follow Up With
-                 </Label>
-                 <p className="text-xs text-muted-foreground">
-                   Who should be contacted when this stage is complete?
-                 </p>
-               </div>
-               <div className="md:col-span-3">
-                 <Select
-                   value={formData.follow_up || 'none'}
-                   onValueChange={(value) => setFormData(prev => ({
-                     ...prev,
-                     follow_up: value === 'none' ? null : value as 'Client' | 'Officer' | 'BCL'
-                   }))}
-                 >
-                   <SelectTrigger>
-                     <SelectValue placeholder="Select follow up person" />
-                   </SelectTrigger>
-                   <SelectContent>
-                     <SelectItem value="none">No follow up required</SelectItem>
-                     <SelectItem value="Client">
-                       <div className="flex items-center gap-2">
-                         <User className="h-4 w-4" />
-                         Client
-                       </div>
-                     </SelectItem>
-                     <SelectItem value="Officer">
-                       <div className="flex items-center gap-2">
-                         <User className="h-4 w-4" />
-                         Officer
-                       </div>
-                     </SelectItem>
-                     <SelectItem value="BCL">
-                       <div className="flex items-center gap-2">
-                         <User className="h-4 w-4" />
-                         BCL
-                       </div>
-                     </SelectItem>
-                   </SelectContent>
-                 </Select>
-               </div>
-             </div>
-           </TabsContent>
+              <div className="space-y-4 border-t pt-6">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="isSpecial"
+                    checked={formData.isSpecial}
+                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, isSpecial: Boolean(checked) }))}
+                  />
+                  <div>
+                    <Label htmlFor="isSpecial" className="font-medium">
+                      Special Time Requirements
+                    </Label>
+                    <p className="text-sm text-muted-foreground">
+                      This stage has different time requirements based on application type
+                    </p>
+                  </div>
+                </div>
 
-           <TabsContent value="documents" className="space-y-6">
-             <DocumentsTab />
-           </TabsContent>
+                {formData.isSpecial ? (
+                  <div className="space-y-4 border rounded-lg p-4 bg-muted/20">
+                    <div className="flex justify-between items-center">
+                      <h4 className="font-medium flex items-center gap-2">
+                        <Clock className="h-4 w-4" />
+                        Time Configurations
+                      </h4>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={addTimeConfig}
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Configuration
+                      </Button>
+                    </div>
 
-           <div className="flex justify-end gap-2 pt-6 border-t">
-             <Button
-               type="button"
-               variant="outline"
-               onClick={() => onOpenChange(false)}
-               disabled={saving}
-             >
-               Cancel
-             </Button>
-             <Button type="submit" disabled={saving || !formData.name.trim()}>
-               {saving ? (
-                 <>
-                   <div className="w-4 h-4 border-2 border-muted border-t-current rounded-full animate-spin mr-2"></div>
-                   Saving...
-                 </>
-               ) : (
-                 <>
-                   {stage ? 'Save Changes' : 'Create Stage'}
-                 </>
-               )}
-             </Button>
-           </div>
-         </form>
-       </Tabs>
-     </DialogContent>
-   </Dialog>
- )
+                    {formData.timeConfigs?.map((config, index) => (
+                      <div key={index} className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end p-4 border rounded-lg bg-background">
+                        <div className="md:col-span-2">
+                          <Label className="text-sm">Application Type</Label>
+                          <Input
+                            name={`timeConfigs[${index}].applicationType`}
+                            value={config.applicationType || ''}
+                            onChange={(e) => updateTimeConfig(index, { applicationType: e.target.value })}
+                            placeholder="e.g., Standard, Express, Renewal"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm">Days</Label>
+                          <Input
+                            type="number"
+                            name={`timeConfigs[${index}].days`}
+                            min="0"
+                            value={config.days || 0}
+                            onChange={(e) => updateTimeConfig(index, { days: parseInt(e.target.value) || 0 })}
+                            className="text-center"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm">Hours</Label>
+                          <Input
+                            type="number"
+                            name={`timeConfigs[${index}].hours`}
+                            min="0"
+                            max="23"
+                            value={config.hours || 0}
+                            onChange={(e) => updateTimeConfig(index, { hours: Math.min(23, parseInt(e.target.value) || 0) })}
+                            className="text-center"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm">Minutes</Label>
+                          <Input
+                            type="number"
+                            name={`timeConfigs[${index}].minutes`}
+                            min="0"
+                            max="59"
+                            value={config.minutes || 0}
+                            onChange={(e) => updateTimeConfig(index, { minutes: Math.min(59, parseInt(e.target.value) || 0) })}
+                            className="text-center"
+                          />
+                        </div>
+                        <div className="flex justify-end">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => removeTimeConfig(index)}
+                            disabled={formData.timeConfigs?.length === 1}
+                            className="text-muted-foreground hover:text-destructive"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-4 items-start gap-4">
+                    <div className="space-y-1">
+                      <Label className="flex items-center gap-2">
+                        <Clock className="h-4 w-4" />
+                        Estimated Duration
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        How long should this stage typically take?
+                      </p>
+                    </div>
+                    <div className="md:col-span-3">
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={totalDays}
+                            onChange={(e) => handleTimeChange('days', parseInt(e.target.value) || 0)}
+                            onFocus={(e) => e.target.select()}
+                            className="text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <Label className="block text-center text-xs text-muted-foreground mt-1">Days</Label>
+                        </div>
+                        <div>
+                          <Input
+                            type="number"
+                            min="0"
+                            max="23"
+                            value={totalHours}
+                            onChange={(e) => handleTimeChange('hours', Math.min(23, parseInt(e.target.value) || 0))}
+                            onFocus={(e) => e.target.select()}
+                            className="text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <Label className="block text-center text-xs text-muted-foreground mt-1">Hours</Label>
+                        </div>
+                        <div>
+                          <Input
+                            type="number"
+                            min="0"
+                            max="59"
+                            value={totalMins}
+                            onChange={(e) => handleTimeChange('minutes', Math.min(59, parseInt(e.target.value) || 0))}
+                            onFocus={(e) => e.target.select()}
+                            className="text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <Label className="block text-center text-xs text-muted-foreground mt-1">Minutes</Label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 items-start gap-4 border-t pt-6">
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <User className="h-4 w-4" />
+                    Follow Up With
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Who should be contacted when this stage is complete?
+                  </p>
+                </div>
+                <div className="md:col-span-3">
+                  <Select
+                    value={formData.follow_up || 'none'}
+                    onValueChange={(value) => setFormData(prev => ({
+                      ...prev,
+                      follow_up: value === 'none' ? null : value as 'Client' | 'Officer' | 'BCL'
+                    }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select follow up person" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No follow up required</SelectItem>
+                      <SelectItem value="Client">
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4" />
+                          Client
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="Officer">
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4" />
+                          Officer
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="BCL">
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4" />
+                          BCL
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="documents" className="space-y-6">
+              <DocumentsTab />
+            </TabsContent>
+
+            <div className="flex justify-end gap-2 pt-6 border-t">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={saving}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving || !formData.name.trim()}>
+                {saving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-muted border-t-current rounded-full animate-spin mr-2"></div>
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    {stage ? 'Save Changes' : 'Create Stage'}
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
+  )
 }
