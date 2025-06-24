@@ -75,8 +75,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [activeClass, setActiveClass] = useState<Record<string, string>>({})
   const [activeSubclass, setActiveSubclass] = useState<Record<string, string>>({})
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
-
-  // Dialog states
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [deleteContext, setDeleteContext] = useState<{ type: string, index: number } | null>(null)
@@ -710,42 +708,42 @@ export default function UploadRequirements({ departments: initialDepartments }: 
             <div className="overflow-y-auto flex-1">
               <Table className="table-fixed w-full">
                 <TableBody className="block">
-              {safeRequirements.length > 0 ? (
-                safeRequirements.map((req, idx) => (
-                  <TableRow key={req.id || req.tempId || idx} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 flex">
-                    <TableCell className="font-medium border-r w-12">
-                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs">
-                        {idx + 1}
-                      </span>
-                    </TableCell>
-                    <TableCell className="border-r flex-1">
-                      {editingIndex === idx ? (
-                        <Input
-                          value={editForm.name}
-                          onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                          className="h-9 w-full"
-                          autoFocus
-                        />
-                      ) : (
-                        <span className="font-medium">{req.name}</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="border-r flex-1">
-                      {editingIndex === idx ? (
-                        <Input
-                          value={editForm.description}
-                          onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                          className="h-9 w-full"
-                          placeholder="Description"
-                          onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
-                        />
-                      ) : (
-                        <span className={!req.description ? 'text-gray-400 italic' : ''}>
-                          {req.description || 'No description'}
-                        </span>
-                      )}
-                    </TableCell>
-                    {/* <TableCell className="border-r ">
+                  {safeRequirements.length > 0 ? (
+                    safeRequirements.map((req, idx) => (
+                      <TableRow key={req.id || req.tempId || idx} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 flex">
+                        <TableCell className="font-medium border-r w-12">
+                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs">
+                            {idx + 1}
+                          </span>
+                        </TableCell>
+                        <TableCell className="border-r flex-1">
+                          {editingIndex === idx ? (
+                            <Input
+                              value={editForm.name}
+                              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                              className="h-9 w-full"
+                              autoFocus
+                            />
+                          ) : (
+                            <span className="font-medium">{req.name}</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="border-r flex-1">
+                          {editingIndex === idx ? (
+                            <Input
+                              value={editForm.description}
+                              onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                              className="h-9 w-full"
+                              placeholder="Description"
+                              onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
+                            />
+                          ) : (
+                            <span className={!req.description ? 'text-gray-400 italic' : ''}>
+                              {req.description || 'No description'}
+                            </span>
+                          )}
+                        </TableCell>
+                        {/* <TableCell className="border-r ">
                     {editingIndex === idx ? (
                       <div className="flex flex-col space-y-1">
                         <label className="flex items-center space-x-1">
@@ -784,80 +782,80 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                       </div>
                     )}
                   </TableCell> */}
-                    <TableCell className="w-56">
-                      <div className="flex items-center space-x-1 justify-end">
-                        {editingIndex === idx ? (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-green-600"
-                              onClick={handleSaveEdit}
-                            >
-                              <Check className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={() => setEditingIndex(null)}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-blue-600"
-                              onClick={() => handleEdit(idx)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={() => handleMove(idx, 'up')}
-                              disabled={idx === 0}
-                            >
-                              <ArrowUp className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={() => handleMove(idx, 'down')}
-                              disabled={idx === safeRequirements.length - 1}
-                            >
-                              <ArrowDown className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-red-500"
-                              onClick={() => handleDeleteClick(context.type, idx)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-gray-500">
-                    <div className="flex flex-col items-center space-y-2">
-                      <FileText className="h-8 w-8 text-gray-400" />
-                      <p>No requirements added yet</p>
-                      <p className="text-xs text-gray-400">Click the button above to add requirements</p>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
+                        <TableCell className="w-56">
+                          <div className="flex items-center space-x-1 justify-end">
+                            {editingIndex === idx ? (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-green-600"
+                                  onClick={handleSaveEdit}
+                                >
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={() => setEditingIndex(null)}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-blue-600"
+                                  onClick={() => handleEdit(idx)}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={() => handleMove(idx, 'up')}
+                                  disabled={idx === 0}
+                                >
+                                  <ArrowUp className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={() => handleMove(idx, 'down')}
+                                  disabled={idx === safeRequirements.length - 1}
+                                >
+                                  <ArrowDown className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-red-500"
+                                  onClick={() => handleDeleteClick(context.type, idx)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+                        <div className="flex flex-col items-center space-y-2">
+                          <FileText className="h-8 w-8 text-gray-400" />
+                          <p>No requirements added yet</p>
+                          <p className="text-xs text-gray-400">Click the button above to add requirements</p>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </div>
@@ -1043,241 +1041,241 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               </div>
             )}
           </div>
-          </div>
-          </div>
-          )
+        </div>
+      </div>
+    )
   }
 
-          if (!departments || departments.length === 0) {
+  if (!departments || departments.length === 0) {
     return (
-          <div className="flex items-center justify-center p-8">
-            <div className="text-center">
-              <Layers className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-              <p className="text-lg font-medium text-gray-600">No departments found</p>
-              <p className="text-sm text-gray-500">Create departments first to manage requirements</p>
-            </div>
-          </div>
-          )
+      <div className="flex items-center justify-center p-8">
+        <div className="text-center">
+          <Layers className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+          <p className="text-lg font-medium text-gray-600">No departments found</p>
+          <p className="text-sm text-gray-500">Create departments first to manage requirements</p>
+        </div>
+      </div>
+    )
   }
 
-          return (
-          <div className="space-y-4">
-            <h2 className="text-2xl font-bold">GOVT Upload Processing Requirements</h2>
-            <p className="text-sm text-gray-500">Manage GOVT upload processing requirements for each department, subdepartment, class, and subclass</p>
-            <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-hidden">
-              <DepartmentSidebar
-                departments={departments}
-                activeDept={activeDept}
-                activeSubdept={activeSubdept}
-                activeClass={activeClass}
-                activeSubclass={activeSubclass}
-                expandedItems={expandedItems}
-                onDeptClick={handleDeptClick}
-                onSubdeptClick={handleSubdeptClick}
-                onClassClick={handleClassClick}
-                onSubclassClick={handleSubclassClick}
-                onToggleExpand={toggleExpanded}
-              />
-              <div className="flex-1 p-6 bg-white dark:bg-gray-900 overflow-auto">
-                {renderMainContent()}
+  return (
+    <div className="space-y-4">
+      <h2 className="text-2xl font-bold">GOVT Upload Processing Requirements</h2>
+      <p className="text-sm text-gray-500">Manage GOVT upload processing requirements for each department, subdepartment, class, and subclass</p>
+      <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-hidden">
+        <DepartmentSidebar
+          departments={departments}
+          activeDept={activeDept}
+          activeSubdept={activeSubdept}
+          activeClass={activeClass}
+          activeSubclass={activeSubclass}
+          expandedItems={expandedItems}
+          onDeptClick={handleDeptClick}
+          onSubdeptClick={handleSubdeptClick}
+          onClassClick={handleClassClick}
+          onSubclassClick={handleSubclassClick}
+          onToggleExpand={toggleExpanded}
+        />
+        <div className="flex-1 p-6 bg-white dark:bg-gray-900 overflow-auto">
+          {renderMainContent()}
+        </div>
+      </div>
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Requirement</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this requirement? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteConfirm}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Requirements Dialog */}
+      <Dialog open={isDialogOpen && !!editingContext} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Add Requirements</DialogTitle>
+            <DialogDescription className="space-y-2">
+              <div className="space-y-1">
+                <div className="font-medium">
+                  {editingContext?.type === 'subdepartment' ? (
+                    `Adding requirements to ${editingContext?.subdepartmentName || 'subdepartment'}`
+                  ) : editingContext?.type === 'class' ? (
+                    `Adding requirements to class: ${editingContext?.className || ''}`
+                  ) : (
+                    `Adding requirements to sub-class: ${editingContext?.subclassName || ''}`
+                  )}
+                </div>
+                <div className="text-sm text-gray-600">
+                  {editingContext?.subdepartmentName && (
+                    <span>{editingContext.subdepartmentName} </span>
+                  )}
+                  {editingContext?.className && (
+                    <span>› {editingContext.className} </span>
+                  )}
+                  {editingContext?.subclassName && (
+                    <span>› {editingContext.subclassName}</span>
+                  )}
+                </div>
               </div>
-            </div>
-          {/* Delete Confirmation Dialog */}
-          <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Delete Requirement</DialogTitle>
-                <DialogDescription>
-                  Are you sure you want to delete this requirement? This action cannot be undone.
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleDeleteConfirm}
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? 'Deleting...' : 'Delete'}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
 
-          {/* Add Requirements Dialog */}
-          <Dialog open={isDialogOpen && !!editingContext} onOpenChange={setIsDialogOpen}>
-            <DialogContent className="max-w-4xl">
-              <DialogHeader>
-                <DialogTitle>Add Requirements</DialogTitle>
-                <DialogDescription className="space-y-2">
-                  <div className="space-y-1">
-                    <div className="font-medium">
-                      {editingContext?.type === 'subdepartment' ? (
-                        `Adding requirements to ${editingContext?.subdepartmentName || 'subdepartment'}`
-                      ) : editingContext?.type === 'class' ? (
-                        `Adding requirements to class: ${editingContext?.className || ''}`
-                      ) : (
-                        `Adding requirements to sub-class: ${editingContext?.subclassName || ''}`
-                      )}
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      {editingContext?.subdepartmentName && (
-                        <span>{editingContext.subdepartmentName} </span>
-                      )}
-                      {editingContext?.className && (
-                        <span>› {editingContext.className} </span>
-                      )}
-                      {editingContext?.subclassName && (
-                        <span>› {editingContext.subclassName}</span>
-                      )}
-                    </div>
-                  </div>
+              {editingContext && (() => {
+                const dept = departments.find(d => d.id === editingContext.departmentId);
+                if (!dept) return null;
 
-                  {editingContext && (() => {
-                    const dept = departments.find(d => d.id === editingContext.departmentId);
-                    if (!dept) return null;
+                const subdept = dept.tm_subdepartments?.find(s => s.id.toString() === editingContext.subdepartmentId);
+                if (!subdept) return null;
 
-                    const subdept = dept.tm_subdepartments?.find(s => s.id.toString() === editingContext.subdepartmentId);
-                    if (!subdept) return null;
+                let classItem = null;
+                let subclassItem = null;
 
-                    let classItem = null;
-                    let subclassItem = null;
+                if (editingContext.classId) {
+                  classItem = subdept.classes?.find(c => c.id.toString() === editingContext.classId);
 
-                    if (editingContext.classId) {
-                      classItem = subdept.classes?.find(c => c.id.toString() === editingContext.classId);
+                  if (editingContext.subclassId && classItem) {
+                    subclassItem = classItem.subClasses?.find(sc => sc.id.toString() === editingContext.subclassId);
+                  }
+                }
 
-                      if (editingContext.subclassId && classItem) {
-                        subclassItem = classItem.subClasses?.find(sc => sc.id.toString() === editingContext.subclassId);
-                      }
-                    }
-
-                    return (
-                      <div className="space-y-1 pt-2 text-sm">
-                        <div className="font-medium">{dept.name} &gt; {subdept.name}</div>
-                        {classItem && (
-                          <div className="pl-4">
-                            • {classItem.name}
-                            {subclassItem && (
-                              <span> &gt; {subclassItem.name}</span>
-                            )}
-                          </div>
-                        )}
-                        {editingContext.type === 'subdepartment' && (
-                          <div className="text-xs text-gray-500">{subdept.description}</div>
-                        )}
-                        {editingContext.type === 'class' && classItem?.description && (
-                          <div className="text-xs text-gray-500">{classItem.description}</div>
-                        )}
-                        {editingContext.type === 'subclass' && subclassItem?.description && (
-                          <div className="text-xs text-gray-500">{subclassItem.description}</div>
+                return (
+                  <div className="space-y-1 pt-2 text-sm">
+                    <div className="font-medium">{dept.name} &gt; {subdept.name}</div>
+                    {classItem && (
+                      <div className="pl-4">
+                        • {classItem.name}
+                        {subclassItem && (
+                          <span> &gt; {subclassItem.name}</span>
                         )}
                       </div>
-                    );
-                  })()}
-                </DialogDescription>
-              </DialogHeader>
+                    )}
+                    {editingContext.type === 'subdepartment' && (
+                      <div className="text-xs text-gray-500">{subdept.description}</div>
+                    )}
+                    {editingContext.type === 'class' && classItem?.description && (
+                      <div className="text-xs text-gray-500">{classItem.description}</div>
+                    )}
+                    {editingContext.type === 'subclass' && subclassItem?.description && (
+                      <div className="text-xs text-gray-500">{subclassItem.description}</div>
+                    )}
+                  </div>
+                );
+              })()}
+            </DialogDescription>
+          </DialogHeader>
 
-              <Tabs defaultValue="single" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="single">Single Entry</TabsTrigger>
-                  <TabsTrigger value="bulk">Bulk Entry</TabsTrigger>
-                </TabsList>
+          <Tabs defaultValue="single" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="single">Single Entry</TabsTrigger>
+              <TabsTrigger value="bulk">Bulk Entry</TabsTrigger>
+            </TabsList>
 
-                <TabsContent value="single" className="space-y-4 pt-4">
-                  <div className="flex justify-end">
+            <TabsContent value="single" className="space-y-4 pt-4">
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => addNewRequirement()}
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Row
+                </Button>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="bulk" className="space-y-4 pt-4">
+              <div className="space-y-2">
+                <Label htmlFor="bulk-requirements">Paste multiple requirements (one per line)</Label>
+                <Textarea
+                  id="bulk-requirements"
+                  value={bulkInput}
+                  onChange={(e) => handleBulkInput(e.target.value)}
+                  placeholder={`Requirement 1\nRequirement 2\nRequirement 3`}
+                  className="min-h-[150px]"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Enter one requirement per line. Each line will become a separate requirement.
+                </p>
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          <div className="space-y-4 max-h-96 overflow-y-auto border rounded-lg p-4 mt-4">
+            {newRequirements.map((req, idx) => (
+              <div key={idx} className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-3">
+                <div className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-6">
+                    <Label htmlFor={`name-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
+                      Requirement Name
+                    </Label>
+                    <Input
+                      id={`name-${idx}`}
+                      value={req.name}
+                      onChange={(e) => handleNewRequirementChange(idx, 'name', e.target.value)}
+                      placeholder="Enter requirement name"
+                    />
+                  </div>
+                  <div className="col-span-5">
+                    <Label htmlFor={`desc-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
+                      Description
+                    </Label>
+                    <Input
+                      id={`desc-${idx}`}
+                      value={req.description}
+                      onChange={(e) => handleNewRequirementChange(idx, 'description', e.target.value)}
+                      placeholder="Description (optional)"
+                    />
+                  </div>
+                  <div className="col-span-1">
                     <Button
                       type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => addNewRequirement()}
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 text-red-500"
+                      onClick={() => removeNewRequirement(idx)}
+                      disabled={newRequirements.length <= 1}
                     >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Row
+                      <X className="h-4 w-4" />
                     </Button>
                   </div>
-                </TabsContent>
-
-                <TabsContent value="bulk" className="space-y-4 pt-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="bulk-requirements">Paste multiple requirements (one per line)</Label>
-                    <Textarea
-                      id="bulk-requirements"
-                      value={bulkInput}
-                      onChange={(e) => handleBulkInput(e.target.value)}
-                      placeholder={`Requirement 1\nRequirement 2\nRequirement 3`}
-                      className="min-h-[150px]"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Enter one requirement per line. Each line will become a separate requirement.
-                    </p>
-                  </div>
-                </TabsContent>
-              </Tabs>
-
-              <div className="space-y-4 max-h-96 overflow-y-auto border rounded-lg p-4 mt-4">
-                {newRequirements.map((req, idx) => (
-                  <div key={idx} className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-3">
-                    <div className="grid grid-cols-12 gap-2 items-end">
-                      <div className="col-span-6">
-                        <Label htmlFor={`name-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
-                          Requirement Name
-                        </Label>
-                        <Input
-                          id={`name-${idx}`}
-                          value={req.name}
-                          onChange={(e) => handleNewRequirementChange(idx, 'name', e.target.value)}
-                          placeholder="Enter requirement name"
-                        />
-                      </div>
-                      <div className="col-span-5">
-                        <Label htmlFor={`desc-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
-                          Description
-                        </Label>
-                        <Input
-                          id={`desc-${idx}`}
-                          value={req.description}
-                          onChange={(e) => handleNewRequirementChange(idx, 'description', e.target.value)}
-                          placeholder="Description (optional)"
-                        />
-                      </div>
-                      <div className="col-span-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9 text-red-500"
-                          onClick={() => removeNewRequirement(idx)}
-                          disabled={newRequirements.length <= 1}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                </div>
               </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={handleCloseDialog}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleAddMultipleRequirements}
-                  disabled={!newRequirements.some(req => req.name.trim() !== '') || isSubmitting}
-                >
-                  {isSubmitting ? (
-                    <>
-                      <div className="animate-spin -ml-1 mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                      Adding...
-                    </>
-                  ) : (
-                    `Add ${newRequirements.filter(req => req.name.trim() !== '').length} Requirements`
-                  )}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-        )
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCloseDialog}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddMultipleRequirements}
+              disabled={!newRequirements.some(req => req.name.trim() !== '') || isSubmitting}
+            >
+              {isSubmitting ? (
+                <>
+                  <div className="animate-spin -ml-1 mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+                  Adding...
+                </>
+              ) : (
+                `Add ${newRequirements.filter(req => req.name.trim() !== '').length} Requirements`
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
 }

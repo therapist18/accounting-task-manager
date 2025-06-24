@@ -1162,25 +1162,25 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                 <div className="space-y-2">
                   <Label>Copy Rates From (Optional)</Label>
                   <Select
-                    value={newPeriodForm.copyFromPeriod?.toString() || ""}
+                    value={newPeriodForm.copyFromPeriod?.toString() || "current"}
                     onValueChange={(value) => setNewPeriodForm(prev => ({
                       ...prev,
-                      copyFromPeriod: value ? parseInt(value) : null
+                      copyFromPeriod: value === "current" ? null : parseInt(value)
                     }))}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select a period to copy rates from" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Start with current rates</SelectItem>
-                        {historicalPeriods.map((period) => (
-                          <SelectItem key={period.id} value={period.id!.toString()}>
-                            {format(period.effectiveFrom, "PPP")}
-                            {period.description && ` - ${period.description}`}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      <SelectItem value="current">Start with current rates</SelectItem>
+                      {historicalPeriods.map((period) => (
+                        <SelectItem key={period.id} value={period.id!.toString()}>
+                          {format(period.effectiveFrom, "PPP")}
+                          {period.description && ` - ${period.description}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={() => setIsNewPeriodDialogOpen(false)}>

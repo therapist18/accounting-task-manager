@@ -8,8 +8,7 @@
   import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
   import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
   import { Badge } from "@/components/ui/badge"
-  // Import Lucide icons individually to avoid potential constructor issues
-  import { DatabaseIcon, Loader2, Plus, Send, FileText } from "lucide-react"
+  import { DatabaseIcon, Loader2, Plus, Send } from "lucide-react"
   import { Users } from "lucide-react"
   import { AlertTriangle } from "lucide-react"
   import { CheckCircle } from "lucide-react"
@@ -17,6 +16,7 @@
   import { Calendar } from "lucide-react"
   import { ChevronDown } from "lucide-react"
   import { Upload } from "lucide-react"
+  import { FileText } from "lucide-react"
   import { Edit } from "lucide-react"
   import { Trash2 } from "lucide-react"
   import { X } from "lucide-react"
@@ -28,12 +28,8 @@
   import { Download } from "lucide-react"
   import { format, parseISO } from "date-fns"
   import dynamic from 'next/dynamic'
-  import { ExtractionPreview } from "@/components/extraction-preview"
-  import { Textarea } from "@/components/ui/textarea"
-  import { Label } from "@/components/ui/label"
-  import { Input } from "@/components/ui/input"
-  
   const PDFViewer = dynamic(() => import('@/components/PDFViewer'), { ssr: false })
+  const ExtractionPreview = dynamic(() => import('@/components/ExtractionPreview'), { ssr: false })
   import { taskColumns } from "./components/tasksfields"
   import { StageTimer } from "@/components/stage-timer"
   import { StageTransitionDialog } from "@/components/stage-transition-dialog"
@@ -49,6 +45,9 @@
   import { DepartmentSidebar } from "../departments/main-shared-components/department-sidebar"
   import { toast } from "@/hooks/use-toast"
   import { performExtraction } from "@/lib/extractionUtils"
+  import { Textarea } from "@/components/ui/textarea"
+  import { Label } from "@/components/ui/label"
+  import { Input } from "@/components/ui/input"
 
   type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
     department?: {
@@ -651,6 +650,7 @@
         updated_at: formatDate(task.updated_at),
         ...requirements
       };
+    };
 
     // State for column visibility and sorting
     const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({});
@@ -763,7 +763,7 @@
       setStageUploadDialogOpen(true);
     };
 
-    // Extraction function to handle document processing and data extraction
+    // Create a simplified extraction function based on your performExtraction
     const performStageExtraction = async (
       file: File,
       extractionSpecs: any[],
@@ -771,52 +771,104 @@
     ) => {
       try {
         setExtractionLoading(true);
-        onProgress?.('Initializing extraction...');
+        onProgress?.('Processing document...');
 
-        // Convert extraction specs to the format expected by performExtraction
+        // Convert extraction specs to the format expected by your performExtraction function
         const fields = extractionSpecs.map(spec => ({
           id: spec.id,
           name: spec.fieldName,
           type: spec.fieldType || 'text',
-          required: spec.isRequired || false,
-          description: spec.description || ''
+          required: spec.isRequired || false
         }));
 
-        onProgress?.('Preparing document for extraction...');
-        
-        // Create a file URL for processing
+        // Create a file URL for processing (you might need to upload to temp storage first)
         const fileUrl = URL.createObjectURL(file);
 
-        try {
-          // Call the extraction utility with proper error handling
-          onProgress?.('Extracting data from document...');
-          const result = await performExtraction(
-            fileUrl,
-            fields,
-            'document',
-            onProgress,
-            file.name
-          );
+        const result = await performExtraction(
+          fileUrl,
+          fields,
+          'document',
+          onProgress,
+          file.name
+        );
 
-          if (!result || !result.extractedData) {
-            throw new Error('No data was extracted from the document');
-          }
+        // Clean up the object URL
+        URL.revokeObjectURL(fileUrl);
 
-
-          return result;
-        } finally {
-          // Always clean up the object URL
-          URL.revokeObjectURL(fileUrl);
-        }
+        return result;
       } catch (error) {
         console.error('Extraction error:', error);
-        onProgress?.(`Error during extraction: ${error.message}`);
         throw error;
       } finally {
         setExtractionLoading(false);
       }
     };
 
+    const handleDocumentUpload = async (file: File, taskId: number, stageId: string, docId: string) => {
+      try {
+        setExtractionLoading(true);
+
+        // Find the stage and document configuration
+        const stage = departments
+          .flatMap(d => d.stages || [])
+          .find(s => s.id === stageId);
+
+        const document = stage?.documents?.find(d => d.id === docId);
+
+        if (!document) {
+          throw new Error('Document configuration not found');
+        }
+
+        let extractedData = null;
+
+        // Perform extraction if the document has extraction specs
+        if (document.extractionSpecs && document.extractionSpecs.length > 0) {
+          const extractionResult = await performStageExtraction(
+            file,
+            document.extractionSpecs,
+            (message) => console.log('Extraction progress:', message)
+          );
+
+          if (extractionResult.success) {
+            extractedData = extractionResult.extractedData;
+            setExtractedData(extractedData);
+          }
+        }
+
+        // Here you would normally upload the file to your storage
+        // For now, we'll just simulate the upload
+        const fileUrl = URL.createObjectURL(file);
+
+        // Update the task with document information (you'll need to implement this)
+        // This is where you'd save to your database
+        const documentInfo = {
+          fileUrl,
+          fileName: file.name,
+          extractedData,
+          uploadedAt: new Date().toISOString()
+        };
+
+        toast({
+          title: "Success",
+          description: extractedData
+            ? "Document uploaded and data extracted successfully"
+            : "Document uploaded successfully",
+        });
+
+        return documentInfo;
+
+      } catch (error) {
+        console.error('Error uploading document:', error);
+        toast({
+          title: "Error",
+          description: "Failed to upload document. Please try again.",
+          variant: "destructive"
+        });
+        throw error;
+      } finally {
+        setExtractionLoading(false);
+      }
+    };
   // Update the generateStageColumns function in your page.tsx
   const generateStageColumns = () => {
     // Define base columns (columns before stages)
@@ -1267,12 +1319,7 @@
       const [previewData, setPreviewData] = useState<{
         fileUrl?: string;
         messageContent?: string;
-        extractedData?: Record<string, any>;
-        fileName?: string;
-        fileType?: string;
-        documentName?: string;
-        documentId?: string;
-        fields?: Array<{ id: string; name: string; type: string; description?: string }>;
+        extractedData?: any;
       }>({});
       
       // Clean up object URLs when component unmounts or when dialog closes
@@ -1347,114 +1394,6 @@
           setUploading(false);
         }
       };
-    
-      const handleMessageSubmit = async (message: string, docId: string) => {
-        try {
-          setUploading(true);
-          setMessageTexts(prev => ({ ...prev, [docId]: message }));
-          
-          // Clean up previous file URL if it exists
-          if (previewData.fileUrl) {
-            URL.revokeObjectURL(previewData.fileUrl);
-          }
-          
-          // Store message content for preview
-          setPreviewData(prev => ({ ...prev, messageContent: message }));
-          
-          // Find document configuration
-          const document = stage.documents?.find(d => d.id === docId);
-          if (!document) return;
-
-          // Convert message to PDF
-          const pdfBlob = await convertMessageToPDF(message);
-          const pdfFile = new File([pdfBlob], `${document.name}_message.pdf`, { type: 'application/pdf' });
-
-          // Clean up previous PDF URL if it exists
-          if (pdfUrl) {
-            URL.revokeObjectURL(pdfUrl);
-          }
-          
-          // Create URL for the PDF blob
-          const newPdfUrl = URL.createObjectURL(pdfBlob);
-          setPdfUrl(newPdfUrl);
-          
-          // Set file URL for preview
-          setPreviewData(prev => ({ ...prev, fileUrl: newPdfUrl }));
-
-          // Perform extraction if needed
-          if (document.extractionSpecs && document.extractionSpecs.length > 0) {
-            console.log('Starting extraction for message with specs:', document.extractionSpecs);
-            onProgress?.('Extracting data from message...');
-            const result = await performStageExtraction(pdfFile, document.extractionSpecs, onProgress);
-            console.log('Extraction result for message:', result);
-            
-            if (result && result.extractedData) {
-              console.log('Raw extracted data from message:', result.extractedData);
-              
-              // Transform the extracted data to match the expected format
-              const formattedData = {};
-              const fields = [];
-              
-              // Process each extraction spec
-              document.extractionSpecs.forEach((spec: any, index: number) => {
-                const fieldName = spec.fieldName || `Field_${index + 1}`;
-                const fieldKey = Object.keys(result.extractedData).find(
-                  k => k.toLowerCase() === fieldName.toLowerCase()
-                ) || fieldName;
-                
-                const fieldValue = result.extractedData[fieldKey] || '';
-                
-                // Add to formatted data
-                formattedData[fieldName] = fieldValue;
-                
-                // Add to fields array for the form
-                fields.push({
-                  id: spec.id || `field-${index}`,
-                  name: fieldName,
-                  type: spec.fieldType || 'text',
-                  description: spec.description || '',
-                  required: spec.isRequired || false
-                });
-              });
-              
-              console.log('Formatted extracted data from message:', formattedData);
-              
-              // Update state with extracted data and fields
-              setExtractedData(formattedData);
-              setPreviewData(prev => ({
-                ...prev,
-                extractedData: formattedData,
-                fields: fields,
-                fileName: pdfFile.name,
-                fileType: pdfFile.type
-              }));
-            } else {
-              console.warn('No extracted data in result for message:', result);
-              toast({
-                title: "No Data Extracted",
-                description: "The message was processed but no data was extracted. Please check the format and try again.",
-                variant: "destructive"
-              });
-            }
-          }
-    
-          toast({
-            title: "Success",
-            description: "Message processed and data extracted successfully",
-          });
-    
-        } catch (error) {
-          console.error('Error processing message:', error);
-          toast({
-            title: "Error",
-            description: "Failed to process message. Please try again.",
-            variant: "destructive"
-          });
-        } finally {
-          setUploading(false);
-        }
-      };
-    
       // Function to convert message to PDF
       const convertMessageToPDF = async (message: string): Promise<Blob> => {
         try {
@@ -1477,122 +1416,143 @@
       };
     
       const activeDocument = stage.documents?.find(d => d.id === activeDocumentTab);
-    // Add this function inside the StageUploadDialog component, before the return statement
-const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, docId: string) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
+      
+      // Handle file upload and extraction
+      const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, docId: string) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
 
-  try {
-    setUploading(true);
-    
-    // Clear previous preview data
-    if (previewData.fileUrl) {
-      URL.revokeObjectURL(previewData.fileUrl);
-    }
-    if (pdfUrl) {
-      URL.revokeObjectURL(pdfUrl);
-    }
-
-    // Create preview URL
-    const fileUrl = URL.createObjectURL(file);
-    setPdfUrl(fileUrl);
-    
-    // Update selected files state
-    setSelectedFiles(prev => ({ ...prev, [docId]: file }));
-
-    // Get the document configuration
-    const document = stage.documents?.find(d => d.id === docId);
-    
-    // Set initial preview data
-    setPreviewData(prev => ({
-      ...prev,
-      fileUrl,
-      fileName: file.name,
-      fileType: file.type,
-      documentName: document?.name || 'Document',
-      documentId: docId
-    }));
-
-    // If there are extraction specs, perform extraction
-    if (document?.extractionSpecs?.length) {
-      try {
-        console.log('Starting extraction with specs:', document.extractionSpecs);
-        const result = await performStageExtraction(file, document.extractionSpecs);
-        console.log('Extraction result:', result);
-        
-        if (result && result.extractedData) {
-          // Transform the extracted data to match the expected format
-          const formattedData = {};
-          const fields = [];
+        try {
+          setUploading(true);
           
-          // Process each extraction spec
-          document.extractionSpecs.forEach((spec: any, index: number) => {
-            const fieldName = spec.fieldName || `Field_${index + 1}`;
-            const fieldValue = result.extractedData[fieldName] || result.extractedData[fieldName.toLowerCase()] || '';
-            
-            // Add to formatted data
-            formattedData[fieldName] = fieldValue;
-            
-            // Add to fields array for the form
-            fields.push({
-              id: `field-${index}`,
-              name: fieldName,
-              type: spec.type || 'text',
-              description: spec.description || '',
-              required: spec.required || false
-            });
+          // Clear previous preview data
+          if (previewData.fileUrl) {
+            URL.revokeObjectURL(previewData.fileUrl);
+          }
+          if (pdfUrl) {
+            URL.revokeObjectURL(pdfUrl);
+          }
+
+          // Update selected files state
+          setSelectedFiles(prev => ({ ...prev, [docId]: file }));
+
+          // Create file URL for preview
+          const fileUrl = URL.createObjectURL(file);
+          setPdfUrl(file.type === 'application/pdf' ? fileUrl : null);
+          
+          // If there are extraction specs, perform extraction
+          const document = stage.documents?.find(d => d.id === docId);
+          let extractedData = null;
+          
+          if (document?.extractionSpecs?.length) {
+            const result = await performStageExtraction(file, document.extractionSpecs);
+            if (result.success) {
+              extractedData = result.extractedData;
+              setExtractedData(extractedData);
+            }
+          }
+
+          // Update preview data with file and extracted data
+          setPreviewData({ 
+            fileUrl,
+            fileName: file.name,
+            fileType: file.type,
+            extractedData,
+            documentName: document?.name || 'Document'
           });
-          
-          console.log('Formatted extracted data:', formattedData);
-          console.log('Generated fields:', fields);
-          
-          // Update state with extracted data and fields
-          setExtractedData(formattedData);
-          setPreviewData(prev => ({
-            ...prev,
-            extractedData: formattedData,
-            fields: fields
-          }));
-          
-          console.log('Preview data after update:', {
-            ...previewData,
-            extractedData: formattedData,
-            fields: fields
+
+          toast({ 
+            title: "File uploaded", 
+            description: `${file.name} has been uploaded successfully.` 
           });
-        } else {
-          console.warn('No extracted data in result:', result);
-          toast({
-            title: "No Data Extracted",
-            description: "The document was processed but no data was extracted. Please check the format and try again.",
-            variant: "destructive"
+
+        } catch (error) {
+          console.error('Error uploading file:', error);
+          toast({ 
+            title: "Error", 
+            description: "Failed to process file. Please try again.", 
+            variant: "destructive" 
           });
+        } finally {
+          setUploading(false);
         }
-      } catch (error) {
-        console.error('Error during extraction:', error);
-        toast({
-          title: "Extraction Error",
-          description: `Failed to extract data from the document: ${error.message || 'Unknown error'}`,
-          variant: "destructive"
-        });
-      }
-    }
+      };
 
-    toast({ 
-      title: "File uploaded", 
-      description: `${file.name} has been uploaded successfully.` 
-    });
+      // Handle message submission
+      const handleMessageSubmit = async (message: string, docId: string) => {
+        try {
+          setUploading(true);
+          setMessageTexts(prev => ({ ...prev, [docId]: message }));
+          
+          // Clean up previous file URL if it exists
+          if (previewData.fileUrl) {
+            URL.revokeObjectURL(previewData.fileUrl);
+          }
+          
+          // Find document configuration
+          const document = stage.documents?.find(d => d.id === docId);
+          if (!document) return;
 
-  } catch (error) {
-    console.error('Error uploading file:', error);
-    toast({ 
-      title: "Error", 
-      description: "Failed to process file. Please try again.", 
-      variant: "destructive" 
-    });
-  } finally {
-    setUploading(false);
-  }
-};
+          // Convert message to PDF
+          const pdfBlob = await convertMessageToPDF(message);
+          const pdfFile = new File([pdfBlob], `${document.name}_message.pdf`, { type: 'application/pdf' });
+          
+          // Create preview URL for the PDF
+          const pdfUrl = URL.createObjectURL(pdfBlob);
+          setPdfUrl(pdfUrl);
+          
+          // If there are extraction specs, perform extraction
+          let extractedData = null;
+          if (document.extractionSpecs?.length) {
+            const result = await performStageExtraction(pdfFile, document.extractionSpecs);
+            if (result.success) {
+              extractedData = result.extractedData;
+              setExtractedData(extractedData);
+            }
+          }
+          
+          // Update preview data with PDF and extracted data
+          setPreviewData({
+            fileUrl: pdfUrl,
+            fileName: `${document.name}_message.pdf`,
+            fileType: 'application/pdf',
+            extractedData,
+            documentName: document.name,
+            messageContent: message
+          });
+          
+          toast({ 
+            title: "Success", 
+            description: "Message processed and data extracted successfully" 
+          });
+          
+        } catch (error) {
+          console.error('Error processing message:', error);
+          toast({ 
+            title: "Error", 
+            description: "Failed to process message. Please try again.", 
+            variant: "destructive" 
+          });
+        } finally {
+          setUploading(false);
+        }
+      };
+      
+      // Handle data changes from ExtractionPreview
+      const handleDataChange = (fieldName: string, value: any) => {
+        setExtractedData((prev: any) => ({
+          ...prev,
+          [fieldName]: value
+        }));
+        
+        setPreviewData(prev => ({
+          ...prev,
+          extractedData: {
+            ...(prev.extractedData || {}),
+            [fieldName]: value
+          }
+        }));
+      };
       return (
           <Dialog open={stageUploadDialogOpen} onOpenChange={setStageUploadDialogOpen}>
             <DialogContent className="max-w-7xl max-h-[95vh] overflow-y-auto">
@@ -1678,41 +1638,64 @@ const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, docId: s
                   </div>
       
                   {/* Right Panel - Preview and Extracted Data */}
-                  <div className="lg:col-span-2">
-                    {previewData.fileUrl ? (
-                      <ExtractionPreview
-                        documentName={previewData.documentName || 'Document'}
-                        extractedData={previewData.extractedData || {}}
-                        fields={previewData.fields || []}
-                        fileUrl={previewData.fileUrl}
-                        fileName={previewData.fileName}
-                        fileType={previewData.fileType}
-                        onDataChange={(field, value) => {
-                          setPreviewData(prev => ({
-                            ...prev,
-                            extractedData: {
-                              ...prev.extractedData,
-                              [field]: value
-                            }
-                          }));
-                        }}
-                        onSave={() => {
-                          toast({
-                            title: "Changes saved",
-                            description: "The extracted data has been updated."
-                          });
-                        }}
-                        loading={uploading}
-                      />
-                    ) : (
-                      <div className="border rounded-lg overflow-hidden bg-gray-50 h-full flex items-center justify-center">
-                        <div className="text-center p-8 text-muted-foreground">
-                          <FileText className="h-12 w-12 mx-auto mb-4 opacity-30" />
-                          <p className="text-lg font-medium">No document selected</p>
-                          <p className="text-sm">Upload a file or submit a message to view the preview</p>
-                        </div>
+                  <div className="lg:col-span-2 space-y-6">
+                    {/* PDF Preview */}
+                    <div className="border rounded-lg overflow-hidden bg-gray-50">
+                      <div className="bg-muted/50 p-3 border-b flex items-center">
+                        <FileText className="h-4 w-4 mr-2" />
+                        <span className="font-medium">Document Preview</span>
                       </div>
-                    )}
+                      <div className="h-[400px] overflow-auto">
+                        {previewData.fileUrl ? (
+                          <PDFViewer fileUrl={previewData.fileUrl} />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-8 text-center">
+                            <FileText className="h-12 w-12 mb-4 opacity-30" />
+                            <p>Preview will appear here</p>
+                            <p className="text-sm">Upload a file or submit a message to generate a preview</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+      
+                    {/* Extracted Data */}
+                    <div className="border rounded-lg overflow-hidden">
+                      <div className="bg-muted/50 p-3 border-b flex items-center">
+                        <DatabaseIcon className="h-4 w-4 mr-2" />
+                        <span className="font-medium">Extracted Data</span>
+                      </div>
+                      <div className="p-4">
+                        {previewData.extractedData ? (
+                          <div className="space-y-4">
+                            {Object.entries(previewData.extractedData).map(([key, value]) => (
+                              <div key={key} className="border-b pb-2 last:border-0 last:pb-0">
+                                <div className="text-sm font-medium text-muted-foreground capitalize">
+                                  {key.replace(/([A-Z])/g, ' $1').trim()}
+                                </div>
+                                <div className="mt-1">
+                                  {Array.isArray(value) ? (
+                                    <ul className="list-disc pl-5 space-y-1">
+                                      {value.map((item, i) => (
+                                        <li key={i}>{String(item)}</li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <div className="font-medium">
+                                      {String(value) || <span className="text-muted-foreground">No data</span>}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-center py-8 text-muted-foreground">
+                            <DatabaseIcon className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                            <p>Extracted data will appear here</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </Tabs>
@@ -2108,5 +2091,4 @@ const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, docId: s
         <StageUploadDialog />
       </div>
     )
-  };
-}
+  }

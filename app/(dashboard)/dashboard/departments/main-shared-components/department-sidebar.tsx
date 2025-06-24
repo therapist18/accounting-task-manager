@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import React from "react"
 
 type SubClass = {
@@ -52,14 +53,32 @@ interface DepartmentSidebarProps {
 // Helper component to render index
 const IndexBadge = ({ index, isActive }: { index: string; isActive: boolean }) => (
   <span className={cn(
-    "flex items-center justify-center w-5 h-5 rounded-full text-xs font-medium mr-2 flex-shrink-0",
+    "flex items-center justify-center w-5 h-5 rounded-full text-xs font-medium mr-2 flex-shrink-0 transition-colors",
     isActive 
       ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200"
-      : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+      : "bg-gray-100 text-gray-600 dark:bg-gray-800/50 dark:text-gray-400"
   )}>
     {index}
   </span>
 )
+
+// Helper component for truncated text with tooltip
+const TruncatedText = ({ text, className = "" }: { text: string; className?: string }) => {
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={`truncate block ${className}`}>
+            {text}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="right" className="max-w-xs">
+          <p className="text-sm">{text}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
 
 export function DepartmentSidebar({
   departments,
@@ -204,7 +223,18 @@ export function DepartmentSidebar({
                           index={`${deptIndex + 1}`} 
                           isActive={activeDept === dept.id}
                         />
-                        <span className="font-medium text-sm">{dept.name}</span>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="font-medium text-sm truncate max-w-[120px] block">
+                                {dept.name}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="right" className="max-w-xs">
+                              <p className="text-sm">{dept.name}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       </div>
                     </div>
                     {subdepartments.length > 0 && (
@@ -260,7 +290,7 @@ export function DepartmentSidebar({
                                     index={`${deptIndex + 1}.${subdeptIndex + 1}`} 
                                     isActive={isActive}
                                   />
-                                  <span>{subdept.name}</span>
+                                  <TruncatedText text={subdept.name} className="max-w-[100px]" />
                                 </div>
                               </div>
                               {classes.length > 0 && (
@@ -315,7 +345,7 @@ export function DepartmentSidebar({
                                               index={`${deptIndex + 1}.${subdeptIndex + 1}.${classIndex + 1}`} 
                                               isActive={activeClass === cls.id.toString()}
                                             />
-                                            <span>{cls.name}</span>
+                                            <TruncatedText text={cls.name} className="max-w-[80px]" />
                                           </div>
                                         </div>
                                         {subClasses.length > 0 && (
@@ -331,14 +361,14 @@ export function DepartmentSidebar({
                                         <button
                                           key={subClass.id}
                                           className={cn(
-                                            "w-full text-left p-1.5 pl-14 pr-2 text-sm rounded-lg transition-colors duration-200 relative",
+                                            "w-full text-left p-1.5 pl-14 pr-2 text-sm rounded-lg transition-colors duration-200 relative group",
                                             activeSubclass === subClass.id.toString()
                                               ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-100 font-medium shadow-sm"
                                               : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800/50",
-                                            "before:absolute before:left-8 before:top-1/2 before:-translate-y-1/2 before:w-1.5 before:h-1.5 before:rounded-full",
+                                            "before:absolute before:left-8 before:top-1/2 before:-translate-y-1/2 before:w-1.5 before:h-1.5 before:rounded-full before:transition-colors",
                                             activeSubclass === subClass.id.toString()
                                               ? "before:bg-blue-500 before:ring-2 before:ring-blue-200 dark:before:ring-blue-900/50"
-                                              : "before:bg-gray-300 dark:before:bg-gray-600"
+                                              : "before:bg-gray-300 dark:before:bg-gray-600 group-hover:before:bg-gray-400 dark:group-hover:before:bg-gray-500"
                                           )}
                                           onClick={(e) => {
                                             e.stopPropagation()
@@ -350,7 +380,7 @@ export function DepartmentSidebar({
                                             )
                                           }}
                                         >
-                                          {subClass.name}
+                                          <TruncatedText text={subClass.name} className="max-w-[70px]" />
                                         </button>
                                       ))}
                                     </CollapsibleContent>

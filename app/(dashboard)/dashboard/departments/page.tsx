@@ -92,11 +92,11 @@ export default function DepartmentsPage() {
       <TabsList>
         <TabsTrigger value="departments">Departments</TabsTrigger>
         <TabsTrigger value="stages">Stages</TabsTrigger>
-        <TabsTrigger value="rates">Rates</TabsTrigger>  
+        <TabsTrigger value="rates">Rates</TabsTrigger>
         <TabsTrigger value="requirements">GOVT Upload Req</TabsTrigger>
-        <TabsTrigger value="webdata">Web Data</TabsTrigger>  
-        <TabsTrigger value="guidelines">Guidelines</TabsTrigger>  
-        <TabsTrigger value="payments">Payments</TabsTrigger>  
+        {/* <TabsTrigger value="webdata">Web Data</TabsTrigger>   */}
+        <TabsTrigger value="guidelines">Guidelines</TabsTrigger>
+        <TabsTrigger value="payments">Payments</TabsTrigger>
       </TabsList>
       <TabsContent value="departments">
         <Departments />
@@ -107,9 +107,9 @@ export default function DepartmentsPage() {
       <TabsContent value="requirements">
         <UploadRequirements departments={departments} />
       </TabsContent>
-      <TabsContent value="webdata">
+      {/* <TabsContent value="webdata">
         <WebData departments={departments} />
-      </TabsContent>
+      </TabsContent> */}
       <TabsContent value="rates">
         <Rates departments={departments} />
       </TabsContent>
