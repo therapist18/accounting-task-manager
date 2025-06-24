@@ -358,17 +358,12 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   
   // Log for debugging
   useEffect(() => {
-    console.log('Available assistants:', availableTaskAssistants);
-    console.log('Available officers:', availableOfficers);
-    console.log('Current form data:', formData);
   }, [availableTaskAssistants, availableOfficers, formData]);
 
   // Get subdepartments from the department map
   const fetchSubdepartments = useCallback((departmentId: string) => {
-    console.log('Fetching subdepartments for department ID:', departmentId, 'Type:', typeof departmentId)
     
     if (!departmentId) {
-      console.log('No department ID provided, clearing subdepartments')
       setSubdepartments([])
       setFormData(prev => ({
         ...prev,
@@ -380,24 +375,16 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       return
     }
 
-    // Log the department map contents for debugging
-    console.log('Department map keys (type:value):', Array.from(departmentMap.keys()).map(k => `${typeof k}:${k}`))
-    
-    // Try to find the department with both string and number ID
     let department = departmentMap.get(departmentId)
     
-    // If not found, try converting the ID to a number if it's a string
     if (!department && typeof departmentId === 'string') {
       const numericId = parseInt(departmentId, 10)
       if (!isNaN(numericId)) {
-        console.log(`Trying to find department with numeric ID: ${numericId}`)
         department = departmentMap.get(numericId as any)
       }
     }
     
-    // If still not found, try to find by stringifying the ID
     if (!department) {
-      console.log('Trying to find department by stringifying map keys')
       for (const [key, dept] of departmentMap.entries()) {
         if (key.toString() === departmentId.toString()) {
           department = dept
@@ -407,15 +394,12 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
     }
     
     if (!department) {
-      console.error('Department not found in map. ID:', departmentId, 'Type:', typeof departmentId)
-      console.log('Available department IDs:', Array.from(departmentMap.keys()).map(k => `${typeof k}:${k}`))
       setSubdepartments([])
       return
     }
 
     // Get subdepartments from the department
     const subdepts = department.subdepartments || []
-    console.log('Subdepartments from department:', subdepts)
     
     // Update subdepartments with task manager/assistant details
     const updatedSubdepts = subdepts.map(subdept => {
@@ -442,8 +426,6 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
 
   // Optimized form change handler with proper state updates
   const handleChange = useCallback((field: keyof FormData, value: any) => {
-    console.log(`Changing ${field} to:`, value);
-
     setFormData(prev => {
       // If changing applicant type, reset related fields
       if (field === 'applicant_type') {
@@ -477,7 +459,6 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       // If changing subdepartment, reset dependent fields but auto-populate task manager/assistant
       if (field === 'subdepartment_id') {
         const selectedSubdept = subdepartments.find(s => s.id.toString() === value.toString());
-        console.log('Selected subdepartment for auto-population:', selectedSubdept);
 
         return {
           ...prev,
@@ -670,8 +651,6 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
         updated_at: new Date().toISOString()
       };
       
-      console.log('Prepared task data for submission:', taskData);
-      
       // Call the API to create the task
       const { data: newTask, error } = await supabase
         .from('tm_tasks')
@@ -759,7 +738,6 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
   const selectedDepartment = useMemo(() => {
     if (!formData.department_id) return null;
     const dept = departments.find(d => d.id.toString() === formData.department_id.toString());
-    console.log('Selected department:', dept);
     return dept || null;
   }, [departments, formData.department_id]);
   
@@ -856,15 +834,6 @@ export function NewTaskDialog({ open, onOpenChange, onCreate }: NewTaskDialogPro
       </Card>
     )
   }, [selectedClient, selectedPrincipalMember, formData.applicant_type])
-
-  // Debug logging
-  useEffect(() => {
-    console.log('Form data updated:', JSON.parse(JSON.stringify(formData)));
-    console.log('Available managers:', availableTaskManagers);
-    console.log('Available assistants:', availableTaskAssistants);
-    console.log('Selected subdepartment:', selectedSubdepartment);
-    console.log('All users:', allUsers);
-  }, [formData, availableTaskManagers, availableTaskAssistants, selectedSubdepartment, allUsers]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

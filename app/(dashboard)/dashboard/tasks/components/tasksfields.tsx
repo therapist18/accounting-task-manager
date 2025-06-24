@@ -44,36 +44,58 @@ const DocumentActionCell = ({ task, onDocumentUpload }: DocumentActionCellProps)
   }
 
   const handleClick = () => {
-    console.log('Document button clicked for task:', task)
-    console.log('Task subdepartment:', task.subdepartment)
-    console.log('Task class_name:', task.class)
+    let reqs: Requirement[] = []
+    const classId = task.class_id?.toString()
 
-    // Get requirements from the subdepartment's classes based on the selected class
-    if (task.subdepartment?.classes && task.class) {
-      const selectedClass = Array.isArray(task.subdepartment.classes)
-        ? task.subdepartment.classes.find((c: any) => c.name === task.class)
-        : null
+    // First, try to get requirements directly from task.class if available
+    if (task.class?.requirements && Array.isArray(task.class.requirements)) {
+      reqs = task.class.requirements.map((req: any) => ({
+        name: req.name || 'Untitled Requirement',
+        description: req.description || null,
+        is_required: req.is_required ?? req.isRequired ?? true,
+        submitted: false // This would come from actual submission data
+      }))
+    } 
+    // If no requirements in task.class, try to find them in subdepartment classes
+    else if (task.subdepartment?.classes) {
+      
+      // Find the class by ID
+      const selectedClass = task.subdepartment.classes.find(
+        (c: any) => c.id?.toString() === classId || 
+                  c.id === classId || 
+                  c.id?.toString() === task.class_id
+      )
 
-      console.log('Selected class:', selectedClass)
+      const finalClass = selectedClass || 
+        task.subdepartment.classes.find(
+          (c: any) => c.name === task.class?.name || c.name === task.class_name
+        )
 
-      if (selectedClass?.requirements) {
-        const reqs = Array.isArray(selectedClass.requirements)
-          ? selectedClass.requirements.map((req: any) => ({
-            ...req,
-            is_required: req.is_required ?? true, // Default to required if not specified
+      // Check for requirements at the class level
+      if (finalClass?.requirements && Array.isArray(finalClass.requirements)) {
+        reqs = finalClass.requirements.map((req: any) => ({
+          name: req.name || 'Untitled Requirement',
+          description: req.description || null,
+          is_required: req.is_required ?? req.isRequired ?? true,
+          submitted: false // This would come from actual submission data
+        }))
+      } else if (finalClass?.subClasses?.length > 0 && task.subclass_id) {
+        // If no class-level requirements, check for subclasses
+        const selectedSubclass = finalClass.subClasses.find(
+          (sc: any) => sc.id?.toString() === task.subclass_id?.toString()
+        )
+        
+        if (selectedSubclass?.requirements && Array.isArray(selectedSubclass.requirements)) {
+          reqs = selectedSubclass.requirements.map((req: any) => ({
+            name: req.name || 'Untitled Requirement',
+            description: req.description || null,
+            is_required: req.is_required ?? req.isRequired ?? true,
             submitted: false // This would come from actual submission data
           }))
-          : []
-        console.log('Mapped requirements:', reqs)
-        setRequirements(reqs)
-      } else {
-        console.log('No requirements found in class')
-        setRequirements([])
+        }
       }
-    } else {
-      console.log('No subdepartment classes or class name found')
-      setRequirements([])
     }
+    setRequirements(reqs)
     setDocDialogOpen(true)
   }
 
@@ -146,7 +168,9 @@ const DocumentDialog = ({ open, onOpenChange, onUpload, requirements, task }: Do
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>Document Requirements - {task.class || 'General'}</DialogTitle>
+          <DialogTitle>
+            Document Requirements - {typeof task.class === 'object' ? task.class?.name || 'General' : task.class || 'General'}
+          </DialogTitle>
           <DialogDescription>
             Review the document requirements and upload files for this task.
           </DialogDescription>

@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Users, AlertTriangle, CheckCircle, ArrowRight, Calendar, Upload, FileText, Edit, Trash2, X, File, Check, XCircle } from "lucide-react"
+import { Plus, Users, AlertTriangle, CheckCircle, ArrowRight, Calendar, ChevronDown, Upload, FileText, Edit, Trash2, X, File, Check, XCircle, Eye } from "lucide-react"
 import { format, parseISO } from "date-fns"
 import { taskColumns } from "./components/tasksfields"
 import { StageTimer } from "@/components/stage-timer"
@@ -23,6 +23,7 @@ import type { Database } from "@/lib/supabase/database.types"
 import type { Stage, Department } from "@/lib/supabase/departments"
 import { fetchDepartments } from "../departments/departments/database"
 import { DepartmentSidebar } from "../departments/main-shared-components/department-sidebar"
+import { toast } from "@/hooks/use-toast"
 
 type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
   department?: {
@@ -154,7 +155,11 @@ export default function TasksPage() {
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
   const [documentsDialogOpen, setDocumentsDialogOpen] = useState(false)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
-
+  const [stageUploadDialogOpen, setStageUploadDialogOpen] = useState(false);
+  const [selectedStageTask, setSelectedStageTask] = useState<{ task: Task, stage: any } | null>(null);
+  const [stageExtractionDialogOpen, setStageExtractionDialogOpen] = useState(false);
+  const [extractedData, setExtractedData] = useState<any>(null);
+  const [extractionLoading, setExtractionLoading] = useState(false);
   // Define stage columns inside the component to access component methods
   const stageColumns = [
     { key: 'index', header: '#', width: '50px' },
@@ -186,7 +191,6 @@ export default function TasksPage() {
     { key: 'account_used', header: 'Account Used', width: '120px' },
     { key: 'applied_by', header: 'Applied by Who', width: '120px' },
     { key: 'batch', header: 'Batch', width: '100px' },
-
     {
       key: 'actions',
       header: 'Actions',
@@ -272,7 +276,7 @@ export default function TasksPage() {
           : []
       };
 
-      console.log(`Processed department ${transformedDept.name} with ${transformedDept.tm_subdepartments.length} subdepartments`);
+
       return transformedDept;
     }).filter(Boolean);
   };
@@ -281,7 +285,6 @@ export default function TasksPage() {
     const loadData = async () => {
       try {
         setLoading(true);
-        console.log('Loading tasks, departments, users, and stages...');
 
         const [tasksData, deptsData, usersData, stagesData] = await Promise.all([
           getTasks(),
@@ -290,14 +293,9 @@ export default function TasksPage() {
           getStages(),
         ]);
 
-        console.log('Raw tasks data:', tasksData);
-        console.log('Raw departments data:', deptsData);
-        console.log('Raw users data:', usersData);
-        console.log('Raw stages data:', stagesData);
 
         // Transform departments data
         const transformedDepts = transformDepartments(deptsData);
-        console.log('Transformed departments:', transformedDepts);
 
         setTasks(tasksData);
         setDepartments(transformedDepts);
@@ -306,9 +304,6 @@ export default function TasksPage() {
 
         // Log the first task's structure for debugging
         if (tasksData.length > 0) {
-          console.log('First task structure:', tasksData[0]);
-          console.log('First task department:', tasksData[0].department);
-          console.log('First task subdepartment:', tasksData[0].subdepartment);
         }
       } catch (error) {
         console.error('Error loading data:', error);
@@ -322,19 +317,9 @@ export default function TasksPage() {
 
   // Get filtered tasks based on selected department/subdepartment/class/subclass
   const getFilteredTasks = useCallback((status?: string) => {
-    console.log('Filtering tasks with selection:', {
-      selectedDepartment,
-      selectedSubdepartment,
-      selectedClass,
-      selectedSubclass,
-      tasksCount: tasks.length
-    });
-
     // If no filters are selected, return all tasks
     if (!selectedDepartment && !selectedSubdepartment && !selectedClass && !selectedSubclass) {
-      const allTasks = status ? tasks.filter(task => task.status === status) : [...tasks];
-      console.log('No filters selected, returning all tasks:', allTasks);
-      return allTasks;
+      return status ? tasks.filter(task => task.status === status) : [...tasks];
     }
 
     // Helper function to compare IDs safely
@@ -344,7 +329,7 @@ export default function TasksPage() {
     };
 
     return tasks.filter(task => {
-      // Log task details for debugging
+      // Task details for filtering
       const taskInfo = {
         taskId: task.id,
         taskDept: task.department?.id,
@@ -352,13 +337,11 @@ export default function TasksPage() {
         taskClass: task.class_id,
         taskSubclass: task.subclass_id
       };
-      console.log('Checking task:', taskInfo);
 
       // Check department match if department is selected
       if (selectedDepartment) {
         const deptMatch = idsMatch(task.department?.id, selectedDepartment);
         if (!deptMatch) {
-          console.log(`Task ${task.id} filtered out - department mismatch`);
           return false;
         }
       }
@@ -367,7 +350,6 @@ export default function TasksPage() {
       if (selectedSubdepartment) {
         const subdeptMatch = idsMatch(task.subdepartment?.id, selectedSubdepartment);
         if (!subdeptMatch) {
-          console.log(`Task ${task.id} filtered out - subdepartment mismatch`);
           return false;
         }
       }
@@ -376,7 +358,6 @@ export default function TasksPage() {
       if (selectedClass) {
         const classMatch = idsMatch(task.class_id, selectedClass);
         if (!classMatch) {
-          console.log(`Task ${task.id} filtered out - class mismatch`);
           return false;
         }
       }
@@ -385,12 +366,10 @@ export default function TasksPage() {
       if (selectedSubclass) {
         const subclassMatch = idsMatch(task.subclass_id, selectedSubclass);
         if (!subclassMatch) {
-          console.log(`Task ${task.id} filtered out - subclass mismatch`);
           return false;
         }
       }
 
-      console.log(`Task ${task.id} passed all filters`);
       return true;
     });
   }, [tasks, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
@@ -405,35 +384,11 @@ export default function TasksPage() {
     const dept = departments.find(d => d.id === selectedDepartment)
     const subdept = dept?.subdepartments?.find(s => s.id === selectedSubdepartment)
 
-    console.log('Current Department:', dept?.name, 'Subdepartment:', subdept?.name)
-    console.log('Subdepartment classes:', subdept?.classes)
+
 
     return subdept
   }
-
-  // Get current selection level for determining data source
-  const getCurrentSelectionLevel = () => {
-    if (selectedSubclass) {
-      console.log('Current selection level: subclass');
-      return 'subclass';
-    }
-    if (selectedClass) {
-      console.log('Current selection level: class');
-      return 'class';
-    }
-    if (selectedSubdepartment) {
-      console.log('Current selection level: subdepartment');
-      return 'subdepartment';
-    }
-    if (selectedDepartment) {
-      console.log('Current selection level: department');
-      return 'department';
-    }
-    console.log('Current selection level: none');
-    return 'none';
-  }
-
-  // Get requirements based on current selection level (child data level)
+  // Updated getCurrentRequirements function
   const getCurrentRequirements = useCallback(() => {
     if (selectedSubclass) {
       console.log('Looking for subclass with ID:', selectedSubclass);
@@ -441,16 +396,26 @@ export default function TasksPage() {
         .flatMap(d => d.tm_subdepartments || [])
         .flatMap(sd => sd.classes || [])
         .flatMap(c => c.subClasses || [])
-        .find(sc => sc.id === selectedSubclass);
+        .find(sc => String(sc.id) === String(selectedSubclass)); // Ensure string comparison
 
       console.log('Found subclass:', subclass);
       return subclass?.requirements || [];
     } else if (selectedClass) {
       console.log('Looking for class with ID:', selectedClass);
-      const cls = departments
+
+      // First try to find the class by ID (which seems to be stored as a number)
+      let cls = departments
         .flatMap(d => d.tm_subdepartments || [])
         .flatMap(sd => sd.classes || [])
-        .find(c => c.id === selectedClass);
+        .find(c => String(c.id) === String(selectedClass));
+
+      // If not found by ID, try by name (since selectedClass might be a name)
+      if (!cls) {
+        cls = departments
+          .flatMap(d => d.tm_subdepartments || [])
+          .flatMap(sd => sd.classes || [])
+          .find(c => c.name === selectedClass);
+      }
 
       console.log('Found class:', cls);
       return cls?.requirements || [];
@@ -458,13 +423,13 @@ export default function TasksPage() {
       console.log('Looking for subdepartment with ID:', selectedSubdepartment);
       const subdept = departments
         .flatMap(d => d.tm_subdepartments || [])
-        .find(sd => sd.id === selectedSubdepartment);
+        .find(sd => String(sd.id) === String(selectedSubdepartment));
 
       console.log('Found subdepartment:', subdept);
       return subdept?.requirements || [];
     } else if (selectedDepartment) {
       console.log('Looking for department with ID:', selectedDepartment);
-      const dept = departments.find(d => d.id === selectedDepartment);
+      const dept = departments.find(d => String(d.id) === String(selectedDepartment));
       console.log('Found department:', dept);
       return dept?.requirements || [];
     }
@@ -472,7 +437,6 @@ export default function TasksPage() {
     console.log('No selection level specified, returning empty requirements');
     return [];
   }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
-
   // Get stages based on department level
   const getCurrentStages = () => {
     const dept = departments.find(d => d.id === selectedDepartment)
@@ -566,21 +530,16 @@ export default function TasksPage() {
 
   // Transform departments for sidebar with proper ID mapping and type handling
   const transformedDepartments = departments.map(dept => {
-    console.log(`Processing department: ${dept.name} (ID: ${dept.id})`);
     const transformedDept = {
       ...dept,
       id: dept.id.toString(), // Ensure department ID is string
       subdepartments: dept.subdepartments?.map(subdept => {
-        console.log(`  - Processing subdepartment: ${subdept.name} (ID: ${subdept.id})`);
-        console.log(`  - Subdepartment classes:`, subdept.classes);
 
         const transformedSubdept = {
           ...subdept,
           id: subdept.id.toString(), // Ensure subdepartment ID is string
           department_id: subdept.department_id?.toString(), // Ensure department_id is string
           classes: subdept.classes?.map(cls => {
-            console.log(`    - Processing class: ${cls.name} (ID: ${cls.id})`);
-            console.log(`    - Class subclasses:`, cls.subClasses);
 
             return {
               ...cls,
@@ -602,7 +561,7 @@ export default function TasksPage() {
     return transformedDept;
   });
 
-  console.log('Transformed departments:', JSON.stringify(transformedDepartments, null, 2));
+
 
   // Format task data for display
   const formatTaskData = (task: Task, index: number) => {
@@ -654,6 +613,9 @@ export default function TasksPage() {
       company_name: task.company_name || 'Missing',
       principal_member_name: task.principal_member_name || 'Missing',
       renewal_status: task.renewal_status || 'New',
+      application_type: task.application_type || 'Standard',
+      r_number: task.r_number || 'N/A',
+      status: task.status || 'pending',
       account_used: task.account_used || 'Missing',
       applied_by: task.applied_by || 'System',
       batch: task.batch || 'Missing',
@@ -665,53 +627,355 @@ export default function TasksPage() {
     };
   };
 
-  // Generate dynamic stage columns based on department (stages are department-dependent)
-  const generateStageColumns = () => {
-    const stages = getCurrentStages()
+  // State for column visibility and sorting
+  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({});
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
 
-    // Create columns up to and including renewal_status
-    const renewalStatusIndex = stageColumns.findIndex(col => col.key === 'renewal_status')
-    const baseColumns = stageColumns.slice(0, renewalStatusIndex + 1)
+  // Initialize column visibility
+  useEffect(() => {
+    const initialVisibility = stageColumns.reduce((acc, col) => {
+      acc[col.key] = true;
+      return acc;
+    }, {} as Record<string, boolean>);
+    setColumnVisibility(initialVisibility);
+  }, []);
 
-    // Get the remaining columns that come after the stages
-    const accountUsedIndex = stageColumns.findIndex(col => col.key === 'account_used')
-    const endColumns = accountUsedIndex !== -1
-      ? stageColumns.slice(accountUsedIndex)
-      : stageColumns.slice(renewalStatusIndex + 1)
-
-    // If no stages, return base columns with a "No Stages" indicator
-    if (!stages || stages.length === 0) {
-      const noStagesColumn = {
-        key: 'no_stages',
-        header: 'Stages',
-        width: '150px',
-        parentHeader: 'Stages',
-        render: () => (
-          <div className="text-center text-muted-foreground text-sm">
-            No stages configured
-          </div>
-        )
-      }
-      return [...baseColumns, noStagesColumn, ...endColumns]
+  // Handle sort request
+  const handleSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
     }
+    setSortConfig({ key, direction });
+  };
 
-    // Create nested stage columns with proper rendering
-    const dynamicStageColumns = stages.map(stage => ({
+  // Sort tasks based on sortConfig
+  const getSortedTasks = (tasks: Task[]) => {
+    if (!sortConfig) return tasks;
+
+    return [...tasks].sort((a, b) => {
+      // Handle nested properties
+      const getNestedValue = (obj: any, path: string) => {
+        return path.split('.').reduce((acc, part) => acc && acc[part], obj);
+      };
+
+      let aValue = getNestedValue(a, sortConfig.key);
+      let bValue = getNestedValue(b, sortConfig.key);
+
+      // Convert to string for consistent comparison
+      const aStr = String(aValue).toLowerCase();
+      const bStr = String(bValue).toLowerCase();
+
+      if (aStr < bStr) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aStr > bStr) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  };
+
+  // Toggle column visibility
+  const toggleColumnVisibility = (key: string) => {
+    setColumnVisibility(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  // Get sort indicator for column header
+  const getSortIndicator = (key: string) => {
+    if (!sortConfig || sortConfig.key !== key) return null;
+    return sortConfig.direction === 'asc' ? ' ↑' : ' ↓';
+  };
+
+  // Column visibility toggle component
+  const ColumnVisibilityToggle = () => (
+    <div className="relative group">
+      <Button
+        variant="outline"
+        size="sm"
+        className="ml-2"
+        onClick={() => setShowColumnMenu(!showColumnMenu)}
+      >
+        <span className="mr-1">Columns</span>
+        <ChevronDown className="h-4 w-4" />
+      </Button>
+      {showColumnMenu && (
+        <div
+          className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 p-2 border"
+          onMouseLeave={() => setShowColumnMenu(false)}
+        >
+          <div className="max-h-60 overflow-y-auto">
+            {taskColumns
+              .filter(col => !['actions', 'index', 'separator1', 'separator2', 'separator3', 'separator4'].includes(col.key))
+              .map(column => (
+                <label
+                  key={column.key}
+                  className="flex items-center p-1 hover:bg-gray-100 rounded cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={columnVisibility[column.key] !== false}
+                    onChange={() => toggleColumnVisibility(column.key)}
+                    className="mr-2"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  {typeof column.header === 'string' ? column.header : column.key}
+                </label>
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+  const handleStageDocumentUpload = (task: Task, stage: any) => {
+    setSelectedStageTask({ task, stage });
+    setStageUploadDialogOpen(true);
+  };
+
+  const handleViewStageDocuments = (task: Task, stage: any) => {
+    // Show uploaded documents and extracted data
+    setSelectedStageTask({ task, stage });
+    setStageUploadDialogOpen(true);
+  };
+
+  // Create a simplified extraction function based on your performExtraction
+  const performStageExtraction = async (
+    file: File,
+    extractionSpecs: any[],
+    onProgress?: (message: string) => void
+  ) => {
+    try {
+      setExtractionLoading(true);
+      onProgress?.('Processing document...');
+
+      // Convert extraction specs to the format expected by your performExtraction function
+      const fields = extractionSpecs.map(spec => ({
+        id: spec.id,
+        name: spec.fieldName,
+        type: spec.fieldType || 'text',
+        required: spec.isRequired || false
+      }));
+
+      // Create a file URL for processing (you might need to upload to temp storage first)
+      const fileUrl = URL.createObjectURL(file);
+
+      // Use your existing performExtraction function
+      const { performExtraction } = await import('./path-to-your-extraction-utils'); // Adjust path
+
+      const result = await performExtraction(
+        fileUrl,
+        fields,
+        'document',
+        onProgress,
+        file.name
+      );
+
+      // Clean up the object URL
+      URL.revokeObjectURL(fileUrl);
+
+      return result;
+    } catch (error) {
+      console.error('Extraction error:', error);
+      throw error;
+    } finally {
+      setExtractionLoading(false);
+    }
+  };
+
+  const handleDocumentUpload = async (file: File, taskId: number, stageId: string, docId: string) => {
+    try {
+      setExtractionLoading(true);
+
+      // Find the stage and document configuration
+      const stage = departments
+        .flatMap(d => d.stages || [])
+        .find(s => s.id === stageId);
+
+      const document = stage?.documents?.find(d => d.id === docId);
+
+      if (!document) {
+        throw new Error('Document configuration not found');
+      }
+
+      let extractedData = null;
+
+      // Perform extraction if the document has extraction specs
+      if (document.extractionSpecs && document.extractionSpecs.length > 0) {
+        const extractionResult = await performStageExtraction(
+          file,
+          document.extractionSpecs,
+          (message) => console.log('Extraction progress:', message)
+        );
+
+        if (extractionResult.success) {
+          extractedData = extractionResult.extractedData;
+          setExtractedData(extractedData);
+        }
+      }
+
+      // Here you would normally upload the file to your storage
+      // For now, we'll just simulate the upload
+      const fileUrl = URL.createObjectURL(file);
+
+      // Update the task with document information (you'll need to implement this)
+      // This is where you'd save to your database
+      const documentInfo = {
+        fileUrl,
+        fileName: file.name,
+        extractedData,
+        uploadedAt: new Date().toISOString()
+      };
+
+      toast({
+        title: "Success",
+        description: extractedData
+          ? "Document uploaded and data extracted successfully"
+          : "Document uploaded successfully",
+      });
+
+      return documentInfo;
+
+    } catch (error) {
+      console.error('Error uploading document:', error);
+      toast({
+        title: "Error",
+        description: "Failed to upload document. Please try again.",
+        variant: "destructive"
+      });
+      throw error;
+    } finally {
+      setExtractionLoading(false);
+    }
+  };
+// Update the generateStageColumns function in your page.tsx
+const generateStageColumns = () => {
+  // Define base columns (columns before stages)
+  const baseColumns = stageColumns
+    .slice(0, stageColumns.findIndex(col => col.key === 'renewal_status') + 1)
+    .filter(col => columnVisibility[col.key] !== false);
+
+  // Define moved columns (account_used, applied_by, batch)
+  const movedColumns = stageColumns
+    .slice(
+      stageColumns.findIndex(col => col.key === 'account_used'),
+      stageColumns.findIndex(col => col.key === 'batch') + 1
+    )
+    .filter(col => ['account_used', 'applied_by', 'batch'].includes(col.key) && 
+                  columnVisibility[col.key] !== false);
+
+  // Define end columns (any remaining columns after moved columns)
+  const endColumns: any[] = [];
+
+  // Define no stages column
+  const noStagesColumn = {
+    key: 'no_stages',
+    header: 'Stages',
+    width: '150px',
+    parentHeader: 'Stages',
+    sortable: false,
+    render: () => (
+      <div className="text-center text-muted-foreground text-sm">
+        No stages configured
+      </div>
+    )
+  };
+
+  const currentDept = departments.find(d => d.id === selectedDepartment);
+  const currentSubdept = currentDept?.tm_subdepartments?.find(s => s.id === selectedSubdepartment);
+  
+  if (!currentDept?.stages) {
+    return [...baseColumns, noStagesColumn, ...endColumns];
+  }
+
+  // Filter stages based on applicable/display settings
+  const applicableStages = currentDept.stages.filter(stage => {
+    if (!currentSubdept) return true; // Show all if no subdepartment selected
+    
+    // Check if stage is applicable for current subdepartment
+    const subdeptStageConfig = currentSubdept.stages?.find(s => s.stage_id === stage.id);
+    if (!subdeptStageConfig?.applicable) return false;
+    
+    // Check if stage should be displayed
+    if (!subdeptStageConfig?.display) return false;
+    
+    // If we have a selected class, check class-level settings
+    if (selectedClass) {
+      const currentClass = currentSubdept.classes?.find(c => c.name === selectedClass);
+      if (currentClass) {
+        const classStageConfig = currentClass.stages?.find(s => s.stage_id === stage.id);
+        if (classStageConfig && !classStageConfig.applicable) return false;
+        if (classStageConfig && !classStageConfig.display) return false;
+      }
+    }
+    
+    return true;
+  });
+
+  // Create stage columns only for applicable and displayable stages
+  const stageColumnsList = applicableStages
+    .filter(stage => columnVisibility[`stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`] !== false)
+    .map(stage => ({
       key: `stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`,
       header: stage.name,
       width: '150px',
       parentHeader: 'Stages',
+      sortable: true,
       render: (value: any, task: Task) => {
-        const isCurrentStage = task.current_stage?.name === stage.name
+        const isCurrentStage = task.current_stage?.name === stage.name;
         const isCompleted = task.current_stage &&
-          (task.current_stage.order_num || 0) > (stage.order_num || 0)
+          (task.current_stage.order_num || 0) > (stage.order_num || 0);
 
-        let status = 'Pending'
-        let variant: 'default' | 'secondary' | 'outline' = 'outline'
+        // Handle document upload for document-based stages
+        if (stage.documents && stage.documents.length > 0) {
+          return (
+            <div className="flex flex-col gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-full p-0"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleStageDocumentUpload(task, stage);
+                }}
+              >
+                <Upload className="h-4 w-4 mr-1" />
+                Upload
+              </Button>
+              
+              {/* Show document indicator if documents have been uploaded */}
+              {task.stage_documents?.[stage.id] && (
+                <div className="flex items-center justify-center">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleViewStageDocuments(task, stage);
+                    }}
+                  >
+                    <Eye className="h-4 w-4 text-blue-600" />
+                  </Button>
+                </div>
+              )}
+              
+              {isCurrentStage && task.current_stage_started_at && (
+                <StageTimer
+                  startTime={task.current_stage_started_at}
+                  estimatedTime={stage.estimated_time}
+                />
+              )}
+            </div>
+          );
+        }
+
+        // Regular stage status display
+        let status = 'Pending';
+        let variant: 'default' | 'secondary' | 'outline' = 'outline';
 
         if (isCurrentStage) {
-          status = 'In Progress'
-          variant = 'default'
+          status = 'In Progress';
+          variant = 'default';
           return (
             <div className="flex flex-col gap-1">
               <Badge variant={variant} className="w-fit">{status}</Badge>
@@ -722,285 +986,293 @@ export default function TasksPage() {
                 />
               )}
             </div>
-          )
+          );
         } else if (isCompleted) {
-          status = 'Completed'
-          variant = 'secondary'
+          status = 'Completed';
+          variant = 'secondary';
         }
 
-        return <Badge variant={variant} className="w-fit">{status}</Badge>
+        return <Badge variant={variant} className="w-fit">{status}</Badge>;
       }
-    }))
+    }));
 
-
-    // Return the columns in the correct order: base columns -> stage columns -> end columns
-    return [...baseColumns, ...dynamicStageColumns, ...endColumns]
-  }
-
-  // Generate dynamic requirement columns based on child data level
-  const generateRequirementColumns = () => {
-    console.log('Generating requirement columns for current selection')
-    const requirements = getCurrentRequirements()
-
-    if (!requirements || requirements.length === 0) {
-      console.log('No requirements found for current selection')
-      return requirementColumns
-    }
-
-    console.log('Found requirements:', requirements)
-
-    const dynamicRequirementColumns = requirements.map(req => {
-      const column = {
-        key: `req_${req.name.replace(/\s+/g, '_').toLowerCase()}`,
-        header: req.name,
-        width: '150px',
-        render: (value: any, task: Task) => {
-          console.log('Rendering requirement:', req.name, 'for task:', task.id)
-          return (
-            <div className="flex items-center gap-2">
-              <Badge variant="outline">Pending</Badge>
-              <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
-                <Upload className="h-3 w-3" />
-              </Button>
-            </div>
-          )
-        }
-      }
-      console.log('Created column for requirement:', req.name, column)
-      return column
-    })
-
-    console.log('Generated requirement columns:', dynamicRequirementColumns)
-
-    // Insert requirement columns after the base columns
-    const baseColumns = requirementColumns
-    const result = [...baseColumns, ...dynamicRequirementColumns]
-
-    console.log('Final columns:', result)
-    return result
-  }
-
-  const handleTaskAssignment = (taskId: string) => {
-    const task = tasks.find((t) => t.id === taskId)
-    if (task) {
-      setSelectedTask({
-        id: task.id,
-        jobDescription: task.job_description || '',
-        currentAssignments: {
-          taskManager: task.task_manager_id || "",
-          taskAssistant: task.task_assistant_id || "",
-        },
-      } as any)
-      setAssignmentDialogOpen(true)
-    }
-  }
-
-  const handleStageTransition = (taskId: string) => {
-    const task = tasks.find(t => t.id === taskId)
-    if (!task) return
-
-    setSelectedTask(task)
-    setStageTransitionDialogOpen(true)
-  }
-
-  const getStatusBadge = (status: string) => {
-    const variants = {
-      in_progress: "default",
-      completed: "success",
-      cancelled: "destructive",
-      pending: "secondary",
-    } as const
-
-    return <Badge variant={variants[status as keyof typeof variants] || "secondary"}>{status}</Badge>
-  }
-
+  return [
+    ...baseColumns,
+    ...stageColumnsList,
+    ...movedColumns.map(col => ({
+      ...col,
+      parentHeader: 'Additional Info'
+    })),
+    ...endColumns
+  ];
+};
+  // Render the task table
   const renderTaskTable = (tasksToRender: Task[], columns: any[], showRequirements = false) => {
-    const finalColumns = showRequirements ? generateRequirementColumns() : generateStageColumns()
+    // Apply sorting
+    const sortedTasks = sortConfig ? getSortedTasks(tasksToRender) : tasksToRender;
 
-    // Group columns by parent header
-    const groupedColumns = finalColumns.reduce((acc, col) => {
-      if (col.parentHeader) {
-        if (!acc[col.parentHeader]) acc[col.parentHeader] = []
-        acc[col.parentHeader].push(col)
-      } else {
-        if (!acc.ungrouped) acc.ungrouped = []
-        acc.ungrouped.push(col)
-      }
-      return acc
-    }, {} as Record<string, any[]>)
+    // Get the appropriate columns based on requirements/stages view
+    const finalColumns = showRequirements ? generateRequirementColumns() : generateStageColumns();
+
+    // Add table controls header
+    // const tableControls = (
+    //   <div className="flex justify-between items-center mb-4 px-4 pt-2">
+    //     <div className="flex items-center">
+    //       <h2 className="text-lg font-semibold">Tasks</h2>
+    //       {/* <span className="ml-2 text-sm text-muted-foreground">
+    //         {sortedTasks.length} {sortedTasks.length === 1 ? 'task' : 'tasks'}
+    //       </span> */}
+    //     </div>
+    //     <div className="flex items-center">
+    //       <ColumnVisibilityToggle />
+    //     </div>
+    //   </div>
+    // );
+
+    // Group columns by parent header for display
+    const groupedColumns = finalColumns.reduce((acc: Record<string, any[]>, col: any) => {
+      const parent = col.parentHeader || 'ungrouped';
+      if (!acc[parent]) acc[parent] = [];
+      acc[parent].push(col);
+      return acc;
+    }, {} as Record<string, any[]>);
+
+    // Flatten all columns for easier access
+    const allColumns = Object.values(groupedColumns).flat();
+
+    // Define background colors for parent headers
+    const getParentHeaderBgColor = (groupName: string) => {
+      if (groupName === 'ungrouped') return 'bg-blue-600';
+      if (groupName === 'Stages') return 'bg-blue-600';
+      if (groupName === 'Additional Info   ') return 'bg-blue-600';
+      return 'bg-blue-500';
+    };
+
+    // Define text color for parent headers
+    const getParentHeaderTextColor = (groupName: string) => {
+      if (groupName === 'ungrouped') return 'text-foreground';
+      return 'text-white';
+    };
 
     return (
-      <div className="rounded-md border w-full flex flex-col bg-background" style={{ maxHeight: '70vh', maxWidth: '90vw' }}>
-        <div className="overflow-hidden flex-1 flex flex-col">
-          <div className="overflow-auto flex-1 relative">
-            <Table className="min-w-[1400px] w-full border-collapse">
-              <TableHeader className="sticky top-0 z-10">
-                {/* First row - parent headers */}
-                <TableRow className="bg-blue-600">
-                  {groupedColumns.ungrouped?.map((column) => (
+      <div className="rounded-md border w-full flex flex-col bg-background shadow-sm" style={{ maxHeight: '80vh', maxWidth: '95vw' }}>
+        <div className="overflow-auto flex-1 relative">
+          {/* {tableControls} */}
+          <Table className="min-w-full w-full border-collapse">
+            <TableHeader className="sticky top-0 z-10">
+              {/* First row - parent headers */}
+              <TableRow className="h-10">
+                {Object.entries(groupedColumns).map(([groupName, groupCols]) => (
+                  <TableHead
+                    key={groupName}
+                    colSpan={groupCols.length}
+                    className={`text-center border-b-2 border-gray-200 font-medium text-sm ${getParentHeaderBgColor(groupName)} ${getParentHeaderTextColor(groupName)}`}
+                  >
+                    {groupName !== 'ungrouped' ? groupName : ''}
+                  </TableHead>
+                ))}
+              </TableRow>
+
+              {/* Second row - column headers */}
+              <TableRow className="h-12">
+                {allColumns.map((col: any) => {
+                  const isStageColumn = col.parentHeader === 'Stages';
+                  const bgColor = isStageColumn ? 'bg-blue-500' : 'bg-blue-600';
+                  return (
                     <TableHead
-                      key={column.key}
-                      rowSpan={2}
-                      className="whitespace-nowrap border-r border-border font-semibold text-white bg-blue-600"
-                      style={{
-                        width: column.width,
-                        position: 'sticky',
-                        top: 0,
-                        zIndex: 10,
-                        backgroundColor: 'hsl(var(--blue-50))',
-                        verticalAlign: 'middle'
-                      }}
+                      key={col.key}
+                      style={{ width: col.width, minWidth: col.width }}
+                      className={`whitespace-nowrap p-2 border-b border-r font-medium text-sm text-white ${bgColor} hover:opacity-90`}
                     >
-                      {column.header}
-                    </TableHead>
-                  ))}
-                  {Object.entries(groupedColumns).map(([groupName, cols]) => {
-                    if (groupName === 'ungrouped') return null
-                    return (
-                      <TableHead
-                        key={groupName}
-                        colSpan={cols.length}
-                        className="whitespace-nowrap border-r border-border font-semibold text-white text-center"
-                        style={{
-                          position: 'sticky',
-                          top: 0,
-                          zIndex: 10,
-                          backgroundColor: 'hsl(var(--blue-50))',
-                        }}
-                      >
-                        {groupName}
-                      </TableHead>
-                    )
-                  })}
-                </TableRow>
-
-                {/* Second row - sub headers */}
-                <TableRow className="bg-blue-600">
-                  {Object.entries(groupedColumns).map(([groupName, cols]) => {
-                    if (groupName === 'ungrouped') return null
-                    return cols.map((column) => (
-                      <TableHead
-                        key={column.key}
-                        className="whitespace-nowrap border-r border-border font-medium text-white text-center"
-                        style={{
-                          width: column.width,
-                          position: 'sticky',
-                          top: '40px', // Height of first row
-                          zIndex: 10,
-                          backgroundColor: 'hsl(var(--blue-50))',
-                        }}
-                      >
-                        {column.header}
-                      </TableHead>
-                    ))
-                  })}
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={finalColumns.length} className="h-24 text-center">
-                      Loading tasks...
-                    </TableCell>
-                  </TableRow>
-                ) : error ? (
-                  <TableRow>
-                    <TableCell colSpan={finalColumns.length} className="h-24 text-center text-destructive">
-                      {error}
-                    </TableCell>
-                  </TableRow>
-                ) : tasksToRender.length > 0 ? (
-                  tasksToRender.map((task, index) => {
-                    const formattedTask = formatTaskData(task, index)
-                    return (
-                      <TableRow key={task.id} className="hover:bg-muted/50">
-                        {finalColumns.map((column) => (
-                          <TableCell
-                            key={`${task.id}-${column.key}`}
-                            className="whitespace-nowrap border-r border-border last:border-r-0 py-2"
+                      <div className="flex items-center justify-between">
+                        <span>{typeof col.header === 'function' ? col.header() : col.header}</span>
+                        {col.sortable && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSort(col.key);
+                            }}
+                            className="ml-1 hover:text-primary-foreground"
                           >
-                            {column.render
-                              ? column.render(
-                                formattedTask[column.key as keyof typeof formattedTask],
-                                formattedTask,
-                                index
-                              )
-                              : (formattedTask[column.key as keyof typeof formattedTask] || '-')}
+                            {sortConfig?.key === col.key ? (
+                              sortConfig.direction === 'asc' ? '↑' : '↓'
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
+            </TableHeader>
+
+            <TableBody className="divide-y">
+              {loading ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={allColumns.length}
+                    className="h-24 text-center bg-gray-50"
+                  >
+                    <div className="flex items-center justify-center space-x-2">
+                      <div className="h-4 w-4 border-2 border-t-2 border-t-primary rounded-full animate-spin"></div>
+                      <span>Loading tasks...</span>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : error ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={allColumns.length}
+                    className="h-24 text-center text-destructive bg-red-50"
+                  >
+                    <div className="flex items-center justify-center space-x-2">
+                      <AlertTriangle className="h-5 w-5 text-destructive" />
+                      <span>{error}</span>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : sortedTasks.length > 0 ? (
+                sortedTasks.map((task, index) => {
+                  const formattedTask = formatTaskData(task, index);
+                  const isEven = index % 2 === 0;
+
+                  return (
+                    <TableRow
+                      key={task.id}
+                      className={`hover:bg-gray-50 ${isEven ? 'bg-white' : 'bg-gray-50'}`}
+                    >
+                      {allColumns.map((col: any) => {
+                        const cellValue = col.render
+                          ? col.render(formattedTask[col.key], task, index)
+                          : formattedTask[col.key] || '-';
+
+                        return (
+                          <TableCell
+                            key={`${task.id}-${col.key}`}
+                            className={`p-2 border-r border-b ${col.key.startsWith('separator') ? 'w-px p-0' : ''}`}
+                          >
+                            {col.key.startsWith('separator') ? (
+                              <div className="w-px h-6 bg-gray-200"></div>
+                            ) : (
+                              <div className="truncate max-w-xs">
+                                {cellValue}
+                              </div>
+                            )}
                           </TableCell>
-                        ))}
-                      </TableRow>
-                    )
-                  })
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={finalColumns.length} className="h-24 text-center">
-                      No tasks found.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                        );
+                      })}
+                    </TableRow>
+                  );
+                })
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={allColumns.length}
+                    className="text-center p-8 text-muted-foreground bg-gray-50"
+                  >
+                    <div className="flex flex-col items-center space-y-2">
+                      <FileText className="h-8 w-8 text-muted-foreground/50" />
+                      <p className="font-medium">No tasks found</p>
+                      <p className="text-sm text-muted-foreground">
+                        Try adjusting your filters or create a new task
+                      </p>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </div>
       </div>
-    )
+    );
   }
+
   // Get current selection details for display
   const getCurrentSelectionDetails = () => {
-    const dept = departments.find(d => d.id === selectedDepartment)
-    const subdept = dept?.subdepartments?.find(s => s.id === selectedSubdepartment)
-    const cls = subdept?.classes?.find(c => c.name === selectedClass)
-    const subcls = cls?.subClasses?.find(sc => sc.id === selectedSubclass)
+    const dept = departments.find(d => d.id === selectedDepartment);
+    const subdept = dept?.subdepartments?.find(s => s.id === selectedSubdepartment);
+    const cls = subdept?.classes?.find(c => c.name === selectedClass);
+    const subcls = cls?.subClasses?.find(sc => sc.id === selectedSubclass);
 
-    return { dept, subdept, cls, subcls }
-  }
+    return { dept, subdept, cls, subcls };
+  };
 
   // Get display title based on current selection
   const getDisplayTitle = () => {
-    const { dept, subdept, cls, subcls } = getCurrentSelectionDetails()
-    const selectionLevel = getCurrentSelectionLevel()
+    const { dept, subdept, cls, subcls } = getCurrentSelectionDetails();
+    const selectionLevel = getCurrentSelectionLevel();
 
     switch (selectionLevel) {
       case 'subclass':
-        return `${subcls?.name} (${cls?.name} - ${subdept?.name})`
+        return `${subcls?.name} (${cls?.name} - ${subdept?.name})`;
       case 'class':
-        return `${cls?.name} (${subdept?.name})`
+        return `${cls?.name} (${subdept?.name})`;
       case 'subdepartment':
-        return subdept?.name
+        return subdept?.name || '';
       case 'department':
-        return dept?.name
+        return dept?.name || '';
       default:
-        return 'Task Management'
+        return 'Task Management';
     }
-  }
-  // Add these functions to your main tasks component
-  const handleEditTask = useCallback((taskId: string) => {
-    const task = tasks.find(t => t.id === taskId)
-    if (task) {
-      // Open edit dialog or navigate to edit page
-      console.log('Edit task:', task)
-      // You can implement an edit dialog similar to the new task dialog
-    }
-  }, [tasks])
+  };
 
-  const handleDeleteTask = useCallback(async (taskId: string) => {
-    if (window.confirm('Are you sure you want to delete this task?')) {
-      try {
-        const { error } = await supabase
-          .from('tm_tasks')
-          .delete()
-          .eq('id', taskId)
+  // Get current selection level
+  const getCurrentSelectionLevel = () => {
+    if (selectedSubclass) return 'subclass';
+    if (selectedClass) return 'class';
+    if (selectedSubdepartment) return 'subdepartment';
+    if (selectedDepartment) return 'department';
+    return 'none';
+  };
 
-        if (error) throw error
+  // Generate columns for requirements view
+  const generateRequirementColumns = () => {
+    // Start with the base columns up to renewal_status
+    const baseColumns = stageColumns.slice(0, stageColumns.findIndex(col => col.key === 'renewal_status') + 1);
 
-        // Remove from local state
-        setTasks(prev => prev.filter(t => t.id !== taskId))
-      } catch (error) {
-        console.error('Error deleting task:', error)
+    // Add requirement-specific columns
+    const requirementColumns = [
+      ...baseColumns,
+      {
+        key: 'requirements',
+        header: 'Requirements',
+        width: '200px',
+        render: (value: any, task: Task) => {
+          const requirements = getCurrentRequirements();
+          return (
+            <div className="space-y-2">
+              {requirements.map((req, idx) => (
+                <div key={idx} className="flex items-center space-x-2">
+                  <span className="text-sm font-medium">{req.name}:</span>
+                  <Badge variant={req.status === 'completed' ? 'default' : 'outline'}>
+                    {req.status || 'Pending'}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          );
+        }
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        width: '150px',
+        render: (value: any, task: Task) => (
+          <div className="flex space-x-2">
+            <Button variant="outline" size="sm" onClick={() => handleViewTask(task)}>
+              View
+            </Button>
+          </div>
+        )
       }
-    }
-  }, [])
+    ];
+
+    return requirementColumns;
+  };
+  const { dept, subdept, cls, subcls } = getCurrentSelectionDetails();
+  const selectionLevel = getCurrentSelectionLevel();
 
   if (loading) {
     return (
@@ -1012,12 +1284,140 @@ export default function TasksPage() {
           </div>
         </div>
       </div>
-    )
+    );
   }
+  // Add this dialog component at the bottom of your page component
+  const StageUploadDialog = () => {
+    if (!selectedStageTask) return null;
 
-  const { dept, subdept, cls, subcls } = getCurrentSelectionDetails()
-  const selectionLevel = getCurrentSelectionLevel()
+    const { task, stage } = selectedStageTask;
 
+    return (
+      <Dialog open={stageUploadDialogOpen} onOpenChange={setStageUploadDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Upload Documents - {stage.name}
+            </DialogTitle>
+            <DialogDescription>
+              Upload and process documents for {task.applicant_name || 'Task'} #{task.id}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Upload Section */}
+            <div className="space-y-4">
+              <h4 className="font-medium">Required Documents</h4>
+              {stage.documents?.map((doc: any, index: number) => (
+                <div key={index} className="border rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h5 className="font-medium">{doc.name}</h5>
+                      {doc.description && (
+                        <p className="text-sm text-muted-foreground">{doc.description}</p>
+                      )}
+                    </div>
+                    <Badge variant={doc.isRequired ? "destructive" : "secondary"}>
+                      {doc.isRequired ? "Required" : "Optional"}
+                    </Badge>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      disabled={extractionLoading}
+                      onClick={() => {
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.accept = '.pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png';
+                        input.onchange = async (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0];
+                          if (file) {
+                            await handleDocumentUpload(file, task.id, stage.id, doc.id);
+                          }
+                        };
+                        input.click();
+                      }}
+                    >
+                      {extractionLoading ? (
+                        <>
+                          <div className="h-4 w-4 border-2 border-t-2 border-t-primary rounded-full animate-spin mr-2" />
+                          Processing...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4 mr-2" />
+                          Choose File
+                        </>
+                      )}
+                    </Button>
+                    <span className="text-sm text-muted-foreground">
+                      PDF, DOC, XLS, or Image files
+                    </span>
+                  </div>
+
+                  {/* Show extraction fields if any */}
+                  {doc.extractionSpecs && doc.extractionSpecs.length > 0 && (
+                    <div className="bg-muted/20 p-3 rounded-md">
+                      <p className="text-sm font-medium mb-2">Data to Extract:</p>
+                      <div className="space-y-1">
+                        {doc.extractionSpecs.map((spec: any, specIndex: number) => (
+                          <div key={specIndex} className="text-sm text-muted-foreground">
+                            • {spec.fieldName}
+                            {spec.description && ` - ${spec.description}`}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Preview/Results Section */}
+            <div className="space-y-4">
+              <h4 className="font-medium">Document Preview & Extracted Data</h4>
+              {extractedData ? (
+                <div className="space-y-4">
+                  <div className="border rounded-lg p-4">
+                    <h5 className="font-medium mb-3">Extracted Information</h5>
+                    <div className="space-y-2">
+                      {Object.entries(extractedData).map(([key, value]) => (
+                        <div key={key} className="flex justify-between">
+                          <span className="font-medium">{key}:</span>
+                          <span>{String(value)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => {
+                      // Clear extracted data and close dialog
+                      setExtractedData(null);
+                      setStageUploadDialogOpen(false);
+                    }}
+                    className="w-full"
+                  >
+                    Continue
+                  </Button>
+                </div>
+              ) : extractionLoading ? (
+                <div className="text-center py-8 text-muted-foreground border border-dashed rounded-lg">
+                  <div className="h-12 w-12 border-2 border-t-2 border-t-primary rounded-full animate-spin mx-auto mb-4" />
+                  <p>Processing document and extracting data...</p>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground border border-dashed rounded-lg">
+                  <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>Upload a document to see preview and extracted data</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  };
   return (
     <div className="flex h-screen">
       {/* Sidebar */}
@@ -1403,6 +1803,7 @@ export default function TasksPage() {
           </Dialog>
         </div>
       </div>
+      <StageUploadDialog />
     </div>
   )
 }

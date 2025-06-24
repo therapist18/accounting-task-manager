@@ -716,7 +716,6 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                   {Object.entries(groupedEntries).flatMap(([subdeptName, entries], groupIndex) => {
                     const rows = []
                     
-                    // Group header if multiple entries
                     if (entries.length > 1) {
                       const groupRowId = `group-${subdeptName}`
                       const isExpanded = expandedRows.has(groupRowId)
@@ -749,14 +748,12 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                         </TableRow>
                       )
 
-                      // Show entries if expanded
                       if (isExpanded) {
                         entries.forEach((entry, entryIndex) => {
                           rows.push(renderRateRow(entry, `${groupIndex + 1}.${entryIndex + 1}`, true))
                         })
                       }
                     } else {
-                      // Single entry, show directly
                       rows.push(renderRateRow(entries[0], `${groupIndex + 1}`, false))
                     }
 
@@ -801,7 +798,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                  : parseFloat(e.target.value) || 0
              }
            })}
-           className="h-8 text-center text-xs"
+           className="h-8 text-center text-xs w-20"
          />
        </TableCell>
        <TableCell className="border-r p-2">
