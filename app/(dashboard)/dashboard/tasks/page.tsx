@@ -52,6 +52,59 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 
+// Utility function for fuzzy name matching
+const fuzzyMatch = (str1: string, str2: string, threshold = 0.8): boolean => {
+  if (!str1 || !str2) return false;
+
+  // Normalize strings: lowercase, remove punctuation, trim
+  const normalize = (str: string) =>
+    str.toLowerCase()
+      .replace(/[^\w\s]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const normalizedStr1 = normalize(str1);
+  const normalizedStr2 = normalize(str2);
+
+  // Check for exact match after normalization
+  if (normalizedStr1 === normalizedStr2) return true;
+
+  // Check if one string contains the other (for partial matches)
+  if (normalizedStr1.includes(normalizedStr2) || normalizedStr2.includes(normalizedStr1)) {
+    return true;
+  }
+
+  // Levenshtein distance calculation
+  const distance = (a: string, b: string): number => {
+    const matrix = Array(b.length + 1).fill(null).map(() => Array(a.length + 1).fill(null));
+
+    for (let i = 0; i <= a.length; i += 1) matrix[0][i] = i;
+    for (let j = 0; j <= b.length; j += 1) matrix[j][0] = j;
+
+    for (let j = 1; j <= b.length; j += 1) {
+      for (let i = 1; i <= a.length; i += 1) {
+        const indicator = a[i - 1] === b[j - 1] ? 0 : 1;
+        matrix[j][i] = Math.min(
+          matrix[j][i - 1] + 1,
+          matrix[j - 1][i] + 1,
+          matrix[j - 1][i - 1] + indicator
+        );
+      }
+    }
+
+    return matrix[b.length][a.length];
+  };
+
+  const maxLength = Math.max(normalizedStr1.length, normalizedStr2.length);
+  if (maxLength === 0) return false;
+
+  const similarity = (maxLength - distance(normalizedStr1, normalizedStr2)) / maxLength;
+
+  console.log(`Fuzzy match comparison: "${str1}" vs "${str2}" = ${similarity.toFixed(3)} (threshold: ${threshold})`);
+
+  return similarity >= threshold;
+};
+
 type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
   department?: {
     id: number;
@@ -189,6 +242,7 @@ export default function TasksPage() {
   const [extractionLoading, setExtractionLoading] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+
   // Define stage columns inside the component to access component methods
   const stageColumns = [
     { key: 'index', header: '#', width: '50px' },
@@ -305,7 +359,6 @@ export default function TasksPage() {
           : []
       };
 
-
       return transformedDept;
     }).filter(Boolean);
   };
@@ -321,7 +374,6 @@ export default function TasksPage() {
           supabase.from('tm_users').select('id, name, email, role'),
           getStages(),
         ]);
-
 
         // Transform departments data
         const transformedDepts = transformDepartments(deptsData);
@@ -413,10 +465,9 @@ export default function TasksPage() {
     const dept = departments.find(d => d.id === selectedDepartment)
     const subdept = dept?.subdepartments?.find(s => s.id === selectedSubdepartment)
 
-
-
     return subdept
   }
+
   // Updated getCurrentRequirements function
   const getCurrentRequirements = useCallback(() => {
     if (selectedSubclass) {
@@ -466,6 +517,7 @@ export default function TasksPage() {
     console.log('No selection level specified, returning empty requirements');
     return [];
   }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
+
   // Get stages based on department level
   const getCurrentStages = () => {
     const dept = departments.find(d => d.id === selectedDepartment)
@@ -590,8 +642,6 @@ export default function TasksPage() {
     return transformedDept;
   });
 
-
-
   // Format task data for display
   const formatTaskData = (task: Task, index: number) => {
     const formatDate = (dateString?: string | null) => {
@@ -710,12 +760,6 @@ export default function TasksPage() {
     }));
   };
 
-  // Get sort indicator for column header
-  const getSortIndicator = (key: string) => {
-    if (!sortConfig || sortConfig.key !== key) return null;
-    return sortConfig.direction === 'asc' ? ' ↑' : ' ↓';
-  };
-
   // Column visibility toggle component
   const ColumnVisibilityToggle = () => (
     <div className="relative group">
@@ -756,6 +800,7 @@ export default function TasksPage() {
       )}
     </div>
   );
+
   const handleStageDocumentUpload = (task: Task, stage: any) => {
     setSelectedStageTask({ task, stage });
     setStageUploadDialogOpen(true);
@@ -912,6 +957,7 @@ export default function TasksPage() {
       setExtractionLoading(false);
     }
   };
+
   // Update the generateStageColumns function in your page.tsx
   const generateStageColumns = () => {
     // Define base columns (columns before stages)
@@ -1071,6 +1117,7 @@ export default function TasksPage() {
       ...endColumns
     ];
   };
+
   // Render the task table
   const renderTaskTable = (tasksToRender: Task[], columns: any[], showRequirements = false) => {
     // Apply sorting
@@ -1078,21 +1125,6 @@ export default function TasksPage() {
 
     // Get the appropriate columns based on requirements/stages view
     const finalColumns = showRequirements ? generateRequirementColumns() : generateStageColumns();
-
-    // Add table controls header
-    // const tableControls = (
-    //   <div className="flex justify-between items-center mb-4 px-4 pt-2">
-    //     <div className="flex items-center">
-    //       <h2 className="text-lg font-semibold">Tasks</h2>
-    //       {/* <span className="ml-2 text-sm text-muted-foreground">
-    //         {sortedTasks.length} {sortedTasks.length === 1 ? 'task' : 'tasks'}
-    //       </span> */}
-    //     </div>
-    //     <div className="flex items-center">
-    //       <ColumnVisibilityToggle />
-    //     </div>
-    //   </div>
-    // );
 
     // Group columns by parent header for display
     const groupedColumns = finalColumns.reduce((acc: Record<string, any[]>, col: any) => {
@@ -1122,7 +1154,6 @@ export default function TasksPage() {
     return (
       <div className="rounded-md border w-full flex flex-col bg-background shadow-sm" style={{ maxHeight: '80vh', maxWidth: '95vw' }}>
         <div className="overflow-auto flex-1 relative">
-          {/* {tableControls} */}
           <Table className="min-w-full w-full border-collapse">
             <TableHeader className="sticky top-0 z-10">
               {/* First row - parent headers */}
@@ -1336,6 +1367,7 @@ export default function TasksPage() {
 
     return requirementColumns;
   };
+
   const { dept, subdept, cls, subcls } = getCurrentSelectionDetails();
   const selectionLevel = getCurrentSelectionLevel();
 
@@ -1351,6 +1383,7 @@ export default function TasksPage() {
       </div>
     );
   }
+
   const StageUploadDialog = () => {
     const [selectedFiles, setSelectedFiles] = useState<Record<string, File>>({});
     const [messageTexts, setMessageTexts] = useState<Record<string, string>>({});
@@ -1366,6 +1399,11 @@ export default function TasksPage() {
       extractedData?: any;
       documentName?: string;
     }>>({});
+
+    // New state for database submission
+    const [confirmationDialogOpen, setConfirmationDialogOpen] = useState(false);
+    const [fuzzyMatchResults, setFuzzyMatchResults] = useState<any[]>([]);
+    const [pendingSubmission, setPendingSubmission] = useState<any>(null);
 
     // Storage keys - following DocumentsTable pattern
     const STAGE_DOCUMENTS_STORAGE_KEY = 'stageDocuments';
@@ -1402,6 +1440,351 @@ export default function TasksPage() {
       localStorage.setItem(key, JSON.stringify(value));
       window.dispatchEvent(new Event('localStorageChange'));
     };
+
+    // Database submission functions
+    const searchRegistryIndividuals = async (individual: any) => {
+      try {
+        console.log('Searching registry for individual:', individual);
+
+        let exactMatch = null;
+        let fuzzyMatches = [];
+
+        // First, try exact matches by r_number or passport_number
+        if (individual.r_number) {
+          console.log('Searching by r_number:', individual.r_number);
+
+          const { data: rNumberMatch, error } = await supabase
+            .from('registry_individuals')
+            .select('*')
+            .eq('r_number', individual.r_number);
+
+          console.log('R-number search result:', { data: rNumberMatch, error });
+
+          if (!error && rNumberMatch && rNumberMatch.length > 0) {
+            exactMatch = rNumberMatch[0]; // Take first match if multiple found
+          }
+        }
+
+        if (!exactMatch && individual.passport_number) {
+          console.log('Searching by passport_number:', individual.passport_number);
+
+          const { data: passportMatch, error } = await supabase
+            .from('registry_individuals')
+            .select('*')
+            .eq('passport_number', individual.passport_number);
+
+          console.log('Passport search result:', { data: passportMatch, error });
+
+          if (!error && passportMatch && passportMatch.length > 0) {
+            exactMatch = passportMatch[0];
+          }
+        }
+
+        // If no exact match, try case-insensitive fuzzy matching on full_name
+        if (!exactMatch && individual.full_name) {
+          console.log('Performing fuzzy search for name:', individual.full_name);
+
+          const { data: allIndividuals, error } = await supabase
+            .from('registry_individuals')
+            .select('*')
+            .limit(100); // Get reasonable number for fuzzy matching
+
+          if (!error && allIndividuals) {
+            console.log('Total individuals for fuzzy matching:', allIndividuals.length);
+
+            // Improved fuzzy matching with case insensitive comparison
+            fuzzyMatches = allIndividuals.filter(person => {
+              if (!person.full_name) return false;
+
+              // Try exact case-insensitive match first
+              if (person.full_name.toLowerCase() === individual.full_name.toLowerCase()) {
+                if (!exactMatch) exactMatch = person; // Promote to exact match
+                return false; // Don't include in fuzzy matches
+              }
+
+              // Then try fuzzy matching with improved threshold
+              return fuzzyMatch(individual.full_name, person.full_name, 0.70);
+            }).slice(0, 5); // Show top 5 matches
+
+            console.log('Fuzzy matches found:', fuzzyMatches.length);
+          }
+        }
+
+        const result = {
+          exactMatch,
+          fuzzyMatches,
+          searchCriteria: {
+            r_number: individual.r_number,
+            passport_number: individual.passport_number,
+            full_name: individual.full_name,
+            individual_type: individual.individual_type
+          }
+        };
+
+        console.log('Search result:', result);
+        return result;
+
+      } catch (error) {
+        console.error('Error searching registry:', error);
+        throw new Error(`Registry search failed: ${error.message}`);
+      }
+    };
+
+    const uploadFileToStorage = async (file: File, individualId: number, documentType: string): Promise<string> => {
+      try {
+        // Use the correct bucket name based on your setup
+        const bucketName = 'kyc-documents'; // or 'kyc-documents' based on your preference
+
+        // Create a proper file path structure matching your expected format
+        const individual = await supabase
+          .from('registry_individuals')
+          .select('full_name')
+          .eq('id', individualId)
+          .single();
+
+        if (individual.error) {
+          throw new Error(`Failed to get individual name: ${individual.error.message}`);
+        }
+
+        // Normalize the name for file path (lowercase, replace spaces with underscores)
+        const normalizedName = individual.data.full_name
+          .toLowerCase()
+          .replace(/\s+/g, '_')
+          .replace(/[^a-z0-9_]/g, ''); // Remove special characters
+
+        // Create path: individual-documents/full_name/document_type/filename
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `individual-documents/${normalizedName}/${documentType}/${file.name}`;
+
+        console.log('Uploading to bucket:', bucketName);
+        console.log('File path:', filename);
+
+        // Upload to Supabase Storage
+        const { data, error } = await supabase.storage
+          .from(bucketName)
+          .upload(filename, file, {
+            cacheControl: '3600',
+            upsert: false // Don't overwrite existing files
+          });
+
+        if (error) {
+          console.error('Storage upload error:', error);
+          throw new Error(`Storage upload failed: ${error.message}`);
+        }
+
+        console.log('File uploaded successfully:', data);
+        return data.path;
+      } catch (error) {
+        console.error('Error uploading file to storage:', error);
+        throw error;
+      }
+    };
+
+    const submitDocumentsToDatabase = async (documents: any[], registryIndividual: any, docId: string) => {
+      try {
+        console.log('=== Starting document submission ===');
+        console.log('Documents to submit:', documents.length);
+        console.log('Registry individual:', registryIndividual);
+        console.log('Document ID:', docId);
+
+        for (const [index, doc] of documents.entries()) {
+          console.log(`\n--- Processing document ${index + 1}/${documents.length} ---`);
+          console.log('Document type:', doc.documentType);
+          console.log('File name:', doc.fileName);
+
+          // Upload file to storage bucket with proper error handling
+          let filePath;
+          try {
+            filePath = await uploadFileToStorage(doc.file, registryIndividual.id, doc.documentType);
+            console.log('File uploaded to path:', filePath);
+          } catch (uploadError) {
+            console.error('Failed to upload file:', uploadError);
+            throw new Error(`File upload failed for ${doc.fileName}: ${uploadError.message}`);
+          }
+
+          // Get the document configuration
+          const document = stage.documents?.find(d => d.id === docId);
+          if (!document) {
+            throw new Error(`Document configuration not found for ID: ${docId}`);
+          }
+
+          console.log('Document configuration:', document.name);
+
+          // Find the corresponding KYC document (optional)
+          let kycDocument = null;
+          try {
+            const { data: kycDoc, error: kycError } = await supabase
+              .from('acc_portal_kyc')
+              .select('id')
+              .eq('name', document.name)
+              .single();
+
+            if (!kycError && kycDoc) {
+              kycDocument = kycDoc;
+              console.log('Found KYC document:', kycDocument.id);
+            } else {
+              console.log('No KYC document found for:', document.name);
+            }
+          } catch (kycError) {
+            console.log('KYC document lookup failed (non-critical):', kycError);
+          }
+
+          // Insert into acc_portal_directors_documents
+          const documentRecord = {
+            director_id: registryIndividual.id,
+            document_id: kycDocument?.id || null,
+            file_path: filePath,
+            status: 'pending',
+            extracted_details: doc.extractedData || {},
+            kyc_document_id: document.id,
+            userid: task.task_manager?.id?.toString() || 'system',
+            issue_date: doc.extractedData?.issue_date || null,
+            expiry_date: doc.extractedData?.expiry_date || null,
+            version: '1.0'
+          };
+
+          console.log('Inserting document record:', documentRecord);
+
+          const { data: insertedDoc, error: insertError } = await supabase
+            .from('acc_portal_directors_documents')
+            .insert(documentRecord)
+            .select()
+            .single();
+
+          if (insertError) {
+            console.error('Database insert error:', insertError);
+            throw new Error(`Failed to save document record: ${insertError.message}`);
+          }
+
+          console.log('Document record saved successfully:', insertedDoc.id);
+        }
+
+        console.log('=== All documents submitted successfully ===');
+
+        toast({
+          title: 'Success',
+          description: `${documents.length} document(s) submitted successfully to database`
+        });
+
+      } catch (error) {
+        console.error('=== Document submission failed ===');
+        console.error('Error details:', error);
+        throw error;
+      }
+    };
+
+    const createNewRegistryIndividual = async (individual: any): Promise<number> => {
+      try {
+        console.log('Creating new registry individual:', individual);
+
+        // Ensure we have a proper full_name
+        let fullName = individual.full_name || task.applicant_name || task.principal_member_name;
+
+        if (!fullName && individual.first_name && individual.last_name) {
+          fullName = `${individual.first_name} ${individual.last_name}`.trim();
+        }
+
+        if (!fullName) {
+          throw new Error('Cannot create individual without a name');
+        }
+
+        const newIndividualData = {
+          first_name: individual.first_name || fullName.split(' ')[0] || '',
+          middle_name: individual.middle_name || '',
+          last_name: individual.last_name || fullName.split(' ').slice(-1)[0] || '',
+          full_name: fullName,
+          gender: individual.gender || null,
+          nationality: individual.nationality || null,
+          date_of_birth: individual.date_of_birth || null,
+          passport_number: individual.passport_number || null,
+          passport_place_of_issue: individual.passport_place_of_issue || null,
+          passport_issue_date: individual.passport_issue_date || null,
+          passport_expiry_date: individual.passport_expiry_date || null,
+          id_number: individual.id_number || null,
+          r_number: individual.r_number || task.r_number || null,
+          individual_type: individual.individual_type || 'director',
+          status: 'Active',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
+        console.log('New individual data:', newIndividualData);
+
+        const { data: newIndividual, error } = await supabase
+          .from('registry_individuals')
+          .insert(newIndividualData)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Registry individual creation error:', error);
+          throw new Error(`Failed to create registry individual: ${error.message}`);
+        }
+
+        console.log('New registry individual created:', newIndividual);
+        return newIndividual.id;
+
+      } catch (error) {
+        console.error('Error creating new registry individual:', error);
+        throw error;
+      }
+    };
+
+    // Main data submission handler
+    const handleDataSubmission = async (docId: string, saveData: any) => {
+      try {
+        setUploading(true);
+
+        const docsToSave = uploadedDocs[docId] || [];
+        if (docsToSave.length === 0) {
+          throw new Error('No documents to save');
+        }
+
+        // Create individual object from task data
+        const individual = {
+          id: task.id,
+          full_name: task.applicant_name || task.principal_member_name,
+          first_name: task.applicant_name?.split(' ')[0],
+          last_name: task.applicant_name?.split(' ').slice(-1)[0],
+          r_number: task.r_number,
+          passport_number: null, // Would need to extract from documents
+          individual_type: task.renewal_status === 'New' ? 'principal' : 'dependent',
+          relationship: 'Principal'
+        };
+
+        // Check applicant type and search registry
+        const registryMatch = await searchRegistryIndividuals(individual);
+
+        if (registryMatch.exactMatch) {
+          // Exact match found, proceed with submission
+          await submitDocumentsToDatabase(docsToSave, registryMatch.exactMatch, docId);
+        } else if (registryMatch.fuzzyMatches && registryMatch.fuzzyMatches.length > 0) {
+          // Show fuzzy match confirmation dialog
+          setFuzzyMatchResults(registryMatch.fuzzyMatches);
+          setPendingSubmission({ docsToSave, docId, originalIndividual: individual });
+          setConfirmationDialogOpen(true);
+          return; // Don't continue until user confirms
+        } else {
+          // No match found, create new registry entry
+          const newRegistryId = await createNewRegistryIndividual(individual);
+          await submitDocumentsToDatabase(docsToSave, { id: newRegistryId }, docId);
+        }
+
+        // Continue with existing localStorage logic for backward compatibility
+        await handleExistingSaveLogic(docId, docsToSave);
+
+      } catch (error) {
+        console.error('Error in data submission:', error);
+        toast({
+          title: 'Error',
+          description: `Failed to submit documents: ${error.message}`,
+          variant: "destructive"
+        });
+      } finally {
+        setUploading(false);
+      }
+    };
+
     // Get fields for extraction based on document configuration
     const getFieldsForDocument = (docId: string) => {
       const document = stage.documents?.find(d => d.id === docId);
@@ -1713,12 +2096,17 @@ export default function TasksPage() {
         // Upload the PDF file
         await handleFileUpload([pdfFile], docId);
 
-        toast.success('Message processed successfully');
+        toast({
+          title: 'Success',
+          description: 'Message processed successfully',
+        });
 
       } catch (error) {
         console.error('Error processing message:', error);
-        toast.error('Failed to process message. Please try again.', {
-          variant: "destructive"
+        toast({
+          title: 'Error',
+          description: `Failed to process message: ${error.message}`,
+          variant: 'destructive',
         });
       } finally {
         setUploading(false);
@@ -1771,92 +2159,49 @@ export default function TasksPage() {
       }
     };
 
-    // Handle document save - following DocumentsTable pattern
+    // Handle existing save logic for backward compatibility
+    const handleExistingSaveLogic = async (docId: string, docsToSave: any[]) => {
+      // Keep your existing localStorage logic here for backward compatibility
+      const existingDocs = JSON.parse(localStorage.getItem(STAGE_DOCUMENTS_STORAGE_KEY) || '[]');
+
+      const processedUploads = docsToSave.map(doc => ({
+        ...doc,
+        status: 'valid',
+        uploadDate: new Date().toISOString(),
+        isRecent: true,
+        file: undefined // Remove File object for localStorage
+      }));
+
+      const updatedDocs = [...existingDocs, ...processedUploads];
+      updateLocalStorage(STAGE_DOCUMENTS_STORAGE_KEY, updatedDocs);
+
+      // Update task stage status
+      const stageStatuses = JSON.parse(localStorage.getItem(TASK_STAGE_STATUS_KEY) || '{}');
+      const taskKey = `${task.id}`;
+      const currentTaskStatus = stageStatuses[taskKey] || {};
+
+      currentTaskStatus[stage.id] = {
+        ...currentTaskStatus[stage.id],
+        [docId]: {
+          status: 'completed',
+          completedAt: new Date().toISOString(),
+          documentsCount: processedUploads.length
+        }
+      };
+
+      stageStatuses[taskKey] = currentTaskStatus;
+      updateLocalStorage(TASK_STAGE_STATUS_KEY, stageStatuses);
+
+      // Clear the uploaded docs for this document
+      setUploadedDocs(prev => ({
+        ...prev,
+        [docId]: []
+      }));
+    };
+
+    // Handle document save with database submission
     const handleSaveDocument = async (docId: string, saveData: any) => {
-      try {
-        setUploading(true);
-
-        const docsToSave = uploadedDocs[docId] || [];
-        if (docsToSave.length === 0) {
-          throw new Error('No documents to save');
-        }
-
-        // Get existing documents
-        const existingDocs = JSON.parse(localStorage.getItem(STAGE_DOCUMENTS_STORAGE_KEY) || '[]');
-
-        // Create a map of existing documents for faster lookup
-        const existingDocsMap = new Map(
-          existingDocs.map(doc => [
-            `${doc.taskId}-${doc.stageId}-${doc.documentId}-${doc.fileName}`,
-            doc
-          ])
-        );
-
-        // Process new documents and filter out duplicates
-        const processedUploads = docsToSave.filter(newDoc => {
-          const key = `${newDoc.taskId}-${newDoc.stageId}-${newDoc.documentId}-${newDoc.fileName}`;
-          return !existingDocsMap.has(key);
-        }).map(doc => ({
-          ...doc,
-          status: 'valid',
-          uploadDate: new Date().toISOString(),
-          isRecent: true,
-          // Remove the File object as it can't be stored in localStorage
-          file: undefined
-        }));
-
-        if (processedUploads.length === 0) {
-          toast({
-            title: 'Warning',
-            description: 'No new documents to save'
-          });
-          return;
-        }
-
-        // Add new documents to existing ones
-        const updatedDocs = [...existingDocs, ...processedUploads];
-
-        // Save to localStorage
-        updateLocalStorage(STAGE_DOCUMENTS_STORAGE_KEY, updatedDocs);
-
-        // Update task stage status
-        const stageStatuses = JSON.parse(localStorage.getItem(TASK_STAGE_STATUS_KEY) || '{}');
-        const taskKey = `${task.id}`;
-        const currentTaskStatus = stageStatuses[taskKey] || {};
-
-        currentTaskStatus[stage.id] = {
-          ...currentTaskStatus[stage.id],
-          [docId]: {
-            status: 'completed',
-            completedAt: new Date().toISOString(),
-            documentsCount: processedUploads.length
-          }
-        };
-
-        stageStatuses[taskKey] = currentTaskStatus;
-        updateLocalStorage(TASK_STAGE_STATUS_KEY, stageStatuses);
-
-        toast({
-          title: 'Success',
-          description: `${processedUploads.length} document(s) saved successfully`
-        });
-
-        // Clear the uploaded docs for this document
-        setUploadedDocs(prev => ({
-          ...prev,
-          [docId]: []
-        }));
-
-      } catch (error) {
-        console.error('Error saving document:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to save document. Please try again.',
-          variant: "destructive"
-        });
-      } finally {
-        setUploading(false);
-      }
+      await handleDataSubmission(docId, saveData);
     };
 
     // Handle saving all documents
@@ -1867,7 +2212,7 @@ export default function TasksPage() {
         // Save all uploaded documents for each document type
         const savePromises = Object.keys(uploadedDocs).map(docId => {
           if (uploadedDocs[docId].length > 0) {
-            return handleSaveDocument(docId, { documents: uploadedDocs[docId] });
+            return handleDataSubmission(docId, { documents: uploadedDocs[docId] });
           }
           return Promise.resolve();
         });
@@ -1885,7 +2230,9 @@ export default function TasksPage() {
 
       } catch (error) {
         console.error('Error saving all documents:', error);
-        toast.error('Failed to save some documents', {
+        toast({
+          title: 'Error',
+          description: 'Failed to save some documents',
           variant: "destructive"
         });
       } finally {
@@ -1900,7 +2247,11 @@ export default function TasksPage() {
         const doc = docsForType[docIndex];
 
         if (!doc?.file) {
-          toast.error("Original file not found");
+          toast({
+            title: 'Error',
+            description: 'Original file not found',
+            variant: "destructive"
+          });
           return;
         }
 
@@ -1912,21 +2263,20 @@ export default function TasksPage() {
         const documentFields = document.extractionSpecs || [];
 
         // Show initial progress toast
-        const progressToastId = toast.loading("Starting re-extraction...");
+        const progressToastId = toast({
+          title: 'Re-extraction',
+          description: "Starting re-extraction..."
+        });
 
         const { extractedData, success, message } = await performExtraction(
           doc.fileUrl,
           documentFields,
           document.type || 'document',
           (progressMessage) => {
-            toast.loading(progressMessage, { id: progressToastId });
             console.log('Re-extraction progress:', progressMessage);
           },
           doc.fileName
         );
-
-        // Dismiss progress toast
-        toast.dismiss(progressToastId);
 
         // Process extracted data - same logic as initial extraction
         let parsedData = extractedData;
@@ -2038,16 +2388,130 @@ export default function TasksPage() {
           }
         }));
 
-        toast.success(`Successfully re-extracted data from ${doc.fileName}`, {
-          duration: 3000,
+        toast({
+          title: 'Success',
+          description: `Successfully re-extracted data from ${doc.fileName}`,
         });
 
       } catch (error) {
         console.error('Error during re-extraction:', error);
-        toast.error(`Re-extraction failed: ${error.message}`, {
-          duration: 5000,
+        toast({
+          title: 'Error',
+          description: `Re-extraction failed: ${error.message}`,
+          variant: 'destructive',
         });
       }
+    };
+
+    // Fuzzy Match Confirmation Dialog Component
+    const FuzzyMatchConfirmationDialog = () => {
+      const handleConfirmMatch = async (selectedMatch: any) => {
+        try {
+          setUploading(true);
+          await submitDocumentsToDatabase(
+            pendingSubmission.docsToSave,
+            selectedMatch,
+            pendingSubmission.docId
+          );
+          await handleExistingSaveLogic(pendingSubmission.docId, pendingSubmission.docsToSave);
+
+          setConfirmationDialogOpen(false);
+          setPendingSubmission(null);
+          setFuzzyMatchResults([]);
+        } catch (error) {
+          console.error('Error confirming match:', error);
+          toast({
+            title: 'Error',
+            description: `Failed to confirm match: ${error.message}`,
+            variant: "destructive"
+          });
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      const handleCreateNew = async () => {
+        try {
+          setUploading(true);
+          const newRegistryId = await createNewRegistryIndividual(pendingSubmission.originalIndividual);
+          await submitDocumentsToDatabase(
+            pendingSubmission.docsToSave,
+            { id: newRegistryId },
+            pendingSubmission.docId
+          );
+          await handleExistingSaveLogic(pendingSubmission.docId, pendingSubmission.docsToSave);
+
+          setConfirmationDialogOpen(false);
+          setPendingSubmission(null);
+          setFuzzyMatchResults([]);
+        } catch (error) {
+          console.error('Error creating new individual:', error);
+          toast({
+            title: 'Error',
+            description: `Failed to create new individual: ${error.message}`,
+            variant: "destructive"
+          });
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      return (
+        <Dialog open={confirmationDialogOpen} onOpenChange={setConfirmationDialogOpen}>
+          <DialogContent className="max-w-4xl">
+            <DialogHeader>
+              <DialogTitle>Confirm Individual Identity</DialogTitle>
+              <DialogDescription>
+                We found similar individuals in the registry. Please confirm if any of these match
+                <strong> {pendingSubmission?.originalIndividual?.full_name}</strong>:
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 max-h-96 overflow-y-auto">
+              {fuzzyMatchResults.map((match) => (
+                <div key={match.id} className="border rounded-lg p-4 hover:bg-gray-50">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-2">
+                      <h4 className="font-semibold">{match.full_name}</h4>
+                      <div className="text-sm text-gray-600 space-y-1">
+                        {match.r_number && <p><span className="font-medium">R-Number:</span> {match.r_number}</p>}
+                        {match.passport_number && <p><span className="font-medium">Passport:</span> {match.passport_number}</p>}
+                        {match.nationality && <p><span className="font-medium">Nationality:</span> {match.nationality}</p>}
+                        {match.date_of_birth && <p><span className="font-medium">DOB:</span> {match.date_of_birth}</p>}
+                      </div>
+                    </div>
+                    <Button
+                      onClick={() => handleConfirmMatch(match)}
+                      className="ml-4"
+                      disabled={uploading}
+                    >
+                      {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Select This Person
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-between pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => setConfirmationDialogOpen(false)}
+                disabled={uploading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateNew}
+                disabled={uploading}
+              >
+                {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Create New Individual
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      );
     };
 
     const activeDocument = stage?.documents?.find(d => d.id === activeDocumentTab);
