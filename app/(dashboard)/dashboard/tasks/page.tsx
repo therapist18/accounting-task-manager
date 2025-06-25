@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { DatabaseIcon, Loader2, Plus, RotateCw, Send } from "lucide-react"
+import { DatabaseIcon, Loader2, Plus, RotateCw, Send, Info } from "lucide-react"
 import { Users } from "lucide-react"
 import { AlertTriangle } from "lucide-react"
 import { CheckCircle } from "lucide-react"
@@ -51,6 +51,79 @@ import { performExtraction } from "@/lib/extractionUtils"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+
+// Define columns outside the component to prevent recreation on every render
+const stageColumns = [
+  { key: 'index', header: '#', width: '50px' },
+  { key: 'website', header: 'Website', width: '120px' },
+  { key: 'job_description', header: 'Job', width: '150px' },
+  { key: 'task_manager', header: 'Task Manager', width: '120px' },
+  { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
+  { key: 'officer', header: 'Officer', width: '120px' },
+  { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
+  { key: 'principal_member_name', header: 'Principal Member Name', width: '180px' },
+  { key: 'company_name', header: 'Company Name', width: '150px' },
+  {
+    key: 'documents',
+    header: 'All Submitted Documents',
+    width: '80px',
+    render: (value: any, task: any) => (
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+        onClick={() => { }}
+      >
+        <X className="h-4 w-4" />
+      </Button>
+    )
+  },
+  { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
+  { key: 'account_used', header: 'Account Used', width: '120px' },
+  { key: 'applied_by', header: 'Applied by Who', width: '120px' },
+  { key: 'batch', header: 'Batch', width: '100px' },
+  {
+    key: 'actions',
+    header: 'Actions',
+    width: '120px',
+    render: (value: any, task: any) => (
+      <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => { }}
+          className="h-8 w-8 p-0"
+        >
+          <Edit className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => { }}
+          className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+    )
+  }
+];
+
+// Define requirement columns outside the component
+const requirementColumns = [
+  { key: 'index', header: '#', width: '50px' },
+  { key: 'website', header: 'Website', width: '120px' },
+  { key: 'job_description', header: 'Job', width: '150px' },
+  { key: 'task_manager', header: 'Task Manager', width: '120px' },
+  { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
+  { key: 'officer', header: 'Officer', width: '120px' },
+  { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
+  { key: 'company_name', header: 'Company Name', width: '150px' },
+  { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
+  { key: 'account_used', header: 'Account Used', width: '120px' },
+  { key: 'applied_by', header: 'Applied by Who', width: '120px' },
+  { key: 'batch', header: 'Batch', width: '100px' },
+];
 
 // Utility function for fuzzy name matching
 const fuzzyMatch = (str1: string, str2: string, threshold = 0.8): boolean => {
@@ -242,91 +315,18 @@ export default function TasksPage() {
   const [extractionLoading, setExtractionLoading] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
-  const [applicantDocuments, setApplicantDocuments] = useState<Record<number, any[]>>({});
   const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
-const [previewDocument, setPreviewDocument] = useState<any>(null);
-  // Define stage columns inside the component to access component methods
-  const stageColumns = [
-    { key: 'index', header: '#', width: '50px' },
-    { key: 'website', header: 'Website', width: '120px' },
-    { key: 'job_description', header: 'Job', width: '150px' },
-    { key: 'task_manager', header: 'Task Manager', width: '120px' },
-    { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
-    { key: 'officer', header: 'Officer', width: '120px' },
-    { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
-    { key: 'principal_member_name', header: 'Principal Member Name', width: '180px' },
-    { key: 'company_name', header: 'Company Name', width: '150px' },
-    {
-      key: 'documents',
-      header: 'All Submitted Documents',
-      width: '80px',
-      render: (value: any, task: Task) => (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-          onClick={() => handleViewDocuments(task)}
-        >
-          <X className="h-4 w-4" />
-        </Button>
-      )
-    },
-    { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
-    // Dynamic stage columns will be added here by generateStageColumns()
-    { key: 'account_used', header: 'Account Used', width: '120px' },
-    { key: 'applied_by', header: 'Applied by Who', width: '120px' },
-    { key: 'batch', header: 'Batch', width: '100px' },
-    {
-      key: 'actions',
-      header: 'Actions',
-      width: '120px',
-      render: (value: any, task: Task) => (
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleEditTask(task.id)}
-            className="h-8 w-8 p-0"
-          >
-            <Edit className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleDeleteTask(task.id)}
-            className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-      )
-    }
-  ]
-
-  // Define requirement columns
-  const requirementColumns = [
-    { key: 'index', header: '#', width: '50px' },
-    { key: 'website', header: 'Website', width: '120px' },
-    { key: 'job_description', header: 'Job', width: '150px' },
-    { key: 'task_manager', header: 'Task Manager', width: '120px' },
-    { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
-    { key: 'officer', header: 'Officer', width: '120px' },
-    { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
-    { key: 'company_name', header: 'Company Name', width: '150px' },
-    { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
-    { key: 'account_used', header: 'Account Used', width: '120px' },
-    { key: 'applied_by', header: 'Applied by Who', width: '120px' },
-    { key: 'batch', header: 'Batch', width: '100px' },
-  ]
-
+  const [previewDocument, setPreviewDocument] = useState<any>(null);
+  const [applicantDocuments, setApplicantDocuments] = useState<Record<number, any[]>>({});
+  const [stageDocuments, setStageDocuments] = useState<Record<string, any[]>>({});
   // Transform departments data to ensure consistent ID types and structure
-  const transformDepartments = (departments: any[]) => {
-    if (!departments || !Array.isArray(departments)) {
-      console.error('Invalid departments data:', departments);
+  const transformDepartments = useCallback((depts: any[]) => {
+    if (!depts || !Array.isArray(depts)) {
+      console.error('Invalid departments data:', depts);
       return [];
     }
 
-    return departments.map(dept => {
+    return depts.map(dept => {
       if (!dept) return null;
 
       const transformedDept = {
@@ -363,7 +363,7 @@ const [previewDocument, setPreviewDocument] = useState<any>(null);
 
       return transformedDept;
     }).filter(Boolean);
-  };
+  }, []);
 
   useEffect(() => {
     const loadData = async () => {
@@ -808,10 +808,32 @@ const [previewDocument, setPreviewDocument] = useState<any>(null);
     setStageUploadDialogOpen(true);
   };
 
-  const handleViewStageDocuments = (task: Task, stage: any) => {
-    // Show uploaded documents and extracted data
-    setSelectedStageTask({ task, stage });
-    setStageUploadDialogOpen(true);
+  const handleViewStageDocument = async (task: Task, stage: any, stageDoc: any, document: any) => {
+    try {
+      // Get file URL from storage
+      const { data: fileUrl, error } = await supabase.storage
+        .from('kyc-documents')
+        .createSignedUrl(document.file_path, 3600);
+
+      if (error) throw error;
+
+      setPreviewDocument({
+        ...document,
+        fileUrl: fileUrl.signedUrl,
+        stageName: stage.name,
+        documentName: stageDoc.name,
+        isRecentlySubmitted: document.created_at > new Date(Date.now() - 5 * 60 * 1000).toISOString() // Last 5 minutes
+      });
+      setDocumentPreviewOpen(true);
+
+    } catch (error) {
+      console.error('Error loading document:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load document",
+        variant: "destructive"
+      });
+    }
   };
 
   // Create a simplified extraction function based on your performExtraction
@@ -959,47 +981,119 @@ const [previewDocument, setPreviewDocument] = useState<any>(null);
       setExtractionLoading(false);
     }
   };
-  const handleViewStageDocument = async (task: Task, stage: any, stageDoc: any) => {
+  const loadApplicantDocuments = async (task: Task) => {
+    if (!task.id || applicantDocuments[task.id]) return; // Already loaded
+
     try {
-      const taskDocuments = applicantDocuments[task.id] || [];
-      const document = taskDocuments.find(doc => doc.document_id === stageDoc.kycId);
-      
-      if (!document) {
-        toast({
-          title: "Error",
-          description: "Document not found",
-          variant: "destructive"
-        });
-        return;
+      // Try to find registry individual first
+      const individual = {
+        full_name: task.applicant_name || task.principal_member_name,
+        r_number: task.r_number,
+        passport_number: null
+      };
+
+      const registryMatch = await searchRegistryIndividuals(individual);
+
+      if (registryMatch.exactMatch) {
+        const documents = await fetchApplicantDocuments(registryMatch.exactMatch.id);
+        setApplicantDocuments(prev => ({
+          ...prev,
+          [task.id]: documents
+        }));
       }
-  
-      // Get file URL from storage
-      const { data: fileUrl, error } = await supabase.storage
-        .from('kyc-documents')
-        .createSignedUrl(document.file_path, 3600); // 1 hour expiry
-  
-      if (error) throw error;
-  
-      setPreviewDocument({
-        ...document,
-        fileUrl: fileUrl.signedUrl,
-        stageName: stage.name,
-        documentName: stageDoc.name
-      });
-      setDocumentPreviewOpen(true);
-  
     } catch (error) {
-      console.error('Error loading document:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load document",
-        variant: "destructive"
-      });
+      console.error('Error loading applicant documents:', error);
     }
   };
-  
+  const searchRegistryIndividuals = async (individual: any) => {
+    try {
+      console.log('Searching registry for individual:', individual);
+
+      let exactMatch = null;
+      let fuzzyMatches = [];
+
+      // First, try exact matches by r_number or passport_number
+      if (individual.r_number) {
+        console.log('Searching by r_number:', individual.r_number);
+
+        const { data: rNumberMatch, error } = await supabase
+          .from('registry_individuals')
+          .select('*')
+          .eq('r_number', individual.r_number);
+
+        console.log('R-number search result:', { data: rNumberMatch, error });
+
+        if (!error && rNumberMatch && rNumberMatch.length > 0) {
+          exactMatch = rNumberMatch[0]; // Take first match if multiple found
+        }
+      }
+
+      if (!exactMatch && individual.passport_number) {
+        console.log('Searching by passport_number:', individual.passport_number);
+
+        const { data: passportMatch, error } = await supabase
+          .from('registry_individuals')
+          .select('*')
+          .eq('passport_number', individual.passport_number);
+
+        console.log('Passport search result:', { data: passportMatch, error });
+
+        if (!error && passportMatch && passportMatch.length > 0) {
+          exactMatch = passportMatch[0];
+        }
+      }
+
+      // If no exact match, try case-insensitive fuzzy matching on full_name
+      if (!exactMatch && individual.full_name) {
+        console.log('Performing fuzzy search for name:', individual.full_name);
+
+        const { data: allIndividuals, error } = await supabase
+          .from('registry_individuals')
+          .select('*')
+          .limit(100); // Get reasonable number for fuzzy matching
+
+        if (!error && allIndividuals) {
+          console.log('Total individuals for fuzzy matching:', allIndividuals.length);
+
+          // Improved fuzzy matching with case insensitive comparison
+          fuzzyMatches = allIndividuals.filter(person => {
+            if (!person.full_name) return false;
+
+            // Try exact case-insensitive match first
+            if (person.full_name.toLowerCase() === individual.full_name.toLowerCase()) {
+              if (!exactMatch) exactMatch = person; // Promote to exact match
+              return false; // Don't include in fuzzy matches
+            }
+
+            // Then try fuzzy matching with improved threshold
+            return fuzzyMatch(individual.full_name, person.full_name, 0.70);
+          }).slice(0, 5); // Show top 5 matches
+
+          console.log('Fuzzy matches found:', fuzzyMatches.length);
+        }
+      }
+
+      const result = {
+        exactMatch,
+        fuzzyMatches,
+        searchCriteria: {
+          r_number: individual.r_number,
+          passport_number: individual.passport_number,
+          full_name: individual.full_name,
+          individual_type: individual.individual_type
+        }
+      };
+
+      console.log('Search result:', result);
+      return result;
+
+    } catch (error) {
+      console.error('Error searching registry:', error);
+      throw new Error(`Registry search failed: ${error.message}`);
+    }
+  };
   // Document Preview Dialog Component
-  const DocumentPreviewDialog = () => {
+  const DocumentPreviewDialog = ({ task }: { task: Task | null }) => {
     if (!previewDocument) return null;
   
     return (
@@ -1010,10 +1104,10 @@ const [previewDocument, setPreviewDocument] = useState<any>(null);
               {previewDocument.documentName} - {previewDocument.stageName}
             </DialogTitle>
             <DialogDescription>
-              Document uploaded for {task?.applicant_name || task?.principal_member_name}
+              Document uploaded for {task?.applicant_name || task?.principal_member_name || 'Unknown'}
             </DialogDescription>
           </DialogHeader>
-  
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Document Preview */}
             <div className="space-y-4">
@@ -1033,7 +1127,7 @@ const [previewDocument, setPreviewDocument] = useState<any>(null);
                 )}
               </div>
             </div>
-  
+
             {/* Extracted Data */}
             <div className="space-y-4">
               <h4 className="font-medium">Extracted Data</h4>
@@ -1056,7 +1150,7 @@ const [previewDocument, setPreviewDocument] = useState<any>(null);
                   </div>
                 )}
               </div>
-  
+
               {/* Document Metadata */}
               <div className="border rounded-lg p-4 bg-gray-50">
                 <h5 className="font-medium mb-3">Document Information</h5>
@@ -1087,7 +1181,7 @@ const [previewDocument, setPreviewDocument] = useState<any>(null);
               </div>
             </div>
           </div>
-  
+
           <div className="flex justify-end gap-2 pt-4 border-t">
             <Button variant="outline" onClick={() => setDocumentPreviewOpen(false)}>
               Close
@@ -1101,176 +1195,225 @@ const [previewDocument, setPreviewDocument] = useState<any>(null);
       </Dialog>
     );
   };
-  // Update the UploadRequirements component to show applicant documents
-const UploadRequirementsDialog = ({ task, requirements, onClose }: { 
-  task: Task, 
-  requirements: any[], 
-  onClose: () => void 
-}) => {
-  const [applicantDocuments, setApplicantDocuments] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
+  // Add this useEffect at the top level of your TasksPage component
   useEffect(() => {
-    if (task) {
-      loadApplicantDocuments();
-    }
-  }, [task]);
+    // Load applicant documents for all filtered tasks
+    const loadAllApplicantDocuments = async () => {
+      const tasksToLoad = filteredTasks.filter(task => !applicantDocuments[task.id]);
 
-  const loadApplicantDocuments = async () => {
-    try {
-      setLoading(true);
-      
-      // Search for registry individual
-      const individual = {
-        full_name: task.applicant_name || task.principal_member_name,
-        r_number: task.r_number,
-        passport_number: null
-      };
-
-      const registryMatch = await searchRegistryIndividuals(individual);
-      
-      if (registryMatch.exactMatch) {
-        const documents = await fetchApplicantDocuments(registryMatch.exactMatch.id);
-        setApplicantDocuments(documents);
+      for (const task of tasksToLoad) {
+        await loadApplicantDocuments(task); // Pass the task parameter here
       }
-    } catch (error) {
-      console.error('Error loading applicant documents:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load applicant documents',
-        variant: 'destructive'
-      });
-    } finally {
-      setLoading(false);
+    };
+
+    if (filteredTasks.length > 0) {
+      loadAllApplicantDocuments();
     }
-  };
+  }, [filteredTasks]); // This will run when filtered tasks change
 
-  const getDocumentForRequirement = (requirement: any) => {
-    if (!requirement.kycDocumentId) return null;
-    
-    return applicantDocuments.find(doc => 
-      doc.document_id === requirement.kycDocumentId
-    );
-  };
+  const UploadRequirementsDialog = ({ task, requirements, onClose }: {
+    task: Task,
+    requirements: any[],
+    onClose: () => void
+  }) => {
+    const [loading, setLoading] = useState(true);
+    const [documentPreviews, setDocumentPreviews] = useState<Record<string, string>>({});
 
-  const handleViewDocument = async (document: any) => {
-    try {
-      // Get file URL from storage
-      const { data: fileUrl, error } = await supabase.storage
-        .from('kyc-documents')
-        .createSignedUrl(document.file_path, 3600);
+    useEffect(() => {
+      if (task) {
+        loadApplicantDocuments(task).then(() => setLoading(false));
+      }
+    }, [task]);
 
-      if (error) throw error;
+    const getDocumentForRequirement = (requirement: any) => {
+      if (!requirement.kycDocumentId) return null;
 
-      // Open document in new tab or show in modal
-      window.open(fileUrl.signedUrl, '_blank');
-    } catch (error) {
-      console.error('Error loading document:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load document',
-        variant: 'destructive'
-      });
-    }
-  };
+      const taskDocuments = applicantDocuments[task.id] || [];
+      return taskDocuments.find(doc =>
+        doc.document_id === requirement.kycDocumentId
+      );
+    };
 
-  return (
-    <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Upload Requirements</DialogTitle>
-          <DialogDescription>
-            {task.job_description} - {task.applicant_name || task.principal_member_name}
-          </DialogDescription>
-        </DialogHeader>
+    const getDocumentPreviewUrl = async (document: any) => {
+      try {
+        if (documentPreviews[document.id]) {
+          return documentPreviews[document.id];
+        }
 
-        <div className="space-y-4">
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin" />
-              <span className="ml-2">Loading applicant documents...</span>
-            </div>
-          ) : (
-            requirements.map((req, index) => {
-              const document = getDocumentForRequirement(req);
-              
-              return (
-                <div key={index} className="flex items-center justify-between p-4 border rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <div className="p-2 rounded-full bg-muted">
-                      <FileText className="h-5 w-5" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium">{req.name}</p>
-                        {req.kycDocumentId && (
-                          <Badge variant="outline" className="text-xs">
-                            <FileText className="h-3 w-3 mr-1" />
-                            Linked
-                          </Badge>
-                        )}
-                        {document && (
-                          <Badge variant="success" className="text-xs">
-                            <Check className="h-3 w-3 mr-1" />
-                            Uploaded
-                          </Badge>
-                        )}
+        const { data: fileUrl, error } = await supabase.storage
+          .from('kyc-documents')
+          .createSignedUrl(document.file_path, 3600);
+
+        if (error) throw error;
+
+        setDocumentPreviews(prev => ({
+          ...prev,
+          [document.id]: fileUrl.signedUrl
+        }));
+
+        return fileUrl.signedUrl;
+      } catch (error) {
+        console.error('Error getting document preview URL:', error);
+        return null;
+      }
+    };
+
+    const handleViewDocument = async (document: any) => {
+      const previewUrl = await getDocumentPreviewUrl(document);
+      if (previewUrl) {
+        window.open(previewUrl, '_blank');
+      }
+    };
+
+    return (
+      <Dialog open={open} onOpenChange={onClose}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Upload Requirements</DialogTitle>
+            <DialogDescription>
+              {task.job_description} - {task.applicant_name || task.principal_member_name}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {loading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin" />
+                <span className="ml-2">Loading applicant documents...</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {requirements.map((req, index) => {
+                  const document = getDocumentForRequirement(req);
+
+                  return (
+                    <div key={index} className="border rounded-lg p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center space-x-3">
+                          <div className="p-2 rounded-full bg-muted">
+                            <FileText className="h-5 w-5" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium">{req.name}</p>
+                              {req.kycDocumentId && (
+                                <Badge variant="outline" className="text-xs">
+                                  <FileText className="h-3 w-3 mr-1" />
+                                  KYC: {req.kycDocumentId}
+                                </Badge>
+                              )}
+                              {document && (
+                                <Badge variant="default" className="text-xs bg-green-100 text-green-800">
+                                  <Check className="h-3 w-3 mr-1" />
+                                  Available
+                                </Badge>
+                              )}
+                            </div>
+                            {req.description && (
+                              <p className="text-sm text-muted-foreground mt-1">{req.description}</p>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      {req.description && (
-                        <p className="text-sm text-muted-foreground">{req.description}</p>
-                      )}
-                      {document && (
-                        <div className="text-xs text-green-600 mt-1">
-                          Uploaded: {new Date(document.created_at).toLocaleDateString()}
+
+                      {/* Document Preview Section */}
+                      {document ? (
+                        <div className="space-y-3">
+                          <div className="bg-gray-50 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-sm font-medium">Document Details</span>
+                              <Badge variant={document.status === 'pending' ? 'outline' : 'default'}>
+                                {document.status}
+                              </Badge>
+                            </div>
+
+                            <div className="text-xs space-y-1">
+                              <div><span className="font-medium">Uploaded:</span> {new Date(document.created_at).toLocaleDateString()}</div>
+                              {document.issue_date && (
+                                <div><span className="font-medium">Issue Date:</span> {document.issue_date}</div>
+                              )}
+                              {document.expiry_date && (
+                                <div><span className="font-medium">Expiry Date:</span> {document.expiry_date}</div>
+                              )}
+                            </div>
+
+                            {/* Extracted Data Preview */}
+                            {document.extracted_details && Object.keys(document.extracted_details).length > 0 && (
+                              <div className="mt-2 p-2 bg-white rounded border">
+                                <div className="text-xs font-medium mb-1">Extracted Data:</div>
+                                <div className="text-xs space-y-1">
+                                  {Object.entries(document.extracted_details).slice(0, 3).map(([key, value]) => (
+                                    <div key={key} className="flex justify-between">
+                                      <span className="text-gray-600">{key.replace(/_/g, ' ')}:</span>
+                                      <span className="font-medium">{String(value).substring(0, 20)}...</span>
+                                    </div>
+                                  ))}
+                                  {Object.keys(document.extracted_details).length > 3 && (
+                                    <div className="text-gray-500">+{Object.keys(document.extracted_details).length - 3} more fields</div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-2 flex-1"
+                              onClick={() => handleViewDocument(document)}
+                            >
+                              <Eye className="h-4 w-4" />
+                              View Document
+                            </Button>
+                            <Button variant="outline" size="sm" className="gap-2">
+                              <Upload className="h-4 w-4" />
+                              Replace
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                            <div className="flex items-center text-yellow-800">
+                              <AlertTriangle className="h-4 w-4 mr-2" />
+                              <span className="text-sm">Document not found</span>
+                            </div>
+                            {req.kycDocumentId && (
+                              <p className="text-xs text-yellow-700 mt-1">
+                                Looking for KYC document ID: {req.kycDocumentId}
+                              </p>
+                            )}
+                          </div>
+
+                          <Button variant="outline" size="sm" className="gap-2 w-full">
+                            <Upload className="h-4 w-4" />
+                            Upload Required Document
+                          </Button>
                         </div>
                       )}
                     </div>
-                  </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    {document ? (
-                      <>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="gap-2"
-                          onClick={() => handleViewDocument(document)}
-                        >
-                          <Eye className="h-4 w-4" />
-                          View
-                        </Button>
-                        <Button variant="outline" size="sm" className="gap-2">
-                          <Upload className="h-4 w-4" />
-                          Replace
-                        </Button>
-                      </>
-                    ) : (
-                      <Button variant="outline" size="sm" className="gap-2">
-                        <Upload className="h-4 w-4" />
-                        Upload
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })
-          )}
+                  );
+                })}
+              </div>
+            )}
 
-          {!loading && requirements.length === 0 && (
-            <div className="text-center py-8 text-muted-foreground">
-              <FileText className="h-8 w-8 mx-auto mb-2" />
-              <p>No requirements defined for this selection</p>
-            </div>
-          )}
-        </div>
+            {!loading && requirements.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground">
+                <FileText className="h-8 w-8 mx-auto mb-2" />
+                <p>No requirements defined for this selection</p>
+              </div>
+            )}
+          </div>
 
-        <div className="flex justify-end pt-4 border-t">
-          <Button onClick={onClose}>Close</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-};
+          <div className="flex justify-end pt-4 border-t">
+            <Button onClick={onClose}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
   // Update the generateStageColumns function in your page.tsx
   const generateStageColumns = () => {
     // Define base columns (columns before stages)
@@ -1336,118 +1479,124 @@ const UploadRequirementsDialog = ({ task, requirements, onClose }: {
     });
 
     const stageColumnsList = applicableStages
-    .filter(stage => columnVisibility[`stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`] !== false)
-    .map(stage => ({
-      key: `stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`,
-      header: stage.name,
-      width: '150px',
-      parentHeader: 'Stages',
-      sortable: true,
-      render: (value: any, task: Task) => {
-        const isCurrentStage = task.current_stage?.name === stage.name;
-        const isCompleted = task.current_stage &&
-          (task.current_stage.order_num || 0) > (stage.order_num || 0);
+      .filter(stage => columnVisibility[`stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`] !== false)
+      .map(stage => ({
+        key: `stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`,
+        header: stage.name,
+        width: '150px',
+        parentHeader: 'Stages',
+        sortable: true,
+        render: (value: any, task: Task) => {
+          const isCurrentStage = task.current_stage?.name === stage.name;
+          const isCompleted = task.current_stage &&
+            (task.current_stage.order_num || 0) > (stage.order_num || 0);
 
-        // Load applicant documents if not loaded
-        useEffect(() => {
-          loadApplicantDocuments(task);
-        }, [task.id]);
+          // Get documents for this task and stage
+          const taskDocuments = applicantDocuments[task.id] || [];
 
-        // Get documents for this task and stage
-        const taskDocuments = applicantDocuments[task.id] || [];
-        const stageDocuments = taskDocuments.filter(doc => 
-          stage.documents?.some(stageDoc => stageDoc.kycId === doc.document_id)
-        );
+          // Handle document upload for document-based stages
+          if (stage.documents && stage.documents.length > 0) {
+            return (
+              <div className="flex flex-col gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-full p-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleStageDocumentUpload(task, stage);
+                  }}
+                >
+                  <Upload className="h-4 w-4 mr-1" />
+                  Upload
+                </Button>
 
-        // Handle document upload for document-based stages
-        if (stage.documents && stage.documents.length > 0) {
-          return (
-            <div className="flex flex-col gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-full p-0"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleStageDocumentUpload(task, stage);
-                }}
-              >
-                <Upload className="h-4 w-4 mr-1" />
-                Upload
-              </Button>
+                {/* Show document indicators with enhanced status */}
+                <div className="flex items-center justify-center gap-1 flex-wrap">
+                  {stage.documents.map((stageDoc, docIndex) => {
+                    // Check for documents by KYC ID or stage document ID
+                    const hasDocument = taskDocuments.some(doc =>
+                      doc.document_id === stageDoc.kycId ||
+                      doc.kyc_document_id === stageDoc.id
+                    );
 
-              {/* Show document indicators */}
-              <div className="flex items-center justify-center gap-1">
-                {stage.documents.map((stageDoc, docIndex) => {
-                  const hasDocument = stageDocuments.some(doc => doc.document_id === stageDoc.kycId);
-                  
-                  return (
-                    <Button
-                      key={docIndex}
-                      variant="ghost"
-                      size="sm"
-                      className={`h-6 w-6 p-0 ${hasDocument ? 'text-green-600' : 'text-gray-300'}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (hasDocument) {
-                          handleViewStageDocument(task, stage, stageDoc);
-                        }
-                      }}
-                      title={`${stageDoc.name} - ${hasDocument ? 'Uploaded' : 'Not uploaded'}`}
-                    >
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                  );
-                })}
+                    const matchingDoc = taskDocuments.find(doc =>
+                      doc.document_id === stageDoc.kycId ||
+                      doc.kyc_document_id === stageDoc.id
+                    );
+
+                    return (
+                      <div key={docIndex} className="relative">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={`h-6 w-6 p-0 ${hasDocument ? 'text-green-600 bg-green-50' : 'text-gray-300'}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (hasDocument && matchingDoc) {
+                              handleViewStageDocument(task, stage, stageDoc, matchingDoc);
+                            }
+                          }}
+                          title={`${stageDoc.name} - ${hasDocument ? 'Uploaded' : 'Not uploaded'}${matchingDoc ? ` (${matchingDoc.status})` : ''}`}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        {hasDocument && matchingDoc && (
+                          <div className={`absolute -top-1 -right-1 w-2 h-2 rounded-full ${matchingDoc.status === 'valid' ? 'bg-green-500' :
+                            matchingDoc.status === 'pending' ? 'bg-yellow-500' : 'bg-gray-500'
+                            }`} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {isCurrentStage && task.current_stage_started_at && (
+                  <StageTimer
+                    startTime={task.current_stage_started_at}
+                    estimatedTime={stage.estimated_time}
+                  />
+                )}
               </div>
+            );
+          }
+          // Regular stage status display
+          let status = 'Pending';
+          let variant: 'default' | 'secondary' | 'outline' = 'outline';
 
-              {isCurrentStage && task.current_stage_started_at && (
-                <StageTimer
-                  startTime={task.current_stage_started_at}
-                  estimatedTime={stage.estimated_time}
-                />
-              )}
-            </div>
-          );
+          if (isCurrentStage) {
+            status = 'In Progress';
+            variant = 'default';
+            return (
+              <div className="flex flex-col gap-1">
+                <Badge variant={variant} className="w-fit">{status}</Badge>
+                {task.current_stage_started_at && (
+                  <StageTimer
+                    startTime={task.current_stage_started_at}
+                    estimatedTime={stage.estimated_time}
+                  />
+                )}
+              </div>
+            );
+          } else if (isCompleted) {
+            status = 'Completed';
+            variant = 'secondary';
+          }
+
+          return <Badge variant={variant} className="w-fit">{status}</Badge>;
         }
+      }));
 
-        // Regular stage status display
-        let status = 'Pending';
-        let variant: 'default' | 'secondary' | 'outline' = 'outline';
-
-        if (isCurrentStage) {
-          status = 'In Progress';
-          variant = 'default';
-          return (
-            <div className="flex flex-col gap-1">
-              <Badge variant={variant} className="w-fit">{status}</Badge>
-              {task.current_stage_started_at && (
-                <StageTimer
-                  startTime={task.current_stage_started_at}
-                  estimatedTime={stage.estimated_time}
-                />
-              )}
-            </div>
-          );
-        } else if (isCompleted) {
-          status = 'Completed';
-          variant = 'secondary';
-        }
-
-        return <Badge variant={variant} className="w-fit">{status}</Badge>;
-      }
-    }));
-
-  return [
-    ...baseColumns,
-    ...stageColumnsList,
-    ...movedColumns.map(col => ({
-      ...col,
-      parentHeader: 'Additional Info'
-    })),
-    ...endColumns
-  ];
-};
+    return [
+      ...baseColumns,
+      ...stageColumnsList,
+      ...movedColumns.map(col => ({
+        ...col,
+        parentHeader: 'Additional Info'
+      })),
+      ...endColumns
+    ];
+  };
 
   // Render the task table
   const renderTaskTable = (tasksToRender: Task[], columns: any[], showRequirements = false) => {
@@ -1714,6 +1863,29 @@ const UploadRequirementsDialog = ({ task, requirements, onClose }: {
       </div>
     );
   }
+  const fetchApplicantDocuments = async (applicantId: number) => {
+    try {
+      const { data: documents, error } = await supabase
+        .from('acc_portal_directors_documents')
+        .select(`
+      *,
+      acc_portal_kyc (
+        id,
+        name,
+        display_name,
+        fields
+      )
+    `)
+        .eq('director_id', applicantId);
+
+      if (error) throw error;
+
+      return documents || [];
+    } catch (error) {
+      console.error('Error fetching applicant documents:', error);
+      return [];
+    }
+  };
 
   const StageUploadDialog = () => {
     const [selectedFiles, setSelectedFiles] = useState<Record<string, File>>({});
@@ -1910,12 +2082,14 @@ const UploadRequirementsDialog = ({ task, requirements, onClose }: {
         throw error;
       }
     };
-// Add this function to fetch documents for an applicant
-const fetchApplicantDocuments = async (applicantId: number) => {
-  try {
-    const { data: documents, error } = await supabase
-      .from('acc_portal_directors_documents')
-      .select(`
+    // Add this function to fetch documents by KYC document IDs
+    const fetchDocumentsByKycIds = async (individualId: number, kycDocumentIds: string[]) => {
+      try {
+        if (!kycDocumentIds.length) return [];
+
+        const { data: documents, error } = await supabase
+          .from('acc_portal_directors_documents')
+          .select(`
         *,
         acc_portal_kyc (
           id,
@@ -1924,131 +2098,130 @@ const fetchApplicantDocuments = async (applicantId: number) => {
           fields
         )
       `)
-      .eq('director_id', applicantId);
+          .eq('director_id', individualId)
+          .in('document_id', kycDocumentIds);
 
-    if (error) throw error;
-
-    return documents || [];
-  } catch (error) {
-    console.error('Error fetching applicant documents:', error);
-    return [];
-  }
-};
-
-// Add function to load applicant documents when needed
-const loadApplicantDocuments = async (task: Task) => {
-  if (!task.id || applicantDocuments[task.id]) return; // Already loaded
-
-  try {
-    // Try to find registry individual first
-    const individual = {
-      full_name: task.applicant_name || task.principal_member_name,
-      r_number: task.r_number,
-      passport_number: null
+        if (error) throw error;
+        return documents || [];
+      } catch (error) {
+        console.error('Error fetching documents by KYC IDs:', error);
+        return [];
+      }
     };
 
-    const registryMatch = await searchRegistryIndividuals(individual);
-    
-    if (registryMatch.exactMatch) {
-      const documents = await fetchApplicantDocuments(registryMatch.exactMatch.id);
-      setApplicantDocuments(prev => ({
-        ...prev,
-        [task.id]: documents
-      }));
-    }
-  } catch (error) {
-    console.error('Error loading applicant documents:', error);
-  }
-};
-// Update the submitDocumentsToDatabase function in tasks page
-const submitDocumentsToDatabase = async (documents: any[], registryIndividual: any, docId: string) => {
-  try {
-    console.log('=== Starting document submission ===');
-    console.log('Documents to submit:', documents.length);
-    console.log('Registry individual:', registryIndividual);
-    console.log('Document ID:', docId);
+    // Update the loadApplicantDocuments function
+    const loadApplicantDocuments = async (task: Task) => {
+      if (!task.id) return;
 
-    for (const [index, doc] of documents.entries()) {
-      console.log(`\n--- Processing document ${index + 1}/${documents.length} ---`);
-      console.log('Document type:', doc.documentType);
-      console.log('File name:', doc.fileName);
-
-      // Get the document configuration to get the KYC ID
-      const document = stage.documents?.find(d => d.id === docId);
-      if (!document) {
-        throw new Error(`Document configuration not found for ID: ${docId}`);
-      }
-
-      console.log('Document configuration:', document.name, 'KYC ID:', document.kycId);
-
-      // Use document name to generate file path
-      const normalizedDocumentName = document.name
-        .toLowerCase()
-        .replace(/\s+/g, '_')
-        .replace(/[^a-z0-9_]/g, '');
-
-      const normalizedIndividualName = registryIndividual.full_name
-        ?.toLowerCase()
-        .replace(/\s+/g, '_')
-        .replace(/[^a-z0-9_]/g, '') || 'unknown';
-
-      // Create path: individual-documents/full_name/document_name/filename
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `individual-documents/${normalizedIndividualName}/${normalizedDocumentName}/${doc.fileName}`;
-
-      // Upload file to storage bucket
-      let filePath;
       try {
-        filePath = await uploadFileToStorage(doc.file, registryIndividual.id, normalizedDocumentName);
-        console.log('File uploaded to path:', filePath);
-      } catch (uploadError) {
-        console.error('Failed to upload file:', uploadError);
-        throw new Error(`File upload failed for ${doc.fileName}: ${uploadError.message}`);
+        // Try to find registry individual first
+        const individual = {
+          full_name: task.applicant_name || task.principal_member_name,
+          r_number: task.r_number,
+          passport_number: null
+        };
+
+        const registryMatch = await searchRegistryIndividuals(individual);
+
+        if (registryMatch.exactMatch) {
+          // Get all requirements and their KYC document IDs
+          const requirements = getCurrentRequirements();
+          const kycDocumentIds = requirements
+            .filter(req => req.kycDocumentId)
+            .map(req => req.kycDocumentId);
+
+          // Fetch documents for both requirements and stage documents
+          const [requirementDocs, allDocs] = await Promise.all([
+            fetchDocumentsByKycIds(registryMatch.exactMatch.id, kycDocumentIds),
+            fetchApplicantDocuments(registryMatch.exactMatch.id)
+          ]);
+
+          // Combine and update state
+          const combinedDocs = [...requirementDocs, ...allDocs];
+          setApplicantDocuments(prev => ({
+            ...prev,
+            [task.id]: combinedDocs
+          }));
+
+          console.log('Loaded documents for task:', task.id, {
+            requirementDocs: requirementDocs.length,
+            allDocs: allDocs.length,
+            total: combinedDocs.length
+          });
+        }
+      } catch (error) {
+        console.error('Error loading applicant documents:', error);
       }
+    };
+    // Update the submitDocumentsToDatabase function to refresh documents
+    const submitDocumentsToDatabase = async (documents: any[], registryIndividual: any, docId: string) => {
+      try {
+        console.log('=== Starting document submission ===');
 
-      // Insert into acc_portal_directors_documents using KYC ID
-      const documentRecord = {
-        director_id: registryIndividual.id,
-        document_id: document.kycId || null, // Use the KYC ID from stage document
-        file_path: filePath,
-        status: 'pending',
-        extracted_details: doc.extractedData || {},
-        kyc_document_id: document.id, // Keep this for backward compatibility
-        userid: task.task_manager?.id?.toString() || 'system',
-        issue_date: doc.extractedData?.issue_date || null,
-        expiry_date: doc.extractedData?.expiry_date || null,
-        version: '1.0'
-      };
+        const submittedDocIds = [];
 
-      console.log('Inserting document record:', documentRecord);
+        for (const [index, doc] of documents.entries()) {
+          // ... existing submission logic ...
 
-      const { data: insertedDoc, error: insertError } = await supabase
-        .from('acc_portal_directors_documents')
-        .insert(documentRecord)
-        .select()
-        .single();
+          const { data: insertedDoc, error: insertError } = await supabase
+            .from('acc_portal_directors_documents')
+            .insert(documentRecord)
+            .select()
+            .single();
 
-      if (insertError) {
-        console.error('Database insert error:', insertError);
-        throw new Error(`Failed to save document record: ${insertError.message}`);
+          if (insertError) {
+            throw new Error(`Failed to save document record: ${insertError.message}`);
+          }
+
+          submittedDocIds.push(insertedDoc.id);
+          console.log('Document record saved successfully:', insertedDoc.id);
+        }
+
+        // Refresh the applicant documents after successful submission
+        await refreshApplicantDocuments(task.id, registryIndividual.id);
+
+        console.log('=== All documents submitted successfully ===');
+
+        toast({
+          title: 'Success',
+          description: `${documents.length} document(s) submitted successfully to database`
+        });
+
+        return submittedDocIds;
+
+      } catch (error) {
+        console.error('=== Document submission failed ===');
+        throw error;
       }
+    };
 
-      console.log('Document record saved successfully:', insertedDoc.id);
-    }
+    // Add function to refresh documents after submission
+    const refreshApplicantDocuments = async (taskId: number, individualId: number) => {
+      try {
+        const requirements = getCurrentRequirements();
+        const kycDocumentIds = requirements
+          .filter(req => req.kycDocumentId)
+          .map(req => req.kycDocumentId);
 
-    console.log('=== All documents submitted successfully ===');
+        const [requirementDocs, allDocs] = await Promise.all([
+          fetchDocumentsByKycIds(individualId, kycDocumentIds),
+          fetchApplicantDocuments(individualId)
+        ]);
 
-    toast({
-      title: 'Success',
-      description: `${documents.length} document(s) submitted successfully to database`
-    });
+        const combinedDocs = [...requirementDocs, ...allDocs];
+        setApplicantDocuments(prev => ({
+          ...prev,
+          [taskId]: combinedDocs
+        }));
 
-  } catch (error) {
-    console.error('=== Document submission failed ===');
-    console.error('Error details:', error);
-    throw error;
-  }
-};
+        console.log('Refreshed documents after submission:', {
+          taskId,
+          documentCount: combinedDocs.length
+        });
+      } catch (error) {
+        console.error('Error refreshing applicant documents:', error);
+      }
+    };
 
     const createNewRegistryIndividual = async (individual: any): Promise<number> => {
       try {
@@ -3477,15 +3650,15 @@ const submitDocumentsToDatabase = async (documents: any[], registryIndividual: a
       </div>
       <StageUploadDialog />
 
-      <DocumentPreviewDialog />
+      <DocumentPreviewDialog task={selectedTask} />
 
       {selectedTask && (
-      <UploadRequirementsDialog
-        task={selectedTask}
-        requirements={getCurrentRequirements()}
-        onClose={() => setSelectedTask(null)}
-      />
-    )}
+        <UploadRequirementsDialog
+          task={selectedTask}
+          requirements={getCurrentRequirements()}
+          onClose={() => setSelectedTask(null)}
+        />
+      )}
     </div>
   )
 }
