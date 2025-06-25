@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
 import type { Stage, TimeConfig, StageDocument, DocumentExtraction } from "./types"
+import { createKYCDocument } from "./kycDocuments"
 
 // Simple UUID generator
 const generateId = () => {
@@ -69,36 +70,80 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
     setActiveTab('general')
   }, [stage, open])
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const trimmedName = formData.name.trim()
-    if (!trimmedName) {
-      // Optionally set an error state or show a toast
-      return
-    }
-    setSaving(true)
-    try {
-      await onSave({
-        ...formData,
-        name: trimmedName,
-        description: formData.description?.trim() || undefined,
-        // Clean up any empty strings in the time configs
-        timeConfigs: formData.timeConfigs?.map(tc => ({
-          ...tc,
-          applicationType: tc.applicationType || 'Default',
-          days: tc.days || 0,
-          hours: tc.hours || 0,
-          minutes: tc.minutes || 0
-        })) || []
-      })
-      onOpenChange(false)
-    } catch (error) {
-      console.error('Error saving stage:', error)
-      // Optionally show error toast
-    } finally {
-      setSaving(false)
-    }
+// Updated handleSubmit in edit-stage-dialog.tsx
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault()
+  const trimmedName = formData.name.trim()
+  if (!trimmedName) {
+    return
   }
+  setSaving(true)
+  try {
+    // Get department name for KYC documents
+    const departmentName = "Applications" // You'll need to pass this from parent component
+    
+    // Process documents and sync with KYC
+    const processedDocs = await Promise.all(
+      (formData.documents || []).map(async (doc) => {
+        if (doc.name.trim() && !doc.kycId) {
+          // Create new KYC document if it doesn't exist
+          try {
+            const kycId = await createKYCDocument({
+              name: doc.name,
+              department: departmentName,
+              category: 'application-docs',
+              document_type: 'one_off',
+              fields: doc.extractionSpecs || [],
+              display_name: doc.name
+            })
+            return { ...doc, kycId }
+          } catch (error) {
+            console.error('Error creating KYC document:', error)
+            return doc
+          }
+        } else if (doc.kycId && doc.name.trim()) {
+          // Update existing KYC document
+          try {
+            await updateKYCDocument(doc.kycId, {
+              name: doc.name,
+              fields: doc.extractionSpecs || [],
+              display_name: doc.name
+            })
+          } catch (error) {
+            console.error('Error updating KYC document:', error)
+          }
+        }
+        return doc
+      })
+    )
+
+    const updatedStage = {
+      ...formData,
+      name: trimmedName,
+      description: formData.description?.trim() || undefined,
+      documents: processedDocs,
+      timeConfigs: formData.timeConfigs?.map(tc => ({
+        ...tc,
+        applicationType: tc.applicationType || 'Default',
+        days: tc.days || 0,
+        hours: tc.hours || 0,
+        minutes: tc.minutes || 0
+      })) || []
+    }
+
+    await onSave(updatedStage)
+    onOpenChange(false)
+  } catch (error) {
+    console.error('Error saving stage:', error)
+    toast({
+      title: "Error",
+      description: "Failed to save stage. Please try again.",
+      variant: "destructive"
+    })
+  } finally {
+    setSaving(false)
+  }
+}
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target

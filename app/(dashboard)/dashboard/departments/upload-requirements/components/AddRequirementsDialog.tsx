@@ -1,10 +1,14 @@
-import { useState } from "react"
+//@ts-nocheck
+"use client"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Plus, X } from "lucide-react"
+import { FileText, Info, Plus, X } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import supabase from "@/lib/supabase/client"
 
 export interface RequirementForm {
   name: string
@@ -12,6 +16,8 @@ export interface RequirementForm {
   type: 'standard' | 'conditional' | 'optional'
   isRequired: boolean
   isVisible: boolean
+  kycDocumentId?: string
+  kycDocumentOption?: 'existing' | 'create_new'
 }
 
 interface AddRequirementsDialogProps {
@@ -27,6 +33,7 @@ interface AddRequirementsDialogProps {
   } | null
 }
 
+
 export function AddRequirementsDialog({
   isOpen,
   onOpenChange,
@@ -39,9 +46,117 @@ export function AddRequirementsDialog({
     description: '',
     type: 'standard',
     isRequired: true,
-    isVisible: true
+    isVisible: true,
+    kycDocumentOption: 'create_new'
   }])
   const [bulkInput, setBulkInput] = useState('')
+  const [kycDocuments, setKycDocuments] = useState<any[]>([])
+  const [loadingKycDocs, setLoadingKycDocs] = useState(false)
+
+  // Fetch KYC documents when dialog opens
+  useEffect(() => {
+    if (isOpen) {
+      fetchKycDocuments()
+    }
+  }, [isOpen])
+
+  const fetchKycDocuments = async () => {
+    try {
+      setLoadingKycDocs(true)
+      
+      const { data, error } = await supabase
+        .from('acc_portal_kyc')
+        .select('id, name, display_name')
+        .order('name')
+
+      if (error) throw error
+
+      setKycDocuments(data || [])
+    } catch (error) {
+      console.error('Error fetching KYC documents:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to load document types',
+        variant: 'destructive'
+      })
+    } finally {
+      setLoadingKycDocs(false)
+    }
+  }
+
+  const createNewKycDocument = async (requirementName: string, departmentName: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('acc_portal_kyc')
+        .insert({
+          name: requirementName,
+          display_name: requirementName,
+          department: departmentName,
+          category: 'application-docs',
+          fields: [],
+          listed: true,
+          created_at: new Date().toISOString()
+        })
+        .select('id')
+        .single()
+
+      if (error) throw error
+
+      return data.id
+    } catch (error) {
+      console.error('Error creating KYC document:', error)
+      throw error
+    }
+  }
+
+  const handleSubmit = async () => {
+    const validRequirements = newRequirements.filter(req => req.name.trim() !== '')
+    if (validRequirements.length === 0) {
+      handleClose()
+      return
+    }
+
+    try {
+      // Process requirements and handle KYC document creation/linking
+      const processedRequirements = await Promise.all(
+        validRequirements.map(async (req) => {
+          let kycDocumentId = req.kycDocumentId
+
+          if (req.kycDocumentOption === 'create_new') {
+            // Create new KYC document
+            const departmentName = context?.subdepartmentName?.split(' ')[0] || 'General'
+            kycDocumentId = await createNewKycDocument(req.name, departmentName)
+          }
+
+          return {
+            ...req,
+            kycDocumentId
+          }
+        })
+      )
+
+      await onSubmit(processedRequirements)
+      
+      // Reset the form after successful submission
+      setNewRequirements([{
+        name: '',
+        description: '',
+        type: 'standard',
+        isRequired: true,
+        isVisible: true,
+        kycDocumentOption: 'create_new'
+      }])
+      setBulkInput('')
+      
+    } catch (error) {
+      console.error('Error processing requirements:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to process requirements',
+        variant: 'destructive'
+      })
+    }
+  }
 
   const handleClose = () => {
     onOpenChange(false)
@@ -50,7 +165,8 @@ export function AddRequirementsDialog({
       description: '',
       type: 'standard',
       isRequired: true,
-      isVisible: true
+      isVisible: true,
+      kycDocumentOption: 'create_new'
     }])
     setBulkInput('')
   }
@@ -61,7 +177,8 @@ export function AddRequirementsDialog({
       description: '',
       type: 'standard',
       isRequired: true,
-      isVisible: true
+      isVisible: true,
+      kycDocumentOption: 'create_new'
     }])
   }
 
@@ -86,7 +203,8 @@ export function AddRequirementsDialog({
         description: '',
         type: 'standard',
         isRequired: true,
-        isVisible: true
+        isVisible: true,
+        kycDocumentOption: 'create_new'
       }])
       return
     }
@@ -97,27 +215,18 @@ export function AddRequirementsDialog({
       description: '',
       type: 'standard' as const,
       isRequired: true,
-      isVisible: true
+      isVisible: true,
+      kycDocumentOption: 'create_new' as const
     }))
 
     setNewRequirements(requirements)
-  }
-
-  const handleSubmit = async () => {
-    const validRequirements = newRequirements.filter(req => req.name.trim() !== '')
-    if (validRequirements.length === 0) {
-      handleClose()
-      return
-    }
-    await onSubmit(validRequirements)
-    handleClose()
   }
 
   if (!context) return null
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add Requirements</DialogTitle>
           <DialogDescription className="space-y-2">
@@ -149,36 +258,112 @@ export function AddRequirementsDialog({
 
           <div className="space-y-4">
             {newRequirements.map((req, idx) => (
-              <div key={idx} className="flex items-start space-x-2">
-                <div className="grid gap-2 flex-1">
-                  <div className="flex items-center justify-between">
-                    <Label>Requirement {idx + 1}</Label>
-                    {newRequirements.length > 1 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => removeNewRequirement(idx)}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
+              <div key={idx} className="border rounded-lg p-4 space-y-4 bg-card">
+                <div className="flex items-center justify-between">
+                  <Label className="font-medium">Requirement {idx + 1}</Label>
+                  {newRequirements.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => removeNewRequirement(idx)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Requirement Name *</Label>
+                    <Input
+                      value={req.name}
+                      onChange={(e) => handleNewRequirementChange(idx, 'name', e.target.value)}
+                      placeholder="Requirement name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Description</Label>
+                    <Input
+                      value={req.description}
+                      onChange={(e) => handleNewRequirementChange(idx, 'description', e.target.value)}
+                      placeholder="Description (optional)"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4 border-t pt-4">
+                  <Label className="font-medium flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Document Type Association
+                  </Label>
+                  
+                  <div className="space-y-3">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id={`create-new-${idx}`}
+                        name={`kyc-option-${idx}`}
+                        checked={req.kycDocumentOption === 'create_new'}
+                        onChange={() => handleNewRequirementChange(idx, 'kycDocumentOption', 'create_new')}
+                      />
+                      <Label htmlFor={`create-new-${idx}`} className="text-sm">
+                        Create new document type
+                      </Label>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id={`existing-${idx}`}
+                        name={`kyc-option-${idx}`}
+                        checked={req.kycDocumentOption === 'existing'}
+                        onChange={() => handleNewRequirementChange(idx, 'kycDocumentOption', 'existing')}
+                      />
+                      <Label htmlFor={`existing-${idx}`} className="text-sm">
+                        Link to existing document type
+                      </Label>
+                    </div>
+
+                    {req.kycDocumentOption === 'existing' && (
+                      <div className="ml-6 space-y-2">
+                        <Label className="text-sm">Select Document Type</Label>
+                        <Select
+                          value={req.kycDocumentId || ''}
+                          onValueChange={(value) => handleNewRequirementChange(idx, 'kycDocumentId', value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a document type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {loadingKycDocs ? (
+                              <SelectItem value="loading" disabled>
+                                Loading document types...
+                              </SelectItem>
+                            ) : (
+                              kycDocuments.map((doc) => (
+                                <SelectItem key={doc.id} value={doc.id}>
+                                  {doc.display_name || doc.name}
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {req.kycDocumentOption === 'create_new' && (
+                      <div className="ml-6 text-sm text-muted-foreground bg-blue-50 p-3 rounded">
+                        <Info className="h-4 w-4 inline mr-2" />
+                        A new document type will be created with the name "{req.name || 'Requirement Name'}"
+                      </div>
                     )}
                   </div>
-                  <Input
-                    value={req.name}
-                    onChange={(e) => handleNewRequirementChange(idx, 'name', e.target.value)}
-                    placeholder="Requirement name"
-                  />
-                  <Textarea
-                    value={req.description}
-                    onChange={(e) => handleNewRequirementChange(idx, 'description', e.target.value)}
-                    placeholder="Description (optional)"
-                    rows={2}
-                  />
                 </div>
               </div>
             ))}
+            
             <Button
               type="button"
               variant="outline"
@@ -199,7 +384,7 @@ export function AddRequirementsDialog({
           <Button
             type="button"
             onClick={handleSubmit}
-            disabled={isSubmitting}
+            disabled={isSubmitting || !newRequirements.some(req => req.name.trim())}
           >
             {isSubmitting ? 'Saving...' : 'Save Requirements'}
           </Button>

@@ -1,6 +1,5 @@
 // @ts-nocheck
 import supabase from '@/lib/supabase/client'
-// Enhanced types for better document extraction handling
 export type DocumentExtraction = {
     id: string
     fieldName: string
@@ -8,8 +7,8 @@ export type DocumentExtraction = {
     isRequired: boolean
     description?: string
     extractionRules?: {
-        format?: string // For dates: "DD/MM/YYYY", for numbers: "currency", etc.
-        validation?: string // Regex or validation rules
+        format?: string
+        validation?: string
         defaultValue?: any
     }
 }
@@ -20,7 +19,9 @@ export type StageDocument = {
     description?: string
     isRequired: boolean
     documentType: 'upload' | 'extraction' | 'both'
+    inputType?: 'file' | 'message' | 'both'
     extractionSpecs?: DocumentExtraction[]
+    kycId?: string // New field to store the acc_portal_kyc ID
 }
 
 export type TimeConfig = {

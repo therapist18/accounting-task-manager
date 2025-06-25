@@ -728,6 +728,59 @@ export default function Stages() {
       })
     }
   }
+// Add this function to handle stage deletion with KYC cleanup
+const handleDeleteStage = async (stageId: string) => {
+  try {
+    const currentDept = getCurrentDepartment()
+    if (!currentDept) return
+
+    const stageToDelete = currentDept.stages.find(s => s.id === stageId)
+    if (!stageToDelete) return
+
+    // Clean up KYC documents
+    if (stageToDelete.documents) {
+      await Promise.all(
+        stageToDelete.documents
+          .filter(doc => doc.kycId)
+          .map(doc => deleteKYCDocument(doc.kycId!))
+      )
+    }
+
+    // Remove stage from department
+    const updatedStages = currentDept.stages
+      .filter(s => s.id !== stageId)
+      .map((stage, index) => ({ ...stage, order_num: index + 1 }))
+
+    const { error } = await supabase
+      .from('tm_departments')
+      .update({
+        stages: updatedStages,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', activeTab)
+
+    if (error) throw error
+
+    // Update local state
+    setDepartments(prev => prev.map(dept =>
+      dept.id === activeTab
+        ? { ...dept, stages: updatedStages }
+        : dept
+    ))
+
+    toast({
+      title: "Success",
+      description: "Stage and associated documents deleted successfully",
+    })
+  } catch (err) {
+    console.error('Error deleting stage:', err)
+    toast({
+      title: "Error",
+      description: "Failed to delete stage. Please try again.",
+      variant: "destructive"
+    })
+  }
+}
 
   const currentDept = getCurrentDepartment()
 
@@ -826,43 +879,96 @@ export default function Stages() {
                                       </Badge>
                                     </Button>
                                   </PopoverTrigger>
-                                  <PopoverContent className="w-80">
-                                    <div className="space-y-2">
-                                      <h4 className="font-medium">Stage Documents ({stage.documents.length})</h4>
-                                      <div className="space-y-2">
+                                  <PopoverContent className="w-96 max-h-96 overflow-y-auto">
+                                    <div className="space-y-3">
+                                      <div className="flex items-center justify-between">
+                                        <h4 className="font-medium">Stage Documents</h4>
+                                        <Badge variant="outline" className="text-xs">
+                                          {stage.documents.length} document{stage.documents.length > 1 ? 's' : ''}
+                                        </Badge>
+                                      </div>
+
+                                      <div className="space-y-3">
                                         {stage.documents.map((doc, i) => (
-                                          <div key={i} className="bg-muted/50 p-2 rounded text-sm">
-                                            <div className="font-medium flex items-center gap-2">
-                                              <FileText className="h-3 w-3" />
-                                              {doc.name}
-                                              <Badge variant={doc.isRequired ? "default" : "secondary"} className="text-xs">
-                                                {doc.isRequired ? "Required" : "Optional"}
-                                              </Badge>
+                                          <div key={doc.id || i} className="bg-muted/50 p-3 rounded-lg space-y-2">
+                                            <div className="flex items-start justify-between">
+                                              <div className="space-y-1">
+                                                <div className="font-medium flex items-center gap-2">
+                                                  <FileText className="h-4 w-4" />
+                                                  {doc.name}
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                  <Badge variant={doc.isRequired ? "default" : "secondary"} className="text-xs">
+                                                    {doc.isRequired ? "Required" : "Optional"}
+                                                  </Badge>
+                                                  <Badge variant="outline" className="text-xs">
+                                                    {doc.documentType}
+                                                  </Badge>
+                                                  {doc.inputType && (
+                                                    <Badge variant="outline" className="text-xs">
+                                                      {doc.inputType}
+                                                    </Badge>
+                                                  )}
+                                                  {doc.kycId && (
+                                                    <Badge variant="success" className="text-xs">
+                                                      KYC Synced
+                                                    </Badge>
+                                                  )}
+                                                </div>
+                                              </div>
                                             </div>
-                                            <div className="text-muted-foreground text-xs">
-                                              Type: {doc.documentType}
-                                            </div>
+
                                             {doc.description && (
-                                              <div className="text-muted-foreground text-xs mt-1">
+                                              <div className="text-muted-foreground text-xs">
                                                 {doc.description}
                                               </div>
                                             )}
+
                                             {doc.extractionSpecs && doc.extractionSpecs.length > 0 && (
-                                              <div className="text-xs text-muted-foreground mt-1">
-                                                <div className="flex items-center gap-1">
+                                              <div className="space-y-2">
+                                                <div className="flex items-center gap-1 text-xs font-medium">
                                                   <Info className="h-3 w-3" />
-                                                  Extractions: {doc.extractionSpecs.map(spec => spec.fieldName).join(', ')}
+                                                  Extraction Fields ({doc.extractionSpecs.length})
+                                                </div>
+                                                <div className="grid grid-cols-1 gap-1">
+                                                  {doc.extractionSpecs.map((spec, specIndex) => (
+                                                    <div key={spec.id || specIndex} className="bg-background p-2 rounded text-xs">
+                                                      <div className="flex items-center justify-between">
+                                                        <span className="font-medium">{spec.fieldName}</span>
+                                                        <div className="flex items-center gap-1">
+                                                          <Badge variant="outline" className="text-xs py-0">
+                                                            {spec.fieldType}
+                                                          </Badge>
+                                                          {spec.isRequired && (
+                                                            <Badge variant="destructive" className="text-xs py-0">
+                                                              Required
+                                                            </Badge>
+                                                          )}
+                                                        </div>
+                                                      </div>
+                                                      {spec.description && (
+                                                        <div className="text-muted-foreground mt-1">
+                                                          {spec.description}
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  ))}
                                                 </div>
                                               </div>
                                             )}
                                           </div>
                                         ))}
                                       </div>
+
+                                      <div className="pt-2 border-t">
+                                        <p className="text-xs text-muted-foreground">
+                                          Documents are automatically synced with the KYC system when stages are saved.
+                                        </p>
+                                      </div>
                                     </div>
                                   </PopoverContent>
                                 </Popover>
                               )}
-
                               {/* Special Time Config Indicator */}
                               {stage.isSpecial && (
                                 <Popover>
@@ -1023,7 +1129,7 @@ export default function Stages() {
                                   // Show controls only if no classes
                                   <div className="grid grid-cols-2 gap-1 p-1">
                                     <div className="flex justify-center">
-                                      <div 
+                                      <div
                                         className="w-full"
                                         data-subdept-id={subdept.id}
                                         data-stage-id={stage.id}
@@ -1037,15 +1143,15 @@ export default function Stages() {
                                             setDepartments(prevDepartments => {
                                               return prevDepartments.map(dept => {
                                                 if (dept.id !== activeTab) return dept;
-                                                
+
                                                 return {
                                                   ...dept,
                                                   subdepartments: dept.subdepartments?.map(sd => {
                                                     if (sd.id !== subdept.id) return sd;
-                                                    
+
                                                     const updatedStages = [...(sd.stages || [])];
                                                     let stageAlloc = updatedStages.find(s => s.stage_id === stage.id);
-                                                    
+
                                                     if (!stageAlloc) {
                                                       stageAlloc = { stage_id: stage.id, applicable: newValue, display: newValue };
                                                       updatedStages.push(stageAlloc);
@@ -1053,7 +1159,7 @@ export default function Stages() {
                                                       stageAlloc.applicable = newValue;
                                                       if (!newValue) stageAlloc.display = false;
                                                     }
-                                                    
+
                                                     return {
                                                       ...sd,
                                                       stages: updatedStages
@@ -1062,12 +1168,12 @@ export default function Stages() {
                                                 };
                                               });
                                             });
-                                            
+
                                             // Then update the database
                                             await handleAllocationChangeInternal(subdept.id, stage.id, newValue);
                                           }}
                                         >
-                                          <SelectTrigger 
+                                          <SelectTrigger
                                             className="h-7 w-full border-0 shadow-none text-xs"
                                             onClick={(e) => e.stopPropagation()}
                                           >

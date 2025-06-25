@@ -22,6 +22,8 @@ import { toast } from "@/hooks/use-toast"
 import { saveClassRequirements, saveSubUploadRequirements } from "./database"
 import type { Department, Requirement, RequirementForm } from "./database"
 import { DepartmentSidebar } from "@/app/(dashboard)/dashboard/departments/main-shared-components/department-sidebar"
+import { EditRequirementDialog } from "./components/EditRequirementDialog"
+import { AddRequirementsDialog } from "./components/AddRequirementsDialog"
 
 interface UploadRequirementsProps {
   departments: Department[]
@@ -38,7 +40,7 @@ interface EditingContext {
   subclassName?: string
 }
 
-// Enhanced requirement interface based on API structure
+// Also update the ApiRequirement interface
 interface ApiRequirement {
   id?: string
   name: string
@@ -47,6 +49,7 @@ interface ApiRequirement {
   order: number
   isVisible: boolean
   isRequired: boolean
+  kycDocumentId?: string // Add this field
 }
 
 interface RequirementTableEntry extends ApiRequirement {
@@ -103,6 +106,10 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     isVisible: true
   })
   const [isReady, setIsReady] = useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [editingRequirement, setEditingRequirement] = useState<ApiRequirement | null>(null)
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [addContext, setAddContext] = useState<EditingContext | null>(null);
 
   useEffect(() => {
     if (departments.length === 0 || isReady) return
@@ -187,9 +194,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       subclassName
     };
 
-    setEditingContext(enhancedContext)
-
-    setEditingContext(enhancedContext)
+    setAddContext(enhancedContext)
     setBulkInput('')
     setNewRequirements([{
       name: '',
@@ -198,7 +203,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       isRequired: true,
       isVisible: true
     }])
-    setIsDialogOpen(true)
+    setIsAddDialogOpen(true)
   }
 
   const handleCloseDialog = () => {
@@ -212,7 +217,53 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       isVisible: true
     }])
   }
+  // Add this function to handle adding new requirements
+  const handleAddRequirements = async (requirements: Omit<ApiRequirement, 'id' | 'order'>[]) => {
+    if (!addContext) return;
 
+    try {
+      setIsSubmitting(true);
+
+      // Get current requirements
+      const currentRequirements = getCurrentRequirementsForContext(addContext) || [];
+
+      // Add new requirements with generated IDs
+      const newRequirementsWithIds = requirements.map((req, index) => ({
+        ...req,
+        id: generateRequirementId(index, currentRequirements),
+        order: currentRequirements.length + index
+      }));
+
+      // Combine with existing requirements
+      const updatedRequirements = [...currentRequirements, ...newRequirementsWithIds];
+
+      // Save to database
+      await saveRequirementsForContext(addContext, updatedRequirements);
+
+      // Refresh the data
+      await refreshDepartments();
+
+      // Close the dialog
+      setIsAddDialogOpen(false);
+
+      // Show success message
+      toast({
+        title: "Success",
+        description: "Requirements added successfully",
+        variant: "default"
+      });
+
+    } catch (error) {
+      console.error('Error adding requirements:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add requirements. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
   const handleDeleteClick = (type: 'subdepartment' | 'class' | 'subclass', index: number) => {
     setDeleteContext({ type, index })
     // Set the current context for deletion
@@ -266,84 +317,181 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   }
 
   const getCurrentRequirementsForContext = (context: EditingContext): ApiRequirement[] | null => {
-    const dept = departments.find(d => d.id === context.departmentId)
-    if (!dept) return null
+    console.log('[getCurrentRequirementsForContext] Getting requirements for context:', JSON.stringify(context, null, 2));
+    
+    try {
+      // Find the department
+      const dept = departments.find(d => 
+        String(d.id) === String(context.departmentId)
+      );
+      
+      if (!dept) {
+        console.error('[getCurrentRequirementsForContext] Department not found:', context.departmentId);
+        return null;
+      }
 
-    const subdept = dept.tm_subdepartments?.find(s => s.id.toString() === context.subdepartmentId)
-    if (!subdept) return null
+      // Find the subdepartment
+      const subdept = dept.tm_subdepartments?.find(s => 
+        String(s.id) === String(context.subdepartmentId)
+      );
+      
+      if (!subdept) {
+        console.error('[getCurrentRequirementsForContext] Subdepartment not found:', context.subdepartmentId);
+        return null;
+      }
 
-    if (context.type === 'subdepartment') {
-      return subdept.upload_requirements || []
-    } else if (context.type === 'class') {
-      const targetClass = subdept.classes?.find(c => c.id.toString() === context.classId)
-      return targetClass?.requirements || []
-    } else if (context.type === 'subclass') {
-      const targetClass = subdept.classes?.find(c => c.id.toString() === context.classId)
-      const targetSubclass = targetClass?.subClasses?.find(sc => sc.id.toString() === context.subclassId)
-      return targetSubclass?.requirements || []
+      // Handle based on context type
+      switch (context.type) {
+        case 'subdepartment':
+          console.log('[getCurrentRequirementsForContext] Found subdepartment requirements:', subdept.upload_requirements || []);
+          return subdept.upload_requirements || [];
+          
+        case 'class':
+          if (!context.classId) {
+            console.error('[getCurrentRequirementsForContext] Missing classId in context');
+            return null;
+          }
+          
+          const targetClass = subdept.classes?.find(c => 
+            String(c.id) === String(context.classId)
+          );
+          
+          if (!targetClass) {
+            console.error('[getCurrentRequirementsForContext] Class not found:', context.classId);
+            return null;
+          }
+          
+          console.log('[getCurrentRequirementsForContext] Found class requirements:', targetClass.requirements || []);
+          return targetClass.requirements || [];
+          
+        case 'subclass':
+          if (!context.classId || !context.subclassId) {
+            console.error('[getCurrentRequirementsForContext] Missing classId or subclassId in context');
+            return null;
+          }
+          
+          const parentClass = subdept.classes?.find(c => 
+            String(c.id) === String(context.classId)
+          );
+          
+          if (!parentClass) {
+            console.error('[getCurrentRequirementsForContext] Parent class not found:', context.classId);
+            return null;
+          }
+          
+          const targetSubclass = parentClass.subClasses?.find(sc => 
+            String(sc.id) === String(context.subclassId)
+          );
+          
+          if (!targetSubclass) {
+            console.error('[getCurrentRequirementsForContext] Subclass not found:', context.subclassId);
+            return null;
+          }
+          
+          console.log('[getCurrentRequirementsForContext] Found subclass requirements:', targetSubclass.requirements || []);
+          return targetSubclass.requirements || [];
+          
+        default:
+          console.error('[getCurrentRequirementsForContext] Unknown context type:', context.type);
+          return null;
+      }
+    } catch (error) {
+      console.error('[getCurrentRequirementsForContext] Error getting requirements:', error);
+      return null;
     }
-
-    return null
   }
 
   const saveRequirementsForContext = async (context: EditingContext, requirements: ApiRequirement[]) => {
-    let classId = '';
-    let requirementType = '';
+    console.log('[saveRequirementsForContext] Starting save with context:', JSON.stringify(context, null, 2));
+    console.log('[saveRequirementsForContext] Requirements to save:', JSON.stringify(requirements, null, 2));
+    
+    try {
+      let classId = '';
+      let requirementType = '';
+      
+      if (context.type === 'subdepartment') {
+        classId = context.subdepartmentId;
+        requirementType = 'subdepartment';
+      } else if (context.type === 'class') {
+        classId = `${context.subdepartmentId}_${context.classId}`;
+        requirementType = 'class';
+      } else if (context.type === 'subclass') {
+        classId = `${context.subdepartmentId}_${context.classId}_${context.subclassId}`;
+        requirementType = 'subclass';
+      }
 
-    if (context.type === 'subdepartment') {
-      classId = context.subdepartmentId;
-      requirementType = 'subdepartment';
-    } else if (context.type === 'class') {
-      classId = `${context.subdepartmentId}_${context.classId}`;
-      requirementType = 'class';
-    } else if (context.type === 'subclass') {
-      classId = `${context.subdepartmentId}_${context.classId}_${context.subclassId}`;
-      requirementType = 'subclass';
-    }
+      console.log(`[saveRequirementsForContext] Generated classId: ${classId}, type: ${requirementType}`);
 
-    // First, check if the record exists
-    const { data: existingRecord, error: fetchError } = await supabase
-      .from('tm_class_requirements')
-      .select('*')
-      .eq('class_id', classId)
-      .eq('type', requirementType)
-      .single();
-
-    if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "No rows found"
-      throw fetchError;
-    }
-
-    if (existingRecord) {
-      // Update existing record
-      const { error: updateError } = await supabase
+      console.log('[saveRequirementsForContext] Checking for existing record...');
+      const { data: existingRecord, error: fetchError } = await supabase
         .from('tm_class_requirements')
-        .update({
-          requirements: requirements,
-          updated_at: new Date().toISOString()
-        })
+        .select('*')
         .eq('class_id', classId)
-        .eq('type', requirementType);
+        .eq('type', requirementType)
+        .single();
 
-      if (updateError) throw updateError;
-    } else {
-      // Insert new record
-      const { error: insertError } = await supabase
-        .from('tm_class_requirements')
-        .insert({
-          class_id: classId,
-          type: requirementType,
-          requirements: requirements,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        console.error('[saveRequirementsForContext] Error fetching existing record:', fetchError);
+        throw fetchError;
+      }
 
-      if (insertError) throw insertError;
+      console.log('[saveRequirementsForContext] Existing record:', existingRecord || 'No existing record found');
+
+      // Ensure kycDocumentId is preserved
+      const requirementsToSave = requirements.map(req => ({
+        ...req,
+        kycDocumentId: req.kycDocumentId || undefined
+      }));
+
+      console.log('[saveRequirementsForContext] All processed requirements:', JSON.stringify(requirementsToSave, null, 2));
+
+      if (existingRecord) {
+        console.log('[saveRequirementsForContext] Updating existing record...');
+        const { data: updatedRecord, error: updateError } = await supabase
+          .from('tm_class_requirements')
+          .update({
+            requirements: requirementsToSave,
+            updated_at: new Date().toISOString()
+          })
+          .eq('class_id', classId)
+          .eq('type', requirementType)
+          .select();
+
+        if (updateError) {
+          console.error('[saveRequirementsForContext] Error updating requirements:', updateError);
+          throw updateError;
+        }
+        console.log('[saveRequirementsForContext] Update successful, response:', updatedRecord);
+      } else {
+        console.log('[saveRequirementsForContext] Inserting new record...');
+        const { data: insertedRecord, error: insertError } = await supabase
+          .from('tm_class_requirements')
+          .insert({
+            class_id: classId,
+            type: requirementType,
+            requirements: requirementsToSave,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .select();
+
+        if (insertError) {
+          console.error('[saveRequirementsForContext] Error inserting requirements:', insertError);
+          throw insertError;
+        }
+        console.log('[saveRequirementsForContext] Insert successful, response:', insertedRecord);
+      }
+
+      console.log('[saveRequirementsForContext] Requirements saved successfully');
+      return true;
+    } catch (error) {
+      console.error('[saveRequirementsForContext] Error:', error);
+      throw error; // Re-throw to be handled by the caller
     }
   }
 
   const refreshDepartments = async () => {
     try {
-      // Fixed query - removed the incorrect join and use correct column names
       const { data: departmentsData, error } = await supabase
         .from('tm_departments')
         .select('*, tm_subdepartments(*)')
@@ -351,7 +499,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
 
       if (error) throw error
 
-      // Fetch all requirements from the API structure
       const { data: requirements, error: reqError } = await supabase
         .from('tm_class_requirements')
         .select('*')
@@ -359,20 +506,14 @@ export default function UploadRequirements({ departments: initialDepartments }: 
 
       if (reqError) throw reqError
 
-
-
-      // Process departments and their requirements according to API structure
+      // Process departments and include KYC document IDs in requirements
       const processedDepartments = departmentsData.map(dept => {
         const subdepartments = (dept.tm_subdepartments || []).map(subdept => {
-          // Process classes from JSONB column
           const classes = (subdept.classes || []).map(cls => {
             const classId = `${subdept.id}_${cls.id}`
-
-            // Find class requirements from API
             const classRequirementsRecord = requirements?.find(req =>
               req.class_id === classId && req.type === 'class'
             )
-
 
             const classRequirements = classRequirementsRecord?.requirements?.map((r: any, idx: number) => ({
               id: r.id?.toString() || generateRequirementId(idx, classRequirementsRecord.requirements),
@@ -381,14 +522,12 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               type: r.type || 'standard',
               order: r.order || idx,
               isVisible: r.isVisible !== false,
-              isRequired: r.isRequired !== false
+              isRequired: r.isRequired !== false,
+              kycDocumentId: r.kycDocumentId || undefined // Include KYC document ID
             })) || []
 
-            // Process subclasses from JSONB
             const subClasses = (cls.subClasses || []).map(subCls => {
               const subClassId = `${classId}_${subCls.id}`
-
-              // Find subclass requirements from API
               const subClassRequirementsRecord = requirements?.find(req =>
                 req.class_id === subClassId && req.type === 'subclass'
               )
@@ -400,7 +539,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                 type: r.type || 'standard',
                 order: r.order || idx,
                 isVisible: r.isVisible !== false,
-                isRequired: r.isRequired !== false
+                isRequired: r.isRequired !== false,
+                kycDocumentId: r.kycDocumentId || undefined // Include KYC document ID
               })) || []
 
               return {
@@ -417,11 +557,9 @@ export default function UploadRequirements({ departments: initialDepartments }: 
             }
           })
 
-          // Process subdepartment requirements
           const subdeptRequirementsRecord = requirements?.find(req =>
             req.class_id === subdept.id.toString() && req.type === 'subdepartment'
           )
-
 
           const uploadRequirements = subdeptRequirementsRecord?.requirements?.map((r: any, idx: number) => ({
             id: r.id?.toString() || generateRequirementId(idx, subdeptRequirementsRecord.requirements),
@@ -430,7 +568,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
             type: r.type || 'standard',
             order: r.order || idx,
             isVisible: r.isVisible !== false,
-            isRequired: r.isRequired !== false
+            isRequired: r.isRequired !== false,
+            kycDocumentId: r.kycDocumentId || undefined // Include KYC document ID
           })) || []
 
           return {
@@ -443,14 +582,13 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         return {
           ...dept,
           tm_subdepartments: subdepartments,
-          subdepartments: subdepartments // For backward compatibility
+          subdepartments: subdepartments
         }
       })
 
-
       setDepartments(processedDepartments)
     } catch (error) {
-      console.error('Error refreshing departments')
+      console.error('Error refreshing departments:', error)
       toast({
         title: "Error",
         description: "Failed to refresh departments. Please try again.",
@@ -515,182 +653,19 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     setNewRequirements(requirements)
   }
 
-  const handleAddMultipleRequirements = async () => {
-    if (!editingContext) return
-
-    const validRequirements = newRequirements.filter(req => req.name.trim() !== '')
-    if (validRequirements.length === 0) {
-      handleCloseDialog()
-      return
-    }
-
-    try {
-      setIsSubmitting(true)
-
-      // Get existing requirements based on context
-      let classId = '';
-      let existingRequirements: any[] = [];
-      let requirementType = '';
-
-      if (editingContext.type === 'subdepartment') {
-        classId = editingContext.subdepartmentId;
-        requirementType = 'subdepartment';
-      } else if (editingContext.type === 'class') {
-        classId = `${editingContext.subdepartmentId}_${editingContext.classId}`;
-        requirementType = 'class';
-      } else if (editingContext.type === 'subclass') {
-        classId = `${editingContext.subdepartmentId}_${editingContext.classId}_${editingContext.subclassId}`;
-        requirementType = 'subclass';
-      }
-
-      // First, try to get existing requirements
-      const { data: existingReqs, error: fetchError } = await supabase
-        .from('tm_class_requirements')
-        .select('*')
-        .eq('class_id', classId)
-        .eq('type', requirementType)
-        .single();
-
-      if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "No rows found"
-        throw fetchError;
-      }
-
-
-      existingRequirements = existingReqs?.requirements || [];
-
-      // Prepare new requirements with proper IDs and order following API structure
-      const newRequirementsWithIds = validRequirements.map((req, index) => {
-        const newId = generateRequirementId(index, existingRequirements);
-        return {
-          id: newId,
-          name: req.name.trim(),
-          description: req.description.trim() || '',
-          type: req.type,
-          order: existingRequirements.length + index,
-          isVisible: req.isVisible,
-          isRequired: req.isRequired
-        };
-      });
-
-      // Combine existing and new requirements
-      const updatedRequirements = [...existingRequirements, ...newRequirementsWithIds];
-
-      // Prepare the data to upsert
-      const recordData = {
-        class_id: classId,
-        type: requirementType,
-        requirements: updatedRequirements,
-        updated_at: new Date().toISOString()
-      };
-
-      // Use upsert with onConflict to handle the unique constraint
-      const { error } = await supabase
-        .from('tm_class_requirements')
-        .upsert(recordData, {
-          onConflict: 'class_id',
-          ignoreDuplicates: false
-        });
-
-      if (error) throw error;
-
-      await refreshDepartments()
-
-      toast({
-        title: "Success",
-        description: `Added ${validRequirements.length} requirement${validRequirements.length > 1 ? 's' : ''} successfully`,
-        variant: "default"
-      })
-
-      handleCloseDialog()
-
-    } catch (error) {
-      console.error('Error adding requirements:', error)
-      toast({
-        title: "Error",
-        description: "Failed to add requirements. Please try again.",
-        variant: "destructive"
-      })
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
+  // Update the renderRequirements function to use the new edit dialog
   const renderRequirements = (requirements: RequirementTableEntry[] | null | undefined, context: EditingContext) => {
-    // Ensure requirements is always an array
     const safeRequirements = requirements || [];
 
-    const handleEdit = (index: number) => {
-      setEditingIndex(index)
-      setEditForm({
-        name: safeRequirements[index].name,
-        description: safeRequirements[index].description || '',
-        type: safeRequirements[index].type || 'standard',
-        isRequired: safeRequirements[index].isRequired !== false,
-        isVisible: safeRequirements[index].isVisible !== false
-      })
+    // Remove the old inline edit logic and update the edit button
+    const handleEditClick = (index: number) => {
+      const requirement = safeRequirements[index]
+      setEditingRequirement(requirement)
+      setEditingContext(context)
+      setIsEditDialogOpen(true)
     }
 
-    const handleSaveEdit = async () => {
-      if (editingIndex === null || !editingContext) return
-
-      try {
-        const updatedRequirements = [...safeRequirements]
-        updatedRequirements[editingIndex] = {
-          ...updatedRequirements[editingIndex],
-          name: editForm.name.trim(),
-          description: editForm.description.trim(),
-          type: editForm.type,
-          isRequired: editForm.isRequired,
-          isVisible: editForm.isVisible
-        }
-
-        await saveRequirementsForContext(context, updatedRequirements)
-        await refreshDepartments()
-        setEditingIndex(null)
-
-        toast({
-          title: "Success",
-          description: "Requirement updated successfully",
-          variant: "default"
-        })
-
-      } catch (error) {
-        console.error('Error updating requirement')
-        toast({
-          title: "Error",
-          description: "Failed to update requirement. Please try again.",
-          variant: "destructive"
-        })
-      }
-    }
-
-    const handleMove = async (index: number, direction: 'up' | 'down') => {
-      const newIndex = direction === 'up' ? index - 1 : index + 1
-      if (newIndex < 0 || newIndex >= safeRequirements.length) return
-
-      try {
-        const updatedRequirements = [...safeRequirements]
-          ;[updatedRequirements[index], updatedRequirements[newIndex]] =
-            [updatedRequirements[newIndex], updatedRequirements[index]]
-
-        // Update order values
-        updatedRequirements.forEach((req, i) => {
-          req.order = i
-        })
-
-        await saveRequirementsForContext(context, updatedRequirements)
-        await refreshDepartments()
-
-      } catch (error) {
-        console.error('Error moving requirement')
-        toast({
-          title: "Error",
-          description: "Failed to move requirement. Please try again.",
-          variant: "destructive"
-        })
-      }
-    }
-
+    // Update the table to remove inline editing
     return (
       <div className="relative border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm flex-1 flex flex-col h-full">
         <div className="flex flex-col h-full">
@@ -701,7 +676,9 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                   <TableHead className="w-12 text-white border-r">#</TableHead>
                   <TableHead className="flex-1 text-white border-r">Requirement</TableHead>
                   <TableHead className="flex-1 text-white border-r">Description</TableHead>
-                  <TableHead className="w-56 text-white">Actions</TableHead>
+                  <TableHead className="w-24 text-white border-r">Document</TableHead>
+                  <TableHead className="w-32 text-white border-r">Properties</TableHead>
+                  <TableHead className="w-48 text-white">Actions</TableHead>
                 </TableRow>
               </TableHeader>
             </Table>
@@ -717,130 +694,76 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                           </span>
                         </TableCell>
                         <TableCell className="border-r flex-1">
-                          {editingIndex === idx ? (
-                            <Input
-                              value={editForm.name}
-                              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                              className="h-9 w-full"
-                              autoFocus
-                            />
-                          ) : (
-                            <span className="font-medium">{req.name}</span>
-                          )}
+                          <span className="font-medium">{req.name}</span>
                         </TableCell>
                         <TableCell className="border-r flex-1">
-                          {editingIndex === idx ? (
-                            <Input
-                              value={editForm.description}
-                              onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                              className="h-9 w-full"
-                              placeholder="Description"
-                              onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
-                            />
-                          ) : (
-                            <span className={!req.description ? 'text-gray-400 italic' : ''}>
-                              {req.description || 'No description'}
-                            </span>
-                          )}
+                          <span className={!req.description ? 'text-gray-400 italic' : ''}>
+                            {req.description || 'No description'}
+                          </span>
                         </TableCell>
-                        {/* <TableCell className="border-r ">
-                    {editingIndex === idx ? (
-                      <div className="flex flex-col space-y-1">
-                        <label className="flex items-center space-x-1">
-                          <Checkbox
-                            checked={editForm.isRequired}
-                            onCheckedChange={(checked) => setEditForm({ ...editForm, isRequired: Boolean(checked) })}
-                          />
-                          <span className="text-xs">Required</span>
-                        </label>
-                        <label className="flex items-center space-x-1">
-                          <Checkbox
-                            checked={editForm.isVisible}
-                            onCheckedChange={(checked) => setEditForm({ ...editForm, isVisible: Boolean(checked) })}
-                          />
-                          <span className="text-xs">Visible</span>
-                        </label>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col space-y-1">
-                        <div className="flex items-center space-x-1">
-                          {req.isRequired ? (
-                            <AlertTriangle className="h-3 w-3 text-red-500" />
-                          ) : (
-                            <div className="h-3 w-3" />
-                          )}
-                          <span className="text-xs">{req.isRequired ? 'Required' : 'Optional'}</span>
-                        </div>
-                        <div className="flex items-center space-x-1">
-                          {req.isVisible ? (
-                            <Eye className="h-3 w-3 text-green-500" />
-                          ) : (
-                            <EyeOff className="h-3 w-3 text-gray-400" />
-                          )}
-                          <span className="text-xs">{req.isVisible ? 'Visible' : 'Hidden'}</span>
-                        </div>
-                      </div>
-                    )}
-                  </TableCell> */}
-                        <TableCell className="w-56">
-                          <div className="flex items-center space-x-1 justify-end">
-                            {editingIndex === idx ? (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0 text-green-600"
-                                  onClick={handleSaveEdit}
-                                >
-                                  <Check className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0"
-                                  onClick={() => setEditingIndex(null)}
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
-                              </>
+                        <TableCell className="border-r w-24">
+                          <div className="flex items-center justify-center">
+                            {req.kycDocumentId ? (
+                              <div className="flex items-center gap-1">
+                                <FileText className="h-4 w-4 text-green-600" />
+                                <span className="text-xs text-green-600">Linked</span>
+                              </div>
                             ) : (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0 text-blue-600"
-                                  onClick={() => handleEdit(idx)}
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0"
-                                  onClick={() => handleMove(idx, 'up')}
-                                  disabled={idx === 0}
-                                >
-                                  <ArrowUp className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0"
-                                  onClick={() => handleMove(idx, 'down')}
-                                  disabled={idx === safeRequirements.length - 1}
-                                >
-                                  <ArrowDown className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0 text-red-500"
-                                  onClick={() => handleDeleteClick(context.type, idx)}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
-                              </>
+                              <div className="flex items-center gap-1">
+                                <FileText className="h-4 w-4 text-gray-400" />
+                                <span className="text-xs text-gray-400">None</span>
+                              </div>
                             )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="border-r w-32">
+                          <div className="flex flex-col space-y-1">
+                            <div className="flex items-center gap-1">
+                              <span className={`w-2 h-2 rounded-full ${req.isRequired ? 'bg-red-500' : 'bg-gray-400'}`}></span>
+                              <span className="text-xs">{req.isRequired ? 'Required' : 'Optional'}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className={`w-2 h-2 rounded-full ${req.isVisible ? 'bg-green-500' : 'bg-gray-400'}`}></span>
+                              <span className="text-xs">{req.isVisible ? 'Visible' : 'Hidden'}</span>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="w-48">
+                          <div className="flex items-center space-x-1 justify-end">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-blue-600"
+                              onClick={() => handleEditClick(idx)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => handleMove(idx, 'up')}
+                              disabled={idx === 0}
+                            >
+                              <ArrowUp className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => handleMove(idx, 'down')}
+                              disabled={idx === safeRequirements.length - 1}
+                            >
+                              <ArrowDown className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-red-500"
+                              onClick={() => handleDeleteClick(context.type, idx)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -864,7 +787,129 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       </div>
     )
   }
+  const handleSaveRequirement = async (updatedRequirement: ApiRequirement) => {
+    console.log('[handleSaveRequirement] Starting with requirement:', JSON.stringify(updatedRequirement, null, 2));
+    console.log('[handleSaveRequirement] Current editing context:', editingContext);
+    
+    if (!editingContext) {
+      console.error('[handleSaveRequirement] No editing context available');
+      toast({
+        title: "Error",
+        description: "No editing context available. Please refresh the page and try again.",
+        variant: "destructive"
+      });
+      return;
+    }
 
+    try {
+      // First, refresh the departments to ensure we have the latest data
+      console.log('[handleSaveRequirement] Refreshing departments to get latest data...');
+      await refreshDepartments();
+      
+      // Get current requirements for the context
+      const currentRequirements = getCurrentRequirementsForContext(editingContext) || [];
+      console.log('[handleSaveRequirement] Current requirements:', JSON.stringify(currentRequirements, null, 2));
+      
+      // If we still have no requirements, try to create a new one
+      if (currentRequirements.length === 0) {
+        console.log('[handleSaveRequirement] No existing requirements found, creating new one...');
+        const newRequirements = [{
+          ...updatedRequirement,
+          id: updatedRequirement.id || Date.now().toString(),
+          order: 0
+        }];
+        
+        console.log('[handleSaveRequirement] Creating new requirements:', JSON.stringify(newRequirements, null, 2));
+        const saveResult = await saveRequirementsForContext(editingContext, newRequirements);
+        console.log('[handleSaveRequirement] saveRequirementsForContext result:', saveResult);
+        
+        await refreshDepartments();
+        
+        // Reset the dialog state
+        setIsEditDialogOpen(false);
+        setEditingRequirement(null);
+        
+        toast({
+          title: "Success",
+          description: "Requirement created successfully",
+          variant: "default"
+        });
+        
+        return;
+      }
+      
+      // Try to find the requirement to update
+      let requirementIndex = -1;
+      
+      // First try to find by ID if it exists
+      if (updatedRequirement.id) {
+        requirementIndex = currentRequirements.findIndex(req => 
+          String(req.id) === String(updatedRequirement.id)
+        );
+      }
+      
+      // If not found by ID, try to find by name as fallback
+      if (requirementIndex === -1) {
+        requirementIndex = currentRequirements.findIndex(req => 
+          req.name === updatedRequirement.name
+        );
+      }
+      
+      console.log('[handleSaveRequirement] Found requirement at index:', requirementIndex);
+
+      let updatedRequirements = [...currentRequirements];
+      
+      // If requirement not found, add it as a new one
+      if (requirementIndex === -1) {
+        console.log('[handleSaveRequirement] Requirement not found, adding as new');
+        updatedRequirements = [
+          ...currentRequirements,
+          {
+            ...updatedRequirement,
+            id: updatedRequirement.id || Date.now().toString(),
+            order: currentRequirements.length
+          }
+        ];
+      } else {
+        // Update existing requirement
+        console.log('[handleSaveRequirement] Updating existing requirement');
+        updatedRequirements[requirementIndex] = {
+          ...updatedRequirements[requirementIndex],
+          ...updatedRequirement,
+          // Preserve the original ID if the updated one is undefined
+          id: updatedRequirement.id || updatedRequirements[requirementIndex].id
+        };
+      }
+      
+      console.log('[handleSaveRequirement] Updated requirements array:', JSON.stringify(updatedRequirements, null, 2));
+
+      console.log('[handleSaveRequirement] Calling saveRequirementsForContext...');
+      const saveResult = await saveRequirementsForContext(editingContext, updatedRequirements);
+      console.log('[handleSaveRequirement] saveRequirementsForContext result:', saveResult);
+      
+      console.log('[handleSaveRequirement] Refreshing departments...');
+      await refreshDepartments();
+
+      // Reset the dialog state
+      setIsEditDialogOpen(false);
+      setEditingRequirement(null);
+
+      toast({
+        title: "Success",
+        description: "Requirement saved successfully",
+        variant: "default"
+      });
+
+      console.log('[handleSaveRequirement] Update completed successfully');
+    } catch (error) {
+      console.error('[handleSaveRequirement] Error updating requirement:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to save requirement. Please try again.",
+        variant: "destructive"
+      });
+    }
+  }
   const handleDeptClick = (deptId: string) => {
     setActiveDept(deptId);
   };
@@ -1105,177 +1150,21 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       </Dialog>
 
       {/* Add Requirements Dialog */}
-      <Dialog open={isDialogOpen && !!editingContext} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>Add Requirements</DialogTitle>
-            <DialogDescription className="space-y-2">
-              <div className="space-y-1">
-                <div className="font-medium">
-                  {editingContext?.type === 'subdepartment' ? (
-                    `Adding requirements to ${editingContext?.subdepartmentName || 'subdepartment'}`
-                  ) : editingContext?.type === 'class' ? (
-                    `Adding requirements to class: ${editingContext?.className || ''}`
-                  ) : (
-                    `Adding requirements to sub-class: ${editingContext?.subclassName || ''}`
-                  )}
-                </div>
-                <div className="text-sm text-gray-600">
-                  {editingContext?.subdepartmentName && (
-                    <span>{editingContext.subdepartmentName} </span>
-                  )}
-                  {editingContext?.className && (
-                    <span>› {editingContext.className} </span>
-                  )}
-                  {editingContext?.subclassName && (
-                    <span>› {editingContext.subclassName}</span>
-                  )}
-                </div>
-              </div>
-
-              {editingContext && (() => {
-                const dept = departments.find(d => d.id === editingContext.departmentId);
-                if (!dept) return null;
-
-                const subdept = dept.tm_subdepartments?.find(s => s.id.toString() === editingContext.subdepartmentId);
-                if (!subdept) return null;
-
-                let classItem = null;
-                let subclassItem = null;
-
-                if (editingContext.classId) {
-                  classItem = subdept.classes?.find(c => c.id.toString() === editingContext.classId);
-
-                  if (editingContext.subclassId && classItem) {
-                    subclassItem = classItem.subClasses?.find(sc => sc.id.toString() === editingContext.subclassId);
-                  }
-                }
-
-                return (
-                  <div className="space-y-1 pt-2 text-sm">
-                    <div className="font-medium">{dept.name} &gt; {subdept.name}</div>
-                    {classItem && (
-                      <div className="pl-4">
-                        • {classItem.name}
-                        {subclassItem && (
-                          <span> &gt; {subclassItem.name}</span>
-                        )}
-                      </div>
-                    )}
-                    {editingContext.type === 'subdepartment' && (
-                      <div className="text-xs text-gray-500">{subdept.description}</div>
-                    )}
-                    {editingContext.type === 'class' && classItem?.description && (
-                      <div className="text-xs text-gray-500">{classItem.description}</div>
-                    )}
-                    {editingContext.type === 'subclass' && subclassItem?.description && (
-                      <div className="text-xs text-gray-500">{subclassItem.description}</div>
-                    )}
-                  </div>
-                );
-              })()}
-            </DialogDescription>
-          </DialogHeader>
-
-          <Tabs defaultValue="single" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="single">Single Entry</TabsTrigger>
-              <TabsTrigger value="bulk">Bulk Entry</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="single" className="space-y-4 pt-4">
-              <div className="flex justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addNewRequirement()}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Row
-                </Button>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="bulk" className="space-y-4 pt-4">
-              <div className="space-y-2">
-                <Label htmlFor="bulk-requirements">Paste multiple requirements (one per line)</Label>
-                <Textarea
-                  id="bulk-requirements"
-                  value={bulkInput}
-                  onChange={(e) => handleBulkInput(e.target.value)}
-                  placeholder={`Requirement 1\nRequirement 2\nRequirement 3`}
-                  className="min-h-[150px]"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Enter one requirement per line. Each line will become a separate requirement.
-                </p>
-              </div>
-            </TabsContent>
-          </Tabs>
-
-          <div className="space-y-4 max-h-96 overflow-y-auto border rounded-lg p-4 mt-4">
-            {newRequirements.map((req, idx) => (
-              <div key={idx} className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-3">
-                <div className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-6">
-                    <Label htmlFor={`name-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
-                      Requirement Name
-                    </Label>
-                    <Input
-                      id={`name-${idx}`}
-                      value={req.name}
-                      onChange={(e) => handleNewRequirementChange(idx, 'name', e.target.value)}
-                      placeholder="Enter requirement name"
-                    />
-                  </div>
-                  <div className="col-span-5">
-                    <Label htmlFor={`desc-${idx}`} className={idx > 0 ? 'sr-only' : ''}>
-                      Description
-                    </Label>
-                    <Input
-                      id={`desc-${idx}`}
-                      value={req.description}
-                      onChange={(e) => handleNewRequirementChange(idx, 'description', e.target.value)}
-                      placeholder="Description (optional)"
-                    />
-                  </div>
-                  <div className="col-span-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 text-red-500"
-                      onClick={() => removeNewRequirement(idx)}
-                      disabled={newRequirements.length <= 1}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={handleCloseDialog}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleAddMultipleRequirements}
-              disabled={!newRequirements.some(req => req.name.trim() !== '') || isSubmitting}
-            >
-              {isSubmitting ? (
-                <>
-                  <div className="animate-spin -ml-1 mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                  Adding...
-                </>
-              ) : (
-                `Add ${newRequirements.filter(req => req.name.trim() !== '').length} Requirements`
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AddRequirementsDialog
+        isOpen={isAddDialogOpen}
+        onOpenChange={setIsAddDialogOpen}
+        onSubmit={handleAddRequirements}
+        isSubmitting={isSubmitting}
+        context={addContext}
+      />
+      <EditRequirementDialog
+        isOpen={isEditDialogOpen}
+        onOpenChange={setIsEditDialogOpen}
+        requirement={editingRequirement}
+        onSave={handleSaveRequirement}
+        isSubmitting={isSubmitting}
+        context={editingContext}
+      />
     </div>
   )
 }
