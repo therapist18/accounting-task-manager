@@ -77,8 +77,15 @@ export default function Stages() {
   const [editingStage, setEditingStage] = useState<Stage | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
-
   const { toast } = useToast()
+
+  // Handle key down for keyboard navigation
+  const handleKeyDown = (e: React.KeyboardEvent, subdeptId: number, stageId: string, shouldAllocate: boolean) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      handleAllocationChangeInternal(subdeptId, stageId, shouldAllocate)
+    }
+  }
 
   const toggleRowExpansion = (rowId: string) => {
     setExpandedRows(prev => {
@@ -152,6 +159,11 @@ export default function Stages() {
     })),
     [departments]
   )
+
+  // Handle allocation change internal (for immediate updates)
+  const handleAllocationChangeInternal = async (subdeptId: number, stageId: string, shouldAllocate: boolean) => {
+    return handleAllocationChange(subdeptId, stageId, shouldAllocate)
+  }
 
   // Handle allocation change
   const handleAllocationChange = async (subdeptId: number, stageId: string, shouldAllocate: boolean, classIndex: number | null = null, subclassIndex: number | null = null) => {
@@ -920,7 +932,7 @@ export default function Stages() {
                     {/* Duration Row */}
                     <TableRow className="bg-blue-50">
                       <TableHead className="sticky left-0 bg-blue-600 border-r z-40 text-white">Duration</TableHead>
-                      {dept.stages.map((stage) => {
+                      {dept.stages.map(stage => {
                         const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
                         return (
                           <TableHead key={`duration-${stage.id}`} className="border-r text-center bg-blue-500">
@@ -938,7 +950,7 @@ export default function Stages() {
                     {/* Follow Up Row */}
                     <TableRow className="bg-blue-50">
                       <TableHead className="sticky left-0 bg-blue-600 border-r z-40 text-white">Follow Up</TableHead>
-                      {dept.stages.map((stage) => (
+                      {dept.stages.map(stage => (
                         <TableHead key={`followup-${stage.id}`} className="border-r text-center bg-blue-500">
                           <div className="font-bold text-sm text-white">
                             {stage.follow_up || '-'}
@@ -950,7 +962,7 @@ export default function Stages() {
                     {/* Applicable/Display Headers Row */}
                     <TableRow className="bg-blue-100">
                       <TableHead className="sticky left-0 bg-blue-600 border-r z-40"></TableHead>
-                      {dept.stages.map((stage) => (
+                      {dept.stages.map(stage => (
                         <TableHead key={`controls-${stage.id}`} className="border-r bg-blue-500">
                           <div className="grid grid-cols-2 gap-1 p-1">
                             <div className="text-center text-xs font-medium text-white">
@@ -1011,30 +1023,77 @@ export default function Stages() {
                                   // Show controls only if no classes
                                   <div className="grid grid-cols-2 gap-1 p-1">
                                     <div className="flex justify-center">
-                                      <Select
-                                        value={hasAllocation ? 'applicable' : 'not-applicable'}
-                                        onValueChange={(value) =>
-                                          handleAllocationChange(subdept.id, stage.id, value === 'applicable')
-                                        }
+                                      <div 
+                                        className="w-full"
+                                        data-subdept-id={subdept.id}
+                                        data-stage-id={stage.id}
+                                        onKeyDown={(e) => handleKeyDown(e, subdept.id, stage.id, !hasAllocation)}
                                       >
-                                        <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs">
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          <SelectItem value="applicable">
-                                            <div className="flex items-center gap-2">
-                                              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                              Applicable
-                                            </div>
-                                          </SelectItem>
-                                          <SelectItem value="not-applicable">
-                                            <div className="flex items-center gap-2">
-                                              <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                              Not Applicable
-                                            </div>
-                                          </SelectItem>
-                                        </SelectContent>
-                                      </Select>
+                                        <Select
+                                          value={hasAllocation ? 'applicable' : 'not-applicable'}
+                                          onValueChange={async (value) => {
+                                            const newValue = value === 'applicable';
+                                            // Optimistically update the UI
+                                            setDepartments(prevDepartments => {
+                                              return prevDepartments.map(dept => {
+                                                if (dept.id !== activeTab) return dept;
+                                                
+                                                return {
+                                                  ...dept,
+                                                  subdepartments: dept.subdepartments?.map(sd => {
+                                                    if (sd.id !== subdept.id) return sd;
+                                                    
+                                                    const updatedStages = [...(sd.stages || [])];
+                                                    let stageAlloc = updatedStages.find(s => s.stage_id === stage.id);
+                                                    
+                                                    if (!stageAlloc) {
+                                                      stageAlloc = { stage_id: stage.id, applicable: newValue, display: newValue };
+                                                      updatedStages.push(stageAlloc);
+                                                    } else {
+                                                      stageAlloc.applicable = newValue;
+                                                      if (!newValue) stageAlloc.display = false;
+                                                    }
+                                                    
+                                                    return {
+                                                      ...sd,
+                                                      stages: updatedStages
+                                                    };
+                                                  }) || []
+                                                };
+                                              });
+                                            });
+                                            
+                                            // Then update the database
+                                            await handleAllocationChangeInternal(subdept.id, stage.id, newValue);
+                                          }}
+                                        >
+                                          <SelectTrigger 
+                                            className="h-7 w-full border-0 shadow-none text-xs"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <SelectValue>
+                                              <div className="flex items-center gap-1">
+                                                <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                                <span className="ml-1">{hasAllocation ? 'Applicable' : 'Not Applicable'}</span>
+                                              </div>
+                                            </SelectValue>
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="applicable">
+                                              <div className="flex items-center gap-2">
+                                                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                                <span>Applicable</span>
+                                              </div>
+                                            </SelectItem>
+                                            <SelectItem value="not-applicable">
+                                              <div className="flex items-center gap-2">
+                                                <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                                <span>Not Applicable</span>
+                                              </div>
+                                            </SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
                                     </div>
                                     <div className="flex justify-center items-center">
                                       <Checkbox

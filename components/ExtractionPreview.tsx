@@ -76,8 +76,7 @@ const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
     </div>
   )
 }
-
-export const ExtractionPreview = ({
+const ExtractionPreview = ({
   documentName,
   extractedData,
   fields = [],
@@ -320,3 +319,4 @@ export const ExtractionPreview = ({
     </Dialog>
   );
 };
+export default ExtractionPreview;

@@ -837,17 +837,40 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
         </TableCell>
         
         {/* Extra Consideration */}
-        <TableCell className="border-r p-2 text-center">
-          <Checkbox
-            checked={entry.extraConsideration.applicable}
-            onCheckedChange={(checked) => updateRateEntry(entry.id, {
+        <TableCell className="border-r p-2">
+          <Select
+            value={entry.extraConsideration.applicable ? "applicable" : "not-applicable"}
+            onValueChange={(value) => updateRateEntry(entry.id, {
               extraConsideration: {
                 ...entry.extraConsideration,
-                applicable: checked as boolean
+                applicable: value === "applicable"
               }
             })}
             disabled={isReadOnly}
-          />
+          >
+            <SelectTrigger className="h-8 w-full border-0 shadow-none text-xs">
+              <SelectValue>
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${entry.extraConsideration.applicable ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                  {entry.extraConsideration.applicable ? 'Applicable' : 'Not Applicable'}
+                </div>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="applicable">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  Applicable
+                </div>
+              </SelectItem>
+              <SelectItem value="not-applicable">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                  Not Applicable
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </TableCell>
         <TableCell className="border-r p-2">
           <Input
@@ -922,16 +945,39 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
         
         {/* Convenience Fee */}
         <TableCell className="border-r p-2 text-center">
-          <Checkbox
-            checked={entry.convenienceFee.applicable}
-            onCheckedChange={(checked) => updateRateEntry(entry.id, {
+          <Select
+            value={entry.convenienceFee.applicable ? "applicable" : "not-applicable"}
+            onValueChange={(value) => updateRateEntry(entry.id, {
               convenienceFee: {
                 ...entry.convenienceFee,
-                applicable: checked as boolean
+                applicable: value === "applicable"
               }
             })}
             disabled={isReadOnly}
-          />
+          >
+            <SelectTrigger className="h-8 w-full border-0 shadow-none text-xs">
+              <SelectValue>
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${entry.convenienceFee.applicable ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                  {entry.convenienceFee.applicable ? 'Applicable' : 'Not Applicable'}
+                </div>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="applicable">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  Applicable
+                </div>
+              </SelectItem>
+              <SelectItem value="not-applicable">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                  Not Applicable
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </TableCell>
         <TableCell className="border-r p-2">
           <Input
@@ -1701,12 +1747,27 @@ function renderRateRow(entry: RateEntry, index: string, isChild: boolean) {
           })}
           disabled={isReadOnly}
         >
-          <SelectTrigger className="h-8 text-xs">
-            <SelectValue />
+          <SelectTrigger className="h-8 w-full border-0 shadow-none text-xs">
+            <SelectValue>
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${entry.extraConsideration.applicable ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                {entry.extraConsideration.applicable ? 'Applicable' : 'Not Applicable'}
+              </div>
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="applicable">Applicable</SelectItem>
-            <SelectItem value="not-applicable">Not Applicable</SelectItem>
+            <SelectItem value="applicable">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                Applicable
+              </div>
+            </SelectItem>
+            <SelectItem value="not-applicable">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                Not Applicable
+              </div>
+            </SelectItem>
           </SelectContent>
         </Select>
       </TableCell>
@@ -1793,12 +1854,27 @@ function renderRateRow(entry: RateEntry, index: string, isChild: boolean) {
           })}
           disabled={isReadOnly}
         >
-          <SelectTrigger className="h-8 text-xs">
-            <SelectValue />
+          <SelectTrigger className="h-8 w-full border-0 shadow-none text-xs">
+            <SelectValue>
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${entry.convenienceFee.applicable ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                {entry.convenienceFee.applicable ? 'Applicable' : 'Not Applicable'}
+              </div>
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="applicable">Applicable</SelectItem>
-            <SelectItem value="not-applicable">Not Applicable</SelectItem>
+            <SelectItem value="applicable">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                Applicable
+              </div>
+            </SelectItem>
+            <SelectItem value="not-applicable">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                Not Applicable
+              </div>
+            </SelectItem>
           </SelectContent>
         </Select>
       </TableCell>
