@@ -90,7 +90,7 @@ export default function DepartmentsPage() {
   return (
     <Tabs defaultValue="departments">
       <TabsList>
-        <TabsTrigger value="departments">Departments</TabsTrigger>
+        <TabsTrigger value="departments" >Departments</TabsTrigger>
         <TabsTrigger value="stages">Stages</TabsTrigger>
         <TabsTrigger value="rates">Rates</TabsTrigger>
         <TabsTrigger value="requirements">GOVT Upload Req</TabsTrigger>
