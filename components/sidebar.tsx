@@ -48,6 +48,11 @@ const navItems = [
     icon: FileText,
   },
   {
+    title: "Applications",
+    href: "/dashboard/applications",
+    icon: FileText,
+  },
+  {
     title: "Reports",
     href: "/dashboard/reports",
     icon: BarChart3,

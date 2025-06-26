@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -14,17 +14,17 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Calendar } from "@/components/ui/calendar"
 import { format } from "date-fns"
-import { 
-  CalendarIcon, 
-  Calculator, 
-  Minus, 
-  Plus, 
-  Save, 
-  DollarSign, 
-  Clock, 
-  ChevronDown, 
-  History, 
-  Copy, 
+import {
+  CalendarIcon,
+  Calculator,
+  Minus,
+  Plus,
+  Save,
+  DollarSign,
+  Clock,
+  ChevronDown,
+  History,
+  Copy,
   Eye,
   ChevronRight,
   Info,
@@ -71,18 +71,40 @@ interface RateEntry {
     paEditable: number
   }
   extraConsideration: {
-    applicable: boolean
-    tccCompanyIgnore: number
-    tccIndividualIgnore: number
-    auditorsFee: number
-    degree: number
-    tfFile: number
+    tccCompany: {
+      applicable: boolean
+      value: number
+    }
+    tccIndividual: {
+      applicable: boolean
+      value: number
+    }
+    auditorsFee: {
+      applicable: boolean
+      value: number
+    }
+    degree: {
+      applicable: boolean
+      value: number
+    }
+    tfFile: {
+      applicable: boolean
+      value: number
+    }
   }
   convenienceFee: {
-    applicable: boolean
-    alienAssistance: number
-    reEntryApproval: number
-    passportEndorsement: number
+    alienAssistance: {
+      applicable: boolean
+      value: number
+    }
+    reEntryApproval: {
+      applicable: boolean
+      value: number
+    }
+    passportEndorsement: {
+      applicable: boolean
+      value: number
+    }
   }
 }
 
@@ -166,6 +188,18 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
     return Date.now().toString() + Math.random().toString(36).substr(2, 9)
   }
 
+  // Helper function to safely access extraConsideration fields
+  const getExtraConsiderationField = (entry: RateEntry, fieldKey: string) => {
+    const field = entry.extraConsideration[fieldKey as keyof typeof entry.extraConsideration];
+    return field || { applicable: false, value: 0 };
+  };
+
+  // Helper function to safely access convenienceFee fields
+  const getConvenienceFeeField = (entry: RateEntry, fieldKey: string) => {
+    const field = entry.convenienceFee[fieldKey as keyof typeof entry.convenienceFee];
+    return field || { applicable: false, value: 0 };
+  };
+
   // Export function
   const exportToCSV = () => {
     const currentDept = departments.find(d => d.id === selectedDepartment)
@@ -195,16 +229,24 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
       'Officer Boss Fixed',
       'Officer PA Tier 1',
       'Officer PA Editable',
-      'Extra Consideration Applicable',
-      'TCC Company',
-      'TCC Individual',
-      'Auditors Fee',
-      'Degree',
-      'TF File',
-      'Convenience Fee Applicable',
-      'Alien Assistance',
-      'Re-Entry Approval',
-      'Passport Endorsement'
+      // Extra Consideration fields
+      'TCC Company Applicable',
+      'TCC Company Value',
+      'TCC Individual Applicable',
+      'TCC Individual Value',
+      'Auditors Fee Applicable',
+      'Auditors Fee Value',
+      'Degree Applicable',
+      'Degree Value',
+      'TF File Applicable',
+      'TF File Value',
+      // Convenience Fee fields
+      'Alien Assistance Applicable',
+      'Alien Assistance Value',
+      'Re-Entry Approval Applicable',
+      'Re-Entry Approval Value',
+      'Passport Endorsement Applicable',
+      'Passport Endorsement Value'
     ]
 
     const csvData = currentPeriod.data.map((entry, index) => [
@@ -224,16 +266,24 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
       entry.officer.bossFixed,
       entry.officer.paTier1,
       entry.officer.paEditable,
-      entry.extraConsideration.applicable ? 'Yes' : 'No',
-      entry.extraConsideration.tccCompanyIgnore,
-      entry.extraConsideration.tccIndividualIgnore,
-      entry.extraConsideration.auditorsFee,
-      entry.extraConsideration.degree,
-      entry.extraConsideration.tfFile,
-      entry.convenienceFee.applicable ? 'Yes' : 'No',
-      entry.convenienceFee.alienAssistance,
-      entry.convenienceFee.reEntryApproval,
-      entry.convenienceFee.passportEndorsement
+      // Extra Consideration fields
+      entry.extraConsideration.tccCompany.applicable ? 'Yes' : 'No',
+      entry.extraConsideration.tccCompany.value,
+      entry.extraConsideration.tccIndividual.applicable ? 'Yes' : 'No',
+      entry.extraConsideration.tccIndividual.value,
+      entry.extraConsideration.auditorsFee.applicable ? 'Yes' : 'No',
+      entry.extraConsideration.auditorsFee.value,
+      entry.extraConsideration.degree.applicable ? 'Yes' : 'No',
+      entry.extraConsideration.degree.value,
+      entry.extraConsideration.tfFile.applicable ? 'Yes' : 'No',
+      entry.extraConsideration.tfFile.value,
+      // Convenience Fee fields
+      entry.convenienceFee.alienAssistance.applicable ? 'Yes' : 'No',
+      entry.convenienceFee.alienAssistance.value,
+      entry.convenienceFee.reEntryApproval.applicable ? 'Yes' : 'No',
+      entry.convenienceFee.reEntryApproval.value,
+      entry.convenienceFee.passportEndorsement.applicable ? 'Yes' : 'No',
+      entry.convenienceFee.passportEndorsement.value
     ])
 
     const csvContent = [headers, ...csvData]
@@ -459,18 +509,16 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
       paEditable: 0
     },
     extraConsideration: {
-      applicable: false,
-      tccCompanyIgnore: 5000,
-      tccIndividualIgnore: 5000,
-      auditorsFee: 5000,
-      degree: 5000,
-      tfFile: 5000
+      tccCompany: { applicable: false, value: 5000 },
+      tccIndividual: { applicable: false, value: 5000 },
+      auditorsFee: { applicable: false, value: 5000 },
+      degree: { applicable: false, value: 5000 },
+      tfFile: { applicable: false, value: 5000 }
     },
     convenienceFee: {
-      applicable: false,
-      alienAssistance: 1000,
-      reEntryApproval: 1000,
-      passportEndorsement: 1000
+      alienAssistance: { applicable: false, value: 1000 },
+      reEntryApproval: { applicable: false, value: 1000 },
+      passportEndorsement: { applicable: false, value: 1000 }
     }
   })
 
@@ -734,12 +782,12 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
     const rowHeight = density === 'compact' ? 'h-10' : density === 'spacious' ? 'h-16' : 'h-12'
     const inputHeight = density === 'compact' ? 'h-7' : density === 'spacious' ? 'h-10' : 'h-8'
     const fontSize = density === 'compact' ? 'text-xs' : density === 'spacious' ? 'text-sm' : 'text-xs'
-    
+
     const paddingLeft = depth === 0 ? '' : depth === 1 ? 'pl-6' : depth === 2 ? 'pl-12' : 'pl-16'
-    
+
     return (
-      <TableRow 
-        key={entry.id} 
+      <TableRow
+        key={entry.id}
         className={`
           ${isChild ? (depth === 1 ? 'bg-slate-50/50' : depth === 2 ? 'bg-purple-50/30' : 'bg-slate-100/50') : ''} 
           hover:bg-muted/50
@@ -753,7 +801,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
             {index}
           </div>
         </TableCell>
-        
+
         <TableCell className={`sticky left-16 bg-background border-r font-medium z-30 px-3`}>
           <div className={`flex items-center gap-2 ${paddingLeft}`}>
             {isChild && (
@@ -783,8 +831,8 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
               processingFee: {
                 ...entry.processingFee,
                 amount: parseFloat(e.target.value) || 0,
-                rate: entry.processingFee.currency === 'USD' 
-                  ? (parseFloat(e.target.value) || 0) * rates.usd 
+                rate: entry.processingFee.currency === 'USD'
+                  ? (parseFloat(e.target.value) || 0) * rates.usd
                   : parseFloat(e.target.value) || 0
               }
             })}
@@ -822,285 +870,328 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
               issuanceFee: {
                 ...entry.issuanceFee,
                 amount: parseFloat(e.target.value) || 0,
-                rate: entry.issuanceFee.currency === 'USD' 
-                ? (parseFloat(e.target.value) || 0) * rates.usd 
-                : parseFloat(e.target.value) || 0
-            }
-          })}
-          className={`${inputHeight} text-center ${fontSize} border-0 bg-white/70 focus:bg-white transition-colors`}
-          disabled={isReadOnly}
-        />
-      </TableCell>
-      <TableCell className="border-r border-green-100 bg-green-50/30 p-2">
-        <Select
-          value={entry.issuanceFee.currency}
-          onValueChange={(value: 'USD' | 'KSH') => updateCurrency(entry.id, 'issuanceFee', value)}
-          disabled={isReadOnly}
-        >
-          <SelectTrigger className={`${inputHeight} border-0 bg-white/70 focus:bg-white ${fontSize} transition-colors`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="USD">USD</SelectItem>
-            <SelectItem value="KSH">KSH</SelectItem>
-          </SelectContent>
-        </Select>
-      </TableCell>
-      <TableCell className="border-r border-green-100 bg-green-50/30 p-2">
-        <div className={`${inputHeight} ${fontSize} bg-green-100/50 rounded px-2 flex items-center justify-center font-mono text-green-800 font-semibold`}>
-          {entry.issuanceFee.rate.toLocaleString()}
-        </div>
-      </TableCell>
-      <TableCell className="border-r border-green-100 bg-green-50/30 p-2">
-        <MultiSelectPopover
-          entryId={entry.id}
-          field="periodType"
-          options={periodOptions}
-          values={entry.issuanceFee.periodType}
-          placeholder="Types"
-        />
-      </TableCell>
-      <TableCell className="border-r border-green-200 bg-green-50/30 p-2">
-        <MultiSelectPopover
-          entryId={entry.id}
-          field="periodCount"
-          options={countOptions}
-          values={entry.issuanceFee.periodCount}
-          placeholder="Counts"
-        />
-      </TableCell>
-
-      {/* BCL Consultancy Section */}
-      {['tier1', 'tier2', 'tier3'].map((tier, idx) => (
-        <TableCell key={tier} className={`border-r border-purple-100 bg-purple-50/30 p-2 ${idx === 2 ? 'border-r-purple-200' : ''}`}>
-          <Input
-            type="number"
-            value={entry.bclConsultancy[tier as keyof typeof entry.bclConsultancy]}
-            onChange={(e) => updateRateEntry(entry.id, {
-              bclConsultancy: {
-                ...entry.bclConsultancy,
-                [tier]: parseFloat(e.target.value) || 0
+                rate: entry.issuanceFee.currency === 'USD'
+                  ? (parseFloat(e.target.value) || 0) * rates.usd
+                  : parseFloat(e.target.value) || 0
               }
             })}
             className={`${inputHeight} text-center ${fontSize} border-0 bg-white/70 focus:bg-white transition-colors`}
             disabled={isReadOnly}
           />
         </TableCell>
-      ))}
-
-      {/* Officer Section */}
-      {['bossFixed', 'paTier1', 'paEditable'].map((field, idx) => (
-        <TableCell key={field} className={`border-r border-orange-100 bg-orange-50/30 p-2 ${idx === 2 ? 'border-r-orange-200' : ''}`}>
-          <Input
-            type="number"
-            value={entry.officer[field as keyof typeof entry.officer]}
-            onChange={(e) => updateRateEntry(entry.id, {
-              officer: {
-                ...entry.officer,
-                [field]: parseFloat(e.target.value) || 0
-              }
-            })}
-            className={`${inputHeight} text-center ${fontSize} border-0 bg-white/70 focus:bg-white transition-colors`}
+        <TableCell className="border-r border-green-100 bg-green-50/30 p-2">
+          <Select
+            value={entry.issuanceFee.currency}
+            onValueChange={(value: 'USD' | 'KSH') => updateCurrency(entry.id, 'issuanceFee', value)}
             disabled={isReadOnly}
+          >
+            <SelectTrigger className={`${inputHeight} border-0 bg-white/70 focus:bg-white ${fontSize} transition-colors`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="USD">USD</SelectItem>
+              <SelectItem value="KSH">KSH</SelectItem>
+            </SelectContent>
+          </Select>
+        </TableCell>
+        <TableCell className="border-r border-green-100 bg-green-50/30 p-2">
+          <div className={`${inputHeight} ${fontSize} bg-green-100/50 rounded px-2 flex items-center justify-center font-mono text-green-800 font-semibold`}>
+            {entry.issuanceFee.rate.toLocaleString()}
+          </div>
+        </TableCell>
+        <TableCell className="border-r border-green-100 bg-green-50/30 p-2">
+          <MultiSelectPopover
+            entryId={entry.id}
+            field="periodType"
+            options={periodOptions}
+            values={entry.issuanceFee.periodType}
+            placeholder="Types"
           />
         </TableCell>
-      ))}
-
-      {/* Extra Consideration Section */}
-      <TableCell className="border-r border-red-100 bg-red-50/30 p-2">
-        <Select
-          value={entry.extraConsideration.applicable ? "applicable" : "not-applicable"}
-          onValueChange={(value) => updateRateEntry(entry.id, {
-            extraConsideration: {
-              ...entry.extraConsideration,
-              applicable: value === "applicable"
-            }
-          })}
-          disabled={isReadOnly}
-        >
-          <SelectTrigger className={`${inputHeight} w-full border-0 bg-white/70 focus:bg-white shadow-none ${fontSize} transition-colors`}>
-            <SelectValue>
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${entry.extraConsideration.applicable ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                {entry.extraConsideration.applicable ? 'Yes' : 'No'}
-              </div>
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="applicable">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                Applicable
-              </div>
-            </SelectItem>
-            <SelectItem value="not-applicable">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                Not Applicable
-              </div>
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </TableCell>
-      
-      {/* Extra Consideration Input Fields */}
-      {['tccCompanyIgnore', 'tccIndividualIgnore', 'auditorsFee', 'degree', 'tfFile'].map((field, idx) => (
-        <TableCell key={field} className={`border-r border-red-100 bg-red-50/30 p-2 ${idx === 4 ? 'border-r-red-200' : ''}`}>
-          <Input
-            type="number"
-            value={entry.extraConsideration[field as keyof typeof entry.extraConsideration] as number}
-            onChange={(e) => updateRateEntry(entry.id, {
-              extraConsideration: {
-                ...entry.extraConsideration,
-                [field]: parseFloat(e.target.value) || 0
-              }
-            })}
-            className={`${inputHeight} text-center ${fontSize} border-0 bg-white/70 focus:bg-white transition-colors`}
-            disabled={isReadOnly || !entry.extraConsideration.applicable}
+        <TableCell className="border-r border-green-200 bg-green-50/30 p-2">
+          <MultiSelectPopover
+            entryId={entry.id}
+            field="periodCount"
+            options={countOptions}
+            values={entry.issuanceFee.periodCount}
+            placeholder="Counts"
           />
         </TableCell>
-      ))}
 
-      {/* Convenience Fee Section */}
-      <TableCell className="border-r border-indigo-100 bg-indigo-50/30 p-2">
-        <Select
-          value={entry.convenienceFee.applicable ? "applicable" : "not-applicable"}
-          onValueChange={(value) => updateRateEntry(entry.id, {
-            convenienceFee: {
-              ...entry.convenienceFee,
-              applicable: value === "applicable"
-            }
-          })}
-          disabled={isReadOnly}
-        >
-          <SelectTrigger className={`${inputHeight} w-full border-0 bg-white/70 focus:bg-white shadow-none ${fontSize} transition-colors`}>
-            <SelectValue>
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${entry.convenienceFee.applicable ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                {entry.convenienceFee.applicable ? 'Yes' : 'No'}
-              </div>
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="applicable">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                Applicable
-              </div>
-            </SelectItem>
-            <SelectItem value="not-applicable">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                Not Applicable
-              </div>
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </TableCell>
-      
-      {/* Convenience Fee Input Fields */}
-      {['alienAssistance', 'reEntryApproval', 'passportEndorsement'].map((field, idx) => (
-        <TableCell key={field} className={`p-2 bg-indigo-50/30 ${idx < 2 ? 'border-r border-indigo-100' : ''}`}>
-          <Input
-            type="number"
-            value={entry.convenienceFee[field as keyof typeof entry.convenienceFee] as number}
-            onChange={(e) => updateRateEntry(entry.id, {
-              convenienceFee: {
-                ...entry.convenienceFee,
-                [field]: parseFloat(e.target.value) || 0
-              }
-            })}
-            className={`${inputHeight} text-center ${fontSize} border-0 bg-white/70 focus:bg-white transition-colors`}
-            disabled={isReadOnly || !entry.convenienceFee.applicable}
-          />
-        </TableCell>
-      ))}
-    </TableRow>
-  )
-}
+        {/* BCL Consultancy Section */}
+        {['tier1', 'tier2', 'tier3'].map((tier, idx) => (
+          <TableCell key={tier} className={`border-r border-purple-100 bg-purple-50/30 p-2 ${idx === 2 ? 'border-r-purple-200' : ''}`}>
+            <Input
+              type="number"
+              value={entry.bclConsultancy[tier as keyof typeof entry.bclConsultancy]}
+              onChange={(e) => updateRateEntry(entry.id, {
+                bclConsultancy: {
+                  ...entry.bclConsultancy,
+                  [tier]: parseFloat(e.target.value) || 0
+                }
+              })}
+              className={`${inputHeight} text-center ${fontSize} border-0 bg-white/70 focus:bg-white transition-colors`}
+              disabled={isReadOnly}
+            />
+          </TableCell>
+        ))}
 
-// Enhanced grouping for nested structure
-const groupedEntries = currentPeriod.data.reduce((acc, entry) => {
-  const parts = entry.entityPath.split(' → ')
-  const subdept = parts[0]
-  const cls = parts[1]
-  const subcls = parts[2]
+        {/* Officer Section */}
+        {['bossFixed', 'paTier1', 'paEditable'].map((field, idx) => (
+          <TableCell key={field} className={`border-r border-orange-100 bg-orange-50/30 p-2 ${idx === 2 ? 'border-r-orange-200' : ''}`}>
+            <Input
+              type="number"
+              value={entry.officer[field as keyof typeof entry.officer]}
+              onChange={(e) => updateRateEntry(entry.id, {
+                officer: {
+                  ...entry.officer,
+                  [field]: parseFloat(e.target.value) || 0
+                }
+              })}
+              className={`${inputHeight} text-center ${fontSize} border-0 bg-white/70 focus:bg-white transition-colors`}
+              disabled={isReadOnly}
+            />
+          </TableCell>
+        ))}
 
-  if (!acc[subdept]) {
-    acc[subdept] = { direct: [], classes: {} }
+        {/* Extra Consideration Section - Each field with its own applicable toggle */}
+        {[
+          { key: 'tccCompany', label: 'TCC Companysss' },
+          { key: 'tccIndividual', label: 'TCC Individual' },
+          { key: 'auditorsFee', label: 'Auditors Fee' },
+          { key: 'degree', label: 'Degree' },
+          { key: 'tfFile', label: 'TF File' }
+        ].map((field, idx) => (
+          <React.Fragment key={field.key}>
+            <TableCell className={`border-r border-red-100 bg-red-50/30 p-2 ${idx === 4 ? 'border-r-red-200' : ''}`}>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-1">
+                  <Select
+                    value={getExtraConsiderationField(entry, field.key).applicable ? "applicable" : "not-applicable"}
+                    onValueChange={(value) => {
+                      const newValue = value === "applicable";
+                      updateRateEntry(entry.id, {
+                        extraConsideration: {
+                          ...entry.extraConsideration,
+                          [field.key]: {
+                            ...getExtraConsiderationField(entry, field.key),
+                            applicable: newValue
+                          }
+                        }
+                      });
+                    }}
+                    disabled={isReadOnly}
+                  >
+                    <SelectTrigger className={`h-6 w-full border-0 bg-white/70 focus:bg-white shadow-none text-xs`}>
+                      <SelectValue>
+                        <div className="flex items-center gap-1">
+                          <div className={`w-2 h-2 rounded-full ${getExtraConsiderationField(entry, field.key).applicable
+                              ? 'bg-green-500'
+                              : 'bg-red-500'
+                            }`}></div>
+                          {getExtraConsiderationField(entry, field.key).applicable ? 'Applicable' : 'Not Applicable'}
+                        </div>
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="applicable">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                          Applicable
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="not-applicable">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                          Not Applicable
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="number"
+                    value={getExtraConsiderationField(entry, field.key).value}
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value) || 0;
+                      updateRateEntry(entry.id, {
+                        extraConsideration: {
+                          ...entry.extraConsideration,
+                          [field.key]: {
+                            ...getExtraConsiderationField(entry, field.key),
+                            value: newValue
+                          }
+                        }
+                      });
+                    }}
+                    className={`h-6 w-full text-center text-xs border-0 bg-white/70 focus:bg-white transition-colors`}
+                    disabled={isReadOnly || !getExtraConsiderationField(entry, field.key).applicable}
+                  />
+                </div>
+              </div>
+            </TableCell>
+          </React.Fragment>
+        ))}
+
+        {/* Convenience Fee Section - Each field with its own applicable toggle */}
+        {[
+          { key: 'alienAssistance', label: 'Alien Assistance' },
+          { key: 'reEntryApproval', label: 'Re-Entry Approval' },
+          { key: 'passportEndorsement', label: 'Passport Endorsement' }
+        ].map((field, idx) => (
+          <React.Fragment key={field.key}>
+            <TableCell className={`p-2 bg-indigo-50/30 ${idx < 2 ? 'border-r border-indigo-100' : ''}`}>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-1">
+                  <Select
+                    value={getConvenienceFeeField(entry, field.key).applicable ? "applicable" : "not-applicable"}
+                    onValueChange={(value) => {
+                      const newValue = value === "applicable";
+                      updateRateEntry(entry.id, {
+                        convenienceFee: {
+                          ...entry.convenienceFee,
+                          [field.key]: {
+                            ...getConvenienceFeeField(entry, field.key),
+                            applicable: newValue
+                          }
+                        }
+                      });
+                    }}
+                    disabled={isReadOnly}
+                  >
+                    <SelectTrigger className={`h-6 w-full border-0 bg-white/70 focus:bg-white shadow-none text-xs`}>
+                      <SelectValue>
+                        <div className="flex items-center gap-1">
+                          <div className={`w-2 h-2 rounded-full ${getConvenienceFeeField(entry, field.key).applicable
+                              ? 'bg-green-500'
+                              : 'bg-red-500'
+                            }`}></div>
+                        </div>
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="applicable">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                          Applicable
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="not-applicable">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                          Not Applicable
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="number"
+                    value={getConvenienceFeeField(entry, field.key).value}
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value) || 0;
+                      updateRateEntry(entry.id, {
+                        convenienceFee: {
+                          ...entry.convenienceFee,
+                          [field.key]: {
+                            ...getConvenienceFeeField(entry, field.key),
+                            value: newValue
+                          }
+                        }
+                      });
+                    }}
+                    className={`h-6 w-full text-center text-xs border-0 bg-white/70 focus:bg-white transition-colors`}
+                    disabled={isReadOnly || !getConvenienceFeeField(entry, field.key).applicable}
+                  />
+                </div>
+              </div>
+            </TableCell>
+          </React.Fragment>
+        ))}
+      </TableRow>
+    )
   }
 
-  if (cls) {
-    if (!acc[subdept].classes[cls]) {
-      acc[subdept].classes[cls] = { direct: [], subclasses: {} }
+  // Enhanced grouping for nested structure
+  const groupedEntries = currentPeriod.data.reduce((acc, entry) => {
+    const parts = entry.entityPath.split(' → ')
+    const subdept = parts[0]
+    const cls = parts[1]
+    const subcls = parts[2]
+
+    if (!acc[subdept]) {
+      acc[subdept] = { direct: [], classes: {} }
     }
 
-    if (subcls) {
-      if (!acc[subdept].classes[cls].subclasses[subcls]) {
-        acc[subdept].classes[cls].subclasses[subcls] = []
+    if (cls) {
+      if (!acc[subdept].classes[cls]) {
+        acc[subdept].classes[cls] = { direct: [], subclasses: {} }
       }
-      acc[subdept].classes[cls].subclasses[subcls].push(entry)
+
+      if (subcls) {
+        if (!acc[subdept].classes[cls].subclasses[subcls]) {
+          acc[subdept].classes[cls].subclasses[subcls] = []
+        }
+        acc[subdept].classes[cls].subclasses[subcls].push(entry)
+      } else {
+        acc[subdept].classes[cls].direct.push(entry)
+      }
     } else {
-      acc[subdept].classes[cls].direct.push(entry)
+      acc[subdept].direct.push(entry)
     }
-  } else {
-    acc[subdept].direct.push(entry)
+
+    return acc
+  }, {} as Record<string, { direct: RateEntry[], classes: Record<string, { direct: RateEntry[], subclasses: Record<string, RateEntry[]> }> }>)
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading departments...</p>
+        </div>
+      </div>
+    )
   }
 
-  return acc
-}, {} as Record<string, { direct: RateEntry[], classes: Record<string, { direct: RateEntry[], subclasses: Record<string, RateEntry[]> }> }>)
+  if (departments.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <p className="text-gray-600">No departments found. Please create departments first.</p>
+        </div>
+      </div>
+    )
+  }
 
-if (isLoading) {
   return (
-    <div className="flex items-center justify-center h-64">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
-        <p className="text-gray-600">Loading departments...</p>
-      </div>
-    </div>
-  )
-}
+    <div className="w-full space-y-6">
+      {/* Header with improved controls */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold">Rates Management</h2>
+          <p className="text-muted-foreground">Configure and manage department rates and fees</p>
+          {isReadOnly && (
+            <Badge variant="secondary" className="mt-2">
+              <Eye className="h-3 w-3 mr-1" />
+              Viewing Historical Data
+            </Badge>
+          )}
+        </div>
 
-if (departments.length === 0) {
-  return (
-    <div className="flex items-center justify-center h-64">
-      <div className="text-center">
-        <p className="text-gray-600">No departments found. Please create departments first.</p>
-      </div>
-    </div>
-  )
-}
+        {/* Enhanced Control Panel */}
+        <div className="flex items-center gap-2">
+          {/* Export Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportToCSV}
+            disabled={!selectedDepartment || currentPeriod.data.length === 0}
+          >
+            <DownloadCloud className="h-4 w-4 mr-2" />
+            Export to Excel
+          </Button>
 
-return (
-  <div className="w-full space-y-6">
-    {/* Header with improved controls */}
-    <div className="flex items-center justify-between">
-      <div>
-        <h2 className="text-2xl font-bold">Rates Management</h2>
-        <p className="text-muted-foreground">Configure and manage department rates and fees</p>
-        {isReadOnly && (
-          <Badge variant="secondary" className="mt-2">
-            <Eye className="h-3 w-3 mr-1" />
-            Viewing Historical Data
-          </Badge>
-        )}
-      </div>
-      
-      {/* Enhanced Control Panel */}
-      <div className="flex items-center gap-2">
-        {/* Export Button */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={exportToCSV}
-          disabled={!selectedDepartment || currentPeriod.data.length === 0}
-        > 
-          <DownloadCloud className="h-4 w-4 mr-2" />
-          Export to Excel
-        </Button>
-
-        {/* View Options */}
-        {/* <div className="flex items-center gap-1 bg-muted/50 p-1 rounded-lg">
+          {/* View Options */}
+          {/* <div className="flex items-center gap-1 bg-muted/50 p-1 rounded-lg">
           <Button
             variant={density === 'compact' ? 'default' : 'ghost'}
             size="sm"
@@ -1127,478 +1218,455 @@ return (
           </Button>
         </div> */}
 
-        {/* Historical Periods Dialog */}
-        <HistoricalRatesDialog
-          isOpen={isHistoryDialogOpen}
-          onOpenChange={setIsHistoryDialogOpen}
-          departments={departments}
-          selectedDepartment={selectedDepartment}
-          historicalPeriods={historicalPeriods}
-          loadingHistory={loadingHistory}
-          onViewHistoricalPeriod={handleViewHistoricalPeriod}
-        />
+          {/* Historical Periods Dialog */}
+          <HistoricalRatesDialog
+            isOpen={isHistoryDialogOpen}
+            onOpenChange={setIsHistoryDialogOpen}
+            departments={departments}
+            selectedDepartment={selectedDepartment}
+            historicalPeriods={historicalPeriods}
+            loadingHistory={loadingHistory}
+            onViewHistoricalPeriod={handleViewHistoricalPeriod}
+          />
 
-        {/* New Period Dialog */}
-        <NewPeriodDialog
-          isOpen={isNewPeriodDialogOpen}
-          onOpenChange={setIsNewPeriodDialogOpen}
-          historicalPeriods={historicalPeriods}
-          onCreatePeriod={async (formData) => {
-            setSaving(true);
-            try {
-              if (currentPeriod.id) {
-                await supabase
-                  .from('rates_history')
-                  .update({ is_active: false })
-                  .eq('id', currentPeriod.id);
-              }
-
-              let newData = currentPeriod.data;
-
-              if (formData.copyFromPeriod) {
-                const sourcePeriod = historicalPeriods.find(p => p.id === formData.copyFromPeriod);
-                if (sourcePeriod) {
-                  newData = sourcePeriod.data.map(entry => ({
-                    ...entry,
-                    id: generateRateId()
-                  }));
+          {/* New Period Dialog */}
+          <NewPeriodDialog
+            isOpen={isNewPeriodDialogOpen}
+            onOpenChange={setIsNewPeriodDialogOpen}
+            historicalPeriods={historicalPeriods}
+            onCreatePeriod={async (formData) => {
+              setSaving(true);
+              try {
+                if (currentPeriod.id) {
+                  await supabase
+                    .from('rates_history')
+                    .update({ is_active: false })
+                    .eq('id', currentPeriod.id);
                 }
-              }
 
-              const { error } = await supabase
-                .from('rates_history')
-                .insert({
-                  department_id: selectedDepartment,
-                  effective_from: formData.effectiveFrom.toISOString().split('T')[0],
-                  effective_to: formData.effectiveTo?.toISOString().split('T')[0] || null,
-                  rates_data: newData,
-                  exchange_rates: rates,
-                  description: formData.description,
-                  is_active: true,
-                  created_by: 'current_user'
+                let newData = currentPeriod.data;
+
+                if (formData.copyFromPeriod) {
+                  const sourcePeriod = historicalPeriods.find(p => p.id === formData.copyFromPeriod);
+                  if (sourcePeriod) {
+                    newData = sourcePeriod.data.map(entry => ({
+                      ...entry,
+                      id: generateRateId()
+                    }));
+                  }
+                }
+
+                const { error } = await supabase
+                  .from('rates_history')
+                  .insert({
+                    department_id: selectedDepartment,
+                    effective_from: formData.effectiveFrom.toISOString().split('T')[0],
+                    effective_to: formData.effectiveTo?.toISOString().split('T')[0] || null,
+                    rates_data: newData,
+                    exchange_rates: rates,
+                    description: formData.description,
+                    is_active: true,
+                    created_by: 'current_user'
+                  });
+
+                if (error) throw error;
+
+                toast({
+                  title: "Success",
+                  description: "New rate period created successfully.",
                 });
 
-              if (error) throw error;
+                setNewPeriodForm({
+                  effectiveFrom: new Date(),
+                  effectiveTo: null,
+                  description: '',
+                  copyFromPeriod: null
+                });
 
+                await loadCurrentRates(selectedDepartment);
+                await loadHistoricalPeriods(selectedDepartment);
+                setIsNewPeriodDialogOpen(false);
+              } catch (error) {
+                console.error('Error creating new period:', error);
+                toast({
+                  title: "Error",
+                  description: "Failed to create new period. Please try again.",
+                  variant: "destructive"
+                });
+              } finally {
+                setSaving(false);
+              }
+            }}
+            saving={saving}
+          />
+
+          {/* Exchange Rates Dialog */}
+          <ExchangeRatesDialog
+            isOpen={isRateDialogOpen}
+            onOpenChange={setIsRateDialogOpen}
+            currentRate={rates.usd}
+            onSave={(rate) => {
+              const newRates = { usd: rate, ksh: 1 };
+              setRates(newRates);
+              setCurrentPeriod(prev => ({ ...prev, exchangeRates: newRates }));
               toast({
-                title: "Success",
-                description: "New rate period created successfully.",
+                title: "Exchange Rate Updated",
+                description: `USD rate set to ${rate} KSH`,
               });
+            }}
+            isReadOnly={isReadOnly}
+          />
 
-              setNewPeriodForm({
-                effectiveFrom: new Date(),
-                effectiveTo: null,
-                description: '',
-                copyFromPeriod: null
-              });
-
-              await loadCurrentRates(selectedDepartment);
-              await loadHistoricalPeriods(selectedDepartment);
-              setIsNewPeriodDialogOpen(false);
-            } catch (error) {
-              console.error('Error creating new period:', error);
-              toast({
-                title: "Error",
-                description: "Failed to create new period. Please try again.",
-                variant: "destructive"
-              });
-            } finally {
-              setSaving(false);
-            }
-          }}
-          saving={saving}
-        />
-
-        {/* Exchange Rates Dialog */}
-        <ExchangeRatesDialog
-          isOpen={isRateDialogOpen}
-          onOpenChange={setIsRateDialogOpen}
-          currentRate={rates.usd}
-          onSave={(rate) => {
-            const newRates = { usd: rate, ksh: 1 };
-            setRates(newRates);
-            setCurrentPeriod(prev => ({ ...prev, exchangeRates: newRates }));
-            toast({
-              title: "Exchange Rate Updated",
-              description: `USD rate set to ${rate} KSH`,
-            });
-          }}
-          isReadOnly={isReadOnly}
-        />
-
-        {!isReadOnly ? (
-          <Button onClick={handleSaveRates} disabled={saving} size="sm">
-            {saving ? (
-              <>
-                <div className="w-4 h-4 border-2 border-muted border-t-current rounded-full animate-spin mr-2"></div>
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save className="h-4 w-4 mr-2" />
-                Save Rates
-              </>
-            )}
-          </Button>
-        ) : (
-          <Button
-            onClick={() => loadCurrentRates(selectedDepartment)}
-            variant="outline"
-            size="sm"
-          >
-            Back to Current
-          </Button>
-        )}
-      </div>
-    </div>
-
-    {/* Tabs with improved styling */}
-    <Tabs value={selectedDepartment} onValueChange={setSelectedDepartment} className="w-full">
-      <div className="flex justify-between items-start gap-4 mb-6">
-        <TabsList className=" gap-1 bg-muted/50 p-1">
-          {departments.map((dept) => (
-            <TabsTrigger 
-              key={dept.id} 
-              value={dept.id} 
-              className="whitespace-nowrap data-[state=active]:bg-white data-[state=active]:shadow-sm"
+          {!isReadOnly ? (
+            <Button onClick={handleSaveRates} disabled={saving} size="sm">
+              {saving ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-muted border-t-current rounded-full animate-spin mr-2"></div>
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Rates
+                </>
+              )}
+            </Button>
+          ) : (
+            <Button
+              onClick={() => loadCurrentRates(selectedDepartment)}
+              variant="outline"
+              size="sm"
             >
-              <div className="flex items-center gap-2">
-                <span>{dept.name}</span>
-                {dept.tm_subdepartments && (
-                  <Badge variant="secondary" className="text-xs">
-                    {dept.tm_subdepartments.length}
-                  </Badge>
-                )}
-              </div>
-            </TabsTrigger>
-          ))}
-        </TabsList>
-        
-        {/* Enhanced info panel */}
-        {selectedDepartment && (
-          <Card className="min-w-fit">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-6 text-sm">
-                <div className="flex items-center gap-2">
-                  <DollarSign className="h-4 w-4 text-green-600" />
-                  <span className="font-medium">USD Rate: {rates.usd}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-blue-600" />
-                  <span>
-                    Effective: {format(currentPeriod.effectiveFrom, "PPP")}
-                    {currentPeriod.effectiveTo && ` - ${format(currentPeriod.effectiveTo, "PPP")}`}
-                  </span>
-                </div>
-                {currentPeriod.description && (
-                  <Badge variant="outline" className="text-xs">
-                    {currentPeriod.description}
-                  </Badge>
-                  )}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-   
-          {departments.map((dept) => (
-            <TabsContent key={dept.id} value={dept.id}>
-              <Card className="overflow-hidden">
-                <div className="relative overflow-auto max-h-[calc(100vh-300px)] border-0">
-                  <Table className="min-w-max border-collapse">
-                    {/* Sticky Headers */}
-                    <TableHeader className="sticky top-0 z-50 bg-background">
-                      {/* Enhanced Main Headers with better visual separation */}
-                      <TableRow className="bg-gradient-to-r from-slate-800 to-slate-700 text-white border-b-2 border-slate-600">
-                        <TableHead className="sticky left-0 bg-slate-800 border-r-2 border-slate-600 w-16 z-50 text-center text-white font-semibold">#</TableHead>
-                        <TableHead className="sticky left-16 bg-slate-800 border-r-2 border-slate-600 w-64 z-50 text-white font-semibold">Entity</TableHead>
-                        
-                        {/* Color-coded header groups */}
-                        <TableHead colSpan={3} className="border-r-4 border-blue-600 text-center text-white font-semibold bg-blue-700">
-                          Processing Fee
-                        </TableHead>
-                        <TableHead colSpan={5} className="border-r-4 border-green-600 text-center text-white font-semibold bg-green-700">
-                          Issuance Fee
-                        </TableHead>
-                        <TableHead colSpan={3} className="border-r-4 border-purple-600 text-center text-white font-semibold bg-purple-700">
-                          BCL Consultancy
-                        </TableHead>
-                        <TableHead colSpan={3} className="border-r-4 border-orange-600 text-center text-white font-semibold bg-orange-700">
-                          Officer
-                        </TableHead>
-                        <TableHead colSpan={6} className="border-r-4 border-red-600 text-center text-white font-semibold bg-red-700">
-                          Extra Consideration
-                        </TableHead>
-                        <TableHead colSpan={4} className="text-center text-white font-semibold bg-indigo-700">
-                          Convenience Fee
-                        </TableHead>
-                      </TableRow>
-   
-                      {/* Enhanced Sub Headers with tooltips and better organization */}
-                      <TableRow className="bg-gradient-to-r from-slate-700 to-slate-600 text-white border-b border-slate-500">
-                        <TableHead className="sticky left-0 bg-slate-700 border-r z-50"></TableHead>
-                        <TableHead className="sticky left-16 bg-slate-700 border-r z-50"></TableHead>
-                        
-                        {/* Processing Fee Sub-headers */}
-                        <TableHead className="border-r border-blue-200 text-center text-xs text-white bg-blue-600/80">Amount</TableHead>
-                        <TableHead className="border-r border-blue-200 text-center text-xs text-white bg-blue-600/80">Currency</TableHead>
-                        <TableHead className="border-r-2 border-blue-300 text-center text-xs text-white bg-blue-600/80">Fee (KSH)</TableHead>
-                        
-                        {/* Issuance Fee Sub-headers */}
-                        <TableHead className="border-r border-green-200 text-center text-xs text-white bg-green-600/80">Amount</TableHead>
-                        <TableHead className="border-r border-green-200 text-center text-xs text-white bg-green-600/80">Currency</TableHead>
-                        <TableHead className="border-r border-green-200 text-center text-xs text-white bg-green-600/80">Fee (KSH)</TableHead>
-                        <TableHead className="border-r border-green-200 text-center text-xs text-white bg-green-600/80">Period Type</TableHead>
-                        <TableHead className="border-r-2 border-green-300 text-center text-xs text-white bg-green-600/80">Period Count</TableHead>
-                        
-                        {/* BCL Consultancy Sub-headers */}
-                        <TableHead className="border-r border-purple-200 text-center text-xs text-white bg-purple-600/80">Tier 1</TableHead>
-                        <TableHead className="border-r border-purple-200 text-center text-xs text-white bg-purple-600/80">Tier 2</TableHead>
-                        <TableHead className="border-r-2 border-purple-300 text-center text-xs text-white bg-purple-600/80">Tier 3</TableHead>
-                        
-                        {/* Officer Sub-headers */}
-                        <TableHead className="border-r border-orange-200 text-center text-xs text-white bg-orange-600/80">Boss Fixed</TableHead>
-                        <TableHead className="border-r border-orange-200 text-center text-xs text-white bg-orange-600/80">PA Tier 1</TableHead>
-                        <TableHead className="border-r-2 border-orange-300 text-center text-xs text-white bg-orange-600/80">PA Editable</TableHead>
-                        
-                        {/* Extra Consideration Sub-headers */}
-                        <TableHead className="border-r border-red-200 text-center text-xs text-white bg-red-600/80">Applicable</TableHead>
-                        <TableHead className="border-r border-red-200 text-center text-xs text-white bg-red-600/80">TCC Company</TableHead>
-                        <TableHead className="border-r border-red-200 text-center text-xs text-white bg-red-600/80">TCC Individual</TableHead>
-                        <TableHead className="border-r border-red-200 text-center text-xs text-white bg-red-600/80">Auditors Fee</TableHead>
-                        <TableHead className="border-r border-red-200 text-center text-xs text-white bg-red-600/80">Degree</TableHead>
-                        <TableHead className="border-r-2 border-red-300 text-center text-xs text-white bg-red-600/80">TF File</TableHead>
-                        
-                        {/* Convenience Fee Sub-headers */}
-                        <TableHead className="border-r border-indigo-200 text-center text-xs text-white bg-indigo-600/80">Applicable</TableHead>
-                        <TableHead className="border-r border-indigo-200 text-center text-xs text-white bg-indigo-600/80">Alien Assistance</TableHead>
-                        <TableHead className="border-r border-indigo-200 text-center text-xs text-white bg-indigo-600/80">Re-Entry</TableHead>
-                        <TableHead className="text-center text-xs text-white bg-indigo-600/80">Passport Endorsement</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    
-                    <TableBody>
-                      {Object.entries(groupedEntries).flatMap(([subdeptName, subdeptData], groupIndex) => {
-                        const rows = []
-                        const totalEntries = subdeptData.direct.length + Object.values(subdeptData.classes).reduce((sum, cls) => 
-                          sum + cls.direct.length + Object.values(cls.subclasses).reduce((subSum, subEntries) => subSum + subEntries.length, 0), 0
-                        )
-                        
-                        const hasMultipleEntries = totalEntries > 1
-   
-                        if (hasMultipleEntries) {
-                          const groupRowId = `group-${subdeptName}`
-                          const isExpanded = expandedRows.has(groupRowId)
-   
-                          // Subdepartment group header
-                          rows.push(
-                            <TableRow key={groupRowId} className="bg-gradient-to-r from-slate-100 to-slate-50 border-b-2 border-slate-200 hover:from-slate-150 hover:to-slate-100 transition-all duration-200">
-                              <TableCell className="sticky left-0 bg-slate-100 border-r text-center font-semibold text-sm z-30 px-3">
-                                <Badge variant="outline" className="bg-white">
-                                  {groupIndex + 1}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="sticky left-16 bg-slate-100 border-r font-semibold z-30 px-3">
-                                <div className="flex justify-between items-center gap-3">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                                    <span className="text-sm font-semibold text-slate-800">{subdeptName}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <Badge variant="secondary" className="text-xs">
-                                      {totalEntries} entries
-                                    </Badge>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 w-6 p-0 hover:bg-white/50"
-                                      onClick={() => toggleRowExpansion(groupRowId)}
-                                    >
-                                      {isExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-                                    </Button>
-                                  </div>
-                                </div>
-                              </TableCell>
-                              <TableCell colSpan={22} className="text-slate-600 italic text-sm px-3">
-                                <div className="flex items-center gap-2">
-                                  <Info className="h-4 w-4 text-blue-500" />
-                                  Click to {isExpanded ? 'collapse' : 'expand'} and view rate entries
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          )
-   
-                          if (isExpanded) {
-                            let entryCount = 0
-   
-                            // Add direct subdepartment entries
-                            subdeptData.direct.forEach((entry) => {
-                              entryCount++
-                              rows.push(renderRateRow(entry, `${groupIndex + 1}.${entryCount}`, true, 1))
-                            })
-   
-                            // Add class entries
-                            Object.entries(subdeptData.classes).forEach(([className, classData]) => {
-                              const hasSubclasses = Object.keys(classData.subclasses).length > 0
-                              const classRowId = `class-${subdeptName}-${className}`
-                              const isClassExpanded = expandedRows.has(classRowId)
-                              const classEntryCount = classData.direct.length + Object.values(classData.subclasses).reduce((sum, entries) => sum + entries.length, 0)
-   
-                              if (hasSubclasses || classData.direct.length > 0) {
-                                if (classEntryCount > 1 || hasSubclasses) {
-                                  // Class group header
-                                  entryCount++
-                                  rows.push(
-                                    <TableRow key={classRowId} className="bg-gradient-to-r from-blue-50 to-blue-25 border-b border-blue-100">
-                                      <TableCell className="sticky left-0 bg-blue-50 border-r text-center font-semibold text-sm z-30 px-3">
-                                        <Badge variant="outline" className="bg-white border-blue-300">
-                                          {groupIndex + 1}.{entryCount}
-                                        </Badge>
-                                      </TableCell>
-                                      <TableCell className="sticky left-16 bg-blue-50 border-r font-semibold z-30 px-3 pl-8">
-                                        <div className="flex justify-between items-center gap-3">
-                                          <div className="flex items-center gap-2">
-                                            <ChevronRight className="h-3 w-3 text-blue-500" />
-                                            <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
-                                            <span className="text-sm font-semibold text-blue-800">{className}</span>
-                                          </div>
-                                          <div className="flex items-center gap-2">
-                                            <Badge variant="secondary" className="text-xs bg-blue-100">
-                                              {classEntryCount} entries
-                                            </Badge>
-                                            <Button
-                                              variant="ghost"
-                                              size="sm"
-                                              className="h-5 w-5 p-0 hover:bg-white/50"
-                                              onClick={() => toggleRowExpansion(classRowId)}
-                                            >
-                                              {isClassExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-                                            </Button>
-                                          </div>
-                                        </div>
-                                      </TableCell>
-                                      <TableCell colSpan={22} className="text-blue-600 italic text-sm px-3">
-                                        <div className="flex items-center gap-2">
-                                          <Info className="h-4 w-4 text-purple-500" />
-                                          Click to {isClassExpanded ? 'collapse' : 'expand'} and view {hasSubclasses ? 'subclass' : 'class'} entries
-                                        </div>
-                                      </TableCell>
-                                    </TableRow>
-                                  )
-   
-                                  if (isClassExpanded) {
-                                    let subCount = 0
-   
-                                    // Add direct class entries
-                                    classData.direct.forEach((entry) => {
-                                      subCount++
-                                      rows.push(renderRateRow(entry, `${groupIndex + 1}.${entryCount}.${subCount}`, true, 2))
-                                    })
-   
-                                    // Add subclass entries
-                                    Object.entries(classData.subclasses).forEach(([subclassName, subclassEntries]) => {
-                                      if (subclassEntries.length > 1) {
-                                        // Subclass group header
-                                        subCount++
-                                        const subclassRowId = `subclass-${subdeptName}-${className}-${subclassName}`
-                                        const isSubclassExpanded = expandedRows.has(subclassRowId)
-   
-                                        rows.push(
-                                          <TableRow key={subclassRowId} className="bg-gradient-to-r from-purple-50 to-purple-25 border-b border-purple-100">
-                                            <TableCell className="sticky left-0 bg-purple-50 border-r text-center font-semibold text-sm z-30 px-3">
-                                              <Badge variant="outline" className="bg-white border-purple-300">
-                                                {groupIndex + 1}.{entryCount}.{subCount}
-                                              </Badge>
-                                            </TableCell>
-                                            <TableCell className="sticky left-16 bg-purple-50 border-r font-semibold z-30 px-3 pl-12">
-                                              <div className="flex justify-between items-center gap-3">
-                                                <div className="flex items-center gap-2">
-                                                  <ChevronRight className="h-3 w-3 text-purple-500" />
-                                                  <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-                                                  <span className="text-sm font-semibold text-purple-800">{subclassName}</span>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                  <Badge variant="secondary" className="text-xs bg-purple-100">
-                                                    {subclassEntries.length} entries
-                                                  </Badge>
-                                                  <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="h-5 w-5 p-0 hover:bg-white/50"
-                                                    onClick={() => toggleRowExpansion(subclassRowId)}
-                                                  >
-                                                    {isSubclassExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-                                                  </Button>
-                                                </div>
-                                              </div>
-                                            </TableCell>
-                                            <TableCell colSpan={22} className="text-purple-600 italic text-sm px-3">
-                                              <div className="flex items-center gap-2">
-                                                <Info className="h-4 w-4 text-orange-500" />
-                                                Click to {isSubclassExpanded ? 'collapse' : 'expand'} and view subclass entries
-                                              </div>
-                                            </TableCell>
-                                          </TableRow>
-                                        )
-   
-                                        if (isSubclassExpanded) {
-                                          subclassEntries.forEach((entry, subEntryIndex) => {
-                                            rows.push(renderRateRow(entry, `${groupIndex + 1}.${entryCount}.${subCount}.${subEntryIndex + 1}`, true, 3))
-                                          })
-                                        }
-                                      } else {
-                                        // Single subclass entry
-                                        subCount++
-                                        rows.push(renderRateRow(subclassEntries[0], `${groupIndex + 1}.${entryCount}.${subCount}`, true, 2))
-                                      }
-                                    })
-                                  }
-                                } else {
-                                  // Single class entry
-                                  entryCount++
-                                  rows.push(renderRateRow(classData.direct[0], `${groupIndex + 1}.${entryCount}`, true, 1))
-                                }
-                              }
-                            })
-                          }
-                        } else {
-                          // Single entry - render directly
-                          const singleEntry = subdeptData.direct[0] || 
-                            Object.values(subdeptData.classes)[0]?.direct[0] || 
-                            Object.values(Object.values(subdeptData.classes)[0]?.subclasses || {})[0]?.[0]
-                          
-                          if (singleEntry) {
-                            rows.push(renderRateRow(singleEntry, `${groupIndex + 1}`, false, 0))
-                          }
-                        }
-   
-                        return rows
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-                
-                {/* Enhanced footer with summary info
-                <div className="border-t bg-slate-50 p-4">
-                  <div className="flex items-center justify-between text-sm text-slate-600">
-                    <div className="flex items-center gap-4">
-                      <span>Total Entries: <span className="font-semibold">{currentPeriod.data.length}</span></span>
-                      <span>|</span>
-                      <span>Groups: <span className="font-semibold">{Object.keys(groupedEntries).length}</span></span>
-                      <span>|</span>
-                      <span>Last Updated: <span className="font-semibold">{format(currentPeriod.effectiveFrom, "PPp")}</span></span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className={`text-xs ${isReadOnly ? 'text-amber-700 bg-amber-50' : 'text-green-700 bg-green-50'}`}>
-                        {isReadOnly ? 'Read Only' : 'Editable'}
-                      </Badge>
-                    </div>
-                  </div>
-                </div> */}
-              </Card>
-            </TabsContent>
-          ))}
-        </Tabs>
+              Back to Current
+            </Button>
+          )}
+        </div>
       </div>
-    )
-   }
+
+      {/* Tabs with improved styling */}
+      <Tabs value={selectedDepartment} onValueChange={setSelectedDepartment} className="w-full">
+        <div className="flex justify-between items-start gap-4 mb-6">
+          <TabsList className=" gap-1 bg-muted/50 p-1">
+            {departments.map((dept) => (
+              <TabsTrigger
+                key={dept.id}
+                value={dept.id}
+                className="whitespace-nowrap data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
+              >
+                <div className="flex items-center gap-2">
+                  <span>{dept.name}</span>
+                  {dept.tm_subdepartments && (
+                    <Badge variant="secondary" className="text-xs">
+                      {dept.tm_subdepartments.length}
+                    </Badge>
+                  )}
+                </div>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+
+          {/* Enhanced info panel */}
+          {selectedDepartment && (
+            <Card className="min-w-fit">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-6 text-sm">
+                  <div className="flex items-center gap-2">
+                    <DollarSign className="h-4 w-4 text-green-600" />
+                    <span className="font-medium">USD Rate: {rates.usd}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-blue-600" />
+                    <span>
+                      Effective: {format(currentPeriod.effectiveFrom, "PPP")}
+                      {currentPeriod.effectiveTo && ` - ${format(currentPeriod.effectiveTo, "PPP")}`}
+                    </span>
+                  </div>
+                  {currentPeriod.description && (
+                    <Badge variant="outline" className="text-xs">
+                      {currentPeriod.description}
+                    </Badge>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {departments.map((dept) => (
+          <TabsContent key={dept.id} value={dept.id}>
+            <Card className="overflow-hidden">
+              <div className="relative overflow-auto max-h-[calc(100vh-300px)] border-0">
+                <Table className="min-w-max border-collapse">
+                  {/* Sticky Headers */}
+                  <TableHeader className="sticky top-0 z-50 bg-background">
+                    {/* Main Headers with subtle colors and defined borders */}
+                    <TableRow className="bg-blue-600 text-white border-b border-slate-300">
+                      <TableHead className="sticky left-0 bg-blue-600 border-r-2 border-white/20 w-16 z-50 text-center text-white font-semibold">#</TableHead>
+                      <TableHead className="sticky left-16 bg-blue-600 border-r-2 border-white/20 w-64 z-50 text-white font-semibold">Entity</TableHead>
+
+                      {/* Processing Fee - Light blue background with defined border */}
+                      <TableHead colSpan={3} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-600">
+                        Processing Fee
+                      </TableHead>
+                      {/* Issuance Fee - Light green background */}
+                      <TableHead colSpan={5} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-600">
+                        Issuance Fee
+                      </TableHead>
+                      {/* BCL Consultancy - Light purple background */}
+                      <TableHead colSpan={3} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-600">
+                        BCL Consultancy
+                      </TableHead>
+                      {/* Officer - Light orange background */}
+                      <TableHead colSpan={3} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-600">
+                        Officer
+                      </TableHead>
+                      {/* Extra Consideration - Light red background */}
+                      <TableHead colSpan={5} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-600">
+                        Extra Consideration
+                      </TableHead>
+                      {/* Convenience Fee - Light indigo background */}
+                      <TableHead colSpan={3} className="text-center text-white font-semibold bg-blue-600">
+                        Convenience Fee
+                      </TableHead>
+                    </TableRow>
+
+                    {/* Sub Headers with very light backgrounds and borders for separation */}
+                    <TableRow className="bg-slate-50 border-b border-slate-200">
+                      <TableHead className="sticky left-0 bg-slate-50 border-r z-50"></TableHead>
+                      <TableHead className="sticky left-16 bg-slate-50 border-r z-50"></TableHead>
+
+                      {/* Processing Fee Sub-headers - Very light blue */}
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-blue-50/50">Amount</TableHead>
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-blue-50/50">Currency</TableHead>
+                      <TableHead className="border-r-4 border-slate-300 text-center text-xs text-slate-900 font-semibold bg-blue-50/50">Fee (KSH)</TableHead>
+
+                      {/* Issuance Fee Sub-headers - Very light green */}
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-green-50/50">Amount</TableHead>
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-green-50/50">Currency</TableHead>
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-green-50/50">Fee (KSH)</TableHead>
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-green-50/50">Period Type</TableHead>
+                      <TableHead className="border-r-4 border-slate-300 text-center text-xs text-slate-900 font-semibold bg-green-50/50">Period Count</TableHead>
+
+                      {/* BCL Consultancy Sub-headers - Very light purple */}
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-purple-50/50">Tier 1</TableHead>
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-purple-50/50">Tier 2</TableHead>
+                      <TableHead className="border-r-4 border-slate-300 text-center text-xs text-slate-900 font-semibold bg-purple-50/50">Tier 3</TableHead>
+
+                      {/* Officer Sub-headers - Very light orange */}
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-orange-50/50">Boss Fixed</TableHead>
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-orange-50/50">PA Tier 1</TableHead>
+                      <TableHead className="border-r-4 border-slate-300 text-center text-xs text-slate-900 font-semibold bg-orange-50/50">PA Editable</TableHead>
+
+                      {/* Extra Consideration Sub-headers - Very light red */}
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-red-50/50">TCC Company</TableHead>
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-red-50/50">TCC Individual</TableHead>
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-red-50/50">Auditors Fee</TableHead>
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-red-50/50">Degree</TableHead>
+                      <TableHead className="border-r-4 border-slate-300 text-center text-xs text-slate-900 font-semibold bg-red-50/50">TF File</TableHead>
+
+                      {/* Convenience Fee Sub-headers - Very light indigo */}
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-indigo-50/50">Alien Assistance</TableHead>
+                      <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-indigo-50/50">Re-Entry</TableHead>
+                      <TableHead className="text-center text-xs text-slate-900 font-semibold bg-indigo-50/50">Passport Endorsement</TableHead>
+                    </TableRow>
+                  </TableHeader>
+
+                  <TableBody>
+                    {Object.entries(groupedEntries).flatMap(([subdeptName, subdeptData], groupIndex) => {
+                      const rows = []
+                      const totalEntries = subdeptData.direct.length + Object.values(subdeptData.classes).reduce((sum, cls) =>
+                        sum + cls.direct.length + Object.values(cls.subclasses).reduce((subSum, subEntries) => subSum + subEntries.length, 0), 0
+                      )
+
+                      const hasMultipleEntries = totalEntries > 1
+
+                      if (hasMultipleEntries) {
+                        const groupRowId = `group-${subdeptName}`
+                        const isExpanded = expandedRows.has(groupRowId)
+
+                        // Subdepartment group header
+                        rows.push(
+                          <TableRow key={groupRowId} className="bg-gradient-to-r from-slate-100 to-slate-50 border-b-2 border-slate-200 hover:from-slate-150 hover:to-slate-100 transition-all duration-200">
+                            <TableCell className="sticky left-0 bg-slate-100 border-r text-center font-semibold text-sm z-30 px-3">
+                              <Badge variant="outline" className="bg-white">
+                                {groupIndex + 1}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="sticky left-16 bg-slate-100 border-r font-semibold z-30 px-3">
+                              <div className="flex justify-between items-center gap-3">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-semibold text-slate-800">{subdeptName}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="secondary" className="text-xs">
+                                    {totalEntries} entries
+                                  </Badge>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 w-6 p-0 hover:bg-white/50"
+                                    onClick={() => toggleRowExpansion(groupRowId)}
+                                  >
+                                    {isExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                                  </Button>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell colSpan={22} className="text-slate-600 italic text-sm px-3">
+                              <div className="flex items-center gap-2">
+                                Click to {isExpanded ? 'collapse' : 'expand'} and view rate entries
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )
+
+                        if (isExpanded) {
+                          let entryCount = 0
+
+                          // Add direct subdepartment entries
+                          subdeptData.direct.forEach((entry) => {
+                            entryCount++
+                            rows.push(renderRateRow(entry, `${groupIndex + 1}.${entryCount}`, true, 1))
+                          })
+
+                          // Add class entries
+                          Object.entries(subdeptData.classes).forEach(([className, classData]) => {
+                            const hasSubclasses = Object.keys(classData.subclasses).length > 0
+                            const classRowId = `class-${subdeptName}-${className}`
+                            const isClassExpanded = expandedRows.has(classRowId)
+                            const classEntryCount = classData.direct.length + Object.values(classData.subclasses).reduce((sum, entries) => sum + entries.length, 0)
+
+                            if (hasSubclasses || classData.direct.length > 0) {
+                              if (classEntryCount > 1 || hasSubclasses) {
+                                // Class group header
+                                entryCount++
+                                rows.push(
+                                  <TableRow key={classRowId} className="bg-gradient-to-r from-blue-50 to-blue-25 border-b border-blue-100">
+                                    <TableCell className="sticky left-0 bg-blue-50 border-r text-center font-semibold text-sm z-30 px-3">
+                                      <Badge variant="outline" className="bg-white border-blue-300">
+                                        {groupIndex + 1}.{entryCount}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell className="sticky left-16 bg-blue-50 border-r font-semibold z-30 px-3 pl-8">
+                                      <div className="flex justify-between items-center gap-3">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm font-semibold text-blue-800">{className}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <Badge variant="secondary" className="text-xs bg-blue-100">
+                                            {classEntryCount} entries
+                                          </Badge>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-5 w-5 p-0 hover:bg-white/50"
+                                            onClick={() => toggleRowExpansion(classRowId)}
+                                          >
+                                            {isClassExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell colSpan={22} className="text-blue-600 italic text-sm px-3">
+                                      <div className="flex items-center gap-2">
+                                        Click to {isClassExpanded ? 'collapse' : 'expand'} and view {hasSubclasses ? 'subclass' : 'class'} entries
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                )
+
+                                if (isClassExpanded) {
+                                  let subCount = 0
+
+                                  // Add direct class entries
+                                  classData.direct.forEach((entry) => {
+                                    subCount++
+                                    rows.push(renderRateRow(entry, `${groupIndex + 1}.${entryCount}.${subCount}`, true, 2))
+                                  })
+
+                                  // Add subclass entries
+                                  Object.entries(classData.subclasses).forEach(([subclassName, subclassEntries]) => {
+                                    if (subclassEntries.length > 1) {
+                                      // Subclass group header
+                                      subCount++
+                                      const subclassRowId = `subclass-${subdeptName}-${className}-${subclassName}`
+                                      const isSubclassExpanded = expandedRows.has(subclassRowId)
+
+                                      rows.push(
+                                        <TableRow key={subclassRowId} className="bg-gradient-to-r from-purple-50 to-purple-25 border-b border-purple-100">
+                                          <TableCell className="sticky left-0 bg-purple-50 border-r text-center font-semibold text-sm z-30 px-3">
+                                            <Badge variant="outline" className="bg-white border-purple-300">
+                                              {groupIndex + 1}.{entryCount}.{subCount}
+                                            </Badge>
+                                          </TableCell>
+                                          <TableCell className="sticky left-16 bg-purple-50 border-r font-semibold z-30 px-3 pl-12">
+                                            <div className="flex justify-between items-center gap-3">
+                                              <div className="flex items-center gap-2">
+                                                <span className="text-sm font-semibold text-purple-800">{subclassName}</span>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                <Badge variant="secondary" className="text-xs bg-purple-100">
+                                                  {subclassEntries.length} entries
+                                                </Badge>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-5 w-5 p-0 hover:bg-white/50"
+                                                  onClick={() => toggleRowExpansion(subclassRowId)}
+                                                >
+                                                  {isSubclassExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                                                </Button>
+                                              </div>
+                                            </div>
+                                          </TableCell>
+                                          <TableCell colSpan={22} className="text-purple-600 italic text-sm px-3">
+                                            <div className="flex items-center gap-2">
+                                              Click to {isSubclassExpanded ? 'collapse' : 'expand'} and view subclass entries
+                                            </div>
+                                          </TableCell>
+                                        </TableRow>
+                                      )
+
+                                      if (isSubclassExpanded) {
+                                        subclassEntries.forEach((entry, subEntryIndex) => {
+                                          rows.push(renderRateRow(entry, `${groupIndex + 1}.${entryCount}.${subCount}.${subEntryIndex + 1}`, true, 3))
+                                        })
+                                      }
+                                    } else {
+                                      // Single subclass entry
+                                      subCount++
+                                      rows.push(renderRateRow(subclassEntries[0], `${groupIndex + 1}.${entryCount}.${subCount}`, true, 2))
+                                    }
+                                  })
+                                }
+                              } else {
+                                // Single class entry
+                                entryCount++
+                                rows.push(renderRateRow(classData.direct[0], `${groupIndex + 1}.${entryCount}`, true, 1))
+                              }
+                            }
+                          })
+                        }
+                      } else {
+                        // Single entry - render directly
+                        const singleEntry = subdeptData.direct[0] ||
+                          Object.values(subdeptData.classes)[0]?.direct[0] ||
+                          Object.values(Object.values(subdeptData.classes)[0]?.subclasses || {})[0]?.[0]
+
+                        if (singleEntry) {
+                          rows.push(renderRateRow(singleEntry, `${groupIndex + 1}`, false, 0))
+                        }
+                      }
+
+                      return rows
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </Card>
+          </TabsContent>
+        ))}
+      </Tabs>
+    </div>
+  )
+}
