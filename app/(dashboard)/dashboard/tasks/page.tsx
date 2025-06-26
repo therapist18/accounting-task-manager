@@ -51,63 +51,9 @@ import { performExtraction } from "@/lib/extractionUtils"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import { UploadRequirementsDialog } from "./components/UploadRequirementsDialog"
 
-// Define columns outside the component to prevent recreation on every render
-const stageColumns = [
-  { key: 'index', header: '#', width: '50px' },
-  { key: 'website', header: 'Website', width: '120px' },
-  { key: 'job_description', header: 'Job', width: '150px' },
-  { key: 'task_manager', header: 'Task Manager', width: '120px' },
-  { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
-  { key: 'officer', header: 'Officer', width: '120px' },
-  { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
-  { key: 'principal_member_name', header: 'Principal Member Name', width: '180px' },
-  { key: 'company_name', header: 'Company Name', width: '150px' },
-  {
-    key: 'documents',
-    header: 'All Submitted Documents',
-    width: '80px',
-    render: (value: any, task: any) => (
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-        onClick={() => { }}
-      >
-        <X className="h-4 w-4" />
-      </Button>
-    )
-  },
-  { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
-  { key: 'account_used', header: 'Account Used', width: '120px' },
-  { key: 'applied_by', header: 'Applied by Who', width: '120px' },
-  { key: 'batch', header: 'Batch', width: '100px' },
-  {
-    key: 'actions',
-    header: 'Actions',
-    width: '120px',
-    render: (value: any, task: any) => (
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => { }}
-          className="h-8 w-8 p-0"
-        >
-          <Edit className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => { }}
-          className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </div>
-    )
-  }
-];
+// We'll define the columns inside the component to access the state
 
 // Define requirement columns outside the component
 const requirementColumns = [
@@ -292,22 +238,22 @@ type Task = Database['public']['Tables']['tm_tasks']['Row'] & {
 }
 
 export default function TasksPage() {
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [departments, setDepartments] = useState<Department[]>([])
-  const [users, setUsers] = useState<{ id: string; name: string | null; email: string | null; role?: string }[]>([])
-  const [stages, setStages] = useState<Stage[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
-  const [stageTransitionDialogOpen, setStageTransitionDialogOpen] = useState(false)
-  const [newTaskDialogOpen, setNewTaskDialogOpen] = useState(false)
-  const [selectedDepartment, setSelectedDepartment] = useState<string>('')
-  const [selectedSubdepartment, setSelectedSubdepartment] = useState<string>('')
-  const [selectedClass, setSelectedClass] = useState<string>('')
-  const [selectedSubclass, setSelectedSubclass] = useState<string>('')
-  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
-  const [documentsDialogOpen, setDocumentsDialogOpen] = useState(false)
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [users, setUsers] = useState<{ id: string; name: string | null; email: string | null; role?: string }[]>([]);
+  const [stages, setStages] = useState<Stage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false);
+  const [stageTransitionDialogOpen, setStageTransitionDialogOpen] = useState(false);
+  const [newTaskDialogOpen, setNewTaskDialogOpen] = useState(false);
+  const [selectedDepartment, setSelectedDepartment] = useState<string>('');
+  const [selectedSubdepartment, setSelectedSubdepartment] = useState<string>('');
+  const [selectedClass, setSelectedClass] = useState<string>('');
+  const [selectedSubclass, setSelectedSubclass] = useState<string>('');
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
+  const [documentsDialogOpen, setDocumentsDialogOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [stageUploadDialogOpen, setStageUploadDialogOpen] = useState(false);
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: Task, stage: any } | null>(null);
   const [stageExtractionDialogOpen, setStageExtractionDialogOpen] = useState(false);
@@ -319,6 +265,71 @@ export default function TasksPage() {
   const [previewDocument, setPreviewDocument] = useState<any>(null);
   const [applicantDocuments, setApplicantDocuments] = useState<Record<number, any[]>>({});
   const [stageDocuments, setStageDocuments] = useState<Record<string, any[]>>({});
+  const [taskRequirements, setTaskRequirements] = useState<any[]>([]);
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({});
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
+
+  // Define columns inside the component to access state
+  const stageColumns = [
+    { key: 'index', header: '#', width: '50px' },
+    { key: 'website', header: 'Website', width: '120px' },
+    { key: 'job_description', header: 'Job', width: '150px' },
+    { key: 'task_manager', header: 'Task Manager', width: '120px' },
+    { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
+    { key: 'officer', header: 'Officer', width: '120px' },
+    { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
+    { key: 'principal_member_name', header: 'Principal Member Name', width: '180px' },
+    { key: 'company_name', header: 'Company Name', width: '150px' },
+    {
+      key: 'documents',
+      header: 'All Submitted Documents',
+      width: '80px',
+      render: (value: any, task: any) => (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+          onClick={() => {
+            setSelectedTask(task);
+            setShowUploadDialog(true);
+          }}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      )
+    },
+    { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
+    { key: 'account_used', header: 'Account Used', width: '120px' },
+    { key: 'applied_by', header: 'Applied by Who', width: '120px' },
+    { key: 'batch', header: 'Batch', width: '100px' },
+    {
+      key: 'actions',
+      header: 'Actions',
+      width: '120px',
+      render: (value: any, task: any) => (
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { }}
+            className="h-8 w-8 p-0"
+          >
+            <Edit className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { }}
+            className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      )
+    }
+  ];
   // Transform departments data to ensure consistent ID types and structure
   const transformDepartments = useCallback((depts: any[]) => {
     if (!depts || !Array.isArray(depts)) {
@@ -707,12 +718,6 @@ export default function TasksPage() {
       ...requirements
     };
   };
-
-  // State for column visibility and sorting
-  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({});
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
-  const [showColumnMenu, setShowColumnMenu] = useState(false);
-
   // Initialize column visibility
   useEffect(() => {
     const initialVisibility = stageColumns.reduce((acc, col) => {
@@ -753,55 +758,6 @@ export default function TasksPage() {
       return 0;
     });
   };
-
-  // Toggle column visibility
-  const toggleColumnVisibility = (key: string) => {
-    setColumnVisibility(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }));
-  };
-
-  // Column visibility toggle component
-  const ColumnVisibilityToggle = () => (
-    <div className="relative group">
-      <Button
-        variant="outline"
-        size="sm"
-        className="ml-2"
-        onClick={() => setShowColumnMenu(!showColumnMenu)}
-      >
-        <span className="mr-1">Columns</span>
-        <ChevronDown className="h-4 w-4" />
-      </Button>
-      {showColumnMenu && (
-        <div
-          className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 p-2 border"
-          onMouseLeave={() => setShowColumnMenu(false)}
-        >
-          <div className="max-h-60 overflow-y-auto">
-            {taskColumns
-              .filter(col => !['actions', 'index', 'separator1', 'separator2', 'separator3', 'separator4'].includes(col.key))
-              .map(column => (
-                <label
-                  key={column.key}
-                  className="flex items-center p-1 hover:bg-gray-100 rounded cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={columnVisibility[column.key] !== false}
-                    onChange={() => toggleColumnVisibility(column.key)}
-                    className="mr-2"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                  {typeof column.header === 'string' ? column.header : column.key}
-                </label>
-              ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
 
   const handleStageDocumentUpload = (task: Task, stage: any) => {
     setSelectedStageTask({ task, stage });
@@ -1095,7 +1051,7 @@ export default function TasksPage() {
   // Document Preview Dialog Component
   const DocumentPreviewDialog = ({ task }: { task: Task | null }) => {
     if (!previewDocument) return null;
-  
+
     return (
       <Dialog open={documentPreviewOpen} onOpenChange={setDocumentPreviewOpen}>
         <DialogContent className="max-w-6xl max-h-[95vh] overflow-y-auto">
@@ -2487,7 +2443,7 @@ export default function TasksPage() {
               file.name
             );
 
-            // Process extracted data - same logic as DocumentsTable
+            // Process extracted data - same logic as initial extraction
             let parsedData = extractedData;
             if (typeof extractedData === 'string') {
               try {
@@ -2499,7 +2455,7 @@ export default function TasksPage() {
               }
             }
 
-            // Map extracted data to fields - same logic as DocumentsTable
+            // Map extracted data to fields - same logic as initial extraction
             let mappedData = parsedData.rawData || parsedData || {};
 
             // Ensure we have proper field mapping
@@ -3608,57 +3564,27 @@ export default function TasksPage() {
             />
           )}
 
-          {/* Documents Dialog */}
-          <Dialog open={documentsDialogOpen} onOpenChange={setDocumentsDialogOpen}>
-            <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Upload Requirements</DialogTitle>
-                <DialogDescription>
-                  {selectedTask?.job_description} - {selectedTask?.applicant_name}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-4">
-                {getCurrentRequirements().map((req, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 border rounded-md">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2 rounded-full bg-muted">
-                        <FileIcon className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <p className="font-medium">{req.name}</p>
-                        {req.description && (
-                          <p className="text-sm text-muted-foreground">{req.description}</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Button variant="outline" size="sm" className="gap-2">
-                        <Upload className="h-4 w-4" />
-                        Upload
-                      </Button>
-                      <Button variant="ghost" size="icon" className="text-muted-foreground">
-                        <XCircle className="h-5 w-5" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </DialogContent>
-          </Dialog>
+{selectedTask && showUploadDialog && (
+            <UploadRequirementsDialog
+              task={selectedTask}
+              requirements={getCurrentRequirements()}
+              onClose={() => {
+                setSelectedTask(null);
+                setShowUploadDialog(false);
+              }}
+              onUploadComplete={() => {
+                // Refresh task data or update UI as needed
+                if (selectedTask) {
+                  loadApplicantDocuments(selectedTask);
+                }
+              }}
+            />
+          )}
         </div>
       </div>
       <StageUploadDialog />
 
       <DocumentPreviewDialog task={selectedTask} />
-
-      {selectedTask && (
-        <UploadRequirementsDialog
-          task={selectedTask}
-          requirements={getCurrentRequirements()}
-          onClose={() => setSelectedTask(null)}
-        />
-      )}
     </div>
   )
 }
