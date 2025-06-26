@@ -9,7 +9,6 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
@@ -30,8 +29,10 @@ import {
   ChevronRight,
   Info,
   Download,
-  FileSpreadsheet
+  FileSpreadsheet,
+  DownloadCloud
 } from "lucide-react"
+import { HistoricalRatesDialog, NewPeriodDialog, ExchangeRatesDialog } from "./components/dialogs"
 import { toast } from "@/hooks/use-toast"
 import { fetchDepartments } from "../departments/database"
 import { supabase } from "@/lib/supabase/client"
@@ -179,9 +180,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
 
     const headers = [
       'Index',
-      'Entity Type',
       'Entity Name',
-      'Entity Path',
       'Processing Fee Amount',
       'Processing Fee Currency',
       'Processing Fee (KSH)',
@@ -210,9 +209,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
 
     const csvData = currentPeriod.data.map((entry, index) => [
       index + 1,
-      entry.entityType,
       entry.entityName,
-      entry.entityPath,
       entry.processingFee.amount,
       entry.processingFee.currency,
       entry.processingFee.rate,
@@ -1097,13 +1094,13 @@ return (
           size="sm"
           onClick={exportToCSV}
           disabled={!selectedDepartment || currentPeriod.data.length === 0}
-        >
-          <FileSpreadsheet className="h-4 w-4 mr-2" />
-          Export CSV
+        > 
+          <DownloadCloud className="h-4 w-4 mr-2" />
+          Export to Excel
         </Button>
 
         {/* View Options */}
-        <div className="flex items-center gap-1 bg-muted/50 p-1 rounded-lg">
+        {/* <div className="flex items-center gap-1 bg-muted/50 p-1 rounded-lg">
           <Button
             variant={density === 'compact' ? 'default' : 'ghost'}
             size="sm"
@@ -1128,335 +1125,106 @@ return (
           >
             Spacious
           </Button>
-        </div>
+        </div> */}
 
         {/* Historical Periods Dialog */}
-        <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
-          <DialogTrigger asChild>
-            <Button variant="outline" size="sm">
-              <History className="h-4 w-4 mr-2" />
-              History
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-5xl max-h-[85vh] overflow-hidden flex flex-col">
-            <DialogHeader className="pb-4 border-b">
-              <DialogTitle className="flex items-center gap-3">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <History className="h-5 w-5 text-blue-600" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold">Rate History</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {departments.find(d => d.id === selectedDepartment)?.name}
-                  </p>
-                </div>
-              </DialogTitle>
-            </DialogHeader>
-            
-            <div className="flex-1 overflow-y-auto py-4">
-              {loadingHistory ? (
-                <div className="text-center py-12">
-                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                  <p className="text-muted-foreground">Loading historical data...</p>
-                </div>
-              ) : historicalPeriods.length === 0 ? (
-                <div className="text-center py-12">
-                  <div className="p-4 bg-slate-100 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-                    <History className="h-8 w-8 text-slate-400" />
-                  </div>
-                  <p className="text-muted-foreground">No historical data found for this department.</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {historicalPeriods.map((period) => (
-                    <Card 
-                      key={period.id} 
-                      className={`
-                        cursor-pointer transition-all duration-200 hover:shadow-md
-                        ${period.isActive 
-                          ? 'border-2 border-blue-500 bg-blue-50/50 shadow-sm' 
-                          : 'border border-slate-200 hover:border-slate-300'
-                        }
-                      `}
-                    >
-                      <CardContent className="p-5">
-                        <div className="flex items-center justify-between">
-                          <div className="space-y-2 flex-1">
-                            <div className="flex items-center gap-3">
-                              <div className={`w-3 h-3 rounded-full ${period.isActive ? 'bg-green-500' : 'bg-slate-400'}`}></div>
-                              <span className="font-semibold text-slate-800">
-                                {format(period.effectiveFrom, "PPP")}
-                                {period.effectiveTo && ` - ${format(period.effectiveTo, "PPP")}`}
-                              </span>
-                              {period.isActive && (
-                                <Badge className="bg-green-100 text-green-800 border-green-200">
-                                  Active
-                                </Badge>
-                              )}
-                            </div>
-                            
-                            {period.description && (
-                              <p className="text-sm text-slate-600 bg-slate-50 px-3 py-1 rounded">
-                                {period.description}
-                              </p>
-                            )}
-                            
-                            <div className="flex items-center gap-6 text-xs text-slate-500">
-                              <div className="flex items-center gap-1">
-                                <DollarSign className="h-3 w-3" />
-                                <span>USD Rate: {period.exchangeRates.usd}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span>Entries: {period.data.length}</span>
-                              </div>
-                              {period.createdAt && (
-                                <div className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" />
-                                  <span>Created: {format(period.createdAt, "PP")}</span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleViewHistoricalPeriod(period)}
-                            className="ml-4 hover:bg-blue-50 hover:border-blue-300"
-                          >
-                            <Eye className="h-4 w-4 mr-2" />
-                            View
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
+        <HistoricalRatesDialog
+          isOpen={isHistoryDialogOpen}
+          onOpenChange={setIsHistoryDialogOpen}
+          departments={departments}
+          selectedDepartment={selectedDepartment}
+          historicalPeriods={historicalPeriods}
+          loadingHistory={loadingHistory}
+          onViewHistoricalPeriod={handleViewHistoricalPeriod}
+        />
 
         {/* New Period Dialog */}
-        <Dialog open={isNewPeriodDialogOpen} onOpenChange={setIsNewPeriodDialogOpen}>
-          <DialogTrigger asChild>
-            <Button variant="outline" size="sm">
-              <Plus className="h-4 w-4 mr-2" />
-              New Period
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader className="pb-4 border-b">
-              <DialogTitle className="flex items-center gap-3">
-                <div className="p-2 bg-green-100 rounded-lg">
-                  <Plus className="h-5 w-5 text-green-600" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold">Create New Rate Period</h3>
-                  <p className="text-sm text-muted-foreground">Set up a new rate period for this department</p>
-                </div>
-              </DialogTitle>
-            </DialogHeader>
-            
-            <div className="space-y-6 py-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Description (Optional)</Label>
-                <Input
-                  value={newPeriodForm.description}
-                  onChange={(e) => setNewPeriodForm(prev => ({ ...prev, description: e.target.value }))}
-                  placeholder="e.g., Q2 2025 Rate Update"
-                  className="w-full"
-                />
-                <p className="text-xs text-muted-foreground">Add a descriptive name for this rate period</p>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">Effective From</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start text-left">
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {format(newPeriodForm.effectiveFrom, "PPP")}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={newPeriodForm.effectiveFrom}
-                        onSelect={(date) => date && setNewPeriodForm(prev => ({ ...prev, effectiveFrom: date }))}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">Effective To (Optional)</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start text-left">
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {newPeriodForm.effectiveTo ? format(newPeriodForm.effectiveTo, "PPP") : "No end date"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={newPeriodForm.effectiveTo || undefined}
-                        onSelect={(date) => setNewPeriodForm(prev => ({ ...prev, effectiveTo: date || null }))}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-              
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Copy Rates From (Optional)</Label>
-                <Select
-                  value={newPeriodForm.copyFromPeriod?.toString() || "current"}
-                  onValueChange={(value) => setNewPeriodForm(prev => ({
-                    ...prev,
-                    copyFromPeriod: value === "current" ? null : parseInt(value)
-                  }))}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select a period to copy rates from" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="current">
-                      <div className="flex items-center gap-2">
-                        <Copy className="h-4 w-4" />
-                        Start with current rates
-                      </div>
-                    </SelectItem>
-                    {historicalPeriods.map((period) => (
-                      <SelectItem key={period.id} value={period.id!.toString()}>
-                        <div className="flex items-center gap-2">
-                          <History className="h-4 w-4" />
-                          <span>
-                            {format(period.effectiveFrom, "PPP")}
-                            {period.description && ` - ${period.description}`}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Choose existing rates to copy, or start fresh with current rates
-                </p>
-              </div>
-            </div>
-            
-            <div className="flex justify-end gap-3 pt-4 border-t">
-              <Button 
-                variant="outline" 
-                onClick={() => setIsNewPeriodDialogOpen(false)}
-                disabled={saving}
-              >
-                Cancel
-              </Button>
-              <Button 
-                onClick={handleCreateNewPeriod} 
-                disabled={saving}
-                className="bg-green-600 hover:bg-green-700"
-              >
-                {saving ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
-                    Creating...
-                  </>
-                ) : (
-                  <>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Period
-                  </>
-                )}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <NewPeriodDialog
+          isOpen={isNewPeriodDialogOpen}
+          onOpenChange={setIsNewPeriodDialogOpen}
+          historicalPeriods={historicalPeriods}
+          onCreatePeriod={async (formData) => {
+            setSaving(true);
+            try {
+              if (currentPeriod.id) {
+                await supabase
+                  .from('rates_history')
+                  .update({ is_active: false })
+                  .eq('id', currentPeriod.id);
+              }
+
+              let newData = currentPeriod.data;
+
+              if (formData.copyFromPeriod) {
+                const sourcePeriod = historicalPeriods.find(p => p.id === formData.copyFromPeriod);
+                if (sourcePeriod) {
+                  newData = sourcePeriod.data.map(entry => ({
+                    ...entry,
+                    id: generateRateId()
+                  }));
+                }
+              }
+
+              const { error } = await supabase
+                .from('rates_history')
+                .insert({
+                  department_id: selectedDepartment,
+                  effective_from: formData.effectiveFrom.toISOString().split('T')[0],
+                  effective_to: formData.effectiveTo?.toISOString().split('T')[0] || null,
+                  rates_data: newData,
+                  exchange_rates: rates,
+                  description: formData.description,
+                  is_active: true,
+                  created_by: 'current_user'
+                });
+
+              if (error) throw error;
+
+              toast({
+                title: "Success",
+                description: "New rate period created successfully.",
+              });
+
+              setNewPeriodForm({
+                effectiveFrom: new Date(),
+                effectiveTo: null,
+                description: '',
+                copyFromPeriod: null
+              });
+
+              await loadCurrentRates(selectedDepartment);
+              await loadHistoricalPeriods(selectedDepartment);
+              setIsNewPeriodDialogOpen(false);
+            } catch (error) {
+              console.error('Error creating new period:', error);
+              toast({
+                title: "Error",
+                description: "Failed to create new period. Please try again.",
+                variant: "destructive"
+              });
+            } finally {
+              setSaving(false);
+            }
+          }}
+          saving={saving}
+        />
 
         {/* Exchange Rates Dialog */}
-        <Dialog open={isRateDialogOpen} onOpenChange={setIsRateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button variant="outline" size="sm" disabled={isReadOnly}>
-              <Calculator className="h-4 w-4 mr-2" />
-              Exchange Rates
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader className="pb-4 border-b">
-              <DialogTitle className="flex items-center gap-3">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <Calculator className="h-5 w-5 text-blue-600" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold">Configure Exchange Rates</h3>
-                  <p className="text-sm text-muted-foreground">Set the USD to KSH conversion rate</p>
-                </div>
-              </DialogTitle>
-            </DialogHeader>
-            
-            <div className="space-y-6 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="usd-rate" className="text-sm font-medium">USD to KSH Rate</Label>
-                <Input
-                  id="usd-rate"
-                  type="number"
-                  value={tempRates.usd}
-                  onChange={(e) => setTempRates(prev => ({ ...prev, usd: parseFloat(e.target.value) || 0 }))}
-                  placeholder="Enter USD to KSH rate"
-                  className="text-lg font-mono text-center"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Current rate: 1 USD = {tempRates.usd} KSH
-                </p>
-              </div>
-              
-              <div className="bg-blue-50 p-4 rounded-lg">
-                <div className="flex items-start gap-3">
-                  <Info className="h-5 w-5 text-blue-600 mt-0.5" />
-                  <div className="text-sm">
-                    <p className="font-medium text-blue-900 mb-1">Important</p>
-                    <p className="text-blue-700">
-                      This rate will be used to automatically convert USD amounts to KSH for all calculations in this period.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div className="flex justify-end gap-3 pt-4 border-t">
-              <Button 
-                variant="outline" 
-                onClick={() => {
-                  setTempRates(rates)
-                  setIsRateDialogOpen(false)
-                }}
-              >
-                Cancel
-              </Button>
-              <Button 
-                onClick={() => {
-                  setRates(tempRates)
-                  setCurrentPeriod(prev => ({ ...prev, exchangeRates: tempRates }))
-                  setIsRateDialogOpen(false)
-                  toast({
-                    title: "Exchange Rate Updated",
-                    description: `USD rate set to ${tempRates.usd} KSH`,
-                  })
-                }}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                <Calculator className="h-4 w-4 mr-2" />
-                Save Rates
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <ExchangeRatesDialog
+          isOpen={isRateDialogOpen}
+          onOpenChange={setIsRateDialogOpen}
+          currentRate={rates.usd}
+          onSave={(rate) => {
+            const newRates = { usd: rate, ksh: 1 };
+            setRates(newRates);
+            setCurrentPeriod(prev => ({ ...prev, exchangeRates: newRates }));
+            toast({
+              title: "Exchange Rate Updated",
+              description: `USD rate set to ${rate} KSH`,
+            });
+          }}
+          isReadOnly={isReadOnly}
+        />
 
         {!isReadOnly ? (
           <Button onClick={handleSaveRates} disabled={saving} size="sm">
@@ -1810,7 +1578,7 @@ return (
                   </Table>
                 </div>
                 
-                {/* Enhanced footer with summary info */}
+                {/* Enhanced footer with summary info
                 <div className="border-t bg-slate-50 p-4">
                   <div className="flex items-center justify-between text-sm text-slate-600">
                     <div className="flex items-center gap-4">
@@ -1826,7 +1594,7 @@ return (
                       </Badge>
                     </div>
                   </div>
-                </div>
+                </div> */}
               </Card>
             </TabsContent>
           ))}
