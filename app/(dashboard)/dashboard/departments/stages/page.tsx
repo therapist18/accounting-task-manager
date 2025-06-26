@@ -7,7 +7,24 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { ArrowUp, ArrowDown, Pencil, X, Info, Minus, Plus, Clock, FileText, User, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight } from "lucide-react"
+import {
+  ArrowUp,
+  ArrowDown,
+  Pencil,
+  X,
+  Info,
+  Minus,
+  Plus,
+  Clock,
+  FileText,
+  User,
+  ArrowLeft,
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  FileSpreadsheet
+} from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
@@ -15,6 +32,7 @@ import { AddStageDialog } from "./add-stage-dialog"
 import { EditStageDialog } from "./edit-stage-dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
+import { format } from "date-fns"
 import type { Department, Stage, Subdepartment, DepartmentOption } from "./types"
 
 // Simple UUID generator for client-side use
@@ -79,7 +97,132 @@ export default function Stages() {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const { toast } = useToast()
 
-  // Handle key down for keyboard navigation
+  // Export function for stages
+  const exportToCSV = () => {
+    const currentDept = getCurrentDepartment()
+    if (!currentDept || !currentDept.stages || currentDept.stages.length === 0) {
+      toast({
+        title: "No data to export",
+        description: "Please select a department with stage data",
+        variant: "destructive"
+      })
+      return
+    }
+
+    const headers = [
+      'Order',
+      'Stage Name',
+      'Description',
+      'Estimated Time (minutes)',
+      'Duration Display',
+      'Follow Up',
+      'Is Special',
+      'Documents Count',
+      'Subdepartment',
+      'Entity',
+      'Entity Type',
+      'Applicable',
+      'Display'
+    ]
+
+    const csvData = []
+
+    // Add stage basic info and allocation data
+    currentDept.stages.forEach((stage) => {
+      // First add the stage basic info
+      csvData.push([
+        stage.order_num,
+        stage.name,
+        stage.description || '',
+        stage.estimated_time || 0,
+        minutesToTimeString(stage.estimated_time),
+        stage.follow_up || '',
+        stage.isSpecial ? 'Yes' : 'No',
+        stage.documents?.length || 0,
+        '', // Subdepartment
+        '', // Entity
+        '', // Entity Type
+        '', // Applicable
+        '' // Display
+      ])
+
+      // Then add allocation data for each subdepartment/class/subclass
+      const normalizedSubdepartments = currentDept.subdepartments && currentDept.subdepartments.length > 0
+        ? currentDept.subdepartments
+        : [{
+          id: -1,
+          name: 'N/A',
+          department_id: currentDept.id,
+          stages: [],
+          hasClasses: false,
+          classes: []
+        }]
+
+      normalizedSubdepartments.forEach((subdept) => {
+        if (!subdept.hasClasses || !subdept.classes || subdept.classes.length === 0) {
+          // Direct subdepartment allocation
+          const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id)
+          csvData.push([
+            '', '', '', '', '', '', '', '',
+            subdept.name,
+            subdept.name,
+            'Subdepartment',
+            stageAllocation?.applicable ? 'Yes' : 'No',
+            stageAllocation?.display ? 'Yes' : 'No'
+          ])
+        } else {
+          // Class and subclass allocations
+          subdept.classes.forEach((cls) => {
+            if (!cls.subClasses || cls.subClasses.length === 0) {
+              // Direct class allocation
+              const stageAllocation = cls.stages?.find(s => s.stage_id === stage.id)
+              csvData.push([
+                '', '', '', '', '', '', '', '',
+                subdept.name,
+                `${subdept.name} → ${cls.name}`,
+                'Class',
+                stageAllocation?.applicable ? 'Yes' : 'No',
+                stageAllocation?.display ? 'Yes' : 'No'
+              ])
+            } else {
+              // Subclass allocations
+              cls.subClasses.forEach((subCls) => {
+                const stageAllocation = subCls.stages?.find(s => s.stage_id === stage.id)
+                csvData.push([
+                  '', '', '', '', '', '', '', '',
+                  subdept.name,
+                  `${subdept.name} → ${cls.name} → ${subCls.name}`,
+                  'Subclass',
+                  stageAllocation?.applicable ? 'Yes' : 'No',
+                  stageAllocation?.display ? 'Yes' : 'No'
+                ])
+              })
+            }
+          })
+        }
+      })
+    })
+
+    const csvContent = [headers, ...csvData]
+      .map(row => row.map(cell => `"${cell}"`).join(','))
+      .join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', `${currentDept.name}_stages_${format(new Date(), 'yyyy-MM-dd')}.csv`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    toast({
+      title: "Export Successful",
+      description: `Exported ${currentDept.stages.length} stages with allocation data to CSV`,
+    })
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent, subdeptId: number, stageId: string, shouldAllocate: boolean) => {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -104,7 +247,6 @@ export default function Stages() {
       try {
         setLoading(true)
 
-        // Fetch departments with their subdepartments and stages
         const { data: deptsData, error: deptsError } = await supabase
           .from('tm_departments')
           .select(`
@@ -118,7 +260,6 @@ export default function Stages() {
 
         if (deptsError) throw deptsError
 
-        // Transform the data to ensure consistent structure
         const transformedDepartments = (deptsData || []).map(dept => ({
           ...dept,
           stages: dept.stages ? (Array.isArray(dept.stages) ? dept.stages : []) : [],
@@ -132,7 +273,6 @@ export default function Stages() {
 
         setDepartments(transformedDepartments)
 
-        // Set the first department as active tab
         if (transformedDepartments.length > 0) {
           setActiveTab(transformedDepartments[0].id)
         }
@@ -151,7 +291,6 @@ export default function Stages() {
     return departments.find(d => d.id === activeTab)
   }
 
-  // Get simplified department list for the dropdown
   const departmentList = useMemo((): DepartmentOption[] =>
     departments.map(dept => ({
       id: dept.id,
@@ -160,13 +299,19 @@ export default function Stages() {
     [departments]
   )
 
-  // Handle allocation change internal (for immediate updates)
-  const handleAllocationChangeInternal = async (subdeptId: number, stageId: string, shouldAllocate: boolean) => {
+  const handleAllocationChangeInternal = async (subdeptId: number, stageId: string,
+    shouldAllocate: boolean
+  ) => {
     return handleAllocationChange(subdeptId, stageId, shouldAllocate)
   }
 
-  // Handle allocation change
-  const handleAllocationChange = async (subdeptId: number, stageId: string, shouldAllocate: boolean, classIndex: number | null = null, subclassIndex: number | null = null) => {
+  const handleAllocationChange = async (
+    subdeptId: number,
+    stageId: string,
+    shouldAllocate: boolean,
+    classIndex: number | null = null,
+    subclassIndex: number | null = null
+  ) => {
     try {
       const currentDept = getCurrentDepartment()
       if (!currentDept) return
@@ -176,7 +321,64 @@ export default function Stages() {
       let className = ''
       let stageName = currentDept.stages.find(s => s.id === stageId)?.name || 'this stage'
 
-      if (classIndex !== null) {
+      if (classIndex !== null && subclassIndex !== null) {
+        // Handle subclass allocation
+        const subdept = currentDept.subdepartments?.find(sd => sd.id === subdeptId)
+        if (!subdept?.classes?.[classIndex]?.subClasses?.[subclassIndex]) {
+          toast({
+            title: "Error",
+            description: "Subclass not found",
+            variant: "destructive"
+          })
+          return
+        }
+
+        subdeptName = subdept.name
+        className = subdept.classes[classIndex].name
+        const subclassName = subdept.classes[classIndex].subClasses[subclassIndex].name
+
+        const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
+
+        if (!updatedClasses[classIndex].subClasses[subclassIndex].stages) {
+          updatedClasses[classIndex].subClasses[subclassIndex].stages = []
+        }
+
+        let stageAllocation = updatedClasses[classIndex].subClasses[subclassIndex].stages.find((s: any) => s.stage_id === stageId)
+        if (!stageAllocation) {
+          stageAllocation = { stage_id: stageId, applicable: false, display: false }
+          updatedClasses[classIndex].subClasses[subclassIndex].stages.push(stageAllocation)
+        }
+
+        stageAllocation.applicable = shouldAllocate
+        if (!shouldAllocate) {
+          stageAllocation.display = false
+        }
+
+        updateData = { classes: updatedClasses }
+
+        // Update parent class and subdepartment stages as well
+        if (!updatedClasses[classIndex].stages) {
+          updatedClasses[classIndex].stages = []
+        }
+        let classStageAllocation = updatedClasses[classIndex].stages.find((s: any) => s.stage_id === stageId)
+        if (!classStageAllocation) {
+          classStageAllocation = { stage_id: stageId, applicable: false, display: false }
+          updatedClasses[classIndex].stages.push(classStageAllocation)
+        }
+        classStageAllocation.applicable = shouldAllocate || updatedClasses[classIndex].subClasses?.some((sc: any) =>
+          sc.stages?.some((s: any) => s.stage_id === stageId && s.applicable)
+        )
+
+        const subdeptStages = [...(subdept.stages || [])]
+        let subdeptStageAllocation = subdeptStages.find(s => s.stage_id === stageId)
+        if (!subdeptStageAllocation) {
+          subdeptStageAllocation = { stage_id: stageId, applicable: false, display: false }
+          subdeptStages.push(subdeptStageAllocation)
+        }
+        subdeptStageAllocation.applicable = shouldAllocate || subdeptStages.some(s => s.stage_id === stageId && s.applicable)
+        updateData.stages = subdeptStages
+
+      } else if (classIndex !== null) {
         // Handle class allocation
         const subdept = currentDept.subdepartments?.find(sd => sd.id === subdeptId)
         if (!subdept?.classes?.[classIndex]) {
@@ -191,25 +393,21 @@ export default function Stages() {
         subdeptName = subdept.name
         className = subdept.classes[classIndex].name
 
-        // Create a deep copy of the classes array
         const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
 
-        // Ensure stages array exists
         if (!updatedClasses[classIndex].stages) {
           updatedClasses[classIndex].stages = []
         }
 
-        // Find or create stage allocation
         let stageAllocation = updatedClasses[classIndex].stages.find((s: any) => s.stage_id === stageId)
         if (!stageAllocation) {
           stageAllocation = { stage_id: stageId, applicable: false, display: false }
           updatedClasses[classIndex].stages.push(stageAllocation)
         }
 
-        // Update allocation
         stageAllocation.applicable = shouldAllocate
         if (!shouldAllocate) {
-          stageAllocation.display = false // If not applicable, can't display
+          stageAllocation.display = false
         }
 
         updateData = { classes: updatedClasses }
@@ -238,7 +436,6 @@ export default function Stages() {
 
         subdeptName = subdept.name
 
-        // Ensure stages array exists
         const subdeptStages = [...(subdept.stages || [])]
         let stageAllocation = subdeptStages.find(s => s.stage_id === stageId)
         if (!stageAllocation) {
@@ -246,10 +443,9 @@ export default function Stages() {
           subdeptStages.push(stageAllocation)
         }
 
-        // Update allocation
         stageAllocation.applicable = shouldAllocate
         if (!shouldAllocate) {
-          stageAllocation.display = false // If not applicable, can't display
+          stageAllocation.display = false
         }
 
         updateData = { stages: subdeptStages }
@@ -273,28 +469,48 @@ export default function Stages() {
             subdepartments: dept.subdepartments?.map(subdept => {
               if (subdept.id !== subdeptId) return subdept
 
-              if (classIndex !== null) {
+              if (classIndex !== null && subclassIndex !== null) {
+                // Update subclass
                 const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
 
-                // Ensure stages array exists
+                if (!updatedClasses[classIndex].subClasses[subclassIndex].stages) {
+                  updatedClasses[classIndex].subClasses[subclassIndex].stages = []
+                }
+
+                let stageAllocation = updatedClasses[classIndex].subClasses[subclassIndex].stages.find((s: any) => s.stage_id === stageId)
+                if (!stageAllocation) {
+                  stageAllocation = { stage_id: stageId, applicable: false, display: false }
+                  updatedClasses[classIndex].subClasses[subclassIndex].stages.push(stageAllocation)
+                }
+
+                stageAllocation.applicable = shouldAllocate
+                if (!shouldAllocate) {
+                  stageAllocation.display = false
+                }
+
+                return {
+                  ...subdept,
+                  classes: updatedClasses
+                }
+              } else if (classIndex !== null) {
+                // Update class
+                const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
+
                 if (!updatedClasses[classIndex].stages) {
                   updatedClasses[classIndex].stages = []
                 }
 
-                // Find or create stage allocation
                 let stageAllocation = updatedClasses[classIndex].stages.find((s: any) => s.stage_id === stageId)
                 if (!stageAllocation) {
                   stageAllocation = { stage_id: stageId, applicable: false, display: false }
                   updatedClasses[classIndex].stages.push(stageAllocation)
                 }
 
-                // Update allocation
                 stageAllocation.applicable = shouldAllocate
                 if (!shouldAllocate) {
-                  stageAllocation.display = false // If not applicable, can't display
+                  stageAllocation.display = false
                 }
 
-                // Update subdepartment stages as well
                 const subdeptStages = [...(subdept.stages || [])]
                 let subdeptStageAllocation = subdeptStages.find(s => s.stage_id === stageId)
                 if (!subdeptStageAllocation) {
@@ -310,6 +526,7 @@ export default function Stages() {
                 }
               }
 
+              // Update subdepartment
               const subdeptStages = [...(subdept.stages || [])]
               let stageAllocation = subdeptStages.find(s => s.stage_id === stageId)
               if (!stageAllocation) {
@@ -317,10 +534,9 @@ export default function Stages() {
                 subdeptStages.push(stageAllocation)
               }
 
-              // Update allocation
               stageAllocation.applicable = shouldAllocate
               if (!shouldAllocate) {
-                stageAllocation.display = false // If not applicable, can't display
+                stageAllocation.display = false
               }
 
               return {
@@ -332,10 +548,9 @@ export default function Stages() {
         })
       )
 
-      // Show success toast
       toast({
         title: "Success",
-        description: `${stageName} has been ${shouldAllocate ? 'applicable to' : 'removed from'} ${className ? `${className} in ${subdeptName}` : subdeptName}`,
+        description: `${stageName} has been ${shouldAllocate ? 'applied to' : 'removed from'} ${className ? `${className} in ${subdeptName}` : subdeptName}`,
       })
     } catch (err) {
       console.error('Error updating allocation:', err)
@@ -347,8 +562,13 @@ export default function Stages() {
     }
   }
 
-  // Handle display toggle
-  const handleDisplayToggle = async (subdeptId: number, stageId: string, checked: boolean, classIndex: number | null = null, subclassIndex: number | null = null) => {
+  const handleDisplayToggle = async (
+    subdeptId: number,
+    stageId: string,
+    checked: boolean,
+    classIndex: number | null = null,
+    subclassIndex: number | null = null
+  ) => {
     try {
       const currentDept = getCurrentDepartment()
       if (!currentDept) return
@@ -358,7 +578,38 @@ export default function Stages() {
       let className = ''
       let stageName = currentDept.stages.find(s => s.id === stageId)?.name || 'this stage'
 
-      if (classIndex !== null) {
+      if (classIndex !== null && subclassIndex !== null) {
+        // Handle subclass display toggle
+        const subdept = currentDept.subdepartments?.find(sd => sd.id === subdeptId)
+        if (!subdept?.classes?.[classIndex]?.subClasses?.[subclassIndex]) {
+          toast({
+            title: "Error",
+            description: "Subclass not found",
+            variant: "destructive"
+          })
+          return
+        }
+
+        subdeptName = subdept.name
+        className = subdept.classes[classIndex].name
+        const subclassName = subdept.classes[classIndex].subClasses[subclassIndex].name
+
+        const updatedClasses = JSON.parse(JSON.stringify(subdept.classes))
+
+        if (!updatedClasses[classIndex].subClasses[subclassIndex].stages) {
+          updatedClasses[classIndex].subClasses[subclassIndex].stages = []
+        }
+
+        let stageAllocation = updatedClasses[classIndex].subClasses[subclassIndex].stages.find((s: any) => s.stage_id === stageId)
+        if (!stageAllocation) {
+          stageAllocation = { stage_id: stageId, applicable: false, display: false }
+          updatedClasses[classIndex].subClasses[subclassIndex].stages.push(stageAllocation)
+        }
+
+        stageAllocation.display = checked
+        updateData = { classes: updatedClasses }
+
+      } else if (classIndex !== null) {
         // Handle class display toggle
         const subdept = currentDept.subdepartments?.find(sd => sd.id === subdeptId)
         if (!subdept?.classes?.[classIndex]) {
@@ -388,7 +639,6 @@ export default function Stages() {
         stageAllocation.display = checked
         updateData = { classes: updatedClasses }
 
-        // Update subdepartment display as well
         const subdeptStages = [...(subdept.stages || [])]
         let subdeptStageAllocation = subdeptStages.find(s => s.stage_id === stageId)
         if (!subdeptStageAllocation) {
@@ -441,7 +691,24 @@ export default function Stages() {
             subdepartments: dept.subdepartments?.map(subdept => {
               if (subdept.id !== subdeptId) return subdept
 
-              if (classIndex !== null) {
+              if (classIndex !== null && subclassIndex !== null) {
+                const updatedClasses = [...(subdept.classes || [])]
+                if (!updatedClasses[classIndex].subClasses[subclassIndex].stages) {
+                  updatedClasses[classIndex].subClasses[subclassIndex].stages = []
+                }
+
+                let stageAllocation = updatedClasses[classIndex].subClasses[subclassIndex].stages.find((s: any) => s.stage_id === stageId)
+                if (!stageAllocation) {
+                  stageAllocation = { stage_id: stageId, applicable: false, display: false }
+                  updatedClasses[classIndex].subClasses[subclassIndex].stages.push(stageAllocation)
+                }
+                stageAllocation.display = checked
+
+                return {
+                  ...subdept,
+                  classes: updatedClasses
+                }
+              } else if (classIndex !== null) {
                 const updatedClasses = [...(subdept.classes || [])]
                 if (!updatedClasses[classIndex].stages) {
                   updatedClasses[classIndex].stages = []
@@ -454,7 +721,6 @@ export default function Stages() {
                 }
                 stageAllocation.display = checked
 
-                // Update subdepartment display as well
                 const subdeptStages = [...(subdept.stages || [])]
                 let subdeptStageAllocation = subdeptStages.find(s => s.stage_id === stageId)
                 if (!subdeptStageAllocation) {
@@ -487,7 +753,6 @@ export default function Stages() {
         })
       )
 
-      // Show success toast
       toast({
         title: "Success",
         description: `Display setting updated for ${stageName} in ${className ? `${className} (${subdeptName})` : subdeptName}`,
@@ -502,7 +767,6 @@ export default function Stages() {
     }
   }
 
-  // Function to add new stages from the AddStageDialog
   const handleAddStages = async (stages: any[], departmentId: string) => {
     const currentDept = departments.find(d => d.id === departmentId)
     if (!currentDept) {
@@ -515,11 +779,9 @@ export default function Stages() {
     }
 
     try {
-      // Process each stage to ensure proper time configurations
       const newStagesData = stages
         .filter(stage => stage.name.trim() !== '')
         .map((stage, index) => {
-          // For special stages, we need to ensure timeConfigs are properly formatted
           if (stage.isSpecial) {
             const timeConfigs = Array.isArray(stage.timeConfigs)
               ? stage.timeConfigs.map(config => ({
@@ -530,7 +792,6 @@ export default function Stages() {
               }))
               : [];
 
-            // Calculate total minutes from the first config (or default to 0)
             const firstConfig = timeConfigs[0] || { days: 0, hours: 0, minutes: 0 };
             const totalMinutes = (firstConfig.days * 24 * 60) + (firstConfig.hours * 60) + firstConfig.minutes;
 
@@ -548,7 +809,6 @@ export default function Stages() {
             };
           }
 
-          // For regular stages, use direct time input
           const days = Number(stage.days) || 0;
           const hours = Number(stage.hours) || 0;
           const minutes = Number(stage.minutes) || 0;
@@ -577,13 +837,11 @@ export default function Stages() {
         return
       }
 
-      // Prepare stages for database update
       const updatedStages = [
         ...currentDept.stages,
         ...newStagesData
       ];
 
-      // Update department with new stages in the database
       const { data: updatedDept, error: updateError } = await supabase
         .from('tm_departments')
         .update({
@@ -596,14 +854,12 @@ export default function Stages() {
 
       if (updateError) throw updateError
 
-      // Update local state with the new stages
       setDepartments(departments.map(dept =>
         dept.id === currentDept.id
           ? { ...dept, stages: updatedStages }
           : dept
       ))
 
-      // Close the dialog
       setIsDialogOpen(false)
 
       toast({
@@ -620,7 +876,6 @@ export default function Stages() {
     }
   }
 
-  // Function to update a stage
   const handleUpdateStage = async (updatedStage: Stage) => {
     try {
       const currentDept = getCurrentDepartment()
@@ -630,7 +885,6 @@ export default function Stages() {
         s.id === updatedStage.id ? updatedStage : s
       )
 
-      // Update department stages in Supabase
       const { error } = await supabase
         .from('tm_departments')
         .update({
@@ -641,7 +895,6 @@ export default function Stages() {
 
       if (error) throw error
 
-      // Update local state
       setDepartments(prev => prev.map(dept =>
         dept.id === activeTab
           ? { ...dept, stages: updatedStages }
@@ -653,7 +906,6 @@ export default function Stages() {
         description: "Stage updated successfully",
       })
 
-      // Clear both states
       setEditingStage(null)
       setIsEditDialogOpen(false)
     } catch (err) {
@@ -666,12 +918,10 @@ export default function Stages() {
     }
   }
 
-  // Function to move a stage up or down
   const moveStage = async (stageId: string, direction: 'up' | 'down') => {
     const currentDept = getCurrentDepartment()
     if (!currentDept) return
 
-    // Create a deep copy of the stages array to avoid reference issues
     const currentStages = JSON.parse(JSON.stringify(currentDept.stages))
     const currentIndex = currentStages.findIndex((s: Stage) => s.id === stageId)
 
@@ -680,19 +930,16 @@ export default function Stages() {
     const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
     if (newIndex < 0 || newIndex >= currentStages.length) return
 
-    // Create a new array with the stage moved to its new position
     const newStages = [...currentStages]
     const [movedStage] = newStages.splice(currentIndex, 1)
     newStages.splice(newIndex, 0, movedStage)
 
-    // Update order numbers while preserving all other properties
     const updatedStages = newStages.map((stage: Stage, index: number) => ({
-      ...stage, // Spread all existing properties
-      order_num: index + 1 // Update just the order_num
+      ...stage,
+      order_num: index + 1
     }))
 
     try {
-      // First, get the current department data to preserve all fields
       const { data: currentDeptData, error: fetchError } = await supabase
         .from('tm_departments')
         .select('*')
@@ -701,11 +948,10 @@ export default function Stages() {
 
       if (fetchError) throw fetchError
 
-      // Update the department with the new stages array
       const { error } = await supabase
         .from('tm_departments')
         .update({
-          ...currentDeptData, // Preserve all other fields
+          ...currentDeptData,
           stages: updatedStages,
           updated_at: new Date().toISOString()
         })
@@ -713,7 +959,6 @@ export default function Stages() {
 
       if (error) throw error
 
-      // Update local state
       setDepartments(prev => prev.map(dept =>
         dept.id === activeTab
           ? { ...dept, stages: updatedStages }
@@ -728,59 +973,56 @@ export default function Stages() {
       })
     }
   }
-// Add this function to handle stage deletion with KYC cleanup
-const handleDeleteStage = async (stageId: string) => {
-  try {
-    const currentDept = getCurrentDepartment()
-    if (!currentDept) return
 
-    const stageToDelete = currentDept.stages.find(s => s.id === stageId)
-    if (!stageToDelete) return
+  const handleDeleteStage = async (stageId: string) => {
+    try {
+      const currentDept = getCurrentDepartment()
+      if (!currentDept) return
 
-    // Clean up KYC documents
-    if (stageToDelete.documents) {
-      await Promise.all(
-        stageToDelete.documents
-          .filter(doc => doc.kycId)
-          .map(doc => deleteKYCDocument(doc.kycId!))
-      )
-    }
+      const stageToDelete = currentDept.stages.find(s => s.id === stageId)
+      if (!stageToDelete) return
 
-    // Remove stage from department
-    const updatedStages = currentDept.stages
-      .filter(s => s.id !== stageId)
-      .map((stage, index) => ({ ...stage, order_num: index + 1 }))
+      if (stageToDelete.documents) {
+        await Promise.all(
+          stageToDelete.documents
+            .filter(doc => doc.kycId)
+            .map(doc => deleteKYCDocument(doc.kycId!))
+        )
+      }
 
-    const { error } = await supabase
-      .from('tm_departments')
-      .update({
-        stages: updatedStages,
-        updated_at: new Date().toISOString()
+      const updatedStages = currentDept.stages
+        .filter(s => s.id !== stageId)
+        .map((stage, index) => ({ ...stage, order_num: index + 1 }))
+
+      const { error } = await supabase
+        .from('tm_departments')
+        .update({
+          stages: updatedStages,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', activeTab)
+
+      if (error) throw error
+
+      setDepartments(prev => prev.map(dept =>
+        dept.id === activeTab
+          ? { ...dept, stages: updatedStages }
+          : dept
+      ))
+
+      toast({
+        title: "Success",
+        description: "Stage and associated documents deleted successfully",
       })
-      .eq('id', activeTab)
-
-    if (error) throw error
-
-    // Update local state
-    setDepartments(prev => prev.map(dept =>
-      dept.id === activeTab
-        ? { ...dept, stages: updatedStages }
-        : dept
-    ))
-
-    toast({
-      title: "Success",
-      description: "Stage and associated documents deleted successfully",
-    })
-  } catch (err) {
-    console.error('Error deleting stage:', err)
-    toast({
-      title: "Error",
-      description: "Failed to delete stage. Please try again.",
-      variant: "destructive"
-    })
+    } catch (err) {
+      console.error('Error deleting stage:', err)
+      toast({
+        title: "Error",
+        description: "Failed to delete stage. Please try again.",
+        variant: "destructive"
+      })
+    }
   }
-}
 
   const currentDept = getCurrentDepartment()
 
@@ -788,7 +1030,6 @@ const handleDeleteStage = async (stageId: string) => {
   if (error) return <div className="text-red-500 p-4">{error}</div>
   if (!currentDept) return <div className="p-4">No department selected</div>
 
-  // Ensure we always have at least one subdepartment
   const normalizedSubdepartments = currentDept.subdepartments && currentDept.subdepartments.length > 0
     ? currentDept.subdepartments
     : [{
@@ -803,20 +1044,41 @@ const handleDeleteStage = async (stageId: string) => {
   return (
     <div className="w-full space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">Stages Management</h2>
-        <AddStageDialog
-          open={isDialogOpen}
-          onOpenChange={setIsDialogOpen}
-          onAddStages={handleAddStages}
-          departments={departmentList}
-        />
+        <div>
+          <h2 className="text-2xl font-bold">Stages Management</h2>
+          <p className="text-muted-foreground">Configure workflow stages and their allocations</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Export Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportToCSV}
+            disabled={!currentDept || !currentDept.stages || currentDept.stages.length === 0}
+          >
+            <FileSpreadsheet className="h-4 w-4 mr-2" />
+            Export CSV
+          </Button>
+
+          <AddStageDialog
+            open={isDialogOpen}
+            onOpenChange={setIsDialogOpen}
+            onAddStages={handleAddStages}
+            departments={departmentList}
+          />
+        </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="w-full mb-4 items-start justify-start overflow-x-auto">
           {departments.map(dept => (
             <TabsTrigger key={dept.id} value={dept.id} className="whitespace-nowrap">
-              {dept.name}
+              <div className="flex items-center gap-2">
+                <span>{dept.name}</span>
+                <Badge variant="secondary" className="text-xs">
+                  {dept.stages?.length || 0}
+                </Badge>
+              </div>
             </TabsTrigger>
           ))}
         </TabsList>
@@ -838,19 +1100,20 @@ const handleDeleteStage = async (stageId: string) => {
             ) : (
               <div className="relative overflow-auto max-h-[calc(100vh-200px)] border rounded-lg">
                 <Table className="min-w-max bg-white">
-                  <TableHeader className="sticky top-0 bg-blue-600 text-white z-30">
+                  {/* Sticky Headers */}
+                  <TableHeader className="sticky top-0 bg-blue-600 text-white z-50">
                     {/* Stage Names Row */}
                     <TableRow className="bg-blue-600">
-                      <TableHead className="sticky left-0 bg-blue-600 border-r font-bold w-16 z-40 text-center text-white" rowSpan={4}>
+                      <TableHead className="sticky left-0 bg-blue-600 border-r font-bold w-16 z-50 text-center text-white" rowSpan={4}>
                         #
                       </TableHead>
-                      <TableHead className="sticky left-16 bg-blue-600 border-r font-bold w-64 z-40 text-white" rowSpan={4}>
+                      <TableHead className="sticky left-16 bg-blue-600 border-r font-bold w-64 z-50 text-white" rowSpan={4}>
                         <div className="flex items-center gap-2">
                           <FileText className="h-4 w-4" />
                           Department / Entity
                         </div>
                       </TableHead>
-                      <TableHead className="sticky left-26 bg-blue-600 border-r z-40 text-white">Stage Name</TableHead>
+                      <TableHead className="sticky left-80 bg-blue-600 border-r z-50 text-white">Stage Name</TableHead>
 
                       {dept.stages.map((stage) => (
                         <TableHead
@@ -868,7 +1131,7 @@ const handleDeleteStage = async (stageId: string) => {
                                 <Popover>
                                   <PopoverTrigger asChild>
                                     <Button variant="ghost" size="icon" className="h-5 w-5 p-0 relative bg-purple-600 shadow-sm">
-                                      <FileText className="h-3 w-3 text-blue-500" />
+                                      <FileText className="h-3 w-3 text-white" />
                                       <Badge
                                         variant="secondary"
                                         className="absolute -top-1 -right-1 h-4 w-4 text-xs p-0 flex items-center justify-center rounded-full"
@@ -969,12 +1232,13 @@ const handleDeleteStage = async (stageId: string) => {
                                   </PopoverContent>
                                 </Popover>
                               )}
+
                               {/* Special Time Config Indicator */}
                               {stage.isSpecial && (
                                 <Popover>
                                   <PopoverTrigger asChild>
                                     <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
-                                      <Clock className="h-3 w-3 text-orange-500" />
+                                      <Clock className="h-3 w-3 text-orange-400" />
                                     </Button>
                                   </PopoverTrigger>
                                   <PopoverContent className="w-80">
@@ -1000,6 +1264,7 @@ const handleDeleteStage = async (stageId: string) => {
                                   </PopoverContent>
                                 </Popover>
                               )}
+
                               <div className="flex items-center gap-1">
                                 <Button
                                   variant="ghost"
@@ -1036,8 +1301,8 @@ const handleDeleteStage = async (stageId: string) => {
                     </TableRow>
 
                     {/* Duration Row */}
-                    <TableRow className="bg-blue-50">
-                      <TableHead className="sticky left-0 bg-blue-600 border-r z-40 text-white">Duration</TableHead>
+                    <TableRow className="bg-blue-500">
+                      <TableHead className="sticky left-80 bg-blue-600 border-r z-50 text-white">Duration</TableHead>
                       {dept.stages.map(stage => {
                         const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
                         return (
@@ -1054,8 +1319,8 @@ const handleDeleteStage = async (stageId: string) => {
                     </TableRow>
 
                     {/* Follow Up Row */}
-                    <TableRow className="bg-blue-50">
-                      <TableHead className="sticky left-0 bg-blue-600 border-r z-40 text-white">Follow Up</TableHead>
+                    <TableRow className="bg-blue-500">
+                      <TableHead className="sticky left-80 bg-blue-600 border-r z-50 text-white">Follow Up</TableHead>
                       {dept.stages.map(stage => (
                         <TableHead key={`followup-${stage.id}`} className="border-r text-center bg-blue-500">
                           <div className="font-bold text-sm text-white">
@@ -1066,8 +1331,8 @@ const handleDeleteStage = async (stageId: string) => {
                     </TableRow>
 
                     {/* Applicable/Display Headers Row */}
-                    <TableRow className="bg-blue-100">
-                      <TableHead className="sticky left-0 bg-blue-600 border-r z-40"></TableHead>
+                    <TableRow className="bg-blue-400">
+                      <TableHead className="sticky left-80 bg-blue-600 border-r z-50"></TableHead>
                       {dept.stages.map(stage => (
                         <TableHead key={`controls-${stage.id}`} className="border-r bg-blue-500">
                           <div className="grid grid-cols-2 gap-1 p-1">
@@ -1090,7 +1355,6 @@ const handleDeleteStage = async (stageId: string) => {
                       const rows = []
                       let rowIndex = subdeptIndex + 1
 
-                      // Subdepartment row (only show applicable/display if no classes)
                       const hasClasses = subdept.classes && subdept.classes.length > 0
 
                       rows.push(
@@ -1099,7 +1363,7 @@ const handleDeleteStage = async (stageId: string) => {
                             {rowIndex}
                           </TableCell>
                           <TableCell className="sticky left-16 bg-white border-r font-medium z-30">
-                            <div className="justify-between flex gap-2">
+                            <div className="flex justify-between items-center gap-2">
                               <span className="font-medium">{subdept.name}</span>
                               {hasClasses && (
                                 <Button
@@ -1117,7 +1381,7 @@ const handleDeleteStage = async (stageId: string) => {
                               )}
                             </div>
                           </TableCell>
-                          <TableCell className="sticky bg-background border-r text-center font-mono text-sm z-30"></TableCell>
+                          <TableCell className="sticky left-80 bg-background border-r text-center font-mono text-sm z-30"></TableCell>
                           {dept.stages.map(stage => {
                             const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id)
                             const hasAllocation = stageAllocation?.applicable || false
@@ -1126,7 +1390,6 @@ const handleDeleteStage = async (stageId: string) => {
                             return (
                               <TableCell key={`subdept-${subdept.id}-${stage.id}`} className="border-r p-0">
                                 {!hasClasses ? (
-                                  // Show controls only if no classes
                                   <div className="grid grid-cols-2 gap-1 p-1">
                                     <div className="flex justify-center">
                                       <div
@@ -1139,7 +1402,6 @@ const handleDeleteStage = async (stageId: string) => {
                                           value={hasAllocation ? 'applicable' : 'not-applicable'}
                                           onValueChange={async (value) => {
                                             const newValue = value === 'applicable';
-                                            // Optimistically update the UI
                                             setDepartments(prevDepartments => {
                                               return prevDepartments.map(dept => {
                                                 if (dept.id !== activeTab) return dept;
@@ -1169,7 +1431,6 @@ const handleDeleteStage = async (stageId: string) => {
                                               });
                                             });
 
-                                            // Then update the database
                                             await handleAllocationChangeInternal(subdept.id, stage.id, newValue);
                                           }}
                                         >
@@ -1180,7 +1441,7 @@ const handleDeleteStage = async (stageId: string) => {
                                             <SelectValue>
                                               <div className="flex items-center gap-1">
                                                 <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                                <span className="ml-1">{hasAllocation ? 'Applicable' : 'Not Applicable'}</span>
+                                                <span className="ml-1">{hasAllocation ? 'Yes' : 'No'}</span>
                                               </div>
                                             </SelectValue>
                                           </SelectTrigger>
@@ -1213,7 +1474,6 @@ const handleDeleteStage = async (stageId: string) => {
                                     </div>
                                   </div>
                                 ) : (
-                                  // Show dash if has classes
                                   <div className="flex items-center justify-center p-2 text-muted-foreground">
                                     -
                                   </div>
@@ -1232,13 +1492,16 @@ const handleDeleteStage = async (stageId: string) => {
                           const isClassExpanded = expandedRows.has(classRowId)
 
                           rows.push(
-                            <TableRow key={classRowId} className="bg-muted/5 hover:bg-muted/10">
-                              <TableCell className="sticky left-0 bg-background border-r text-center font-mono text-sm z-30">
+                            <TableRow key={classRowId} className="bg-blue-50/30 hover:bg-blue-100/30">
+                              <TableCell className="sticky left-0 bg-blue-50/30 border-r text-center font-mono text-sm z-30">
                                 {rowIndex}.{clsIndex + 1}
                               </TableCell>
-                              <TableCell className="sticky left-16 bg-background border-r pl-8 z-30">
+                              <TableCell className="sticky left-16 bg-blue-50/30 border-r pl-8 z-30">
                                 <div className="flex justify-between items-center gap-2">
-                                  <span className="text-muted-foreground text-sm">{cls.name}</span>
+                                  <div className="flex items-center gap-2">
+                                    <ChevronRight className="h-3 w-3 text-blue-500" />
+                                    <span className="text-blue-700 text-sm font-medium">{cls.name}</span>
+                                  </div>
                                   {hasSubClasses && (
                                     <Button
                                       variant="ghost"
@@ -1256,7 +1519,7 @@ const handleDeleteStage = async (stageId: string) => {
                                 </div>
                               </TableCell>
 
-                              <TableCell className="sticky bg-background border-r text-center font-mono text-sm z-30"></TableCell>
+                              <TableCell className="sticky left-80 bg-blue-50/30 border-r text-center font-mono text-sm z-30"></TableCell>
                               {dept.stages.map(stage => {
                                 const stageAllocation = cls.stages?.find(s => s.stage_id === stage.id)
                                 const hasAllocation = stageAllocation?.applicable || false
@@ -1265,7 +1528,6 @@ const handleDeleteStage = async (stageId: string) => {
                                 return (
                                   <TableCell key={`class-${subdept.id}-${cls.id}-${stage.id}`} className="border-r p-0">
                                     {!hasSubClasses ? (
-                                      // Show controls only if no subclasses
                                       <div className="grid grid-cols-2 gap-1 p-1">
                                         <div className="flex justify-center">
                                           <Select
@@ -1275,7 +1537,12 @@ const handleDeleteStage = async (stageId: string) => {
                                             }
                                           >
                                             <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs">
-                                              <SelectValue />
+                                              <SelectValue>
+                                                <div className="flex items-center gap-1">
+                                                  <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                                  <span>{hasAllocation ? 'Yes' : 'No'}</span>
+                                                </div>
+                                              </SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
                                               <SelectItem value="applicable">
@@ -1305,7 +1572,6 @@ const handleDeleteStage = async (stageId: string) => {
                                         </div>
                                       </div>
                                     ) : (
-                                      // Show dash if has subclasses
                                       <div className="flex items-center justify-center p-2 text-muted-foreground">
                                         -
                                       </div>
@@ -1320,15 +1586,18 @@ const handleDeleteStage = async (stageId: string) => {
                           if (isClassExpanded && hasSubClasses) {
                             cls.subClasses?.forEach((subCls, subClsIndex) => {
                               rows.push(
-                                <TableRow key={`subclass-${subdept.id}-${cls.id}-${subCls.id}`} className="bg-muted/10 hover:bg-muted/15">
-                                  <TableCell className="sticky left-0 bg-background border-r text-center font-mono text-sm z-30">
+                                <TableRow key={`subclass-${subdept.id}-${cls.id}-${subCls.id}`} className="bg-purple-50/30 hover:bg-purple-100/30">
+                                  <TableCell className="sticky left-0 bg-purple-50/30 border-r text-center font-mono text-sm z-30">
                                     {rowIndex}.{clsIndex + 1}.{subClsIndex + 1}
                                   </TableCell>
-                                  <TableCell className="sticky left-16 bg-background border-r pl-16 z-30">
-                                    <span className="text-muted-foreground text-sm">{subCls.name}</span>
+                                  <TableCell className="sticky left-16 bg-purple-50/30 border-r pl-16 z-30">
+                                    <div className="flex items-center gap-2">
+                                      <ChevronRight className="h-3 w-3 text-purple-500" />
+                                      <span className="text-purple-700 text-sm">{subCls.name}</span>
+                                    </div>
                                   </TableCell>
 
-                                  <TableCell className="sticky bg-background border-r text-center font-mono text-sm z-30"></TableCell>
+                                  <TableCell className="sticky left-80 bg-purple-50/30 border-r text-center font-mono text-sm z-30"></TableCell>
                                   {dept.stages.map(stage => {
                                     const stageAllocation = subCls.stages?.find(s => s.stage_id === stage.id)
                                     const hasAllocation = stageAllocation?.applicable || false
@@ -1345,7 +1614,12 @@ const handleDeleteStage = async (stageId: string) => {
                                               }
                                             >
                                               <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs">
-                                                <SelectValue />
+                                                <SelectValue>
+                                                  <div className="flex items-center gap-1">
+                                                    <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                                    <span>{hasAllocation ? 'Yes' : 'No'}</span>
+                                                  </div>
+                                                </SelectValue>
                                               </SelectTrigger>
                                               <SelectContent>
                                                 <SelectItem value="applicable">
@@ -1393,6 +1667,7 @@ const handleDeleteStage = async (stageId: string) => {
           </TabsContent>
         ))}
       </Tabs>
+
       <EditStageDialog
         open={!!editingStage}
         onOpenChange={(open) => {
