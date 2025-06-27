@@ -7,24 +7,7 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import {
-  ArrowUp,
-  ArrowDown,
-  Pencil,
-  X,
-  Info,
-  Minus,
-  Plus,
-  Clock,
-  FileText,
-  User,
-  ArrowLeft,
-  ArrowRight,
-  ChevronLeft,
-  ChevronRight,
-  Download,
-  FileSpreadsheet
-} from "lucide-react"
+import { ArrowUp, ArrowDown, Pencil, X, Info, Minus, Plus, Clock, FileText, User, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Download, FileSpreadsheet } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
@@ -37,8 +20,8 @@ import { format } from "date-fns"
 import type { Department, Stage, Subdepartment, DepartmentOption } from "./stagesdb"
 
 // Simple UUID generator for client-side use
-const generateId = () => {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+const generateId = () => { 
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) { 
     const r = Math.random() * 16 | 0
     const v = c === 'x' ? r : (r & 0x3 | 0x8)
     return v.toString(16)
@@ -93,7 +76,7 @@ const getStageColumnColor = (index: number) => {
 }
 
 const getStageHeaderColor = (index: number) => {
-  return index % 2 === 0 ? 'bg-blue-700' : 'bg-blue-600'
+  return index % 2 === 0 ? 'bg-blue-800' : 'bg-blue-700'
 }
 
 export default function Stages() {
@@ -1257,10 +1240,10 @@ export default function Stages() {
  
                       rows.push(
                         <TableRow key={subdeptRowId} className="hover:bg-muted/30 transition-colors">
-                          <TableCell className="sticky left-0 bg-white border-r-2 border-gray-300 text-center font-mono text-sm z-30 font-semibold">
+                          <TableCell className="sticky left-0 bg-white border-2 border-gray-300 text-center font-mono text-sm z-30 font-semibold">
                             {rowIndex}
                           </TableCell>
-                          <TableCell className="sticky left-16 bg-white border-r-2 border-gray-300 font-medium z-30">
+                          <TableCell className="sticky left-16 bg-white border-2 border-gray-300 font-medium z-30">
                             <div className="flex justify-between items-center gap-2">
                               <span className="font-semibold text-gray-900">{subdept.name}</span>
                               {hasClasses && (
@@ -1279,7 +1262,7 @@ export default function Stages() {
                               )}
                             </div>
                           </TableCell>
-                          <TableCell className="sticky left-80 bg-white border-r-2 border-gray-300 text-center font-mono text-sm z-30"></TableCell>
+                          <TableCell className="sticky left-80 bg-white border-2 border-gray-300 text-center font-mono text-sm z-30"></TableCell>
                           {dept.stages.map((stage, stageIndex) => {
                             const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id)
                             const hasAllocation = stageAllocation?.applicable ?? true
@@ -1289,7 +1272,7 @@ export default function Stages() {
                               <TableCell
                                 key={`subdept-${subdept.id}-${stage.id}`}
                                 className={cn(
-                                  "border-r border-gray-200 p-0",
+                                  "border-2 border-gray-300 p-0",
                                   getStageColumnColor(stageIndex)
                                 )}
                               >
@@ -1397,10 +1380,10 @@ export default function Stages() {
  
                           rows.push(
                             <TableRow key={classRowId} className="bg-blue-50/50 hover:bg-blue-100/50 transition-colors">
-                              <TableCell className="sticky left-0 bg-blue-50/50 border-r-2 border-gray-300 text-center font-mono text-sm z-30 font-semibold">
+                              <TableCell className="sticky left-0 bg-blue-50/50 border-2 border-gray-300 text-center font-mono text-sm z-30 font-semibold">
                                 {rowIndex}.{clsIndex + 1}
                               </TableCell>
-                              <TableCell className="sticky left-16 bg-blue-50/50 border-r-2 border-gray-300 pl-8 z-30">
+                              <TableCell className="sticky left-16 bg-blue-50/50 border-2 border-gray-300 pl-8 z-30">
                                 <div className="flex justify-between items-center gap-2">
                                   <div className="flex items-center gap-2">
                                     <ChevronRight className="h-3 w-3 text-blue-500" />
@@ -1423,7 +1406,7 @@ export default function Stages() {
                                 </div>
                               </TableCell>
  
-                              <TableCell className="sticky left-80 bg-blue-50/50 border-r-2 border-gray-300 text-center font-mono text-sm z-30"></TableCell>
+                              <TableCell className="sticky left-80 bg-blue-50/50 border-2 border-gray-300 text-center font-mono text-sm z-30"></TableCell>
                               {dept.stages.map((stage, stageIndex) => {
                                 const stageAllocation = cls.stages?.find(s => s.stage_id === stage.id)
                                 const hasAllocation = stageAllocation?.applicable ?? true
@@ -1433,7 +1416,7 @@ export default function Stages() {
                                   <TableCell
                                     key={`class-${subdept.id}-${cls.id}-${stage.id}`}
                                     className={cn(
-                                      "border-r border-gray-200 p-0",
+                                      "border-2 border-gray-300 p-0 z-30",
                                       getStageColumnColor(stageIndex)
                                     )}
                                   >
@@ -1497,17 +1480,17 @@ export default function Stages() {
                             cls.subClasses?.forEach((subCls, subClsIndex) => {
                               rows.push(
                                 <TableRow key={`subclass-${subdept.id}-${cls.id}-${subCls.id}`} className="bg-purple-50/50 hover:bg-purple-100/50 transition-colors">
-                                  <TableCell className="sticky left-0 bg-purple-50/50 border-r-2 border-gray-300 text-center font-mono text-sm z-30 font-semibold">
+                                  <TableCell className="sticky left-0 bg-purple-50/50 border-2 border-gray-300 text-center font-mono text-sm z-30 font-semibold">
                                     {rowIndex}.{clsIndex + 1}.{subClsIndex + 1}
                                   </TableCell>
-                                  <TableCell className="sticky left-16 bg-purple-50/50 border-r-2 border-gray-300 pl-16 z-30">
+                                  <TableCell className="sticky left-16 bg-purple-50/50 border-2 border-gray-300 pl-16 z-30">
                                     <div className="flex items-center gap-2">
-                                      <ChevronRight className="h-3 w-3 text-purple-500" />
-                                      <span className="text-purple-700 text-sm font-medium">{subCls.name}</span>
+                                      <ChevronRight className="h-3 w-3 text-blue-500" />
+                                      <span className="text-blue-700 text-sm font-medium">{subCls.name}</span>
                                     </div>
                                   </TableCell>
  
-                                  <TableCell className="sticky left-80 bg-purple-50/50 border-r-2 border-gray-300 text-center font-mono text-sm z-30"></TableCell>
+                                  <TableCell className="sticky left-80 bg-purple-50/50 border-2 border-gray-300 text-center font-mono text-sm z-30"></TableCell>
                                   {dept.stages.map((stage, stageIndex) => {
                                     const stageAllocation = subCls.stages?.find(s => s.stage_id === stage.id)
                                     const hasAllocation = stageAllocation?.applicable ?? true
@@ -1517,7 +1500,7 @@ export default function Stages() {
                                       <TableCell
                                         key={`subclass-${subdept.id}-${cls.id}-${subCls.id}-${stage.id}`}
                                         className={cn(
-                                          "border-r border-gray-200 p-0",
+                                          "border-2 border-gray-300 p-0",
                                           getStageColumnColor(stageIndex)
                                         )}
                                       >
