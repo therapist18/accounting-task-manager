@@ -98,25 +98,25 @@ export default function DepartmentsPage() {
         <TabsTrigger value="guidelines">Guidelines</TabsTrigger>
         <TabsTrigger value="payments">Payments</TabsTrigger>
       </TabsList>
-      <TabsContent value="departments">
+      <TabsContent value="departments" className="h-screen">
         <Departments />
       </TabsContent>
-      <TabsContent value="stages">
+      <TabsContent value="stages" className="h-screen">
         <Stages />
       </TabsContent>
-      <TabsContent value="requirements">
+      <TabsContent value="requirements" className="h-screen">
         <UploadRequirements departments={departments} />
       </TabsContent>
       {/* <TabsContent value="webdata">
         <WebData departments={departments} />
       </TabsContent> */}
-      <TabsContent value="rates">
+      <TabsContent value="rates" className="h-screen">
         <Rates departments={departments} />
       </TabsContent>
-      <TabsContent value="payments">
+      <TabsContent value="payments" className="h-screen">
         <Payments departments={departments} />
       </TabsContent>
-      <TabsContent value="guidelines">
+      <TabsContent value="guidelines" className="h-screen">
         <DepartmentGuidelines departments={departments} />
       </TabsContent>
     </Tabs>

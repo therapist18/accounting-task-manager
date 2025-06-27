@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import {
@@ -27,6 +26,22 @@ interface AddFieldDialogProps {
   onSuccess: () => void
 }
 
+interface TableColumn {
+  column_name: string
+  data_type: string
+  is_jsonb: boolean
+  jsonb_properties?: Array<{
+    id: string
+    name: string
+    type: string
+    properties?: Array<{
+      id: string
+      name: string
+      type: string
+    }>
+  }>
+}
+
 export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialogProps) {
   const [formData, setFormData] = useState<Partial<JobFieldInsert>>({
     field_key: "",
@@ -42,8 +57,9 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
   // State for table and field selection
   const [tables, setTables] = useState<Array<{name: string, label: string}>>([])
   const [selectedTable, setSelectedTable] = useState<string>("")
-  const [fields, setFields] = useState<Array<{name: string, type: string}>>([])
+  const [fields, setFields] = useState<TableColumn[]>([])
   const [selectedField, setSelectedField] = useState<string>("")
+  const [selectedJsonPath, setSelectedJsonPath] = useState<string>("")
   const [loadingTables, setLoadingTables] = useState(false)
   const [loadingFields, setLoadingFields] = useState(false)
   const [sourceType, setSourceType] = useState<"profile" | "document" | "company">("profile")
@@ -58,7 +74,6 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
         try {
           options = JSON.parse(optionsText)
         } catch {
-          // If JSON parsing fails, treat as comma-separated values
           options = optionsText
             .split(",")
             .map((opt) => opt.trim())
@@ -70,7 +85,7 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
       const sources = selectedTable && selectedField ? [{
         source_type: sourceType,
         table: selectedTable,
-        path: selectedField,
+        path: selectedJsonPath || selectedField,
         priority: 1
       }] : []
 
@@ -114,6 +129,7 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
     setOptionsText("")
     setSelectedTable("")
     setSelectedField("")
+    setSelectedJsonPath("")
     setSourceType("profile")
     setFields([])
   }
@@ -162,18 +178,16 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
       
       try {
         setLoadingFields(true)
+        setSelectedField("")
+        setSelectedJsonPath("")
+        
         const { data, error } = await supabase.rpc('get_table_columns', {
-          table_name: selectedTable
+          input_table_name: selectedTable
         })
         
         if (error) throw error
         
-        const formattedFields = data.map((col: { column_name: string; data_type: string }) => ({
-          name: col.column_name,
-          type: col.data_type
-        }))
-        
-        setFields(formattedFields)
+        setFields(data || [])
       } catch (error) {
         console.error('Error fetching table fields:', error)
         toast({
@@ -189,6 +203,61 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
     fetchFields()
   }, [selectedTable])
 
+  const handleFieldSelect = (fieldName: string) => {
+    setSelectedField(fieldName)
+    setSelectedJsonPath("") // Reset JSON path when field changes
+  }
+
+  const handleJsonPathSelect = (path: string) => {
+    setSelectedJsonPath(path)
+  }
+
+  const renderJsonPathSelector = (field: TableColumn) => {
+    if (!field.is_jsonb || !field.jsonb_properties?.length) return null
+
+    return (
+      <div className="mt-2 pl-4 border-l-2 border-muted">
+        <Label>JSON Property</Label>
+        <Select
+          value={selectedJsonPath}
+          onValueChange={handleJsonPathSelect}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select a property" />
+          </SelectTrigger>
+          <SelectContent>
+            {field.jsonb_properties.flatMap(prop => {
+              const baseItem = (
+                <SelectItem 
+                  key={prop.id} 
+                  value={`${field.column_name}->>'${prop.name}'`}
+                >
+                  {prop.name} ({prop.type})
+                </SelectItem>
+              )
+
+              if (prop.properties?.length) {
+                return [
+                  baseItem,
+                  ...prop.properties.map(nestedProp => (
+                    <SelectItem 
+                      key={nestedProp.id} 
+                      value={`${field.column_name}->'${prop.name}'->>'${nestedProp.name}'`}
+                      className="pl-6"
+                    >
+                      {prop.name}.{nestedProp.name} ({nestedProp.type})
+                    </SelectItem>
+                  ))
+                ]
+              }
+              return baseItem
+            })}
+          </SelectContent>
+        </Select>
+      </div>
+    )
+  }
+
   const handleClose = () => {
     onOpenChange(false)
     resetForm()
@@ -196,7 +265,7 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>Add New Field</DialogTitle>
           <DialogDescription>Create a new job application field with its configuration.</DialogDescription>
@@ -309,7 +378,7 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
                 <Label htmlFor="field">Field</Label>
                 <Select
                   value={selectedField}
-                  onValueChange={setSelectedField}
+                  onValueChange={handleFieldSelect}
                   disabled={loadingFields || !selectedTable}
                 >
                   <SelectTrigger>
@@ -319,12 +388,18 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
                   </SelectTrigger>
                   <SelectContent>
                     {fields.map((field) => (
-                      <SelectItem key={field.name} value={field.name}>
-                        {field.name} <span className="text-muted-foreground text-xs ml-2">({field.type})</span>
+                      <SelectItem key={field.column_name} value={field.column_name}>
+                        {field.column_name} <span className="text-muted-foreground text-xs ml-2">({field.data_type})</span>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+
+                {selectedField && (
+                  fields.find(f => f.column_name === selectedField)?.is_jsonb && (
+                    renderJsonPathSelector(fields.find(f => f.column_name === selectedField)!)
+                  )
+                )}
               </div>
             )}
           </div>

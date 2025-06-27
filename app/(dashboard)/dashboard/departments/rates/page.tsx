@@ -823,7 +823,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
         </TableCell>
 
         {/* Processing Fee Section */}
-        <TableCell className="border-r border-blue-100 bg-blue-50/30 p-2">
+        <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
           <Input
             type="number"
             value={entry.processingFee.amount}
@@ -840,7 +840,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
             disabled={isReadOnly}
           />
         </TableCell>
-        <TableCell className="border-r border-blue-100 bg-blue-50/30 p-2">
+        <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
           <Select
             value={entry.processingFee.currency}
             onValueChange={(value: 'USD' | 'KSH') => updateCurrency(entry.id, 'processingFee', value)}
@@ -855,14 +855,14 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
             </SelectContent>
           </Select>
         </TableCell>
-        <TableCell className="border-r border-blue-200 bg-blue-50/30 p-2">
+        <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
           <div className={`${inputHeight} ${fontSize} bg-blue-100/50 rounded px-2 flex items-center justify-center font-mono text-blue-800 font-semibold`}>
             {entry.processingFee.rate.toLocaleString()}
           </div>
         </TableCell>
 
         {/* Issuance Fee Section */}
-        <TableCell className="border-r border-green-100 bg-green-50/30 p-2">
+        <TableCell className="border-r border-gray-200 bg-green-50/30 p-2">
           <Input
             type="number"
             value={entry.issuanceFee.amount}
@@ -879,7 +879,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
             disabled={isReadOnly}
           />
         </TableCell>
-        <TableCell className="border-r border-green-100 bg-green-50/30 p-2">
+        <TableCell className="border-r border-gray-200 bg-green-50/30 p-2">
           <Select
             value={entry.issuanceFee.currency}
             onValueChange={(value: 'USD' | 'KSH') => updateCurrency(entry.id, 'issuanceFee', value)}
@@ -894,12 +894,12 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
             </SelectContent>
           </Select>
         </TableCell>
-        <TableCell className="border-r border-green-100 bg-green-50/30 p-2">
+        <TableCell className="border-r border-gray-200 bg-green-50/30 p-2">
           <div className={`${inputHeight} ${fontSize} bg-green-100/50 rounded px-2 flex items-center justify-center font-mono text-green-800 font-semibold`}>
             {entry.issuanceFee.rate.toLocaleString()}
           </div>
         </TableCell>
-        <TableCell className="border-r border-green-100 bg-green-50/30 p-2">
+        <TableCell className="border-r border-gray-200 bg-green-50/30 p-2">
           <MultiSelectPopover
             entryId={entry.id}
             field="periodType"
@@ -908,7 +908,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
             placeholder="Types"
           />
         </TableCell>
-        <TableCell className="border-r border-green-200 bg-green-50/30 p-2">
+        <TableCell className="border-r border-gray-200 bg-green-50/30 p-2">
           <MultiSelectPopover
             entryId={entry.id}
             field="periodCount"
@@ -920,7 +920,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
 
         {/* BCL Consultancy Section */}
         {['tier1', 'tier2', 'tier3'].map((tier, idx) => (
-          <TableCell key={tier} className={`border-r border-purple-100 bg-purple-50/30 p-2 ${idx === 2 ? 'border-r-purple-200' : ''}`}>
+          <TableCell key={tier} className={`border-r border-gray-200 bg-purple-50/30 p-2 ${idx === 2 ? 'border-r-gray-200' : ''}`}>
             <Input
               type="number"
               value={entry.bclConsultancy[tier as keyof typeof entry.bclConsultancy]}
@@ -930,7 +930,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                   [tier]: parseFloat(e.target.value) || 0
                 }
               })}
-              className={`${inputHeight} text-center ${fontSize} border-0 bg-white/70 focus:bg-white transition-colors`}
+              className={`${inputHeight} text-center ${fontSize} border-gray-200 bg-white/70 focus:bg-white transition-colors`}
               disabled={isReadOnly}
             />
           </TableCell>
@@ -938,7 +938,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
 
         {/* Officer Section */}
         {['bossFixed', 'paTier1', 'paEditable'].map((field, idx) => (
-          <TableCell key={field} className={`border-r border-orange-100 bg-orange-50/30 p-2 ${idx === 2 ? 'border-r-orange-200' : ''}`}>
+          <TableCell key={field} className={`border-r border-gray-200 bg-orange-50/30 p-2 ${idx === 2 ? 'border-r-gray-200' : ''}`}>
             <Input
               type="number"
               value={entry.officer[field as keyof typeof entry.officer]}
@@ -948,7 +948,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                   [field]: parseFloat(e.target.value) || 0
                 }
               })}
-              className={`${inputHeight} text-center ${fontSize} border-0 bg-white/70 focus:bg-white transition-colors`}
+              className={`${inputHeight} text-center ${fontSize} border-gray-200 bg-white/70 focus:bg-white transition-colors`}
               disabled={isReadOnly}
             />
           </TableCell>
@@ -963,7 +963,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
           { key: 'tfFile', label: 'TF File' }
         ].map((field, idx) => (
           <React.Fragment key={field.key}>
-            <TableCell className={`border-r border-red-100 bg-red-50/30 p-2 ${idx === 4 ? 'border-r-red-200' : ''}`}>
+            <TableCell className={`border-r border-gray-400 bg-red-50/30 p-2 ${idx === 4 ? 'border-r-gray-200' : ''}`}>
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-1">
                   <Select
@@ -982,7 +982,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                     }}
                     disabled={isReadOnly}
                   >
-                    <SelectTrigger className={`h-6 w-full border-0 bg-white/70 focus:bg-white shadow-none text-xs`}>
+                    <SelectTrigger className={`h-6 w-full border-gray-200 focus:border-gray-200 focus:bg-white shadow-none text-xs`}>
                       <SelectValue>
                         <div className="flex items-center gap-1">
                           <div className={`w-2 h-2 rounded-full ${getExtraConsiderationField(entry, field.key).applicable
@@ -1023,7 +1023,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                         }
                       });
                     }}
-                    className={`h-6 w-full text-center text-xs border-0 bg-white/70 focus:bg-white transition-colors`}
+                    className={`h-6 w-full text-center text-xs border-gray-200 focus:border-gray-200 focus:bg-white transition-colors`}
                     disabled={isReadOnly || !getExtraConsiderationField(entry, field.key).applicable}
                   />
                 </div>
@@ -1039,7 +1039,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
           { key: 'passportEndorsement', label: 'Passport Endorsement' }
         ].map((field, idx) => (
           <React.Fragment key={field.key}>
-            <TableCell className={`p-2 bg-indigo-50/30 ${idx < 2 ? 'border-r border-indigo-100' : ''}`}>
+            <TableCell className={`p-2 bg-indigo-50/30 ${idx < 2 ? 'border-r border-gray-200' : ''}`}>
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-1">
                   <Select
@@ -1058,13 +1058,14 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                     }}
                     disabled={isReadOnly}
                   >
-                    <SelectTrigger className={`h-6 w-full border-0 bg-white/70 focus:bg-white shadow-none text-xs`}>
+                    <SelectTrigger className={`h-6 w-full border-gray-200 bg-white/70 focus:border-gray-200 focus:bg-white shadow-none text-xs`}>
                       <SelectValue>
                         <div className="flex items-center gap-1">
                           <div className={`w-2 h-2 rounded-full ${getConvenienceFeeField(entry, field.key).applicable
                               ? 'bg-green-500'
                               : 'bg-red-500'
                             }`}></div>
+                            {getConvenienceFeeField(entry, field.key).applicable ? 'Applicable' : 'Not Applicable'} 
                         </div>
                       </SelectValue>
                     </SelectTrigger>
@@ -1098,7 +1099,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                         }
                       });
                     }}
-                    className={`h-6 w-full text-center text-xs border-0 bg-white/70 focus:bg-white transition-colors`}
+                    className={`h-6 w-full text-center text-xs border-gray-200 focus:border-gray-200 focus:bg-white transition-colors`}
                     disabled={isReadOnly || !getConvenienceFeeField(entry, field.key).applicable}
                   />
                 </div>

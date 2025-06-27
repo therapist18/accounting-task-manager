@@ -519,7 +519,7 @@ export default function JobFieldsManagement() {
     try {
       setLoadingFields(true);
       const { data, error } = await supabase.rpc('get_table_columns', {
-        table_name: tableName
+        input_table_name: tableName
       });
       
       if (error) throw error;
@@ -558,7 +558,7 @@ export default function JobFieldsManagement() {
   }, [selectedTable, fetchTableFields]);
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <div className="mx-auto p-6 space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>

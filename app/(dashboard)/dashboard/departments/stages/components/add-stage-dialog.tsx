@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { useToast } from "@/components/ui/use-toast"
 import type { NewStage, TimeConfig, StageDocument, DocumentExtraction, DepartmentOption } from "./types"
-import { createKYCDocument } from "./kycDocuments"
+import { createKYCDocument } from "../kycDocuments"
 
 // Simple UUID generator
 const generateId = () => {

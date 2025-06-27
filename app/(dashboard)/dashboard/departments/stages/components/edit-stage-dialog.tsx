@@ -12,8 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
-import type { Stage, TimeConfig, StageDocument, DocumentExtraction } from "./types"
-import { createKYCDocument } from "./kycDocuments"
+import type { Stage, TimeConfig, StageDocument, DocumentExtraction } from "../types"
+import { createKYCDocument } from "../kycDocuments"   
 
 // Simple UUID generator
 const generateId = () => {
