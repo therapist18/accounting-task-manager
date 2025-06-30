@@ -334,7 +334,7 @@ export default function TasksPage() {
     const baseColumns = stageColumns
       .slice(0, stageColumns.findIndex(col => col.key === 'renewal_status') + 1)
       .filter(col => columnVisibility[col.key] !== false);
-
+  
     const movedColumns = stageColumns
       .slice(
         stageColumns.findIndex(col => col.key === 'account_used'),
@@ -342,9 +342,9 @@ export default function TasksPage() {
       )
       .filter(col => ['account_used', 'applied_by', 'batch'].includes(col.key) &&
         columnVisibility[col.key] !== false);
-
+  
     const endColumns: any[] = [];
-
+  
     const noStagesColumn = {
       key: 'no_stages',
       header: 'Stages',
@@ -357,34 +357,68 @@ export default function TasksPage() {
         </div>
       )
     };
-
+  
     const currentDept = departments.find(d => d.id === selectedDepartment);
-    const currentSubdept = currentDept?.tm_subdepartments?.find(s => s.id === selectedSubdepartment);
-
-    if (!currentDept?.stages) {
+    if (!currentDept) {
       return [...baseColumns, noStagesColumn, ...endColumns];
     }
-
-    const applicableStages = currentDept.stages.filter(stage => {
-      if (!currentSubdept) return true;
-
-      const subdeptStageConfig = currentSubdept.stages?.find(s => s.stage_id === stage.id);
-      if (!subdeptStageConfig?.applicable) return false;
-      if (!subdeptStageConfig?.display) return false;
-
-      if (selectedClass) {
-        const currentClass = currentSubdept.classes?.find(c => c.name === selectedClass);
-        if (currentClass) {
-          const classStageConfig = currentClass.stages?.find(s => s.stage_id === stage.id);
-          if (classStageConfig && !classStageConfig.applicable) return false;
-          if (classStageConfig && !classStageConfig.display) return false;
+  
+    // Get all stages from department
+    let departmentStages = currentDept.stages || [];
+    
+    // If we have a subdepartment, filter stages based on subdepartment settings
+    if (selectedSubdepartment) {
+      const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id === selectedSubdepartment);
+      if (currentSubdept) {
+        // Filter stages based on subdepartment settings
+        departmentStages = departmentStages.filter(stage => {
+          const subdeptStageConfig = currentSubdept.stages?.find(s => s.stage_id === stage.id);
+          
+          // If stage is explicitly set to not applicable in subdepartment, hide it
+          if (subdeptStageConfig && subdeptStageConfig.applicable === false) {
+            return false;
+          }
+          
+          // If stage has display setting in subdepartment, respect it
+          if (subdeptStageConfig && subdeptStageConfig.display !== undefined) {
+            return subdeptStageConfig.display;
+          }
+          
+          return true; // Default to showing if no specific settings
+        });
+      }
+    }
+  
+    // If we have a class, apply class-level stage settings
+    if (selectedClass) {
+      const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id === selectedSubdepartment);
+      if (currentSubdept) {
+        const currentClass = currentSubdept.classes?.find(c => 
+          c.id === selectedClass || c.name === selectedClass
+        );
+        
+        if (currentClass && currentClass.stages) {
+          departmentStages = departmentStages.filter(stage => {
+            const classStageConfig = currentClass.stages?.find(s => s.stage_id === stage.id);
+            
+            // If stage is explicitly set to not applicable in class, hide it
+            if (classStageConfig && classStageConfig.applicable === false) {
+              return false;
+            }
+            
+            // If stage has display setting in class, respect it
+            if (classStageConfig && classStageConfig.display !== undefined) {
+              return classStageConfig.display;
+            }
+            
+            return true; // Keep the stage if no class-level settings
+          });
         }
       }
-
-      return true;
-    });
-
-    const stageColumnsList = applicableStages
+    }
+  
+    // Generate stage columns from filtered stages
+    const stageColumnsList = departmentStages
       .filter(stage => columnVisibility[`stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`] !== false)
       .map(stage => ({
         key: `stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`,
@@ -392,9 +426,27 @@ export default function TasksPage() {
         width: '150px',
         parentHeader: 'Stages',
         sortable: true,
-        stage: stage // Pass the stage object for rendering
+        stage: stage,
+        render: (value: any, task: any) => {
+          // Your existing render logic for each stage cell
+          const taskStage = task.stages?.find((s: any) => s.id === stage.id);
+          if (!taskStage) return null;
+          
+          return (
+            <div 
+              className={`p-2 rounded text-center ${
+                taskStage.status === 'completed' ? 'bg-green-100 text-green-800' : 
+                taskStage.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
+                'bg-gray-100 text-gray-500'
+              }`}
+            >
+              {taskStage.status === 'completed' ? '✓' : 
+               taskStage.status === 'in_progress' ? '⌛' : '—'}
+            </div>
+          );
+        }
       }));
-
+  
     return [
       ...baseColumns,
       ...stageColumnsList,
@@ -405,7 +457,6 @@ export default function TasksPage() {
       ...endColumns
     ];
   }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, columnVisibility]);
-
   // Generate columns for requirements view
   const generateRequirementColumns = useCallback(() => {
     const baseColumns = stageColumns.slice(0, stageColumns.findIndex(col => col.key === 'renewal_status') + 1);
@@ -695,14 +746,6 @@ export default function TasksPage() {
               <p className="text-muted-foreground">
                 {dept?.name} {subdept && `> ${subdept.name}`} {cls && `> ${cls.name}`} {subcls && `> ${subcls.name}`}
               </p>
-              <div className="mt-1">
-                <Badge variant="outline" className="text-xs">
-                  Current Level: {selectionLevel.charAt(0).toUpperCase() + selectionLevel.slice(1)}
-                </Badge>
-                <Badge variant="outline" className="text-xs ml-2">
-                  Stages: Department-based | Requirements: {selectionLevel === 'subclass' ? 'Subclass-based' : 'Class-based'}
-                </Badge>
-              </div>
             </div>
             <div className="flex items-center space-x-2">
               <Button
@@ -728,11 +771,11 @@ export default function TasksPage() {
                   <TabsList>
                     <TabsTrigger value="stages">
                       <FileText className="h-4 w-4 mr-2" />
-                      Stages (Department-based)
+                      Stages
                     </TabsTrigger>
                     <TabsTrigger value="upload-requirements">
                       <Upload className="h-4 w-4 mr-2" />
-                      Upload Requirements ({selectionLevel === 'subclass' ? 'Subclass' : 'Class'}-based)
+                      Upload Requirements
                     </TabsTrigger>
                     <TabsTrigger value="webdata">
                       <Upload className="h-4 w-4 mr-2" />
@@ -878,7 +921,7 @@ export default function TasksPage() {
                   <TabsContent value="stages" className="space-y-4">
                     <Card>
                       <CardHeader>
-                        <CardTitle>Stages Progress - {subdept?.name}</CardTitle>
+                        <CardTitle>Stages Progress</CardTitle>
                         <CardDescription>
                           Track tasks through various stages of completion (Department-level stages)
                         </CardDescription>
@@ -906,7 +949,7 @@ export default function TasksPage() {
                   <TabsContent value="upload-requirements" className="space-y-4">
                     <Card>
                       <CardHeader>
-                        <CardTitle>Upload Requirements - {subdept?.name}</CardTitle>
+                        <CardTitle>Upload Requirements</CardTitle>
                         <CardDescription>
                           Manage document requirements for this subdepartment (Class/Subclass-level requirements)
                         </CardDescription>
@@ -932,7 +975,7 @@ export default function TasksPage() {
                   <TabsContent value="webdata" className="space-y-4">
                     <Card>
                       <CardHeader>
-                        <CardTitle>Web Data - {subdept?.name}</CardTitle>
+                        <CardTitle>Web Data</CardTitle>
                         <CardDescription>
                           Web data for this subdepartment
                         </CardDescription>
@@ -960,7 +1003,7 @@ export default function TasksPage() {
               <TabsContent value="completed" className="space-y-4">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Completed Tasks - {subdept?.name}</CardTitle>
+                    <CardTitle>Completed Tasks</CardTitle>
                     <CardDescription>Successfully completed tasks with performance metrics</CardDescription>
                   </CardHeader>
                   <CardContent className="p-4">
@@ -986,7 +1029,7 @@ export default function TasksPage() {
           ) : selectedDepartment ? (
             <Card>
               <CardHeader>
-                <CardTitle>Department Overview - {dept?.name}</CardTitle>
+                <CardTitle>Department Overview</CardTitle>
                 <CardDescription>
                   Select a subdepartment from the sidebar to view tasks
                 </CardDescription>

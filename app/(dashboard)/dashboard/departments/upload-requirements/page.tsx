@@ -318,23 +318,23 @@ export default function UploadRequirements({ departments: initialDepartments }: 
 
   const getCurrentRequirementsForContext = (context: EditingContext): ApiRequirement[] | null => {
     console.log('[getCurrentRequirementsForContext] Getting requirements for context:', JSON.stringify(context, null, 2));
-    
+
     try {
       // Find the department
-      const dept = departments.find(d => 
+      const dept = departments.find(d =>
         String(d.id) === String(context.departmentId)
       );
-      
+
       if (!dept) {
         console.error('[getCurrentRequirementsForContext] Department not found:', context.departmentId);
         return null;
       }
 
       // Find the subdepartment
-      const subdept = dept.tm_subdepartments?.find(s => 
+      const subdept = dept.tm_subdepartments?.find(s =>
         String(s.id) === String(context.subdepartmentId)
       );
-      
+
       if (!subdept) {
         console.error('[getCurrentRequirementsForContext] Subdepartment not found:', context.subdepartmentId);
         return null;
@@ -345,52 +345,52 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         case 'subdepartment':
           console.log('[getCurrentRequirementsForContext] Found subdepartment requirements:', subdept.upload_requirements || []);
           return subdept.upload_requirements || [];
-          
+
         case 'class':
           if (!context.classId) {
             console.error('[getCurrentRequirementsForContext] Missing classId in context');
             return null;
           }
-          
-          const targetClass = subdept.classes?.find(c => 
+
+          const targetClass = subdept.classes?.find(c =>
             String(c.id) === String(context.classId)
           );
-          
+
           if (!targetClass) {
             console.error('[getCurrentRequirementsForContext] Class not found:', context.classId);
             return null;
           }
-          
+
           console.log('[getCurrentRequirementsForContext] Found class requirements:', targetClass.requirements || []);
           return targetClass.requirements || [];
-          
+
         case 'subclass':
           if (!context.classId || !context.subclassId) {
             console.error('[getCurrentRequirementsForContext] Missing classId or subclassId in context');
             return null;
           }
-          
-          const parentClass = subdept.classes?.find(c => 
+
+          const parentClass = subdept.classes?.find(c =>
             String(c.id) === String(context.classId)
           );
-          
+
           if (!parentClass) {
             console.error('[getCurrentRequirementsForContext] Parent class not found:', context.classId);
             return null;
           }
-          
-          const targetSubclass = parentClass.subClasses?.find(sc => 
+
+          const targetSubclass = parentClass.subClasses?.find(sc =>
             String(sc.id) === String(context.subclassId)
           );
-          
+
           if (!targetSubclass) {
             console.error('[getCurrentRequirementsForContext] Subclass not found:', context.subclassId);
             return null;
           }
-          
+
           console.log('[getCurrentRequirementsForContext] Found subclass requirements:', targetSubclass.requirements || []);
           return targetSubclass.requirements || [];
-          
+
         default:
           console.error('[getCurrentRequirementsForContext] Unknown context type:', context.type);
           return null;
@@ -404,11 +404,11 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const saveRequirementsForContext = async (context: EditingContext, requirements: ApiRequirement[]) => {
     console.log('[saveRequirementsForContext] Starting save with context:', JSON.stringify(context, null, 2));
     console.log('[saveRequirementsForContext] Requirements to save:', JSON.stringify(requirements, null, 2));
-    
+
     try {
       let classId = '';
       let requirementType = '';
-      
+
       if (context.type === 'subdepartment') {
         classId = context.subdepartmentId;
         requirementType = 'subdepartment';
@@ -677,7 +677,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                   <TableHead className="flex-1 text-white border-r">Requirement</TableHead>
                   <TableHead className="flex-1 text-white border-r">Description</TableHead>
                   <TableHead className="w-24 text-white border-r">Document</TableHead>
-                  <TableHead className="w-32 text-white border-r">Properties</TableHead>
                   <TableHead className="w-48 text-white">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -714,18 +713,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
                                 <span className="text-xs text-gray-400">None</span>
                               </div>
                             )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="border-r w-32">
-                          <div className="flex flex-col space-y-1">
-                            <div className="flex items-center gap-1">
-                              <span className={`w-2 h-2 rounded-full ${req.isRequired ? 'bg-red-500' : 'bg-gray-400'}`}></span>
-                              <span className="text-xs">{req.isRequired ? 'Required' : 'Optional'}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className={`w-2 h-2 rounded-full ${req.isVisible ? 'bg-green-500' : 'bg-gray-400'}`}></span>
-                              <span className="text-xs">{req.isVisible ? 'Visible' : 'Hidden'}</span>
-                            </div>
                           </div>
                         </TableCell>
                         <TableCell className="w-48">
@@ -790,7 +777,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const handleSaveRequirement = async (updatedRequirement: ApiRequirement) => {
     console.log('[handleSaveRequirement] Starting with requirement:', JSON.stringify(updatedRequirement, null, 2));
     console.log('[handleSaveRequirement] Current editing context:', editingContext);
-    
+
     if (!editingContext) {
       console.error('[handleSaveRequirement] No editing context available');
       toast({
@@ -805,11 +792,11 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       // First, refresh the departments to ensure we have the latest data
       console.log('[handleSaveRequirement] Refreshing departments to get latest data...');
       await refreshDepartments();
-      
+
       // Get current requirements for the context
       const currentRequirements = getCurrentRequirementsForContext(editingContext) || [];
       console.log('[handleSaveRequirement] Current requirements:', JSON.stringify(currentRequirements, null, 2));
-      
+
       // If we still have no requirements, try to create a new one
       if (currentRequirements.length === 0) {
         console.log('[handleSaveRequirement] No existing requirements found, creating new one...');
@@ -818,47 +805,47 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           id: updatedRequirement.id || Date.now().toString(),
           order: 0
         }];
-        
+
         console.log('[handleSaveRequirement] Creating new requirements:', JSON.stringify(newRequirements, null, 2));
         const saveResult = await saveRequirementsForContext(editingContext, newRequirements);
         console.log('[handleSaveRequirement] saveRequirementsForContext result:', saveResult);
-        
+
         await refreshDepartments();
-        
+
         // Reset the dialog state
         setIsEditDialogOpen(false);
         setEditingRequirement(null);
-        
+
         toast({
           title: "Success",
           description: "Requirement created successfully",
           variant: "default"
         });
-        
+
         return;
       }
-      
+
       // Try to find the requirement to update
       let requirementIndex = -1;
-      
+
       // First try to find by ID if it exists
       if (updatedRequirement.id) {
-        requirementIndex = currentRequirements.findIndex(req => 
+        requirementIndex = currentRequirements.findIndex(req =>
           String(req.id) === String(updatedRequirement.id)
         );
       }
-      
+
       // If not found by ID, try to find by name as fallback
       if (requirementIndex === -1) {
-        requirementIndex = currentRequirements.findIndex(req => 
+        requirementIndex = currentRequirements.findIndex(req =>
           req.name === updatedRequirement.name
         );
       }
-      
+
       console.log('[handleSaveRequirement] Found requirement at index:', requirementIndex);
 
       let updatedRequirements = [...currentRequirements];
-      
+
       // If requirement not found, add it as a new one
       if (requirementIndex === -1) {
         console.log('[handleSaveRequirement] Requirement not found, adding as new');
@@ -880,13 +867,13 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           id: updatedRequirement.id || updatedRequirements[requirementIndex].id
         };
       }
-      
+
       console.log('[handleSaveRequirement] Updated requirements array:', JSON.stringify(updatedRequirements, null, 2));
 
       console.log('[handleSaveRequirement] Calling saveRequirementsForContext...');
       const saveResult = await saveRequirementsForContext(editingContext, updatedRequirements);
       console.log('[handleSaveRequirement] saveRequirementsForContext result:', saveResult);
-      
+
       console.log('[handleSaveRequirement] Refreshing departments...');
       await refreshDepartments();
 

@@ -149,9 +149,17 @@ interface RatesPageProps {
   departments?: Department[]
 }
 
-// Helper function to get alternating blue colors for columns
+// Helper function to get alternating blue colors like in stages
 const getColumnColor = (index: number) => {
-  return index % 2 === 0 ? 'bg-blue-100/50' : 'bg-blue-50/50'
+  const colors = [
+    'bg-blue-50/30',
+    'bg-green-50/30', 
+    'bg-purple-50/30',
+    'bg-orange-50/30',
+    'bg-red-50/30',
+    'bg-indigo-50/30'
+  ]
+  return colors[index % colors.length]
 }
 
 const getHeaderColor = (index: number) => {
@@ -983,7 +991,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
         </TableCell>
  
         {/* Processing Fee Section */}
-        <TableCell className={cn("border-r border-gray-200 p-2", getColumnColor(0))}>
+        <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
           <Input
             type="number"
             value={entry.processingFee?.amount || 0}
@@ -1023,7 +1031,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
         </TableCell>
  
         {/* Issuance Fee Section */}
-        <TableCell className={cn("border-r border-gray-200 p-2", getColumnColor(1))}>
+        <TableCell className="border-r border-gray-200 bg-green-50/30 p-2">
           <Input
             type="number"
             value={entry.issuanceFee?.amount || 0}
@@ -1082,7 +1090,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
  
         {/* BCL Consultancy Section */}
         {['tier1', 'tier2', 'tier3'].map((tier, idx) => (
-          <TableCell key={tier} className={cn("border-r border-gray-200 p-2", getColumnColor(2), idx === 2 ? 'border-r-gray-200' : '')}>
+          <TableCell key={tier} className={cn("border-r border-gray-200 bg-purple-50/30 p-2", idx === 2 ? 'border-r-gray-200' : '')}>
             <Input
               type="number"
               value={entry.bclConsultancy?.[tier as keyof typeof entry.bclConsultancy] || 0}
@@ -1101,7 +1109,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
  
         {/* Officer Section */}
         {['bossFixed', 'paTier1', 'paEditable'].map((field, idx) => (
-          <TableCell key={field} className={cn("border-r border-gray-200 p-2", getColumnColor(3), idx === 2 ? 'border-r-gray-200' : '')}>
+          <TableCell key={field} className={cn("border-r border-gray-200 bg-orange-50/30 p-2", idx === 2 ? 'border-r-gray-200' : '')}>
             <Input
               type="number"
               value={entry.officer?.[field as keyof typeof entry.officer] || 0}
@@ -1126,7 +1134,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
           { key: 'degree', label: 'Degree' },
           { key: 'tfFile', label: 'TF File' }
         ].map((field, idx) => (
-          <TableCell key={field.key} className={cn("border-r border-gray-200 p-2", getColumnColor(4), idx === 4 ? 'border-r-gray-200' : '')}>
+          <TableCell key={field.key} className={cn("border-r border-gray-400 bg-red-50/30 p-2", idx === 4 ? 'border-r-gray-200' : '')}>
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-1">
                 <Select
@@ -1201,7 +1209,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
           { key: 'reEntryApproval', label: 'Re-Entry Approval' },
           { key: 'passportEndorsement', label: 'Passport Endorsement' }
         ].map((field, idx) => (
-          <TableCell key={field.key} className={cn("border-r border-gray-200 p-2", getColumnColor(5))}>
+          <TableCell key={field.key} className={cn("p-2 bg-indigo-50/30", idx < 2 ? 'border-r border-gray-200' : '')}>
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-1">
                 <Select
@@ -1354,11 +1362,6 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
               </Badge>
             )}
           </div>
-          {!isReadOnly && (
-            <p className="text-xs text-muted-foreground mt-1">
-              Press Ctrl+S to save manually • Changes auto-save after 1 second • Use Tab/Enter to navigate
-            </p>
-          )}
         </div>
  
         {/* Enhanced Control Panel */}
@@ -1498,11 +1501,11 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
               >
                <div className="flex items-center gap-2">
                  <span>{dept.name}</span>
-                 {dept.tm_subdepartments && (
+                 {/* {dept.tm_subdepartments && (
                    <Badge variant="secondary" className="text-xs">
                      {dept.tm_subdepartments.length}
                    </Badge>
-                 )}
+                 )} */}
                </div>
              </TabsTrigger>
            ))}

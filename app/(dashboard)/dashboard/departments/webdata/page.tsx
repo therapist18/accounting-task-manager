@@ -186,6 +186,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       }
     }
 
+
     // Create enhanced context with names
     const enhancedContext = {
       ...context,
@@ -195,14 +196,6 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     };
 
     setAddContext(enhancedContext)
-    setBulkInput('')
-    setNewWebData([{
-      name: '',
-      description: '',
-      type: 'standard',
-      isRequired: true,
-      isVisible: true
-    }])
     setIsAddDialogOpen(true)
   }
 
@@ -218,7 +211,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     }])
   }
   // Add this function to handle adding new webData
-  const handleAddWebData = async (webData: Omit<ApiWebData, 'id' | 'order'>[]) => {
+  const handleAddWebData = async (webData: WebDataForm[]) => {
     if (!addContext) return;
 
     try {
@@ -227,11 +220,17 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       // Get current webData
       const currentWebData = getCurrentWebDataForContext(addContext) || [];
 
-      // Add new webData with generated IDs
+      // Add new webData with generated IDs and required fields
       const newWebDataWithIds = webData.map((req, index) => ({
-        ...req,
         id: generateWebDataId(index, currentWebData),
-        order: currentWebData.length + index
+        name: req.name,
+        description: req.description,
+        type: 'standard' as const,
+        isRequired: req.isRequired,
+        isVisible: true,
+        order: currentWebData.length + index,
+        masterFieldId: req.masterFieldId,
+        kycDocumentId: undefined
       }));
 
       // Combine with existing webData
@@ -318,23 +317,23 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
 
   const getCurrentWebDataForContext = (context: EditingContext): ApiWebData[] | null => {
     console.log('[getCurrentWebDataForContext] Getting webData for context:', JSON.stringify(context, null, 2));
-    
+
     try {
       // Find the department
-      const dept = departments.find(d => 
+      const dept = departments.find(d =>
         String(d.id) === String(context.departmentId)
       );
-      
+
       if (!dept) {
         console.error('[getCurrentWebDataForContext] Department not found:', context.departmentId);
         return null;
       }
 
       // Find the subdepartment
-      const subdept = dept.tm_subdepartments?.find(s => 
+      const subdept = dept.tm_subdepartments?.find(s =>
         String(s.id) === String(context.subdepartmentId)
       );
-      
+
       if (!subdept) {
         console.error('[getCurrentWebDataForContext] Subdepartment not found:', context.subdepartmentId);
         return null;
@@ -345,52 +344,52 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
         case 'subdepartment':
           console.log('[getCurrentWebDataForContext] Found subdepartment webData:', subdept.upload_webData || []);
           return subdept.upload_webData || [];
-          
+
         case 'class':
           if (!context.classId) {
             console.error('[getCurrentWebDataForContext] Missing classId in context');
             return null;
           }
-          
-          const targetClass = subdept.classes?.find(c => 
+
+          const targetClass = subdept.classes?.find(c =>
             String(c.id) === String(context.classId)
           );
-          
+
           if (!targetClass) {
             console.error('[getCurrentWebDataForContext] Class not found:', context.classId);
             return null;
           }
-          
+
           console.log('[getCurrentWebDataForContext] Found class webData:', targetClass.webData || []);
           return targetClass.webData || [];
-          
+
         case 'subclass':
           if (!context.classId || !context.subclassId) {
             console.error('[getCurrentWebDataForContext] Missing classId or subclassId in context');
             return null;
           }
-          
-          const parentClass = subdept.classes?.find(c => 
+
+          const parentClass = subdept.classes?.find(c =>
             String(c.id) === String(context.classId)
           );
-          
+
           if (!parentClass) {
             console.error('[getCurrentWebDataForContext] Parent class not found:', context.classId);
             return null;
           }
-          
-          const targetSubclass = parentClass.subClasses?.find(sc => 
+
+          const targetSubclass = parentClass.subClasses?.find(sc =>
             String(sc.id) === String(context.subclassId)
           );
-          
+
           if (!targetSubclass) {
             console.error('[getCurrentWebDataForContext] Subclass not found:', context.subclassId);
             return null;
           }
-          
+
           console.log('[getCurrentWebDataForContext] Found subclass webData:', targetSubclass.webData || []);
           return targetSubclass.webData || [];
-          
+
         default:
           console.error('[getCurrentWebDataForContext] Unknown context type:', context.type);
           return null;
@@ -404,11 +403,11 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
   const saveWebDataForContext = async (context: EditingContext, webData: ApiWebData[]) => {
     console.log('[saveWebDataForContext] Starting save with context:', JSON.stringify(context, null, 2));
     console.log('[saveWebDataForContext] WebData to save:', JSON.stringify(webData, null, 2));
-    
+
     try {
       let classId = '';
       let webDataType = '';
-      
+
       if (context.type === 'subdepartment') {
         classId = context.subdepartmentId;
         webDataType = 'subdepartment';
@@ -424,7 +423,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
 
       console.log('[saveWebDataForContext] Checking for existing record...');
       const { data: existingRecord, error: fetchError } = await supabase
-        .from('tm_class_web_data')
+        .from('tm_class_requirements')
         .select('*')
         .eq('class_id', classId)
         .eq('type', webDataType)
@@ -448,7 +447,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       if (existingRecord) {
         console.log('[saveWebDataForContext] Updating existing record...');
         const { data: updatedRecord, error: updateError } = await supabase
-          .from('tm_class_web_data')
+          .from('tm_class_requirements')
           .update({
             webData: webDataToSave,
             updated_at: new Date().toISOString()
@@ -465,7 +464,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       } else {
         console.log('[saveWebDataForContext] Inserting new record...');
         const { data: insertedRecord, error: insertError } = await supabase
-          .from('tm_class_web_data')
+          .from('tm_class_requirements')
           .insert({
             class_id: classId,
             type: webDataType,
@@ -500,7 +499,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       if (error) throw error
 
       const { data: webData, error: reqError } = await supabase
-        .from('tm_class_web_data')
+        .from('tm_class_requirements')
         .select('*')
         .order('id')
 
@@ -677,7 +676,6 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
                   <TableHead className="flex-1 text-white border-r">WebData</TableHead>
                   <TableHead className="flex-1 text-white border-r">Description</TableHead>
                   <TableHead className="w-24 text-white border-r">Document</TableHead>
-                  <TableHead className="w-32 text-white border-r">Properties</TableHead>
                   <TableHead className="w-48 text-white">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -714,18 +712,6 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
                                 <span className="text-xs text-gray-400">None</span>
                               </div>
                             )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="border-r w-32">
-                          <div className="flex flex-col space-y-1">
-                            <div className="flex items-center gap-1">
-                              <span className={`w-2 h-2 rounded-full ${req.isRequired ? 'bg-red-500' : 'bg-gray-400'}`}></span>
-                              <span className="text-xs">{req.isRequired ? 'Required' : 'Optional'}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className={`w-2 h-2 rounded-full ${req.isVisible ? 'bg-green-500' : 'bg-gray-400'}`}></span>
-                              <span className="text-xs">{req.isVisible ? 'Visible' : 'Hidden'}</span>
-                            </div>
                           </div>
                         </TableCell>
                         <TableCell className="w-48">
@@ -790,7 +776,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
   const handleSaveWebData = async (updatedWebData: ApiWebData) => {
     console.log('[handleSaveWebData] Starting with webData:', JSON.stringify(updatedWebData, null, 2));
     console.log('[handleSaveWebData] Current editing context:', editingContext);
-    
+
     if (!editingContext) {
       console.error('[handleSaveWebData] No editing context available');
       toast({
@@ -805,11 +791,11 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       // First, refresh the departments to ensure we have the latest data
       console.log('[handleSaveWebData] Refreshing departments to get latest data...');
       await refreshDepartments();
-      
+
       // Get current webData for the context
       const currentWebData = getCurrentWebDataForContext(editingContext) || [];
       console.log('[handleSaveWebData] Current webData:', JSON.stringify(currentWebData, null, 2));
-      
+
       // If we still have no webData, try to create a new one
       if (currentWebData.length === 0) {
         console.log('[handleSaveWebData] No existing webData found, creating new one...');
@@ -818,47 +804,47 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
           id: updatedWebData.id || Date.now().toString(),
           order: 0
         }];
-        
+
         console.log('[handleSaveWebData] Creating new webData:', JSON.stringify(newWebData, null, 2));
         const saveResult = await saveWebDataForContext(editingContext, newWebData);
         console.log('[handleSaveWebData] saveWebDataForContext result:', saveResult);
-        
+
         await refreshDepartments();
-        
+
         // Reset the dialog state
         setIsEditDialogOpen(false);
         setEditingWebData(null);
-        
+
         toast({
           title: "Success",
           description: "WebData created successfully",
           variant: "default"
         });
-        
+
         return;
       }
-      
+
       // Try to find the webData to update
       let webDataIndex = -1;
-      
+
       // First try to find by ID if it exists
       if (updatedWebData.id) {
-        webDataIndex = currentWebData.findIndex(req => 
+        webDataIndex = currentWebData.findIndex(req =>
           String(req.id) === String(updatedWebData.id)
         );
       }
-      
+
       // If not found by ID, try to find by name as fallback
       if (webDataIndex === -1) {
-        webDataIndex = currentWebData.findIndex(req => 
+        webDataIndex = currentWebData.findIndex(req =>
           req.name === updatedWebData.name
         );
       }
-      
+
       console.log('[handleSaveWebData] Found webData at index:', webDataIndex);
 
       let updatedWebData = [...currentWebData];
-      
+
       // If webData not found, add it as a new one
       if (webDataIndex === -1) {
         console.log('[handleSaveWebData] WebData not found, adding as new');
@@ -880,13 +866,13 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
           id: updatedWebData.id || updatedWebData[webDataIndex].id
         };
       }
-      
+
       console.log('[handleSaveWebData] Updated webData array:', JSON.stringify(updatedWebData, null, 2));
 
       console.log('[handleSaveWebData] Calling saveWebDataForContext...');
       const saveResult = await saveWebDataForContext(editingContext, updatedWebData);
       console.log('[handleSaveWebData] saveWebDataForContext result:', saveResult);
-      
+
       console.log('[handleSaveWebData] Refreshing departments...');
       await refreshDepartments();
 
@@ -1105,8 +1091,8 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
 
   return (
     <div className="space-y-4">
-      <h2 className="text-2xl font-bold">GOVT Upload Processing WebData</h2>
-      <p className="text-sm text-gray-500">Manage GOVT upload processing webData for each department, subdepartment, class, and subclass</p>
+      <h2 className="text-2xl font-bold">WebData</h2>
+      <p className="text-sm text-gray-500">Manage webData for each department, subdepartment, class, and subclass</p>
       <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-hidden">
         <DepartmentSidebar
           departments={departments}

@@ -935,9 +935,9 @@ export default function Stages() {
             <TabsTrigger key={dept.id} value={dept.id} className="whitespace-nowrap">
               <div className="flex items-center gap-2">
                 <span>{dept.name}</span>
-                <Badge variant="secondary" className="text-xs">
+                {/* <Badge variant="secondary" className="text-xs">
                   {dept.stages?.length || 0}
-                </Badge>
+                </Badge> */}
               </div>
             </TabsTrigger>
           ))}

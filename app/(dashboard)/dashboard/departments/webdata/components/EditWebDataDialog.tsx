@@ -277,7 +277,7 @@ export function EditWebDataDialog({
           <div className="space-y-4 border-t pt-4">
             <Label className="font-medium flex items-center gap-2">
               <FileText className="h-4 w-4" />
-              Document Type Association
+              Field Association
             </Label>
 
             <div className="space-y-3">
@@ -293,7 +293,7 @@ export function EditWebDataDialog({
                   }}
                 />
                 <Label htmlFor="none-option" className="text-sm">
-                  No document association
+                  No field association
                 </Label>
               </div>
 
@@ -306,37 +306,24 @@ export function EditWebDataDialog({
                   onChange={() => setKycDocumentOption('existing')}
                 />
                 <Label htmlFor="existing-option" className="text-sm">
-                  Link to existing document type
-                </Label>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  id="create-new-option"
-                  name="kyc-option"
-                  checked={kycDocumentOption === 'create_new'}
-                  onChange={() => setKycDocumentOption('create_new')}
-                />
-                <Label htmlFor="create-new-option" className="text-sm">
-                  Create new document type
+                  Linked to existing field
                 </Label>
               </div>
 
               {kycDocumentOption === 'existing' && (
                 <div className="ml-6 space-y-2">
-                  <Label className="text-sm">Select Document Type</Label>
+                  <Label className="text-sm">Select Field</Label>
                   <Select
                     value={formData.kycDocumentId || ''}
                     onValueChange={(value) => setFormData(prev => ({ ...prev, kycDocumentId: value }))}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select a document type" />
+                      <SelectValue placeholder="Select a field" />
                     </SelectTrigger>
                     <SelectContent>
                       {loadingKycDocs ? (
                         <SelectItem value="loading" disabled>
-                          Loading document types...
+                          Loading fields...
                         </SelectItem>
                       ) : (
                         kycDocuments.map((doc) => (

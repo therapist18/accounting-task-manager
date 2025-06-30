@@ -18,13 +18,10 @@ import { toast } from "@/hooks/use-toast"
 export interface WebDataForm {
   name: string
   description: string
-  type: 'standard' | 'conditional' | 'optional'
   isRequired: boolean
-  isVisible: boolean
-  kycDocumentId?: string
-  kycDocumentOption?: 'existing' | 'create_new'
-  masterFieldId?: number // Link to master field
-  masterField?: any // Store master field data for display
+  masterFieldId: string
+  masterField: any // Store master field data for display
+  order: number
 }
 
 interface JobField {
@@ -64,57 +61,27 @@ export function AddWebDataDialog({
   isSubmitting,
   context
 }: AddWebDataDialogProps) {
-  const [newWebData, setNewWebData] = useState<WebDataForm[]>([{
-    name: '',
-    description: '',
-    type: 'standard',
-    isRequired: true,
-    isVisible: true,
-    kycDocumentOption: 'create_new'
-  }])
+  const [newWebData, setNewWebData] = useState<WebDataForm[]>([])
   const [bulkInput, setBulkInput] = useState('')
-  const [kycDocuments, setKycDocuments] = useState<any[]>([])
   const [masterFields, setMasterFields] = useState<JobField[]>([])
-  const [loadingKycDocs, setLoadingKycDocs] = useState(false)
   const [loadingMasterFields, setLoadingMasterFields] = useState(false)
-  const [creationMode, setCreationMode] = useState<'manual' | 'master'>('manual')
+  const [profileSearch, setProfileSearch] = useState('')
+  const [companySearch, setCompanySearch] = useState('')
+  const [selectedFields, setSelectedFields] = useState<string[]>([])
 
-  // Fetch KYC documents when dialog opens
+  // Fetch master fields when dialog opens
   useEffect(() => {
     if (isOpen) {
-      fetchKycDocuments()
       fetchMasterFields()
     }
   }, [isOpen])
 
-  const fetchKycDocuments = async () => {
-    try {
-      setLoadingKycDocs(true)
-      
-      const { data, error } = await supabase
-        .from('acc_portal_kyc')
-        .select('id, name, display_name')
-        .order('name')
 
-      if (error) throw error
-
-      setKycDocuments(data || [])
-    } catch (error) {
-      console.error('Error fetching KYC documents:', error)
-      toast({
-        title: 'Error',
-        description: 'Failed to load document types',
-        variant: 'destructive'
-      })
-    } finally {
-      setLoadingKycDocs(false)
-    }
-  }
 
   const fetchMasterFields = async () => {
     try {
       setLoadingMasterFields(true)
-      
+
       const { data, error } = await supabase
         .from('tm_job_fields')
         .select('*')
@@ -161,50 +128,19 @@ export function AddWebDataDialog({
   }
 
   const handleSubmit = async () => {
-    const validWebData = newWebData.filter(req => req.name.trim() !== '')
-    if (validWebData.length === 0) {
+    if (newWebData.length === 0) {
       handleClose()
       return
     }
 
     try {
-      // Process webData and handle KYC document creation/linking
-      const processedWebData = await Promise.all(
-        validWebData.map(async (req) => {
-          let kycDocumentId = req.kycDocumentId
-
-          if (req.kycDocumentOption === 'create_new') {
-            // Create new KYC document
-            const departmentName = context?.subdepartmentName?.split(' ')[0] || 'General'
-            kycDocumentId = await createNewKycDocument(req.name, departmentName)
-          }
-
-          return {
-            ...req,
-            kycDocumentId
-          }
-        })
-      )
-
-      await onSubmit(processedWebData)
-      
-      // Reset the form after successful submission
-      setNewWebData([{
-        name: '',
-        description: '',
-        type: 'standard',
-        isRequired: true,
-        isVisible: true,
-        kycDocumentOption: 'create_new'
-      }])
-      setBulkInput('')
-      setCreationMode('manual')
-      
+      await onSubmit(newWebData)
+      handleClose()
     } catch (error) {
-      console.error('Error processing webData:', error)
+      console.error('Error saving webData:', error)
       toast({
         title: 'Error',
-        description: 'Failed to process webData',
+        description: 'Failed to save webData',
         variant: 'destructive'
       })
     }
@@ -212,28 +148,11 @@ export function AddWebDataDialog({
 
   const handleClose = () => {
     onOpenChange(false)
-    setNewWebData([{
-      name: '',
-      description: '',
-      type: 'standard',
-      isRequired: true,
-      isVisible: true,
-      kycDocumentOption: 'create_new'
-    }])
-    setBulkInput('')
-    setCreationMode('manual')
+    setNewWebData([])
+    setSelectedFields([])
   }
 
-  const addNewWebData = () => {
-    setNewWebData([...newWebData, {
-      name: '',
-      description: '',
-      type: 'standard',
-      isRequired: true,
-      isVisible: true,
-      kycDocumentOption: 'create_new'
-    }])
-  }
+
 
   const removeNewWebData = (index: number) => {
     if (newWebData.length > 1) {
@@ -247,445 +166,255 @@ export function AddWebDataDialog({
     setNewWebData(updated)
   }
 
-  const handleMasterFieldSelect = (index: number, masterFieldId: string) => {
+  const handleMasterFieldSelect = (masterFieldId: string) => {
     const masterField = masterFields.find(f => f.id.toString() === masterFieldId)
     if (!masterField) return
 
-    const updated = [...newWebData]
-    updated[index] = {
-      ...updated[index],
-      masterFieldId: masterField.id,
-      masterField: masterField,
+    const newWebDataItem = {
       name: masterField.label,
       description: `Auto-populated from ${masterField.field_key}`,
       isRequired: masterField.is_required,
-    }
-    setNewWebData(updated)
-  }
-
-  const handleBulkInput = (text: string) => {
-    setBulkInput(text)
-
-    if (!text.trim()) {
-      setNewWebData([{
-        name: '',
-        description: '',
-        type: 'standard',
-        isRequired: true,
-        isVisible: true,
-        kycDocumentOption: 'create_new'
-      }])
-      return
+      masterFieldId: masterField.id.toString(),
+      masterField: masterField,
+      order: newWebData.length
     }
 
-    const lines = text.split('\n').filter(line => line.trim() !== '')
-    const webData = lines.map(line => ({
-      name: line.trim(),
-      description: '',
-      type: 'standard' as const,
-      isRequired: true,
-      isVisible: true,
-      kycDocumentOption: 'create_new' as const
-    }))
-
-    setNewWebData(webData)
+    setNewWebData([...newWebData, newWebDataItem])
   }
 
-  const handleAddFromMasterFields = () => {
-    // Add multiple fields from master fields at once
-    const selectedFields = masterFields.slice(0, 5) // Example: add first 5 fields
-    const webDataFromMaster = selectedFields.map(field => ({
+  const toggleFieldSelection = (fieldId: string) => {
+    setSelectedFields(prev =>
+      prev.includes(fieldId)
+        ? prev.filter(id => id !== fieldId)
+        : [...prev, fieldId]
+    )
+  }
+
+  const addSelectedFields = () => {
+    const fieldsToAdd = masterFields.filter(field => 
+      selectedFields.includes(field.id.toString()) && 
+      !newWebData.some(item => item.masterFieldId === field.id.toString())
+    )
+
+    const newFields = fieldsToAdd.map((field, index) => ({
       name: field.label,
       description: `Auto-populated from ${field.field_key}`,
-      type: 'standard' as const,
       isRequired: field.is_required,
-      isVisible: true,
-      kycDocumentOption: 'create_new' as const,
-      masterFieldId: field.id,
-      masterField: field
+      masterFieldId: field.id.toString(),
+      masterField: field,
+      order: newWebData.length + index
     }))
 
-    setNewWebData(webDataFromMaster)
-    setCreationMode('master')
+    setNewWebData(prev => [...prev, ...newFields])
+    setSelectedFields([])
   }
+
+  const filteredProfileFields = masterFields
+    .filter(field => !newWebData.some(item => item.masterFieldId === field.id.toString()))
+    .filter(field =>
+      field.sources?.some(s => s.source_type === 'profile' || s.source_type === 'document') &&
+      field.label.toLowerCase().includes(profileSearch.toLowerCase())
+    )
+
+  const filteredCompanyFields = masterFields
+    .filter(field => !newWebData.some(item => item.masterFieldId === field.id.toString()))
+    .filter(field =>
+      field.sources?.some(s => s.source_type === 'company') &&
+      field.label.toLowerCase().includes(companySearch.toLowerCase())
+    )
+
+
+
+
 
   if (!context) return null
 
-  return (
-    <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Add WebData</DialogTitle>
-          <DialogDescription className="space-y-2">
-            <div className="space-y-1">
-              <p className="text-sm font-medium">
-                Adding webData to: <span className="font-semibold">
-                  {context.subdepartmentName}
-                  {context.className && ` > ${context.className}`}
-                  {context.subclassName && ` > ${context.subclassName}`}
-                </span>
-              </p>
-            </div>
-          </DialogDescription>
-        </DialogHeader>
+  const handleOpenChange = (open: boolean) => {
+    if (!open) {
+      handleClose()
+    }
+    onOpenChange(open)
+  }
 
+  const removeWebData = (masterFieldId: string) => {
+    setNewWebData(prev => prev.filter(item => item.masterFieldId !== masterFieldId))
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+      <DialogHeader>
+        <DialogTitle>Add WebData</DialogTitle>
+        <DialogDescription className="space-y-2">
+          <div className="space-y-1">
+            <p className="text-sm font-medium">
+              Adding webData to: <span className="font-semibold">
+                {context.subdepartmentName}
+                {context.className && ` > ${context.className}`}
+                {context.subclassName && ` > ${context.subclassName}`}
+              </span>
+            </p>
+          </div>
+        </DialogDescription>
+      </DialogHeader>
+      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
         <div className="space-y-6">
-          {/* Creation Mode Selector */}
           <Card>
             <CardContent className="p-4">
               <div className="space-y-3">
-                <Label className="text-base font-medium">Creation Mode</Label>
-                <div className="flex gap-4">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="radio"
-                      id="manual-mode"
-                      name="creation-mode"
-                      checked={creationMode === 'manual'}
-                      onChange={() => setCreationMode('manual')}
-                    />
-                    <Label htmlFor="manual-mode" className="text-sm">
-                      Manual Entry
-                    </Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="radio"
-                      id="master-mode"
-                      name="creation-mode"
-                      checked={creationMode === 'master'}
-                      onChange={() => setCreationMode('master')}
-                    />
-                    <Label htmlFor="master-mode" className="text-sm">
-                      Link Master Fields
-                    </Label>
-                  </div>
+                <Label className="text-base font-medium">
+                  Link Master Fields
+                </Label>
+                <div className="text-sm text-blue-600 bg-blue-50 p-3 rounded">
+                  Select fields from the master list to link to this web data.
                 </div>
-                {creationMode === 'master' && (
-                  <div className="text-sm text-blue-600 bg-blue-50 p-3 rounded">
-                    <Info className="h-4 w-4 inline mr-2" />
-                    Link existing master fields with pre-configured data sources and validation rules.
-                  </div>
-                )}
               </div>
             </CardContent>
           </Card>
 
-          {creationMode === 'manual' && (
-            <div className="space-y-2">
-              <Label>Bulk Add WebData (one per line)</Label>
-              <Textarea
-                value={bulkInput}
-                onChange={(e) => handleBulkInput(e.target.value)}
-                placeholder="Enter webData, one per line"
-                rows={4}
-              />
-              <p className="text-xs text-muted-foreground">
-                Or add them individually below
-              </p>
-            </div>
-          )}
-
-          {creationMode === 'master' && (
+          <div className="space-y-6">
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <Label className="text-base font-medium">Available Master Fields</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleAddFromMasterFields}
-                  disabled={loadingMasterFields}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Popular Fields
-                </Button>
-              </div>
-              
-              {loadingMasterFields ? (
-                <div className="text-center py-4">Loading master fields...</div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-60 overflow-y-auto">
-                  {masterFields.map(field => (
-                    <Card key={field.id} className="cursor-pointer hover:bg-gray-50 transition-colors">
-                      <CardContent className="p-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Profile/Individuals Section */}
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label className="text-base font-medium">Profile/Individuals Fields</Label>
+                      <div className="relative">
+                        <Input
+                          placeholder="Search profile fields..."
+                          value={profileSearch}
+                          onChange={(e) => setProfileSearch(e.target.value)}
+                          className="h-9" />
+                      </div>
+                    </div>
+                    <div className="border rounded-md p-2 h-[400px] overflow-y-auto">
+                      {filteredProfileFields.length > 0 ? (
                         <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <h4 className="font-medium text-sm">{field.label}</h4>
-                            <Badge variant={field.is_required ? "default" : "secondary"} className="text-xs">
-                              {field.is_required ? "Required" : "Optional"}
-                            </Badge>
-                          </div>
-                          <p className="text-xs text-gray-600 font-mono">{field.field_key}</p>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs">{field.type}</Badge>
-                            {field.sources && field.sources.length > 0 && (
-                              <Badge variant="outline" className="text-xs">
-                                <Link2 className="h-3 w-3 mr-1" />
-                                {field.sources.length} source{field.sources.length > 1 ? 's' : ''}
-                              </Badge>
-                            )}
-                          </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="w-full"
-                            onClick={() => {
-                              const updated = [...newWebData]
-                              if (updated.length === 1 && !updated[0].name) {
-                                // Replace the empty first item
-                                updated[0] = {
-                                  ...updated[0],
-                                  masterFieldId: field.id,
-                                  masterField: field,
-                                  name: field.label,
-                                  description: `Auto-populated from ${field.field_key}`,
-                                  isRequired: field.is_required,
-                                }
-                              } else {
-                                // Add new item
-                                updated.push({
-                                  name: field.label,
-                                  description: `Auto-populated from ${field.field_key}`,
-                                  type: 'standard',
-                                  isRequired: field.is_required,
-                                  isVisible: true,
-                                  kycDocumentOption: 'create_new',
-                                  masterFieldId: field.id,
-                                  masterField: field
-                                })
-                              }
-                              setNewWebData(updated)
-                            }}
-                          >
-                            Add Field
-                          </Button>
+                          {filteredProfileFields.map((field) => (
+                            <div key={field.id} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded">
+                              <input
+                                type="checkbox"
+                                id={`field-${field.id}`}
+                                checked={selectedFields.includes(field.id)}
+                                onChange={() => toggleFieldSelection(field.id)}
+                                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                              <label htmlFor={`field-${field.id}`} className="flex-1 flex items-center justify-between">
+                                <span className="text-sm">{field.label}</span>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="text-xs">{field.type}</Badge>
+                                  {field.is_required && (
+                                    <Badge variant="default" className="text-xs">Required</Badge>
+                                  )}
+                                </div>
+                              </label>
+                            </div>
+                          ))}
                         </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-sm text-gray-500">
+                          No profile fields found
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Company Section */}
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label className="text-base font-medium">Company Fields</Label>
+                      <div className="relative">
+                        <Input
+                          placeholder="Search company fields..."
+                          value={companySearch}
+                          onChange={(e) => setCompanySearch(e.target.value)}
+                          className="h-9" />
+                      </div>
+                    </div>
+                    <div className="border rounded-md p-2 h-[400px] overflow-y-auto">
+                      {filteredCompanyFields.length > 0 ? (
+                        <div className="space-y-2">
+                          {filteredCompanyFields.map((field) => (
+                            <div key={field.id} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded">
+                              <input
+                                type="checkbox"
+                                id={`field-${field.id}`}
+                                checked={selectedFields.includes(field.id)}
+                                onChange={() => toggleFieldSelection(field.id)}
+                                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                              <label htmlFor={`field-${field.id}`} className="flex-1 flex items-center justify-between">
+                                <span className="text-sm">{field.label}</span>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="text-xs">{field.type}</Badge>
+                                  {field.is_required && (
+                                    <Badge variant="default" className="text-xs">Required</Badge>
+                                  )}
+                                </div>
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-sm text-gray-500">
+                          No company fields found
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
 
-          <Separator />
-
+                <div className="flex justify-end pt-2">
+                  <Button
+                    type="button"
+                    onClick={addSelectedFields}
+                    disabled={selectedFields.length === 0}
+                    className="px-6"
+                  >
+                    Add Selected Fields ({selectedFields.length})
+                  </Button>
+                </div>
+              </div>
+          </div>
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <Label className="text-base font-medium">WebData Configuration</Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={addNewWebData}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Another WebData
-              </Button>
-            </div>
-
-            {newWebData.map((req, idx) => (
-              <div key={idx} className="border rounded-lg p-4 space-y-4 bg-card">
+            {newWebData.map((item, idx) => (
+              <div key={`${item.masterFieldId}-${idx}`} className="border rounded-lg p-4 space-y-4 bg-card">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <Label className="font-medium">WebData {idx + 1}</Label>
-                    {req.masterField && (
-                      <Badge variant="outline" className="text-xs">
-                        <Link2 className="h-3 w-3 mr-1" />
-                        Linked to: {req.masterField.field_key}
-                      </Badge>
-                    )}
+                    <Label className="font-medium">Field {idx + 1}</Label>
+                    <Badge variant="outline" className="text-xs">
+                      <Link2 className="h-3 w-3 mr-1" />
+                      {item.name}
+                    </Badge>
                   </div>
-                  {newWebData.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => removeNewWebData(idx)}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => removeWebData(item.masterFieldId)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
                 </div>
 
-                {/* Master Field Selector */}
-                {creationMode === 'master' || req.masterField ? (
-                  <div className="space-y-3">
-                    <Label>Link to Master Field</Label>
-                    <Select
-                      value={req.masterFieldId?.toString() || ''}
-                      onValueChange={(value) => handleMasterFieldSelect(idx, value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a master field" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {masterFields.map(field => (
-                          <SelectItem key={field.id} value={field.id.toString()}>
-                            <div className="flex items-center gap-2">
-                              <span>{field.label}</span>
-                              <Badge variant="outline" className="text-xs">{field.type}</Badge>
-                              {field.is_required && (
-                                <Badge variant="default" className="text-xs">Required</Badge>
-                              )}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    
-                    {req.masterField && (
-                      <Card className="bg-blue-50 border-blue-200">
-                        <CardContent className="p-3">
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-medium text-sm">Master Field Details</h4>
-                              <Badge variant="outline">{req.masterField.type}</Badge>
-                            </div>
-                            <p className="text-xs text-gray-600">
-                              Field Key: <code className="bg-white px-1 rounded">{req.masterField.field_key}</code>
-                            </p>
-                            {req.masterField.sources && req.masterField.sources.length > 0 && (
-                              <div className="space-y-1">
-                                <p className="text-xs font-medium">Data Sources:</p>
-                                {req.masterField.sources.map((source: any, sourceIdx: number) => (
-                                  <div key={sourceIdx} className="text-xs text-gray-600 ml-2">
-                                    • {source.source_type}: {source.table}.{source.path} (Priority: {source.priority})
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
-                  </div>
-                ) : null}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>WebData Name *</Label>
-                    <Input
-                      value={req.name}
-                      onChange={(e) => handleNewWebDataChange(idx, 'name', e.target.value)}
-                      placeholder="WebData name"
-                      disabled={!!req.masterField}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Description</Label>
-                    <Input
-                      value={req.description}
-                      onChange={(e) => handleNewWebDataChange(idx, 'description', e.target.value)}
-                      placeholder="Description (optional)"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>WebData Type</Label>
-                    <Select
-                      value={req.type}
-                      onValueChange={(value) => handleNewWebDataChange(idx, 'type', value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="standard">Standard</SelectItem>
-                        <SelectItem value="conditional">Conditional</SelectItem>
-                        <SelectItem value="optional">Optional</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-3">
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        checked={req.isRequired}
-                        onCheckedChange={(checked) => handleNewWebDataChange(idx, 'isRequired', checked)}
-                        disabled={req.masterField?.is_required}
-                      />
-                      <Label className="text-sm">Required</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        checked={req.isVisible}
-                        onCheckedChange={(checked) => handleNewWebDataChange(idx, 'isVisible', checked)}
-                      />
-                      <Label className="text-sm">Visible</Label>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-4 border-t pt-4">
-                  <Label className="font-medium flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    Document Type Association
-                  </Label>
-                  
-                  <div className="space-y-3">
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="radio"
-                        id={`create-new-${idx}`}
-                        name={`kyc-option-${idx}`}
-                        checked={req.kycDocumentOption === 'create_new'}
-                        onChange={() => handleNewWebDataChange(idx, 'kycDocumentOption', 'create_new')}
-                      />
-                      <Label htmlFor={`create-new-${idx}`} className="text-sm">
-                        Create new document type
-                      </Label>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="radio"
-                        id={`existing-${idx}`}
-                        name={`kyc-option-${idx}`}
-                        checked={req.kycDocumentOption === 'existing'}
-                        onChange={() => handleNewWebDataChange(idx, 'kycDocumentOption', 'existing')}
-                      />
-                      <Label htmlFor={`existing-${idx}`} className="text-sm">
-                        Link to existing document type
-                      </Label>
-                    </div>
-
-                    {req.kycDocumentOption === 'existing' && (
-                      <div className="ml-6 space-y-2">
-                        <Label className="text-sm">Select Document Type</Label>
-                        <Select
-                          value={req.kycDocumentId || ''}
-                          onValueChange={(value) => handleNewWebDataChange(idx, 'kycDocumentId', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a document type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {loadingKycDocs ? (
-                              <SelectItem value="loading" disabled>
-                                Loading document types...
-                              </SelectItem>
-                            ) : (
-                              kycDocuments.map((doc) => (
-                                <SelectItem key={doc.id} value={doc.id}>
-                                  {doc.display_name || doc.name}
-                                </SelectItem>
-                              ))
-                            )}
-                          </SelectContent>
-                        </Select>
+                <div className="space-y-2">
+                  <Label>Field Details</Label>
+                  <div className="p-3 bg-gray-50 rounded-md text-sm">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">Field Key:</span>
+                        <code className="bg-white px-2 py-0.5 rounded border text-xs">
+                          {item.masterField?.field_key || 'N/A'}
+                        </code>
                       </div>
-                    )}
-
-                    {req.kycDocumentOption === 'create_new' && (
-                      <div className="ml-6 text-sm text-muted-foreground bg-blue-50 p-3 rounded">
-                        <Info className="h-4 w-4 inline mr-2" />
-                        A new document type will be created with the name "{req.name || 'WebData Name'}"
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">Type:</span>
+                        <Badge variant="outline" className="text-xs">
+                          {item.masterField?.type || 'text'}
+                        </Badge>
                       </div>
-                    )}
+                      {item.isRequired && (
+                        <div className="text-xs text-green-600 font-medium">This field is required</div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -693,14 +422,14 @@ export function AddWebDataDialog({
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={handleClose}>
+        <DialogFooter className="mt-6">
+          <Button variant="outline" onClick={handleClose} disabled={isSubmitting}>
             Cancel
           </Button>
           <Button
             type="button"
             onClick={handleSubmit}
-            disabled={isSubmitting || !newWebData.some(req => req.name.trim())}
+            disabled={isSubmitting || newWebData.length === 0}
           >
             {isSubmitting ? 'Saving...' : 'Save WebData'}
           </Button>

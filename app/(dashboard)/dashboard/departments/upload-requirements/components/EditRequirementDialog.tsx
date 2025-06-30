@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { FileText, Info, X } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import supabase from "@/lib/supabase/client"
+import { Card } from '@/components/ui/card'
 
 interface EditRequirementDialogProps {
   isOpen: boolean
@@ -128,10 +129,10 @@ export function EditRequirementDialog({
 
     try {
       setIsSubmitting(true)
-      
+
       // Create a copy of the form data to modify
       const updatedData = { ...formData }
-      
+
       // Handle KYC document selection
       if (kycDocumentOption === 'create_new') {
         try {
@@ -172,20 +173,20 @@ export function EditRequirementDialog({
       }
 
       console.log('Submitting requirement:', updatedRequirement) // Debug log
-      
+
       // Call the parent's onSave function
       await onSave(updatedRequirement)
-      
+
       // Show success message
       toast({
         title: 'Success',
         description: 'Requirement updated successfully',
         variant: 'default'
       })
-      
+
       // Close the dialog on successful save
       handleClose()
-      
+
     } catch (error) {
       console.error('Error in handleSubmit:', error)
       toast({
@@ -207,7 +208,7 @@ export function EditRequirementDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>Edit Requirement</DialogTitle>
           <DialogDescription>
@@ -227,52 +228,14 @@ export function EditRequirementDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label>Type</Label>
-              <Select
-                value={formData.type}
-                onValueChange={(value: 'standard' | 'conditional' | 'optional') =>
-                  setFormData(prev => ({ ...prev, type: value }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="standard">Standard</SelectItem>
-                  <SelectItem value="conditional">Conditional</SelectItem>
-                  <SelectItem value="optional">Optional</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Description</Label>
-            <Input
-              value={formData.description || ''}
-              onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-              placeholder="Description (optional)"
-            />
-          </div>
-
-          {/* Requirements Settings */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                checked={formData.isRequired}
-                onCheckedChange={(checked) => setFormData(prev => ({ ...prev, isRequired: Boolean(checked) }))}
+              <Label>Description</Label>
+              <Input
+                value={formData.description || ''}
+                onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                placeholder="Description (optional)"
               />
-              <Label className="text-sm">Required</Label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                checked={formData.isVisible}
-                onCheckedChange={(checked) => setFormData(prev => ({ ...prev, isVisible: Boolean(checked) }))}
-              />
-              <Label className="text-sm">Visible</Label>
             </div>
           </div>
-
           {/* KYC Document Association */}
           <div className="space-y-4 border-t pt-4">
             <Label className="font-medium flex items-center gap-2">
