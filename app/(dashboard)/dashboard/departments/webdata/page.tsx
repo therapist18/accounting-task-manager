@@ -49,7 +49,9 @@ interface ApiWebData {
   order: number
   isVisible: boolean
   isRequired: boolean
-  kycDocumentId?: string // Add this field
+  kycDocumentId?: string
+  masterFieldId?: string
+  masterField?: any // Store master field data for display
 }
 
 interface WebDataTableEntry extends ApiWebData {
@@ -675,6 +677,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
                   <TableHead className="w-12 text-white border-r">#</TableHead>
                   <TableHead className="flex-1 text-white border-r">WebData</TableHead>
                   <TableHead className="flex-1 text-white border-r">Description</TableHead>
+                  <TableHead className="w-48 text-white border-r">Master Field</TableHead>
                   <TableHead className="w-24 text-white border-r">Document</TableHead>
                   <TableHead className="w-48 text-white">Actions</TableHead>
                 </TableRow>
@@ -692,12 +695,29 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
                           </span>
                         </TableCell>
                         <TableCell className="border-r flex-1">
-                          <span className="font-medium">{req.name}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{req.name}</span>
+                            {req.masterFieldId && (
+                              <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                                <Link2 className="h-3 w-3 mr-1" />
+                                Master
+                              </span>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell className="border-r flex-1">
                           <span className={!req.description ? 'text-gray-400 italic' : ''}>
                             {req.description || 'No description'}
                           </span>
+                        </TableCell>
+                        <TableCell className="border-r w-48">
+                          {req.masterFieldId ? (
+                            <div className="text-sm text-muted-foreground truncate">
+                              {req.masterField?.label || 'Linked'}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
                         </TableCell>
                         <TableCell className="border-r w-24">
                           <div className="flex items-center justify-center">

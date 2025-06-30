@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { FileText, Info, X } from "lucide-react"
+import { FileText, Info, X, Link2 } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import supabase from "@/lib/supabase/client"
 
@@ -42,6 +42,8 @@ export function EditWebDataDialog({
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
   const [loadingKycDocs, setLoadingKycDocs] = useState(false)
   const [kycDocumentOption, setKycDocumentOption] = useState<'existing' | 'create_new' | 'none'>('none')
+  const [masterFields, setMasterFields] = useState<any[]>([])
+  const [loadingMasterFields, setLoadingMasterFields] = useState(false)
 
   useEffect(() => {
     if (webData && isOpen) {
@@ -58,6 +60,8 @@ export function EditWebDataDialog({
       }
 
       fetchKycDocuments()
+      fetchKycDocuments()
+      fetchMasterFields()
     }
   }, [webData, isOpen])
 
@@ -198,6 +202,52 @@ export function EditWebDataDialog({
     }
   }
 
+  const fetchMasterFields = async () => {
+    try {
+      setLoadingMasterFields(true)
+      const { data, error } = await supabase
+        .from('tm_job_fields')
+        .select('*')
+        .order('label')
+
+      if (error) throw error
+
+      setMasterFields(data || [])
+    } catch (error) {
+      console.error('Error fetching master fields:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to load master fields',
+        variant: 'destructive'
+      })
+    } finally {
+      setLoadingMasterFields(false)
+    }
+  }
+
+  const handleMasterFieldSelect = (fieldId: string) => {
+    const selectedField = masterFields.find(f => f.id.toString() === fieldId)
+    if (selectedField) {
+      setFormData(prev => ({
+        ...prev,
+        masterFieldId: selectedField.id.toString(),
+        masterField: selectedField,
+        name: selectedField.label,
+        description: selectedField.description || ''
+      }))
+    }
+  }
+
+  const clearMasterField = () => {
+    setFormData(prev => ({
+      ...prev,
+      masterFieldId: undefined,
+      masterField: undefined,
+      name: '',
+      description: ''
+    }))
+  }
+
   const handleClose = () => {
     onOpenChange(false)
     setKycDocumentOption('none')
@@ -219,12 +269,70 @@ export function EditWebDataDialog({
           {/* Basic Information */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>WebData Name *</Label>
-              <Input
-                value={formData.name}
-                onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="WebData name"
-              />
+              <div className="flex justify-between items-center">
+                <Label>WebData Name *</Label>
+                {formData.masterFieldId && (
+                  <span className="text-xs text-blue-600 flex items-center">
+                    <Link2 className="h-3 w-3 mr-1" />
+                    Linked to master field
+                  </span>
+                )}
+              </div>
+              {formData.masterFieldId ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={formData.name}
+                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="WebData name"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={clearMasterField}
+                    className="shrink-0"
+                  >
+                    Unlink
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <Select
+                      value=""
+                      onValueChange={handleMasterFieldSelect}
+                      disabled={loadingMasterFields}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Link to master field" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {loadingMasterFields ? (
+                          <SelectItem value="loading" disabled>
+                            Loading fields...
+                          </SelectItem>
+                        ) : masterFields.length > 0 ? (
+                          masterFields.map((field) => (
+                            <SelectItem key={field.id} value={field.id.toString()}>
+                              {field.label}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <SelectItem value="no-fields" disabled>
+                            No master fields found
+                          </SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Input
+                    value={formData.name}
+                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="Or enter name manually"
+                  />
+                </div>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Type</Label>

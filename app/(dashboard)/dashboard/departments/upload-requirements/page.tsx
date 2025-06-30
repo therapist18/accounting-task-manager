@@ -669,7 +669,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     return (
       <div className="relative border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm flex-1 flex flex-col h-full">
         <div className="flex flex-col h-full">
-          <div className="overflow-hidden flex-1 flex flex-col">
+          <div className="overflow-auto flex-1 flex flex-col">
             <Table className="table-fixed w-full">
               <TableHeader className="sticky top-0 z-10 bg-blue-600 dark:bg-blue-800 block">
                 <TableRow className="flex">
@@ -972,108 +972,104 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     const currentSubclass = currentClass?.subClasses?.find(sc => sc.id.toString() === currentSubclassId)
 
     return (
-      <div className="space-y-4 h-[calc(100vh-200px)] flex flex-col">
-        <div className="flex-1 overflow-hidden">
-          <div className="h-full overflow-auto">
-            {/* Header */}
-            <div className="border-b pb-4">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
-              <h3 className="text-lg text-gray-600 dark:text-gray-400">
-                {currentSubdept.name} - <span className="text-sm text-gray-500">{currentSubdept.description}</span>
-              </h3>
-            </div>
+      <div className="space-y-4 h-[calc(100vh-200px)] flex flex-col flex-1 overflow-hidden h-full overflow-auto">
+        {/* Header */}
+        <div className="border-b pb-4">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
+          <h3 className="text-lg text-gray-600 dark:text-gray-400">
+            {currentSubdept.name} - <span className="text-sm text-gray-500">{currentSubdept.description}</span>
+          </h3>
+        </div>
 
-            {/* Content based on current selection */}
-            {currentSubclass ? (
-              // Show subclass requirements
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-lg font-medium flex items-center space-x-2">
-                    <Layers className="h-5 w-5 text-orange-600" />
-                    <span>
-                      Sub-class Requirements: {currentSubclass.name} -
-                      <span className="text-sm text-gray-500">{currentSubclass.description}</span>
-                    </span>
-                  </h4>
-                  <Button
-                    onClick={() => openRequirementsDialog({
-                      type: 'subclass',
-                      departmentId: currentDept.id,
-                      subdepartmentId: currentSubdept.id,
-                      classId: currentClass?.id.toString(),
-                      subclassId: currentSubclass.id.toString()
-                    })}
-                    size="sm"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Requirements
-                  </Button>
-                </div>
-                {currentSubclass.requirements && renderRequirements(currentSubclass.requirements, {
+        {/* Content based on current selection */}
+        {currentSubclass ? (
+          // Show subclass requirements
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-lg font-medium flex items-center space-x-2">
+                <Layers className="h-5 w-5 text-orange-600" />
+                <span>
+                  Sub-class Requirements: {currentSubclass.name} -
+                  <span className="text-sm text-gray-500">{currentSubclass.description}</span>
+                </span>
+              </h4>
+              <Button
+                onClick={() => openRequirementsDialog({
                   type: 'subclass',
                   departmentId: currentDept.id,
                   subdepartmentId: currentSubdept.id,
                   classId: currentClass?.id.toString(),
                   subclassId: currentSubclass.id.toString()
                 })}
-              </div>
-            ) : currentClass ? (
-              // Show class requirements
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-lg font-medium flex items-center space-x-2">
-                    <Layers className="h-5 w-5 text-purple-600" />
-                    <span>Class Requirements: {currentClass.name} - <span className="text-sm text-gray-500">{currentClass.description}</span></span>
-                  </h4>
-                  <Button
-                    onClick={() => openRequirementsDialog({
-                      type: 'class',
-                      departmentId: currentDept.id,
-                      subdepartmentId: currentSubdept.id,
-                      classId: currentClass.id.toString()
-                    })}
-                    size="sm"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Requirements
-                  </Button>
-                </div>
-                {renderRequirements(currentClass.requirements, {
+                size="sm"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Requirements
+              </Button>
+            </div>
+            {currentSubclass.requirements && renderRequirements(currentSubclass.requirements, {
+              type: 'subclass',
+              departmentId: currentDept.id,
+              subdepartmentId: currentSubdept.id,
+              classId: currentClass?.id.toString(),
+              subclassId: currentSubclass.id.toString()
+            })}
+          </div>
+        ) : currentClass ? (
+          // Show class requirements
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-lg font-medium flex items-center space-x-2">
+                <Layers className="h-5 w-5 text-purple-600" />
+                <span>Class Requirements: {currentClass.name} - <span className="text-sm text-gray-500">{currentClass.description}</span></span>
+              </h4>
+              <Button
+                onClick={() => openRequirementsDialog({
                   type: 'class',
                   departmentId: currentDept.id,
                   subdepartmentId: currentSubdept.id,
                   classId: currentClass.id.toString()
                 })}
-              </div>
-            ) : (
-              // Show subdepartment requirements
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-lg font-medium flex items-center space-x-2">
-                    <FileText className="h-5 w-5 text-green-600" />
-                    <span>Subdepartment Requirements</span>
-                  </h4>
-                  <Button
-                    onClick={() => openRequirementsDialog({
-                      type: 'subdepartment',
-                      departmentId: currentDept.id,
-                      subdepartmentId: currentSubdept.id
-                    })}
-                    size="sm"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Requirements
-                  </Button>
-                </div>
-                {renderRequirements(currentSubdept.upload_requirements, {
+                size="sm"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Requirements
+              </Button>
+            </div>
+            {renderRequirements(currentClass.requirements, {
+              type: 'class',
+              departmentId: currentDept.id,
+              subdepartmentId: currentSubdept.id,
+              classId: currentClass.id.toString()
+            })}
+          </div>
+        ) : (
+          // Show subdepartment requirements
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-lg font-medium flex items-center space-x-2">
+                <FileText className="h-5 w-5 text-green-600" />
+                <span>Subdepartment Requirements</span>
+              </h4>
+              <Button
+                onClick={() => openRequirementsDialog({
                   type: 'subdepartment',
                   departmentId: currentDept.id,
                   subdepartmentId: currentSubdept.id
                 })}
-              </div>
-            )}
+                size="sm"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Requirements
+              </Button>
+            </div>
+            {renderRequirements(currentSubdept.upload_requirements, {
+              type: 'subdepartment',
+              departmentId: currentDept.id,
+              subdepartmentId: currentSubdept.id
+            })}
           </div>
-        </div>
+        )}
       </div>
     )
   }
@@ -1108,7 +1104,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           onSubclassClick={handleSubclassClick}
           onToggleExpand={toggleExpanded}
         />
-        <div className="flex-1 p-6 bg-white dark:bg-gray-900 overflow-auto">
+        <div className="flex-1 p-4 bg-white dark:bg-gray-900">
           {renderMainContent()}
         </div>
       </div>

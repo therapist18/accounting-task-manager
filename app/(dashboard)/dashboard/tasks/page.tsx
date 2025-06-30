@@ -22,6 +22,8 @@ import { getStages } from "@/lib/supabase/stages"
 import { fetchDepartments } from "../departments/departments/database"
 import { DepartmentSidebar } from "../departments/main-shared-components/department-sidebar"
 import DocumentPreviewDialog from "../applications/components/document-preview-dialog"
+import { EditableStageCell } from "./components/EditableStageCell"
+import { EnquiryDialog } from "./components/EnquiryDialog"
 
 const fuzzyMatch = (str1: string, str2: string, threshold = 0.8): boolean => {
   if (!str1 || !str2) return false;
@@ -134,6 +136,9 @@ export default function TasksPage() {
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [documentReviewOpen, setDocumentReviewOpen] = useState(false)
   const [reviewDocument, setReviewDocument] = useState<any>(null)
+  const [enquiryDialogOpen, setEnquiryDialogOpen] = useState(false)
+  const [enquiryTasks, setEnquiryTasks] = useState<Task[]>([])
+
   // Define requirement columns
   const requirementColumns = [
     { key: 'index', header: '#', width: '50px' },
@@ -253,37 +258,50 @@ export default function TasksPage() {
 
   // Get filtered tasks based on selected department/subdepartment/class/subclass
   const getFilteredTasks = useCallback((status?: string) => {
+    // If no filters are selected, return all tasks or filter by status if provided
     if (!selectedDepartment && !selectedSubdepartment && !selectedClass && !selectedSubclass) {
       return status ? tasks.filter(task => task.status === status) : [...tasks];
     }
 
+    // Helper function to compare IDs, handling both string and number types
     const idsMatch = (id1: any, id2: any): boolean => {
       if (id1 === undefined || id2 === undefined) return false;
       return String(id1) === String(id2);
     };
 
-    return tasks.filter(task => {
+    // First filter by status if provided
+    const tasksToFilter = status ? tasks.filter(task => task.status === status) : [...tasks];
+
+    return tasksToFilter.filter(task => {
+      // For enquiry tasks, we need to check the task's department/subdepartment/class/subclass
+      // against the selected filters
+      let matches = true;
+
+      // Check department match
       if (selectedDepartment) {
         const deptMatch = idsMatch(task.department?.id, selectedDepartment);
-        if (!deptMatch) return false;
+        if (!deptMatch) matches = false;
       }
 
-      if (selectedSubdepartment) {
+      // Only check subdepartment if department matches (or isn't selected)
+      if (matches && selectedSubdepartment) {
         const subdeptMatch = idsMatch(task.subdepartment?.id, selectedSubdepartment);
-        if (!subdeptMatch) return false;
+        if (!subdeptMatch) matches = false;
       }
 
-      if (selectedClass) {
+      // Only check class if department and subdepartment match (or aren't selected)
+      if (matches && selectedClass) {
         const classMatch = idsMatch(task.class_id, selectedClass);
-        if (!classMatch) return false;
+        if (!classMatch) matches = false;
       }
 
-      if (selectedSubclass) {
+      // Only check subclass if all parent levels match (or aren't selected)
+      if (matches && selectedSubclass) {
         const subclassMatch = idsMatch(task.subclass_id, selectedSubclass);
-        if (!subclassMatch) return false;
+        if (!subclassMatch) matches = false;
       }
 
-      return true;
+      return matches;
     });
   }, [tasks, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
 
@@ -291,132 +309,195 @@ export default function TasksPage() {
     return getFilteredTasks();
   }, [getFilteredTasks]);
 
-  // Get current requirements
-  const getCurrentRequirements = useCallback(() => {
-    if (selectedSubclass) {
-      const subclass = departments
-        .flatMap(d => d.tm_subdepartments || [])
-        .flatMap(sd => sd.classes || [])
-        .flatMap(c => c.subClasses || [])
-        .find(sc => String(sc.id) === String(selectedSubclass));
-
-      return subclass?.requirements || [];
-    } else if (selectedClass) {
-      let cls = departments
-        .flatMap(d => d.tm_subdepartments || [])
-        .flatMap(sd => sd.classes || [])
-        .find(c => String(c.id) === String(selectedClass));
-
-      if (!cls) {
-        cls = departments
-          .flatMap(d => d.tm_subdepartments || [])
-          .flatMap(sd => sd.classes || [])
-          .find(c => c.name === selectedClass);
+  const getCurrentRequirements = useCallback(async (task: any) => {
+    try {
+      let constructedClassId = null;
+      
+      if (task.subclass_id && task.class_id) {
+        constructedClassId = task.subclass_id;
+      } else if (task.class_id) {
+        const subdepartmentId = task.subdepartment?.id || task.subdepartment_id;
+        if (subdepartmentId) {
+          constructedClassId = `${subdepartmentId}_${task.class_id}`;
+        } else {
+          constructedClassId = task.class_id;
+        }
       }
+      
+      if (constructedClassId) {
+        const { data, error } = await supabase
+          .from('tm_class_requirements')
+          .select('*')
+          .eq('class_id', constructedClassId)
+          .maybeSingle();
+        
+        if (!error && data?.requirements) {
+          return data.requirements;
+        }
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('Error fetching requirements:', error);
+      return [];
+    }
+  }, []);
 
-      return cls?.requirements || [];
-    } else if (selectedSubdepartment) {
-      const subdept = departments
-        .flatMap(d => d.tm_subdepartments || [])
-        .find(sd => String(sd.id) === String(selectedSubdepartment));
+  const getTaskStageStatus = (taskId: string, stageId: string) => {
+    const stageStatuses = JSON.parse(localStorage.getItem(TASK_STAGE_STATUS_KEY) || '{}');
+    const taskStatuses = stageStatuses[taskId] || {};
+    return taskStatuses[stageId];
+  };
+  // Add these constants at the top of your component
+  const TASK_STAGE_STATUS_KEY = 'taskStageStatuses';
 
-      return subdept?.requirements || [];
-    } else if (selectedDepartment) {
-      const dept = departments.find(d => String(d.id) === String(selectedDepartment));
-      return dept?.requirements || [];
+  // Add this function to handle enquiry creation
+  const handleEnquiryCreated = (newEnquiry: any) => {
+    setEnquiryTasks(prev => [newEnquiry, ...prev])
+    // Refresh all tasks
+    const loadTasks = async () => {
+      const tasksData = await getTasks()
+      setTasks(tasksData)
+    }
+    loadTasks()
+  }
+
+const handleStageStatusSave = async (stageId: string, taskId: string, date: string) => {
+  try {
+    // Get current task data
+    const { data: currentTask, error: fetchError } = await supabase
+      .from('tm_tasks')
+      .select('stages')
+      .eq('id', taskId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    // Parse existing stages or create new object
+    const existingStages = currentTask.stages || {}
+    
+    // Format date as DD/MM/YYYY for consistency
+    const parsedDate = new Date(date);
+    const formattedDate = `${String(parsedDate.getDate()).padStart(2, '0')}/` +
+                         `${String(parsedDate.getMonth() + 1).padStart(2, '0')}/` +
+                         `${parsedDate.getFullYear()}`;
+
+    // Update stages object
+    const updatedStages = {
+      ...existingStages,
+      [stageId]: {
+        date: formattedDate,
+        status: 'completed',
+        completedAt: new Date().toISOString()
+      }
     }
 
-    return [];
-  }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
+    // Check if this is confirmation stage
+    const confirmationStageId = "a19b270e-6d1e-4e6d-b2bc-f21db72cde08"
+    const shouldMoveToProgress = stageId === confirmationStageId
 
-  // Generate columns for stages view
+    // Update task with new stages data and potentially new status
+    const { error: updateError } = await supabase
+      .from('tm_tasks')
+      .update({
+        stages: updatedStages,
+        status: shouldMoveToProgress ? 'in_progress' : undefined,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', taskId)
+
+    if (updateError) throw updateError
+
+    // Refresh tasks if status changed
+    if (shouldMoveToProgress) {
+      const [tasksData] = await Promise.all([getTasks()])
+      setTasks(tasksData)
+    }
+
+    return Promise.resolve()
+  } catch (error) {
+    console.error('Error saving stage status:', error)
+    throw error
+  }
+}
+
+  // Update the generateStageColumns function to handle enquiry stages
   const generateStageColumns = useCallback(() => {
     const baseColumns = stageColumns
       .slice(0, stageColumns.findIndex(col => col.key === 'renewal_status') + 1)
-      .filter(col => columnVisibility[col.key] !== false);
-  
+      .filter(col => columnVisibility[col.key] !== false)
+
     const movedColumns = stageColumns
       .slice(
         stageColumns.findIndex(col => col.key === 'account_used'),
         stageColumns.findIndex(col => col.key === 'batch') + 1
       )
       .filter(col => ['account_used', 'applied_by', 'batch'].includes(col.key) &&
-        columnVisibility[col.key] !== false);
-  
-    const endColumns: any[] = [];
-  
-    const noStagesColumn = {
-      key: 'no_stages',
-      header: 'Stages',
-      width: '150px',
-      parentHeader: 'Stages',
-      sortable: false,
-      render: () => (
-        <div className="text-center text-muted-foreground text-sm">
-          No stages configured
-        </div>
-      )
-    };
-  
-    const currentDept = departments.find(d => d.id === selectedDepartment);
+        columnVisibility[col.key] !== false)
+
+    const endColumns: any[] = []
+
+    const currentDept = departments.find(d => d.id === selectedDepartment)
     if (!currentDept) {
-      return [...baseColumns, noStagesColumn, ...endColumns];
+      return [...baseColumns, ...endColumns]
     }
-  
-    // Get all stages from department
-    let departmentStages = currentDept.stages || [];
-    
-    // If we have a subdepartment, filter stages based on subdepartment settings
+
+    // Get stages - for enquiry tab, only show enquiry and confirmation stages
+    let departmentStages = currentDept.stages || []
+
+    // Filter stages for enquiry view
+    const isEnquiryView = window.location.hash.includes('enquiry')
+    if (isEnquiryView) {
+      departmentStages = departmentStages.filter(stage =>
+        stage.name === 'Enquiry' || stage.name === 'Confirmation'
+      )
+    }
+
+    // Apply subdepartment and class filters as before...
     if (selectedSubdepartment) {
-      const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id === selectedSubdepartment);
+      const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id === selectedSubdepartment)
       if (currentSubdept) {
-        // Filter stages based on subdepartment settings
         departmentStages = departmentStages.filter(stage => {
-          const subdeptStageConfig = currentSubdept.stages?.find(s => s.stage_id === stage.id);
-          
-          // If stage is explicitly set to not applicable in subdepartment, hide it
+          const subdeptStageConfig = currentSubdept.stages?.find(s => s.stage_id === stage.id)
+
           if (subdeptStageConfig && subdeptStageConfig.applicable === false) {
-            return false;
+            return false
           }
-          
-          // If stage has display setting in subdepartment, respect it
+
           if (subdeptStageConfig && subdeptStageConfig.display !== undefined) {
-            return subdeptStageConfig.display;
+            return subdeptStageConfig.display
           }
-          
-          return true; // Default to showing if no specific settings
-        });
+
+          return true
+        })
       }
     }
-  
-    // If we have a class, apply class-level stage settings
+
     if (selectedClass) {
-      const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id === selectedSubdepartment);
+      const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id === selectedSubdepartment)
       if (currentSubdept) {
-        const currentClass = currentSubdept.classes?.find(c => 
+        const currentClass = currentSubdept.classes?.find(c =>
           c.id === selectedClass || c.name === selectedClass
-        );
-        
+        )
+
         if (currentClass && currentClass.stages) {
           departmentStages = departmentStages.filter(stage => {
-            const classStageConfig = currentClass.stages?.find(s => s.stage_id === stage.id);
-            
-            // If stage is explicitly set to not applicable in class, hide it
+            const classStageConfig = currentClass.stages?.find(s => s.stage_id === stage.id)
+
             if (classStageConfig && classStageConfig.applicable === false) {
-              return false;
+              return false
             }
-            
-            // If stage has display setting in class, respect it
+
             if (classStageConfig && classStageConfig.display !== undefined) {
-              return classStageConfig.display;
+              return classStageConfig.display
             }
-            
-            return true; // Keep the stage if no class-level settings
-          });
+
+            return true
+          })
         }
       }
     }
-  
+
     // Generate stage columns from filtered stages
     const stageColumnsList = departmentStages
       .filter(stage => columnVisibility[`stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`] !== false)
@@ -428,25 +509,21 @@ export default function TasksPage() {
         sortable: true,
         stage: stage,
         render: (value: any, task: any) => {
-          // Your existing render logic for each stage cell
-          const taskStage = task.stages?.find((s: any) => s.id === stage.id);
-          if (!taskStage) return null;
-          
+          const taskStageStatus = getTaskStageStatus(task.id, stage.id)
+
           return (
-            <div 
-              className={`p-2 rounded text-center ${
-                taskStage.status === 'completed' ? 'bg-green-100 text-green-800' : 
-                taskStage.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
-                'bg-gray-100 text-gray-500'
-              }`}
-            >
-              {taskStage.status === 'completed' ? '✓' : 
-               taskStage.status === 'in_progress' ? '⌛' : '—'}
-            </div>
-          );
+            <EditableStageCell
+              stage={stage}
+              task={task}
+              value={taskStageStatus?.completedAt || taskStageStatus?.date}
+              onSave={handleStageStatusSave}
+              onDocumentUpload={handleStageDocumentUpload}
+              onShowDocuments={handleShowUploadDialog}
+            />
+          )
         }
-      }));
-  
+      }))
+
     return [
       ...baseColumns,
       ...stageColumnsList,
@@ -455,9 +532,56 @@ export default function TasksPage() {
         parentHeader: 'Additional Info'
       })),
       ...endColumns
-    ];
-  }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, columnVisibility]);
-  // Generate columns for requirements view
+    ]
+  }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, columnVisibility])
+
+  // Helper function to check if IDs match
+  const idsMatch = (id1: any, id2: any): boolean => {
+    if (id1 === undefined || id2 === undefined) return false;
+    return String(id1) === String(id2);
+  };
+
+  // Function to get enquiry tasks filtered by selected data level
+  const getEnquiryTasks = useCallback(() => {
+    // First filter by status
+    let filtered = tasks.filter(task => task.status === 'enquiry');
+
+    // If no filters are selected, return all enquiry tasks
+    if (!selectedDepartment && !selectedSubdepartment && !selectedClass && !selectedSubclass) {
+      return filtered;
+    }
+
+    // Apply department filter if selected
+    if (selectedDepartment) {
+      filtered = filtered.filter(task => 
+        idsMatch(task.department?.id, selectedDepartment)
+      );
+    }
+
+    // Apply subdepartment filter if selected
+    if (selectedSubdepartment) {
+      filtered = filtered.filter(task => 
+        idsMatch(task.subdepartment?.id, selectedSubdepartment)
+      );
+    }
+
+    // Apply class filter if selected
+    if (selectedClass) {
+      filtered = filtered.filter(task => 
+        idsMatch(task.class_id, selectedClass)
+      );
+    }
+
+    // Apply subclass filter if selected
+    if (selectedSubclass) {
+      filtered = filtered.filter(task => 
+        idsMatch(task.subclass_id, selectedSubclass)
+      );
+    }
+
+    return filtered;
+  }, [tasks, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass])
+
   const generateRequirementColumns = useCallback(() => {
     const baseColumns = stageColumns.slice(0, stageColumns.findIndex(col => col.key === 'renewal_status') + 1);
 
@@ -722,6 +846,19 @@ export default function TasksPage() {
     );
   }
 
+
+  // Add this to TasksPage.tsx for debugging:
+const debugClassId = (task: any) => {
+  console.log('Task debug info:', {
+    taskId: task.id,
+    class_id: task.class_id,
+    subclass_id: task.subclass_id,
+    subdepartment_id: task.subdepartment?.id,
+    constructedClassId: task.subdepartment?.id ? `${task.subdepartment.id}_${task.class_id}` : task.class_id
+  });
+};
+
+
   return (
     <div className="flex h-screen">
       {/* Sidebar */}
@@ -760,11 +897,49 @@ export default function TasksPage() {
 
           {/* Content based on selection */}
           {(selectedClass || selectedSubclass) ? (
-            <Tabs defaultValue="work-in-progress" className="space-y-4">
+            <Tabs defaultValue="enquiries" className="space-y-4">
               <TabsList>
+                <TabsTrigger value="enquiries">Enquiries</TabsTrigger>
                 <TabsTrigger value="work-in-progress">Work in Progress</TabsTrigger>
                 <TabsTrigger value="completed">Completed</TabsTrigger>
               </TabsList>
+
+              <TabsContent value="enquiries" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <span>Enquiries - {getDisplayTitle()}</span>
+                      <Button
+                        onClick={() => setEnquiryDialogOpen(true)}
+                        className="flex items-center gap-2"
+                      >
+                        <Plus className="h-4 w-4" />
+                        New Enquiry
+                      </Button>
+                    </CardTitle>
+                    <CardDescription>
+                      Manage client enquiries and move them through enquiry and confirmation stages
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-4">
+                    <TaskTable
+                      tasks={getEnquiryTasks()}
+                      columns={generateStageColumns()}
+                      loading={loading}
+                      error={error}
+                      onTaskAction={handleTaskAction}
+                      onStageDocumentUpload={handleStageDocumentUpload}
+                      onViewStageDocument={handleViewStageDocument}
+                      onShowUploadDialog={handleShowUploadDialog}
+                      applicantDocuments={applicantDocuments}
+                      departments={departments}
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                      columnVisibility={columnVisibility}
+                    />
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
               <TabsContent value="work-in-progress" className="space-y-4">
                 <Tabs defaultValue="stages" className="space-y-4">
@@ -1172,6 +1347,12 @@ export default function TasksPage() {
               console.log('Extracted data updated:', { documentId, updatedData })
               // Handle extracted data update
             }}
+          />
+
+          <EnquiryDialog
+            open={enquiryDialogOpen}
+            onOpenChange={setEnquiryDialogOpen}
+            onEnquiryCreated={handleEnquiryCreated}
           />
         </div>
       </div>

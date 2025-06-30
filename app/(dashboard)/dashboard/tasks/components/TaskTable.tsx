@@ -140,166 +140,222 @@ export function TaskTable({
    return 'text-white';
  };
 
- // Render stage column content
+ // Get stage date from task.stages object
+ const getStageDate = (task: any, stageId: string) => {
+   // Check both the new format (stage ID as key with date property) and legacy format (stage ID as key with date string)
+   if (task.stages?.[stageId]?.date) {
+     return task.stages[stageId].date;
+   } else if (typeof task.stages?.[stageId] === 'string') {
+     return task.stages[stageId];
+   }
+   return null;
+ };
+
  const renderStageColumn = useCallback((task: any, stage: any) => {
-   const isCurrentStage = task.current_stage?.name === stage.name;
-   const isCompleted = task.current_stage &&
-     (task.current_stage.order_num || 0) > (stage.order_num || 0);
+  const isCurrentStage = task.current_stage?.id === stage.id;
+  
+  // Get stage date from task.stages JSON
+  const getStageDate = (task: any, stageId: string): string => {
+    if (task.stages && task.stages[stageId]) {
+      const stageData = task.stages[stageId];
+      if (typeof stageData === 'object' && stageData.date) {
+        return stageData.date;
+      } else if (typeof stageData === 'string') {
+        return stageData;
+      }
+    }
+    return '';
+  };
 
-   const taskDocuments = applicantDocuments[task.id] || [];
+  const stageDate = getStageDate(task, stage.id);
+  const isCompleted = Boolean(stageDate);
+  
+  const taskDocuments = applicantDocuments[task.id] || [];
 
-   // Handle document upload for document-based stages
-   if (stage.documents && stage.documents.length > 0) {
-     return (
-       <div className="flex flex-col gap-1">
-         <Button
-           variant="ghost"
-           size="sm"
-           className="h-8 w-full p-0"
-           onClick={(e) => {
-             e.stopPropagation();
-             onStageDocumentUpload?.(task, stage);
-           }}
-         >
-           <Upload className="h-4 w-4 mr-1" />
-           Upload
-         </Button>
+  // Format date for display
+  const formatDateDisplay = (dateStr: string) => {
+    if (!dateStr) return '';
+    
+    // Handle DD/MM/YYYY format
+    if (dateStr.includes('/')) {
+      return dateStr; // Already in correct format
+    }
+    
+    // Fallback to Date parsing
+    try {
+      const date = new Date(dateStr);
+      if (!isNaN(date.getTime())) {
+        return format(date, 'dd/MM/yyyy');
+      }
+      return dateStr;
+    } catch (e) {
+      return dateStr;
+    }
+  };
 
-         {/* Show document indicators with enhanced status */}
-         <div className="flex items-center justify-center gap-1 flex-wrap">
-           {stage.documents.map((stageDoc: any, docIndex: number) => {
-             const hasDocument = taskDocuments.some(doc =>
-               doc.document_id === stageDoc.kycId ||
-               doc.kyc_document_id === stageDoc.id
-             );
+  // Handle document upload for document-based stages
+  if (stage.documents && stage.documents.length > 0) {
+    return (
+      <div className="flex flex-col gap-1 items-center">
+        {stageDate && (
+          <div className="text-xs text-muted-foreground mb-1">
+            {formatDateDisplay(stageDate)}
+          </div>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-full p-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            onStageDocumentUpload?.(task, stage);
+          }}
+        >
+          <Upload className="h-4 w-4 mr-1" />
+          Upload
+        </Button>
 
-             const matchingDoc = taskDocuments.find(doc =>
-               doc.document_id === stageDoc.kycId ||
-               doc.kyc_document_id === stageDoc.id
-             );
+        {/* Show document indicators with enhanced status */}
+        <div className="flex items-center justify-center gap-1 flex-wrap">
+          {stage.documents.map((stageDoc: any, docIndex: number) => {
+            const hasDocument = taskDocuments.some(doc =>
+              doc.document_id === stageDoc.kycId ||
+              doc.kyc_document_id === stageDoc.id
+            );
 
-             return (
-               <div key={docIndex} className="relative">
-                 <Button
-                   variant="ghost"
-                   size="sm"
-                   className={`h-6 w-6 p-0 ${hasDocument ? 'text-green-600 bg-green-50' : 'text-gray-300'}`}
-                   onClick={(e) => {
-                     e.stopPropagation();
-                     if (hasDocument && matchingDoc) {
-                       onViewStageDocument?.(task, stage, stageDoc, matchingDoc);
-                     }
-                   }}
-                   title={`${stageDoc.name} - ${hasDocument ? 'Uploaded' : 'Not uploaded'}${matchingDoc ? ` (${matchingDoc.status})` : ''}`}
-                 >
-                   <Eye className="h-4 w-4" />
-                 </Button>
-                 {hasDocument && matchingDoc && (
-                   <div className={`absolute -top-1 -right-1 w-2 h-2 rounded-full ${
-                     matchingDoc.status === 'valid' ? 'bg-green-500' :
-                     matchingDoc.status === 'pending' ? 'bg-yellow-500' : 'bg-gray-500'
-                   }`} />
-                 )}
-               </div>
-             );
-           })}
-         </div>
+            const matchingDoc = taskDocuments.find(doc =>
+              doc.document_id === stageDoc.kycId ||
+              doc.kyc_document_id === stageDoc.id
+            );
 
-         {isCurrentStage && task.current_stage_started_at && (
-           <StageTimer
-             startTime={task.current_stage_started_at}
-             estimatedTime={stage.estimated_time}
-           />
-         )}
-       </div>
-     );
-   }
+            return (
+              <div key={docIndex} className="relative">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={`h-6 w-6 p-0 ${hasDocument ? 'text-green-600 bg-green-50' : 'text-gray-300'}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (hasDocument && matchingDoc) {
+                      onViewStageDocument?.(task, stage, stageDoc, matchingDoc);
+                    }
+                  }}
+                  title={`${stageDoc.name} - ${hasDocument ? 'Uploaded' : 'Not uploaded'}${matchingDoc ? ` (${matchingDoc.status})` : ''}`}
+                >
+                  <Eye className="h-4 w-4" />
+                </Button>
+                {hasDocument && matchingDoc && (
+                  <div className={`absolute -top-1 -right-1 w-2 h-2 rounded-full ${
+                    matchingDoc.status === 'valid' ? 'bg-green-500' :
+                    matchingDoc.status === 'pending' ? 'bg-yellow-500' : 'bg-gray-500'
+                  }`} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
-   // Regular stage status display
-   let status = 'Pending';
-   let variant: 'default' | 'secondary' | 'outline' = 'outline';
+  // Regular stage status display
+  if (isCurrentStage) {
+    return (
+      <div className="flex flex-col items-center gap-1">
+        {stageDate && (
+          <div className="text-xs text-muted-foreground">
+            {formatDateDisplay(stageDate)}
+          </div>
+        )}
+        <Badge variant="default" className="w-fit">In Progress</Badge>
+        {task.current_stage_started_at && (
+          <StageTimer
+            startTime={task.current_stage_started_at}
+            estimatedTime={stage.estimated_time}
+          />
+        )}
+      </div>
+    );
+  } else if (isCompleted) {
+    return (
+      <div className="flex flex-col items-center">
+        {stageDate && (
+          <div className="text-xs text-muted-foreground">
+            {formatDateDisplay(stageDate)}
+          </div>
+        )}
+        <Badge variant="secondary" className="mt-1">Completed</Badge>
+      </div>
+    );
+  }
 
-   if (isCurrentStage) {
-     status = 'In Progress';
-     variant = 'default';
-     return (
-       <div className="flex flex-col gap-1">
-         <Badge variant={variant} className="w-fit">{status}</Badge>
-         {task.current_stage_started_at && (
-           <StageTimer
-             startTime={task.current_stage_started_at}
-             estimatedTime={stage.estimated_time}
-           />
-         )}
-       </div>
-     );
-   } else if (isCompleted) {
-     status = 'Completed';
-     variant = 'secondary';
-   }
+  // Pending stage
+  return (
+    <div className="flex flex-col items-center">
+      <Badge variant="outline" className="text-muted-foreground">Pending</Badge>
+    </div>
+  );
+}, [applicantDocuments, onStageDocumentUpload, onViewStageDocument]);
 
-   return <Badge variant={variant} className="w-fit">{status}</Badge>;
- }, [applicantDocuments, onStageDocumentUpload, onViewStageDocument]);
-
- // Render cell content based on column configuration
  const renderCellContent = useCallback((col: any, task: any, index: number) => {
-   const formattedTask = formatTaskData(task, index);
+  const formattedTask = formatTaskData(task, index);
 
-   if (col.render) {
-     return col.render(formattedTask[col.key], task, index);
-   }
+  if (col.render) {
+    return col.render(formattedTask[col.key], task, index);
+  }
 
-   // Handle special cases
-   if (col.key === 'documents') {
-     return (
-       <Button
-         variant="ghost"
-         size="icon"
-         className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-         onClick={() => onShowUploadDialog?.(task)}
-       >
-         <X className="h-4 w-4" />
-       </Button>
-     );
-   }
+  // Handle special cases
+  if (col.key === 'documents') {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 px-3 text-blue-600 hover:text-blue-800 hover:bg-blue-100"
+        onClick={() => onShowUploadDialog?.(task)}
+      >
+        <FileText className="h-4 w-4 mr-1" />
+        View Requirements
+      </Button>
+    );
+  }
 
-   if (col.key === 'actions') {
-     return (
-       <div className="flex items-center gap-2">
-         <Button
-           variant="ghost"
-           size="sm"
-           onClick={() => onTaskAction?.('edit', task)}
-           className="h-8 w-8 p-0"
-         >
-           <Edit className="h-4 w-4" />
-         </Button>
-         <Button
-           variant="ghost"
-           size="sm"
-           onClick={() => onTaskAction?.('delete', task)}
-           className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-         >
-           <Trash2 className="h-4 w-4" />
-         </Button>
-       </div>
-     );
-   }
+  if (col.key === 'actions') {
+    return (
+      <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onTaskAction?.('edit', task)}
+          className="h-8 w-8 p-0"
+        >
+          <Edit className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onTaskAction?.('delete', task)}
+          className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+    );
+  }
 
-   // Handle stage columns
-   if (col.key.startsWith('stage_')) {
-     const stageName = col.header;
-     const stage = departments
-       .flatMap(d => d.stages || [])
-       .find(s => s.name === stageName);
-     
-     if (stage) {
-       return renderStageColumn(task, stage);
-     }
-   }
+  // Handle stage columns
+  if (col.key.startsWith('stage_')) {
+    const stageName = col.header;
+    const stage = departments
+      .flatMap(d => d.stages || [])
+      .find(s => s.name === stageName);
+    
+    if (stage) {
+      return renderStageColumn(task, stage);
+    }
+  }
 
-   return formattedTask[col.key] || '-';
- }, [formatTaskData, onTaskAction, onShowUploadDialog, departments, renderStageColumn]);
+  return formattedTask[col.key] || '-';
+}, [formatTaskData, onTaskAction, onShowUploadDialog, departments, renderStageColumn]);
 
  return (
    <div className="rounded-md border w-full flex flex-col bg-background shadow-sm" style={{ maxHeight: '80vh', maxWidth: '95vw' }}>

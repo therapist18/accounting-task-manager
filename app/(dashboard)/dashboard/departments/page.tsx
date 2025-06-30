@@ -11,6 +11,7 @@ import Departments from "./departments/page"
 import DepartmentGuidelines from "./department-guidelines/page"
 import UploadRequirements from "./upload-requirements/page"
 import Webdata from "./webdata/page"
+import DocumentsFields from "./documents+fields/page"
 
 type Department = {
   id: string
@@ -96,7 +97,7 @@ export default function DepartmentsPage() {
         <TabsTrigger value="requirements">GOVT Upload Req</TabsTrigger>
         <TabsTrigger value="webdata">Web Data</TabsTrigger>  
         <TabsTrigger value="guidelines">Guidelines</TabsTrigger>
-        <TabsTrigger value="payments">Payments</TabsTrigger>
+        <TabsTrigger value="documents+fields">Documents + Fields</TabsTrigger>
       </TabsList>
       <TabsContent value="departments" className="h-screen">
         <Departments />
@@ -106,18 +107,18 @@ export default function DepartmentsPage() {
       </TabsContent>
       <TabsContent value="requirements" className="h-screen">
         <UploadRequirements departments={departments} />
-      </TabsContent>
+      </TabsContent>  
       <TabsContent value="webdata">
         <Webdata departments={departments} />
       </TabsContent>
       <TabsContent value="rates" className="h-screen">
         <Rates departments={departments} />
       </TabsContent>
-      <TabsContent value="payments" className="h-screen">
-        <Payments departments={departments} />
-      </TabsContent>
       <TabsContent value="guidelines" className="h-screen">
         <DepartmentGuidelines departments={departments} />
+      </TabsContent>
+      <TabsContent value="documents+fields" className="h-screen">
+        <DocumentsFields departments={departments} />
       </TabsContent>
     </Tabs>
   )
