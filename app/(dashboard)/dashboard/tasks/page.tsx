@@ -309,39 +309,87 @@ export default function TasksPage() {
     return getFilteredTasks();
   }, [getFilteredTasks]);
 
-  const getCurrentRequirements = useCallback(async (task: any) => {
-    try {
-      let constructedClassId = null;
-      
-      if (task.subclass_id && task.class_id) {
-        constructedClassId = task.subclass_id;
-      } else if (task.class_id) {
-        const subdepartmentId = task.subdepartment?.id || task.subdepartment_id;
-        if (subdepartmentId) {
-          constructedClassId = `${subdepartmentId}_${task.class_id}`;
-        } else {
-          constructedClassId = task.class_id;
-        }
+  // In TasksPage.tsx, update the getCurrentRequirements function:
+  const getCurrentRequirements = useCallback(() => {
+    // Don't pass task parameter anymore - use selection state instead
+    if (selectedSubclass) {
+      const subclass = departments
+        .flatMap(d => d.tm_subdepartments || [])
+        .flatMap(sd => sd.classes || [])
+        .flatMap(c => c.subClasses || [])
+        .find(sc => String(sc.id) === String(selectedSubclass));
+
+      return subclass?.requirements || [];
+    } else if (selectedClass) {
+      let cls = departments
+        .flatMap(d => d.tm_subdepartments || [])
+        .flatMap(sd => sd.classes || [])
+        .find(c => String(c.id) === String(selectedClass));
+
+      if (!cls) {
+        cls = departments
+          .flatMap(d => d.tm_subdepartments || [])
+          .flatMap(sd => sd.classes || [])
+          .find(c => c.name === selectedClass);
       }
-      
-      if (constructedClassId) {
-        const { data, error } = await supabase
-          .from('tm_class_requirements')
-          .select('*')
-          .eq('class_id', constructedClassId)
-          .maybeSingle();
-        
-        if (!error && data?.requirements) {
-          return data.requirements;
-        }
-      }
-      
-      return [];
-    } catch (error) {
-      console.error('Error fetching requirements:', error);
-      return [];
+
+      return cls?.requirements || [];
+    } else if (selectedSubdepartment) {
+      const subdept = departments
+        .flatMap(d => d.tm_subdepartments || [])
+        .find(sd => String(sd.id) === String(selectedSubdepartment));
+
+      return subdept?.requirements || [];
+    } else if (selectedDepartment) {
+      const dept = departments.find(d => String(d.id) === String(selectedDepartment));
+      return dept?.requirements || [];
     }
-  }, []);
+
+    return [];
+  }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
+
+  // Also update the generateRequirementColumns function to not call getCurrentRequirements with task:
+  const generateRequirementColumns = useCallback(() => {
+    const baseColumns = stageColumns.slice(0, stageColumns.findIndex(col => col.key === 'renewal_status') + 1);
+
+    const requirementColumns = [
+      ...baseColumns,
+      {
+        key: 'requirements',
+        header: 'Requirements',
+        width: '200px',
+        render: (value: any, task: any) => {
+          const requirements = getCurrentRequirements(); // Remove task parameter
+          return (
+            <div className="space-y-2">
+              {requirements.map((req, idx) => (
+                <div key={idx} className="flex items-center space-x-2">
+                  <span className="text-sm font-medium">{req.name}:</span>
+                  <Badge variant={req.status === 'completed' ? 'default' : 'outline'}>
+                    {req.status || 'Pending'}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          );
+        }
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        width: '150px',
+        render: (value: any, task: any) => (
+          <div className="flex space-x-2">
+            <Button variant="outline" size="sm" onClick={() => handleViewTask(task)}>
+              View
+            </Button>
+          </div>
+        )
+      }
+    ];
+
+    return requirementColumns;
+  }, [getCurrentRequirements]); // Update dependency
 
   const getTaskStageStatus = (taskId: string, stageId: string) => {
     const stageStatuses = JSON.parse(localStorage.getItem(TASK_STAGE_STATUS_KEY) || '{}');
@@ -362,64 +410,64 @@ export default function TasksPage() {
     loadTasks()
   }
 
-const handleStageStatusSave = async (stageId: string, taskId: string, date: string) => {
-  try {
-    // Get current task data
-    const { data: currentTask, error: fetchError } = await supabase
-      .from('tm_tasks')
-      .select('stages')
-      .eq('id', taskId)
-      .single()
+  const handleStageStatusSave = async (stageId: string, taskId: string, date: string) => {
+    try {
+      // Get current task data
+      const { data: currentTask, error: fetchError } = await supabase
+        .from('tm_tasks')
+        .select('stages')
+        .eq('id', taskId)
+        .single()
 
-    if (fetchError) throw fetchError
+      if (fetchError) throw fetchError
 
-    // Parse existing stages or create new object
-    const existingStages = currentTask.stages || {}
-    
-    // Format date as DD/MM/YYYY for consistency
-    const parsedDate = new Date(date);
-    const formattedDate = `${String(parsedDate.getDate()).padStart(2, '0')}/` +
-                         `${String(parsedDate.getMonth() + 1).padStart(2, '0')}/` +
-                         `${parsedDate.getFullYear()}`;
+      // Parse existing stages or create new object
+      const existingStages = currentTask.stages || {}
 
-    // Update stages object
-    const updatedStages = {
-      ...existingStages,
-      [stageId]: {
-        date: formattedDate,
-        status: 'completed',
-        completedAt: new Date().toISOString()
+      // Format date as DD/MM/YYYY for consistency
+      const parsedDate = new Date(date);
+      const formattedDate = `${String(parsedDate.getDate()).padStart(2, '0')}/` +
+        `${String(parsedDate.getMonth() + 1).padStart(2, '0')}/` +
+        `${parsedDate.getFullYear()}`;
+
+      // Update stages object
+      const updatedStages = {
+        ...existingStages,
+        [stageId]: {
+          date: formattedDate,
+          status: 'completed',
+          completedAt: new Date().toISOString()
+        }
       }
+
+      // Check if this is confirmation stage
+      const confirmationStageId = "a19b270e-6d1e-4e6d-b2bc-f21db72cde08"
+      const shouldMoveToProgress = stageId === confirmationStageId
+
+      // Update task with new stages data and potentially new status
+      const { error: updateError } = await supabase
+        .from('tm_tasks')
+        .update({
+          stages: updatedStages,
+          status: shouldMoveToProgress ? 'in_progress' : undefined,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', taskId)
+
+      if (updateError) throw updateError
+
+      // Refresh tasks if status changed
+      if (shouldMoveToProgress) {
+        const [tasksData] = await Promise.all([getTasks()])
+        setTasks(tasksData)
+      }
+
+      return Promise.resolve()
+    } catch (error) {
+      console.error('Error saving stage status:', error)
+      throw error
     }
-
-    // Check if this is confirmation stage
-    const confirmationStageId = "a19b270e-6d1e-4e6d-b2bc-f21db72cde08"
-    const shouldMoveToProgress = stageId === confirmationStageId
-
-    // Update task with new stages data and potentially new status
-    const { error: updateError } = await supabase
-      .from('tm_tasks')
-      .update({
-        stages: updatedStages,
-        status: shouldMoveToProgress ? 'in_progress' : undefined,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', taskId)
-
-    if (updateError) throw updateError
-
-    // Refresh tasks if status changed
-    if (shouldMoveToProgress) {
-      const [tasksData] = await Promise.all([getTasks()])
-      setTasks(tasksData)
-    }
-
-    return Promise.resolve()
-  } catch (error) {
-    console.error('Error saving stage status:', error)
-    throw error
   }
-}
 
   // Update the generateStageColumns function to handle enquiry stages
   const generateStageColumns = useCallback(() => {
@@ -553,76 +601,34 @@ const handleStageStatusSave = async (stageId: string, taskId: string, date: stri
 
     // Apply department filter if selected
     if (selectedDepartment) {
-      filtered = filtered.filter(task => 
+      filtered = filtered.filter(task =>
         idsMatch(task.department?.id, selectedDepartment)
       );
     }
 
     // Apply subdepartment filter if selected
     if (selectedSubdepartment) {
-      filtered = filtered.filter(task => 
+      filtered = filtered.filter(task =>
         idsMatch(task.subdepartment?.id, selectedSubdepartment)
       );
     }
 
     // Apply class filter if selected
     if (selectedClass) {
-      filtered = filtered.filter(task => 
+      filtered = filtered.filter(task =>
         idsMatch(task.class_id, selectedClass)
       );
     }
 
     // Apply subclass filter if selected
     if (selectedSubclass) {
-      filtered = filtered.filter(task => 
+      filtered = filtered.filter(task =>
         idsMatch(task.subclass_id, selectedSubclass)
       );
     }
 
     return filtered;
   }, [tasks, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass])
-
-  const generateRequirementColumns = useCallback(() => {
-    const baseColumns = stageColumns.slice(0, stageColumns.findIndex(col => col.key === 'renewal_status') + 1);
-
-    const requirementColumns = [
-      ...baseColumns,
-      {
-        key: 'requirements',
-        header: 'Requirements',
-        width: '200px',
-        render: (value: any, task: any) => {
-          const requirements = getCurrentRequirements();
-          return (
-            <div className="space-y-2">
-              {requirements.map((req, idx) => (
-                <div key={idx} className="flex items-center space-x-2">
-                  <span className="text-sm font-medium">{req.name}:</span>
-                  <Badge variant={req.status === 'completed' ? 'default' : 'outline'}>
-                    {req.status || 'Pending'}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          );
-        }
-      },
-      {
-        key: 'actions',
-        header: 'Actions',
-        width: '150px',
-        render: (value: any, task: any) => (
-          <div className="flex space-x-2">
-            <Button variant="outline" size="sm" onClick={() => handleViewTask(task)}>
-              View
-            </Button>
-          </div>
-        )
-      }
-    ];
-
-    return requirementColumns;
-  }, [getCurrentRequirements]);
 
   // Handle sidebar navigation
   const handleDeptClick = (deptId: string) => {
@@ -848,15 +854,15 @@ const handleStageStatusSave = async (stageId: string, taskId: string, date: stri
 
 
   // Add this to TasksPage.tsx for debugging:
-const debugClassId = (task: any) => {
-  console.log('Task debug info:', {
-    taskId: task.id,
-    class_id: task.class_id,
-    subclass_id: task.subclass_id,
-    subdepartment_id: task.subdepartment?.id,
-    constructedClassId: task.subdepartment?.id ? `${task.subdepartment.id}_${task.class_id}` : task.class_id
-  });
-};
+  const debugClassId = (task: any) => {
+    console.log('Task debug info:', {
+      taskId: task.id,
+      class_id: task.class_id,
+      subclass_id: task.subclass_id,
+      subdepartment_id: task.subdepartment?.id,
+      constructedClassId: task.subdepartment?.id ? `${task.subdepartment.id}_${task.class_id}` : task.class_id
+    });
+  };
 
 
   return (
@@ -1310,7 +1316,7 @@ const debugClassId = (task: any) => {
             getCurrentRequirements={getCurrentRequirements}
             fuzzyMatch={fuzzyMatch}
           />
-
+          
           {selectedTask && showUploadDialog && (
             <UploadRequirementsDialog
               open={showUploadDialog}
@@ -1319,7 +1325,7 @@ const debugClassId = (task: any) => {
                 setShowUploadDialog(false);
               }}
               task={selectedTask}
-              requirements={getCurrentRequirements()}
+              requirements={getCurrentRequirements()} // Remove task parameter
               onUploadComplete={() => {
                 if (selectedTask) {
                   // Refresh task data or update UI as needed

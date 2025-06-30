@@ -63,21 +63,26 @@ export function EditableStageCell({
   }, [isEditing])
 
   useEffect(() => {
-    // Initialize editValue with the stage date from task.stages
+    // Set initial edit value when stageDate changes
     if (stageDate) {
-      // Convert DD/MM/YYYY to YYYY-MM-DD for date input
-      const dateParts = stageDate.split('/');
-      if (dateParts.length === 3) {
-        const [day, month, year] = dateParts;
-        const isoDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-        setEditValue(isoDate);
-      } else {
+      // Check if the date is already in ISO format (YYYY-MM-DD)
+      if (/^\d{4}-\d{2}-\d{2}$/.test(stageDate)) {
         setEditValue(stageDate);
+      } else {
+        // Convert DD/MM/YYYY to YYYY-MM-DD for the date input
+        const dateParts = stageDate.split('/');
+        if (dateParts.length === 3) {
+          const [day, month, year] = dateParts;
+          const isoDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+          setEditValue(isoDate);
+        } else {
+          setEditValue(stageDate);
+        }
       }
     } else {
       setEditValue('');
     }
-  }, [stageDate])
+  }, [stageDate]);
 
   // Rest of the component remains the same...
   const parseDateString = (dateStr: string): Date | null => {
@@ -119,6 +124,7 @@ export function EditableStageCell({
     return dateStr;
   };
 
+  // In EditableStageCell.tsx, update the handleSave function:
   const handleSave = async () => {
     if (!editValue.trim()) {
       toast({
@@ -129,57 +135,79 @@ export function EditableStageCell({
       return;
     }
 
-    // Convert YYYY-MM-DD to DD/MM/YYYY for storage
-    let formattedDate = editValue;
-    if (editValue.includes('-')) {
-      const date = new Date(editValue);
-      if (!isNaN(date.getTime())) {
-        formattedDate = format(date, 'dd/MM/yyyy');
-      }
-    }
-
-    setIsLoading(true)
+    let dateObj: Date;
+    
     try {
-      await onSave(stage.id, task.id, formattedDate)
-      setIsEditing(false)
-      
-      if (isConfirmationStage) {
-        toast({
-          title: "Success",
-          description: "Confirmation completed. Task moved to Work in Progress.",
-        });
+      // Handle both YYYY-MM-DD and DD/MM/YYYY formats
+      if (editValue.includes('-')) {
+        // Handle YYYY-MM-DD format (from date input)
+        const [year, month, day] = editValue.split('-').map(Number);
+        dateObj = new Date(year, month - 1, day);
+      } else if (editValue.includes('/')) {
+        // Handle DD/MM/YYYY format (from manual input)
+        const [day, month, year] = editValue.split('/').map(Number);
+        if (day > 31 || month > 12 || year < 1000) throw new Error('Invalid date');
+        dateObj = new Date(year, month - 1, day);
       } else {
-        toast({
-          title: "Success",
-          description: "Date saved successfully"
-        })
+        throw new Error('Invalid date format');
       }
+
+      // Validate the date
+      if (isNaN(dateObj.getTime())) {
+        throw new Error('Invalid date');
+      }
+
+      // Format as DD/MM/YYYY for storage
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const year = dateObj.getFullYear();
+      const formattedDate = `${day}/${month}/${year}`;
+
+      console.log('Date conversion:', { input: editValue, formattedDate });
+
+      setIsLoading(true);
+      await onSave(stage.id, task.id, formattedDate);
+      setIsEditing(false);
+      
+      toast({
+        title: "Success",
+        description: isConfirmationStage 
+          ? "Confirmation completed. Task moved to Work in Progress."
+          : "Date saved successfully"
+      });
     } catch (error) {
+      console.error('Date save error:', error);
       toast({
         title: "Error",
-        description: "Failed to save date",
+        description: "Please enter a valid date in DD/MM/YYYY format",
         variant: "destructive"
-      })
+      });
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   const handleCancel = () => {
     // Reset to original stage date
     if (stageDate) {
-      const dateParts = stageDate.split('/');
-      if (dateParts.length === 3) {
-        const [day, month, year] = dateParts;
-        const isoDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-        setEditValue(isoDate);
-      } else {
+      // Check if the date is already in ISO format (YYYY-MM-DD)
+      if (/^\d{4}-\d{2}-\d{2}$/.test(stageDate)) {
         setEditValue(stageDate);
+      } else {
+        // Convert DD/MM/YYYY to YYYY-MM-DD for the input field
+        const dateParts = stageDate.split('/');
+        if (dateParts.length === 3) {
+          const [day, month, year] = dateParts;
+          const isoDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+          setEditValue(isoDate);
+        } else {
+          setEditValue(stageDate);
+        }
       }
     } else {
       setEditValue('');
     }
-    setIsEditing(false)
+    setIsEditing(false);
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

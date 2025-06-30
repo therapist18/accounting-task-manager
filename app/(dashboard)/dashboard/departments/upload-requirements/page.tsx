@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
-import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff } from "lucide-react"
+import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, Zap } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -653,127 +653,147 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     setNewRequirements(requirements)
   }
 
-  // Update the renderRequirements function to use the new edit dialog
-  const renderRequirements = (requirements: RequirementTableEntry[] | null | undefined, context: EditingContext) => {
-    const safeRequirements = requirements || [];
+ // In the main upload-requirements component, update the renderRequirements function:
 
-    // Remove the old inline edit logic and update the edit button
-    const handleEditClick = (index: number) => {
-      const requirement = safeRequirements[index]
-      setEditingRequirement(requirement)
-      setEditingContext(context)
-      setIsEditDialogOpen(true)
-    }
+const renderRequirements = (requirements: RequirementTableEntry[] | null | undefined, context: EditingContext) => {
+  const safeRequirements = requirements || [];
 
-    // Update the table to remove inline editing
-    return (
-      <div className="relative border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm flex-1 flex flex-col h-full">
-        <div className="flex flex-col h-full">
-          <div className="overflow-auto flex-1 flex flex-col">
+  const handleEditClick = (index: number) => {
+    const requirement = safeRequirements[index]
+    setEditingRequirement(requirement)
+    setEditingContext(context)
+    setIsEditDialogOpen(true)
+  }
+
+  return (
+    <div className="relative border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm flex-1 flex flex-col h-full">
+      <div className="flex flex-col h-full">
+        <div className="overflow-auto flex-1 flex flex-col">
+          <Table className="table-fixed w-full">
+            <TableHeader className="sticky top-0 z-10 bg-blue-600 dark:bg-blue-800 block">
+              <TableRow className="flex">
+                <TableHead className="w-12 text-white border-r">#</TableHead>
+                <TableHead className="flex-1 text-white border-r">Requirement</TableHead>
+                <TableHead className="flex-1 text-white border-r">Description</TableHead>
+                <TableHead className="w-24 text-white border-r">Document</TableHead>
+                <TableHead className="w-32 text-white border-r">Automation</TableHead>
+                <TableHead className="w-48 text-white">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+          </Table>
+          <div className="overflow-y-auto flex-1">
             <Table className="table-fixed w-full">
-              <TableHeader className="sticky top-0 z-10 bg-blue-600 dark:bg-blue-800 block">
-                <TableRow className="flex">
-                  <TableHead className="w-12 text-white border-r">#</TableHead>
-                  <TableHead className="flex-1 text-white border-r">Requirement</TableHead>
-                  <TableHead className="flex-1 text-white border-r">Description</TableHead>
-                  <TableHead className="w-24 text-white border-r">Document</TableHead>
-                  <TableHead className="w-48 text-white">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-            </Table>
-            <div className="overflow-y-auto flex-1">
-              <Table className="table-fixed w-full">
-                <TableBody className="block">
-                  {safeRequirements.length > 0 ? (
-                    safeRequirements.map((req, idx) => (
-                      <TableRow key={req.id || req.tempId || idx} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 flex">
-                        <TableCell className="font-medium border-r w-12">
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs">
-                            {idx + 1}
-                          </span>
-                        </TableCell>
-                        <TableCell className="border-r flex-1">
-                          <span className="font-medium">{req.name}</span>
-                        </TableCell>
-                        <TableCell className="border-r flex-1">
-                          <span className={!req.description ? 'text-gray-400 italic' : ''}>
-                            {req.description || 'No description'}
-                          </span>
-                        </TableCell>
-                        <TableCell className="border-r w-24">
-                          <div className="flex items-center justify-center">
-                            {req.kycDocumentId ? (
-                              <div className="flex items-center gap-1">
-                                <FileText className="h-4 w-4 text-green-600" />
-                                <span className="text-xs text-green-600">Linked</span>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1">
-                                <FileText className="h-4 w-4 text-gray-400" />
-                                <span className="text-xs text-gray-400">None</span>
-                              </div>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="w-48">
-                          <div className="flex items-center space-x-1 justify-end">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-blue-600"
-                              onClick={() => handleEditClick(idx)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={() => handleMove(idx, 'up')}
-                              disabled={idx === 0}
-                            >
-                              <ArrowUp className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={() => handleMove(idx, 'down')}
-                              disabled={idx === safeRequirements.length - 1}
-                            >
-                              <ArrowDown className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-red-500"
-                              onClick={() => handleDeleteClick(context.type, idx)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8 text-gray-500">
-                        <div className="flex flex-col items-center space-y-2">
-                          <FileText className="h-8 w-8 text-gray-400" />
-                          <p>No requirements added yet</p>
-                          <p className="text-xs text-gray-400">Click the button above to add requirements</p>
+              <TableBody className="block">
+                {safeRequirements.length > 0 ? (
+                  safeRequirements.map((req, idx) => (
+                    <TableRow key={req.id || req.tempId || idx} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 flex">
+                      <TableCell className="font-medium border-r w-12">
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs">
+                          {idx + 1}
+                        </span>
+                      </TableCell>
+                      <TableCell className="border-r flex-1">
+                        <span className="font-medium">{req.name}</span>
+                      </TableCell>
+                      <TableCell className="border-r flex-1">
+                        <span className={!req.description ? 'text-gray-400 italic' : ''}>
+                          {req.description || 'No description'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="border-r w-24">
+                        <div className="flex items-center justify-center">
+                          {req.kycDocumentId ? (
+                            <div className="flex items-center gap-1">
+                              <FileText className="h-4 w-4 text-green-600" />
+                              <span className="text-xs text-green-600">Linked</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <FileText className="h-4 w-4 text-gray-400" />
+                              <span className="text-xs text-gray-400">None</span>
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="border-r w-32">
+                        <div className="flex items-center justify-center">
+                          {req.hasWebForm && req.automationId ? (
+                            <div className="flex items-center gap-1">
+                              <Zap className="h-4 w-4 text-blue-600" />
+                              <span className="text-xs text-blue-600">Active</span>
+                            </div>
+                          ) : req.hasWebForm ? (
+                            <div className="flex items-center gap-1">
+                              <Zap className="h-4 w-4 text-yellow-600" />
+                              <span className="text-xs text-yellow-600">Form Only</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <Zap className="h-4 w-4 text-gray-400" />
+                              <span className="text-xs text-gray-400">None</span>
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="w-48">
+                        <div className="flex items-center space-x-1 justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-blue-600"
+                            onClick={() => handleEditClick(idx)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => handleMove(idx, 'up')}
+                            disabled={idx === 0}
+                          >
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => handleMove(idx, 'down')}
+                            disabled={idx === safeRequirements.length - 1}
+                          >
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-red-500"
+                            onClick={() => handleDeleteClick(context.type, idx)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+                      <div className="flex flex-col items-center space-y-2">
+                        <FileText className="h-8 w-8 text-gray-400" />
+                        <p>No requirements added yet</p>
+                        <p className="text-xs text-gray-400">Click the button above to add requirements</p>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
           </div>
         </div>
       </div>
-    )
-  }
+    </div>
+  )
+}
   const handleSaveRequirement = async (updatedRequirement: ApiRequirement) => {
     console.log('[handleSaveRequirement] Starting with requirement:', JSON.stringify(updatedRequirement, null, 2));
     console.log('[handleSaveRequirement] Current editing context:', editingContext);

@@ -1,4 +1,4 @@
-//@ts-nocheck
+// @ts-nocheck
 "use client"
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
@@ -6,9 +6,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { FileText, Info, Plus, X } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
+import { FileText, Info, Plus, X, Zap, Webhook } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import supabase from "@/lib/supabase/client"
+import { toast } from "@/hooks/use-toast"
 
 export interface RequirementForm {
   name: string
@@ -18,6 +20,9 @@ export interface RequirementForm {
   isVisible: boolean
   kycDocumentId?: string
   kycDocumentOption?: 'existing' | 'create_new'
+  hasWebForm?: boolean
+  webFormName?: string
+  automationId?: string
 }
 
 interface AddRequirementsDialogProps {
@@ -33,7 +38,6 @@ interface AddRequirementsDialogProps {
   } | null
 }
 
-
 export function AddRequirementsDialog({
   isOpen,
   onOpenChange,
@@ -47,16 +51,22 @@ export function AddRequirementsDialog({
     type: 'standard',
     isRequired: true,
     isVisible: true,
-    kycDocumentOption: 'create_new'
+    kycDocumentOption: 'create_new',
+    hasWebForm: false,
+    webFormName: '',
+    automationId: ''
   }])
   const [bulkInput, setBulkInput] = useState('')
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
+  const [automationTypes, setAutomationTypes] = useState<AutomationType[]>([])
   const [loadingKycDocs, setLoadingKycDocs] = useState(false)
+  const [loadingAutomations, setLoadingAutomations] = useState(false)
 
-  // Fetch KYC documents when dialog opens
+  // Fetch KYC documents and automations when dialog opens
   useEffect(() => {
     if (isOpen) {
       fetchKycDocuments()
+      fetchAutomationTypes()
     }
   }, [isOpen])
 
@@ -81,6 +91,31 @@ export function AddRequirementsDialog({
       })
     } finally {
       setLoadingKycDocs(false)
+    }
+  }
+
+  const fetchAutomationTypes = async () => {
+    try {
+      setLoadingAutomations(true)
+      
+      const { data, error } = await supabase
+        .from('tm_automations')
+        .select('id, name, description, webhook_url, webhook_type, is_active')
+        .eq('is_active', true)
+        .order('name')
+
+      if (error) throw error
+
+      setAutomationTypes(data || [])
+    } catch (error) {
+      console.error('Error fetching automation types:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to load automation types',
+        variant: 'destructive'
+      })
+    } finally {
+      setLoadingAutomations(false)
     }
   }
 
@@ -130,7 +165,11 @@ export function AddRequirementsDialog({
 
           return {
             ...req,
-            kycDocumentId
+            kycDocumentId,
+            // Ensure automation fields are included
+            hasWebForm: req.hasWebForm || false,
+            webFormName: req.webFormName || '',
+            automationId: req.automationId || ''
           }
         })
       )
@@ -144,7 +183,10 @@ export function AddRequirementsDialog({
         type: 'standard',
         isRequired: true,
         isVisible: true,
-        kycDocumentOption: 'create_new'
+        kycDocumentOption: 'create_new',
+        hasWebForm: false,
+        webFormName: '',
+        automationId: ''
       }])
       setBulkInput('')
       
@@ -166,7 +208,10 @@ export function AddRequirementsDialog({
       type: 'standard',
       isRequired: true,
       isVisible: true,
-      kycDocumentOption: 'create_new'
+      kycDocumentOption: 'create_new',
+      hasWebForm: false,
+      webFormName: '',
+      automationId: ''
     }])
     setBulkInput('')
   }
@@ -178,7 +223,10 @@ export function AddRequirementsDialog({
       type: 'standard',
       isRequired: true,
       isVisible: true,
-      kycDocumentOption: 'create_new'
+      kycDocumentOption: 'create_new',
+      hasWebForm: false,
+      webFormName: '',
+      automationId: ''
     }])
   }
 
@@ -191,6 +239,13 @@ export function AddRequirementsDialog({
   const handleNewRequirementChange = (index: number, field: string, value: any) => {
     const updated = [...newRequirements]
     updated[index] = { ...updated[index], [field]: value }
+    
+    // If hasWebForm is turned off, clear the automation fields
+    if (field === 'hasWebForm' && !value) {
+      updated[index].webFormName = ''
+      updated[index].automationId = ''
+    }
+    
     setNewRequirements(updated)
   }
 
@@ -204,7 +259,10 @@ export function AddRequirementsDialog({
         type: 'standard',
         isRequired: true,
         isVisible: true,
-        kycDocumentOption: 'create_new'
+        kycDocumentOption: 'create_new',
+        hasWebForm: false,
+        webFormName: '',
+        automationId: ''
       }])
       return
     }
@@ -216,7 +274,10 @@ export function AddRequirementsDialog({
       type: 'standard' as const,
       isRequired: true,
       isVisible: true,
-      kycDocumentOption: 'create_new' as const
+      kycDocumentOption: 'create_new' as const,
+      hasWebForm: false,
+      webFormName: '',
+      automationId: ''
     }))
 
     setNewRequirements(requirements)
@@ -226,7 +287,7 @@ export function AddRequirementsDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add Requirements</DialogTitle>
           <DialogDescription className="space-y-2">
@@ -293,6 +354,7 @@ export function AddRequirementsDialog({
                   </div>
                 </div>
 
+                {/* Document Type Association */}
                 <div className="space-y-4 border-t pt-4">
                   <Label className="font-medium flex items-center gap-2">
                     <FileText className="h-4 w-4" />
@@ -360,6 +422,85 @@ export function AddRequirementsDialog({
                       </div>
                     )}
                   </div>
+                </div>
+
+                {/* Web Form Automation Section */}
+                <div className="space-y-4 border-t pt-4">
+                  <div className="flex items-center justify-between">
+                    <Label className="font-medium flex items-center gap-2">
+                      <Zap className="h-4 w-4" />
+                      Web Form Automation
+                    </Label>
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        id={`has-webform-${idx}`}
+                        checked={req.hasWebForm}
+                        onCheckedChange={(checked) => handleNewRequirementChange(idx, 'hasWebForm', checked)}
+                      />
+                      <Label htmlFor={`has-webform-${idx}`} className="text-sm">
+                        Enable web form
+                      </Label>
+                    </div>
+                  </div>
+
+                  {req.hasWebForm && (
+                    <div className="space-y-4 ml-6">
+                      <div className="space-y-2">
+                        <Label className="text-sm">Web Form Name</Label>
+                        <Input
+                          value={req.webFormName}
+                          onChange={(e) => handleNewRequirementChange(idx, 'webFormName', e.target.value)}
+                          placeholder="e.g., Personal Information Form, Address Verification"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm flex items-center gap-2">
+                          <Webhook className="h-4 w-4" />
+                          Automation Type
+                        </Label>
+                        <Select
+                          value={req.automationId || ''}
+                          onValueChange={(value) => handleNewRequirementChange(idx, 'automationId', value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select automation type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {loadingAutomations ? (
+                              <SelectItem value="loading" disabled>
+                                Loading automation types...
+                              </SelectItem>
+                            ) : (
+                              <>
+                                <SelectItem value="">No automation</SelectItem>
+                                {automationTypes.map((automation) => (
+                                  <SelectItem key={automation.id} value={automation.id}>
+                                    <div className="flex items-center gap-2">
+                                      <Webhook className="h-3 w-3" />
+                                      <span>{automation.name}</span>
+                                      {automation.description && (
+                                        <span className="text-xs text-muted-foreground">
+                                          - {automation.description}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </SelectItem>
+                                ))}
+                              </>
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {req.automationId && (
+                        <div className="text-sm text-muted-foreground bg-green-50 p-3 rounded">
+                          <Info className="h-4 w-4 inline mr-2" />
+                          This requirement will trigger the selected automation when the form is submitted.
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

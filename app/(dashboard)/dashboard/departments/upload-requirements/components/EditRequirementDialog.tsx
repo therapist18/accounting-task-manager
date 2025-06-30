@@ -6,11 +6,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Checkbox } from "@/components/ui/checkbox"
-import { FileText, Info, X } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
+import { FileText, Info, Zap, Webhook } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import supabase from "@/lib/supabase/client"
-import { Card } from '@/components/ui/card'
 
 interface EditRequirementDialogProps {
   isOpen: boolean
@@ -38,17 +37,25 @@ export function EditRequirementDialog({
     order: 0,
     isVisible: true,
     isRequired: true,
-    kycDocumentId: ''
+    kycDocumentId: '',
+    hasWebForm: false,
+    webFormName: '',
+    automationId: ''
   })
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
+  const [automationTypes, setAutomationTypes] = useState<AutomationType[]>([])
   const [loadingKycDocs, setLoadingKycDocs] = useState(false)
+  const [loadingAutomations, setLoadingAutomations] = useState(false)
   const [kycDocumentOption, setKycDocumentOption] = useState<'existing' | 'create_new' | 'none'>('none')
 
   useEffect(() => {
     if (requirement && isOpen) {
       setFormData({
         ...requirement,
-        kycDocumentId: requirement.kycDocumentId || ''
+        kycDocumentId: requirement.kycDocumentId || '',
+        hasWebForm: requirement.hasWebForm || false,
+        webFormName: requirement.webFormName || '',
+        automationId: requirement.automationId || ''
       })
 
       // Determine the current KYC document option
@@ -59,6 +66,7 @@ export function EditRequirementDialog({
       }
 
       fetchKycDocuments()
+      fetchAutomationTypes()
     }
   }, [requirement, isOpen])
 
@@ -83,6 +91,31 @@ export function EditRequirementDialog({
       })
     } finally {
       setLoadingKycDocs(false)
+    }
+  }
+
+  const fetchAutomationTypes = async () => {
+    try {
+      setLoadingAutomations(true)
+      
+      const { data, error } = await supabase
+        .from('tm_automations')
+        .select('id, name, description, webhook_url, webhook_type, is_active')
+        .eq('is_active', true)
+        .order('name')
+
+      if (error) throw error
+
+      setAutomationTypes(data || [])
+    } catch (error) {
+      console.error('Error fetching automation types:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to load automation types',
+        variant: 'destructive'
+      })
+    } finally {
+      setLoadingAutomations(false)
     }
   }
 
@@ -163,13 +196,35 @@ export function EditRequirementDialog({
         return
       }
 
+      // Validate web form fields if enabled
+      if (updatedData.hasWebForm && !updatedData.webFormName?.trim()) {
+        toast({
+          title: 'Error',
+          description: 'Web form name is required when web form is enabled.',
+          variant: 'destructive'
+        })
+        return
+      }
+
       // Prepare the final requirement object
       const updatedRequirement: ApiRequirement = {
         ...updatedData,
         name: updatedData.name.trim(),
         description: updatedData.description?.trim() || '',
-        // Ensure kycDocumentId is undefined if empty string
-        kycDocumentId: updatedData.kycDocumentId || undefined
+        // Ensure empty strings are converted to undefined for optional fields
+        kycDocumentId: updatedData.kycDocumentId || undefined,
+        webFormName: updatedData.webFormName?.trim() || undefined,
+        automationId: updatedData.automationId || undefined,
+        // Include Automations array if automation is selected
+        ...(updatedData.automationId && {
+          Automations: [{
+            id: updatedData.automationId,
+            name: automationTypes.find(a => a.id === updatedData.automationId)?.name || 'Automation',
+            type: 'webhook',
+            status: 'active',
+            triggeredAt: new Date().toISOString()
+          }]
+        })
       }
 
       console.log('Submitting requirement:', updatedRequirement) // Debug log
@@ -208,11 +263,11 @@ export function EditRequirementDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>Edit Requirement</DialogTitle>
           <DialogDescription>
-            Update the requirement details and document association
+            Update the requirement details, document association, and automation settings
           </DialogDescription>
         </DialogHeader>
 
@@ -236,6 +291,7 @@ export function EditRequirementDialog({
               />
             </div>
           </div>
+
           {/* KYC Document Association */}
           <div className="space-y-4 border-t pt-4">
             <Label className="font-medium flex items-center gap-2">
@@ -298,12 +354,12 @@ export function EditRequirementDialog({
                     </SelectTrigger>
                     <SelectContent>
                       {loadingKycDocs ? (
-                        <SelectItem value="loading" disabled>
+                        <SelectItem key="loading" value="loading" disabled>
                           Loading document types...
                         </SelectItem>
                       ) : (
                         kycDocuments.map((doc) => (
-                          <SelectItem key={doc.id} value={doc.id}>
+                          <SelectItem key={doc.id} value={doc.id.toString()}>
                             {doc.display_name || doc.name}
                           </SelectItem>
                         ))
@@ -321,20 +377,123 @@ export function EditRequirementDialog({
               )}
             </div>
           </div>
-        </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={handleClose}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={isSubmitting || !formData.name.trim()}
-          >
-            {isSubmitting ? 'Saving...' : 'Save Changes'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
+          {/* Web Form Automation Section */}
+          <div className="space-y-4 border-t pt-4">
+            <div className="flex items-center justify-between">
+              <Label className="font-medium flex items-center gap-2">
+                <Zap className="h-4 w-4" />
+                Web Form Automation
+              </Label>
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="has-webform"
+                  checked={formData.hasWebForm}
+                  onCheckedChange={(checked) => {
+                    setFormData(prev => ({
+                      ...prev,
+                      hasWebForm: checked,
+                      // Clear automation fields when disabling
+                      webFormName: checked ? prev.webFormName : '',
+                      automationId: checked ? prev.automationId : ''
+                    }))
+                  }}
+                />
+                <Label htmlFor="has-webform" className="text-sm">
+                  Enable web form
+                </Label>
+              </div>
+            </div>
+
+            {formData.hasWebForm && (
+              <div className="space-y-4 ml-6">
+                <div className="space-y-2">
+                  <Label className="text-sm">Web Form Name *</Label>
+                  <Input
+                    value={formData.webFormName || ''}
+                    onChange={(e) => setFormData(prev => ({ ...prev, webFormName: e.target.value }))}
+                    placeholder="e.g., Personal Information Form, Address Verification"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm flex items-center gap-2">
+                    <Webhook className="h-4 w-4" />
+                    Automation Type
+                  </Label>
+                  <Select
+                    value={formData.automationId || ''}
+                    onValueChange={(value) => {
+                      setFormData(prev => ({
+                        ...prev,
+                        automationId: value === 'no-automation' ? '' : value,
+                        // Store the automation data in an Automations field
+                        ...(value !== 'no-automation' && {
+                          Automations: [{
+                            id: value,
+                            name: automationTypes.find(a => a.id === value)?.name,
+                            type: 'webhook',
+                            status: 'active'
+                          }]
+                        })
+                      }));
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select automation type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {loadingAutomations ? (
+                        <SelectItem key="loading" value="loading" disabled>
+                          Loading automation types...
+                        </SelectItem>
+                      ) : (
+                        <>
+                          <SelectItem key="no-automation" value="no-automation">
+                            No automation
+                          </SelectItem>
+                          {automationTypes.map((automation) => (
+                            <SelectItem key={automation.id} value={automation.id.toString()}>
+                              <div className="flex items-center gap-2">
+                                <Webhook className="h-3 w-3" />
+                                <span>{automation.name}</span>
+                                {automation.description && (
+                                  <span className="text-xs text-muted-foreground">
+                                    - {automation.description}
+                                  </span>
+                                )}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  </div>
+   
+                  {formData.automationId && (
+                    <div className="text-sm text-muted-foreground bg-green-50 p-3 rounded">
+                      <Info className="h-4 w-4 inline mr-2" />
+                      This requirement will trigger the selected automation when the form is submitted.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+   
+          <DialogFooter>
+            <Button variant="outline" onClick={handleClose}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={isSubmitting || !formData.name.trim()}
+            >
+              {isSubmitting ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
+   }
