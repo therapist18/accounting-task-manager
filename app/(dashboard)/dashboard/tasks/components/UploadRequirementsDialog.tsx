@@ -21,7 +21,9 @@ import {
   CheckCircle,
   ExternalLink,
   Download,
-  Info
+  Info,
+  Layers,
+  Building
 } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
@@ -209,51 +211,212 @@ export function UploadRequirementsDialog({
 
     try {
       setLoadingApplicant(true);
-
-      // First, find the individual using registry search
-      const individual = {
-        full_name: task.applicant_name || task.principal_member_name,
-        r_number: task.r_number,
-        passport_number: null
-      };
-
-      const registryMatch = await searchRegistryIndividuals(individual);
+      
       let documents = [];
       let companies = [];
+      let billToInfo = null;
+      let individualData = null;
 
-      if (registryMatch.exactMatch) {
-        // Fetch documents for this individual
-        documents = await fetchApplicantDocuments(registryMatch.exactMatch.id);
-        setApplicantDocuments(documents);
+      // First, fetch the individual's data from registry_individuals
+      if (task.r_number) {
+        console.log('Fetching individual data for r_number:', task.r_number);
+        const { data: individual, error } = await supabase
+          .from('registry_individuals')
+          .select('*')
+          .eq('r_number', task.r_number)
+          .single();
 
-        // Extract companies from bill_to field
-        if (registryMatch.exactMatch.bill_to) {
-          // Handle different bill_to formats
-          if (Array.isArray(registryMatch.exactMatch.bill_to)) {
-            companies = registryMatch.exactMatch.bill_to;
-          } else if (typeof registryMatch.exactMatch.bill_to === 'object') {
-            companies = [registryMatch.exactMatch.bill_to];
+        if (error) {
+          console.error('Error fetching individual data:', error);
+        } else if (individual) {
+          individualData = individual;
+          console.log('Fetched individual data:', individualData);
+          
+          // Extract billing information from individual data
+          if (individualData.bill_to) {
+            billToInfo = individualData.bill_to;
+            console.log('Found billing information in registry_individuals:', billToInfo);
+          }
+          
+          // Get director roles from employment_history
+          if (individualData.employment_history?.length > 0) {
+            // Filter for director roles and get unique company IDs
+            const directorCompanyIds = [...new Set(
+              individualData.employment_history
+                .filter((emp: any) => emp.role?.toLowerCase() === 'director' && emp.company_id)
+                .map((emp: any) => emp.company_id)
+            )];
+            
+            if (directorCompanyIds.length > 0) {
+              console.log('Fetching details for director companies:', directorCompanyIds);
+              
+              // Fetch company details in a single query
+              const { data: companyDetails, error: companyError } = await supabase
+                .from('acc_portal_company_duplicate')
+                .select('id, company_name, registration_number')
+                .in('id', directorCompanyIds);
+              
+              if (companyError) {
+                console.error('Error fetching company details:', companyError);
+              } else if (companyDetails?.length > 0) {
+                // Create a map of company ID to company details
+                const companyMap = new Map(companyDetails.map(company => [company.id.toString(), company]));
+                
+                // Map employment history to company objects with details
+                const directorCompanies = individualData.employment_history
+                  .filter((emp: any) => emp.role?.toLowerCase() === 'director' && emp.company_id)
+                  .map((emp: any) => {
+                    const companyId = emp.company_id.toString();
+                    const companyDetails = companyMap.get(companyId) || {};
+                    
+                    return {
+                      id: companyId,
+                      name: companyDetails.company_name || `Company ${companyId}`,
+                      registration_number: companyDetails.registration_number || '',
+                      type: 'directorship',
+                      position: 'Director',
+                      source: 'employment_history',
+                      start_date: emp.start_date,
+                      end_date: emp.end_date,
+                      on_payroll: emp.on_payroll
+                    };
+                  });
+                
+                // Add director companies to companies array
+                companies.push(...directorCompanies);
+                console.log('Added director companies with details:', directorCompanies);
+              }
+            }
           }
         }
+      }
 
-        // Also check directorship_history for additional companies
-        if (registryMatch.exactMatch.directorship_history && Array.isArray(registryMatch.exactMatch.directorship_history)) {
-          const directorshipCompanies = registryMatch.exactMatch.directorship_history
-            .filter((dir: any) => dir.company_name)
-            .map((dir: any) => ({
-              id: dir.company_id || `dir_${dir.company_name}`,
-              name: dir.company_name,
-              registration_number: dir.company_registration_number,
-              type: 'directorship',
-              position: dir.position,
-              from_date: dir.from_date,
-              to_date: dir.to_date
-            }));
+      // Function to fetch company details by ID
+      const fetchCompanyDetails = async (companyId: number) => {
+        try {
+          const { data: companyData, error } = await supabase
+            .from('acc_portal_company_duplicate')
+            .select('*')
+            .eq('id', companyId)
+            .single();
 
-          companies = [...companies, ...directorshipCompanies];
+          if (error) {
+            console.error(`Error fetching company ${companyId}:`, error);
+            return null;
+          }
+          
+          return companyData ? {
+            id: companyData.id,
+            name: companyData.company_name,
+            registration_number: companyData.registration_number,
+            type: 'billing',
+            is_primary: true,
+            source: 'bill_to'
+          } : null;
+        } catch (error) {
+          console.error(`Error fetching company ${companyId}:`, error);
+          return null;
         }
+      };
 
+      // Add billing company from bill_to if it exists
+      let billingCompany = null;
+      if (billToInfo) {
+        const billingCompanyId = billToInfo.company || 
+                               (typeof billToInfo === 'object' && billToInfo.company_id) ||
+                               (typeof billToInfo === 'object' && billToInfo.companyId);
+        
+        if (billingCompanyId) {
+          console.log('Fetching billing company details for ID:', billingCompanyId);
+          billingCompany = await fetchCompanyDetails(billingCompanyId);
+          if (billingCompany) {
+            // Add billing company at the beginning of the array
+            companies.unshift({
+              ...billingCompany,
+              is_primary: true,
+              source: 'billing'
+            });
+            console.log('Added billing company:', billingCompany);
+          }
+        } else {
+          console.log('No valid billing company ID found in bill_to:', billToInfo);
+        }
+      }
+
+      // Check for bill_to company first
+      if (task.bill_to?.type === 'company' && task.bill_to.company) {
+        console.log('Fetching company details for ID:', task.bill_to.company);
+        try {
+          // Fetch company details from acc_portal_company_duplicate
+          const { data: companyData, error: companyError } = await supabase
+            .from('acc_portal_company_duplicate')
+            .select('*')
+            .eq('id', task.bill_to.company)
+            .single();
+
+          console.log('Company fetch result:', { companyData, companyError });
+
+          if (companyData && !companyError) {
+            console.log('Company found:', {
+              id: companyData.id,
+              name: companyData.company_name,
+              registration_number: companyData.registration_number
+            });
+            
+            companies = [{
+              id: companyData.id,
+              name: companyData.company_name,
+              registration_number: companyData.registration_number,
+              type: 'billing',
+              is_primary: true
+            }];
+          } else if (companyError) {
+            console.error('Error fetching company:', companyError);
+          }
+        } catch (error) {
+          console.error('Error fetching bill_to company:', error);
+        }
+      }
+
+      if (individualData) {
+        // Fetch documents for this individual using the r_number we already have
+        documents = await fetchApplicantDocuments(individualData.r_number);
+        setApplicantDocuments(documents);
+
+        console.log('Current companies array before adding registry companies:', companies);
+        
+        // Get the billing company from individual data if available
+        const billingCompany = individualData.bill_to?.company
+          ? {
+              type: 'billing',
+              is_primary: true
+            }
+          : null;
+
+        // We've already processed the directorship history earlier
+        // No need to process it again here
+        console.log('Using companies from individual data:', companies);
+
+        // Ensure companies are unique by ID
+        const uniqueCompanies = [];
+        const companyIds = new Set();
+        
+        // Add all companies, ensuring no duplicates
+        companies.forEach(company => {
+          if (company.id && !companyIds.has(company.id)) {
+            uniqueCompanies.push(company);
+            companyIds.add(company.id);
+          }
+        });
+        
+        // Update the companies array with deduplicated list
+        companies = uniqueCompanies;
+
+        console.log('Merged companies:', companies);
+
+        console.log('Final companies array before setting state:', companies);
         setApplicantCompanies(companies);
+        console.log('Applicant companies after state update:', companies);
       }
 
       // Load requirements from database
@@ -285,13 +448,18 @@ export function UploadRequirementsDialog({
   // Add function to fetch company documents
   const fetchCompanyDocuments = async (companyId: string, requirement: any) => {
     try {
+      // Skip if this is a directorship company (starts with 'dir_')
+      if (companyId.startsWith('dir_')) {
+        console.log('Skipping document fetch for directorship company:', companyId);
+        return [];
+      }
+
       // This would fetch documents for the specific company
-      // You might need to implement this based on your company documents storage
       const { data: companyDocs, error } = await supabase
-        .from('company_documents') // Adjust table name as needed
+        .from('acc_portal_kyc_uploads')
         .select('*')
         .eq('company_id', companyId)
-        .eq('document_type', requirement.kycDocumentId);
+        .eq('kyc_document_id', requirement.kycDocumentId);
 
       if (error) throw error;
       return companyDocs || [];
@@ -301,46 +469,99 @@ export function UploadRequirementsDialog({
     }
   };
 
-  const handleCompanySelection = (requirementId: string, companyId: string) => {
+  const handleCompanySelection = async (requirementId: string, companyId: string) => {
     setSelectedCompanies(prev => ({
       ...prev,
       [requirementId]: companyId
     }));
 
-    // Optionally refresh documents for this requirement
-    // You might want to fetch company-specific documents here
-  };
-  const getDocumentForRequirement = (requirement: any) => {
-    if (!requirement.kycDocumentId) return [];
+    // Clear any previously selected documents for this requirement
+    setSelectedDocuments(prev => ({
+      ...prev,
+      [requirementId]: []
+    }));
 
-    // Return all documents matching this requirement type
+    // Find the requirement to get its document type
+    const requirement = requirementsWithDocuments.find(r => r.id === requirementId);
+    if (!requirement) return;
+
+    try {
+      // Fetch documents for the selected company
+      const { data: companyDocs, error } = await supabase
+        .from('acc_portal_kyc_uploads')
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('kyc_document_id', requirement.kycDocumentId);
+
+      if (error) throw error;
+
+      // Update the requirement with the company's documents
+      setRequirementsWithDocuments(prev => 
+        prev.map(req => 
+          req.id === requirementId 
+            ? { 
+                ...req, 
+                companyDocuments: companyDocs || [],
+                documents: [...(req.documents || []), ...(companyDocs || [])]
+              } 
+            : req
+        )
+      );
+    } catch (error) {
+      console.error('Error fetching company documents:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load company documents',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const getDocumentForRequirement = (requirement: any) => {
+    if (!requirement) return [];
+    
+    // If it's a company requirement and a company is selected, return company documents
+    if (requirement.type === 'company' && selectedCompanies[requirement.id]) {
+      return requirement.companyDocuments || [];
+    }
+
+    // Otherwise return regular applicant documents
+    if (!requirement.kycDocumentId) return [];
+    
     return applicantDocuments.filter(doc =>
       doc.document_id === requirement.kycDocumentId ||
       doc.kyc_document_id === requirement.kycDocumentId
     );
-  }
+  };
 
   const handleDocumentSelection = (requirementId: string, document: any, checked: boolean) => {
     setSelectedDocuments(prev => {
-      const current = prev[requirementId] || []
+      const current = prev[requirementId] || [];
+      const requirement = requirementsWithDocuments.find(r => r.id === requirementId);
+      const requiredCount = requirement?.requiredDocumentCount || 1;
+      
       if (checked) {
+        // If we're at the required count, don't add more unless it's a multi-select
+        if (current.length >= requiredCount && !requirement?.allowMultiple) {
+          return prev;
+        }
         return {
           ...prev,
           [requirementId]: [...current, document]
-        }
+        };
       } else {
         return {
           ...prev,
           [requirementId]: current.filter(doc => doc.id !== document.id)
-        }
+        };
       }
-    })
+    });
   }
 
   const handlePreviewDocuments = (requirement: any) => {
-    setPreviewRequirement(requirement)
-    setPreviewDialogOpen(true)
-  }
+    setPreviewRequirement(requirement);
+    setPreviewDialogOpen(true);
+  };
 
   const getRequiredDocumentCount = (requirement: any) => {
     // Check if requirement specifies a count, default to 1
