@@ -408,7 +408,7 @@ export default function DocumentsFields() {
 
                 <TabsContent value={documentTab} className="mt-6">
                   {filteredDocuments.length === 0 ? (
-                    <div className="text-center py-12 bg-white rounded-lg border border-gray-100">
+                    <div className="text-center py-12 bg-white rounded-lg border-2">
                       <div className="text-gray-400 text-lg">No {documentTab} documents found</div>
                       <p className="text-gray-600 mt-2">Add documents to get started</p>
                     </div>
@@ -416,19 +416,19 @@ export default function DocumentsFields() {
                     <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
                       <div className="relative overflow-auto max-h-[calc(100vh-300px)]">
                         <Table className="min-w-max">
-                          <TableHeader className="sticky top-0 bg-gradient-to-r from-blue-600 to-indigo-600 z-10">
+                          <TableHeader className="sticky top-0 bg-gradient-to-r from-blue-600 to-indigo-600 z-[5]">
                             {/* Main Subdepartment Header */}
                             <TableRow>
-                              <TableHead rowSpan={4} className="sticky left-0 bg-blue-600 border-r border-gray-500 font-bold w-12 z-10 text-white text-center">
+                              <TableHead rowSpan={4} className="sticky left-0 bg-blue-600 border-r border-gray-500 font-bold w-12 z-[6] text-white text-center">
                                 #
                               </TableHead>
-                              <TableHead rowSpan={4} className="sticky left-12 bg-blue-600 border-r border-gray-500 font-bold w-48 z-10 text-white text-center">
+                              <TableHead rowSpan={4} className="sticky left-12 bg-blue-600 border-r border-gray-500 font-bold w-48 z-[6] text-white text-center">
                                 Document Details
                               </TableHead>
-                              <TableHead rowSpan={4} className="sticky left-60 bg-blue-600 border-r border-gray-500 font-bold w-24 z-10 text-white text-center">
+                              <TableHead rowSpan={4} className="sticky left-60 bg-blue-600 border-r border-gray-500 font-bold w-24 z-[6] text-white text-center">
                                 Order
                               </TableHead>
-                              <TableHead rowSpan={4} className="sticky left-84 bg-blue-600 border-r border-gray-500 font-bold w-24 z-10 text-white text-center">
+                              <TableHead rowSpan={4} className="sticky left-84 bg-blue-600 border-r border-gray-500 font-bold w-24 z-[6] text-white text-center">
                                 Subdepartment
                               </TableHead>
                               {normalizedSubdepartments.map((subdept, subIndex) => {
@@ -491,7 +491,7 @@ export default function DocumentsFields() {
                                         <TableHead
                                           key={`subclass-${subdept.id}-${clsIndex}-${subclsIndex}`}
                                           className={cn(
-                                            "border border-gray-300 text-center text-white text-xs",
+                                            "border border-2 border text-center text-white text-xs",
                                             subIndex % 2 === 0 ? "bg-blue-400" : "bg-blue-500"
                                           )}
                                         >
@@ -502,7 +502,7 @@ export default function DocumentsFields() {
                                         <TableHead
                                           key={`class-direct-${subdept.id}-${clsIndex}`}
                                           className={cn(
-                                            "border border-gray-300 text-center text-white text-xs",
+                                            "border border-2 border text-center text-white text-xs",
                                             subIndex % 2 === 0 ? "bg-blue-400" : "bg-blue-500"
                                           )}
                                         >
@@ -513,7 +513,7 @@ export default function DocumentsFields() {
                                   : (
                                     <TableHead
                                       className={cn(
-                                        "border border-gray-300 text-center text-white text-xs",
+                                        "border border-2 border text-center text-white text-xs",
                                         subIndex % 2 === 0 ? "bg-blue-400" : "bg-blue-500"
                                       )}
                                     >
@@ -575,10 +575,10 @@ export default function DocumentsFields() {
                                   >
                                     {isMainRow && (
                                       <>
-                                        <TableCell className="sticky left-0 bg-white border-r border-gray-200 z-20 text-center w-12 font-medium text-gray-800">
+                                        <TableCell className="sticky left-0 bg-white border-r border-gray-200 z-[7] text-center w-12 font-medium text-gray-800">
                                           {index + 1}
                                         </TableCell>
-                                        <TableCell className="sticky left-12 bg-white border-r border-gray-200 p-0 z-20 w-48">
+                                        <TableCell className="sticky left-12 bg-white border-r border-gray-200 p-0 z-[7] w-48">
                                           <div className="flex gap-2 p-3">
                                             {!hasFields && <div className="w-6" />}
                                             {editingDisplayName === document.id ? (
@@ -629,7 +629,7 @@ export default function DocumentsFields() {
                                             )}
                                           </div>
                                         </TableCell>
-                                        <TableCell className="sticky left-60 bg-white border-r border-gray-200 p-0 z-10 w-24">
+                                        <TableCell className="sticky left-60 bg-white border-r border-gray-200 p-0 z-[7] w-24">
                                           <div className="flex items-center justify-center p-2">
                                             <div className="flex flex-col items-center gap-1">
                                               <Button
@@ -670,15 +670,15 @@ export default function DocumentsFields() {
                                             </div>
                                           </div>
                                         </TableCell>
-                                        <TableCell className="sticky left-60 bg-white border-r border-gray-200 p-0 z-20 w-24"></TableCell>
+                                        <TableCell className="sticky left-84 bg-white border-r border-gray-200 p-0 z-[7] w-24"></TableCell>
 
                                       </>
                                     )}
 
                                     {!isMainRow && (
                                       <>
-                                        <TableCell className="sticky left-0 bg-blue-25 border-r border-gray-200 z-10 text-center w-12"></TableCell>
-                                        <TableCell className="sticky left-12 bg-blue-25 border-r border-gray-200 p-0 z-10 w-48">
+                                        <TableCell className="sticky left-0 bg-blue-25 border-r border-gray-200 z-[6] text-center w-12"></TableCell>
+                                        <TableCell className="sticky left-12 bg-blue-25 border-r border-gray-200 p-0 z-[6] w-48">
                                           <div className="pl-8 p-3">
                                             <span className="text-sm text-gray-700">
                                               {field?.name}
@@ -687,7 +687,7 @@ export default function DocumentsFields() {
                                             </span>
                                           </div>
                                         </TableCell>
-                                        <TableCell className="sticky left-60 bg-blue-25 border-r border-gray-200 p-0 z-10 w-24"></TableCell>
+                                        <TableCell className="sticky left-60 bg-blue-25 border-r border-gray-200 p-0 z-[6] w-24"></TableCell>
                                       </>
                                     )}
 
@@ -700,7 +700,7 @@ export default function DocumentsFields() {
                                                 return (
                                                   <TableCell
                                                     key={`field-cell-${subdept.id}-${clsIndex}-${subclsIndex}-${field?.id}`}
-                                                    className="border border-gray-100 p-0 bg-blue-25"
+                                                    className="border-2 p-0 bg-blue-25"
                                                   />
                                                 )
                                               }
@@ -710,7 +710,7 @@ export default function DocumentsFields() {
                                               return (
                                                 <TableCell
                                                   key={`cell-${subdept.id}-${clsIndex}-${subclsIndex}-${document.id}`}
-                                                  className="border border-gray-100 p-0"
+                                                  className="border-2 p-0"
                                                 >
                                                   <div className="flex items-center justify-center p-3">
                                                     <Checkbox
@@ -718,7 +718,7 @@ export default function DocumentsFields() {
                                                       onCheckedChange={(checked) =>
                                                         handleDisplayToggle(document.id, subdept.id, clsIndex, subclsIndex, checked as boolean)
                                                       }
-                                                      className="h-4 w-4 border-gray-300 data-[state=checked]:bg-blue-600 data-[state=checked]:border-gray-600"
+                                                      className="h-4 w-4 border-2 border data-[state=checked]:bg-blue-600 data-[state=checked]:border-gray-600"
                                                     />
                                                   </div>
                                                 </TableCell>
@@ -729,7 +729,7 @@ export default function DocumentsFields() {
                                                 return (
                                                   <TableCell
                                                     key={`field-cell-${subdept.id}-${clsIndex}-${field?.id}`}
-                                                    className="border border-gray-100 p-0 bg-blue-25"
+                                                    className="border-2 p-0 bg-blue-25"
                                                   />
                                                 )
                                               }
@@ -739,7 +739,7 @@ export default function DocumentsFields() {
                                               return (
                                                 <TableCell
                                                   key={`cell-${subdept.id}-${clsIndex}-${document.id}`}
-                                                  className="border border-gray-100 p-0"
+                                                  className="border-2 p-0"
                                                 >
                                                   <div className="flex items-center justify-center p-3">
                                                     <Checkbox
@@ -747,7 +747,7 @@ export default function DocumentsFields() {
                                                       onCheckedChange={(checked) =>
                                                         handleDisplayToggle(document.id, subdept.id, clsIndex, null, checked as boolean)
                                                       }
-                                                      className="h-4 w-4 border-gray-300 data-[state=checked]:bg-blue-600 data-[state=checked]:border-gray-600"
+                                                      className="h-4 w-4 border-2 border data-[state=checked]:bg-blue-600 data-[state=checked]:border-gray-600"
                                                     />
                                                   </div>
                                                 </TableCell>
@@ -759,7 +759,7 @@ export default function DocumentsFields() {
                                           return (
                                             <TableCell
                                               key={`field-cell-${subdept.id}-direct-${field?.id}`}
-                                              className="border border-gray-100 p-0 bg-blue-25"
+                                              className="border-2 p-0 bg-blue-25"
                                             />
                                           )
                                         }
@@ -769,7 +769,7 @@ export default function DocumentsFields() {
                                         return (
                                           <TableCell
                                             key={`cell-${subdept.id}-direct-${document.id}`}
-                                            className="border border-gray-100 p-0"
+                                            className="border-2 p-0"
                                           >
                                             <div className="flex items-center justify-center p-3">
                                               <Checkbox
@@ -777,7 +777,7 @@ export default function DocumentsFields() {
                                                 onCheckedChange={(checked) =>
                                                   handleDisplayToggle(document.id, subdept.id, null, null, checked as boolean)
                                                 }
-                                                className="h-4 w-4 border-gray-300 data-[state=checked]:bg-blue-600 data-[state=checked]:border-gray-600"
+                                                className="h-4 w-4 border-2 border data-[state=checked]:bg-blue-600 data-[state=checked]:border-gray-600"
                                               />
                                             </div>
                                           </TableCell>
