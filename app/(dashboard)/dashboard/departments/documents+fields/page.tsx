@@ -422,7 +422,7 @@ export default function DocumentsFields() {
       <div className="mx-auto p-4">
         <div className="flex justify-between items-center mb-4">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Document Management</h1>
+            <h1 className="text-3xl font-semibold text-gray-900">Document Management</h1>
             <p className="text-gray-600 mt-1">Manage document types and allocations</p>
           </div>
           <div className="flex gap-3">
@@ -463,7 +463,7 @@ export default function DocumentsFields() {
                                     <span className="truncate">Document / Field Details</span>
                                     <Tooltip>
                                       <TooltipTrigger asChild>
-                                        <Info className="h-3.5 w-3.5 text-blue-200 flex-shrink-0" />
+                                        <Info className="h-3.5 w-3.5 text-gray-200 flex-shrink-0" />
                                       </TooltipTrigger>
                                       <TooltipContent className="max-w-[300px]">
                                         <p>Hover over truncated text to see full content. Click + to expand array fields.</p>
@@ -479,12 +479,12 @@ export default function DocumentsFields() {
                                       key={`subdept-header-${subdept.id}`}
                                       colSpan={colSpan}
                                       style={{ width: `${width}px` }}
-                                      className={cn("border-r border-blue-400 px-2 text-center font-bold text-white", subIndex % 2 === 0 ? "bg-blue-700" : "bg-blue-600")}
+                                      className={cn("border-r border-blue-400 px-2 text-center font-semibold text-white", subIndex % 2 === 0 ? "bg-blue-700" : "bg-blue-600")}
                                     >
                                       <div className="flex items-center justify-center">
                                         <TruncatedText
                                           text={subdept.name}
-                                          className="font-bold text-white"
+                                          className="font-semibold text-white"
                                           maxLength={15}
                                         />
                                       </div>
@@ -614,19 +614,19 @@ export default function DocumentsFields() {
                                   
                                   return [
                                     // Category Header Row
-                                    <TableRow key={`category-${categoryKey}`} className="bg-blue-100 hover:bg-blue-150 cursor-pointer" onClick={() => toggleCategoryExpansion(categoryKey)}>
-                                      <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-bold text-blue-800 w-16">
+                                    <TableRow key={`category-${categoryKey}`} className="bg-blue-50 hover:bg-blue-50/80 transition-colors cursor-pointer" onClick={() => toggleCategoryExpansion(categoryKey)}>
+                                      <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-gray-700 w-16">
                                         {group.mainCategoryNumber}
                                       </TableCell>
                                       <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] w-[300px]">
                                         <div className="flex items-center justify-between px-4">
                                           <TruncatedText
                                             text={group.mainCategory}
-                                            className="font-bold text-blue-800 flex-1 min-w-0 pr-2"
+                                            className="font-semibold text-gray-700 flex-1 min-w-0 pr-2"
                                             maxLength={35}
                                           />
-                                          <span className="text-xs bg-blue-200 text-blue-700 px-2 py-1 rounded-full mr-2">{group.documents.length}</span>
-                                          {isCategoryExpanded ? <Minus className="h-4 w-4 text-blue-600" /> : <Plus className="h-4 w-4 text-blue-600" />}
+                                          <span className="text-xs bg-blue-200 text-gray-700 px-2 py-1 rounded-full mr-2">{group.documents.length}</span>
+                                          {isCategoryExpanded ? <Minus className="h-4 w-4 text-gray-600" /> : <Plus className="h-4 w-4 text-gray-600" />}
                                         </div>
                                       </TableCell>
                                       {normalizedSubdepartments.flatMap((subdept, subIndex) =>
@@ -657,14 +657,14 @@ export default function DocumentsFields() {
                                           // RENDER DOCUMENT ROW
                                           return (
                                             <TableRow key={`doc-${doc.id}`} className="group bg-white hover:bg-gray-50">
-                                              <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-[5] text-center font-medium w-16">
+                                              <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-[5] text-center font-semibold w-16">
                                                 {`${group.mainCategoryNumber}.${docIndex + 1}`}
                                               </TableCell>
                                               <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-[5] w-[300px]">
                                                 <div className="flex items-center justify-between px-4 pl-8">
                                                   <TruncatedText
                                                     text={doc.display_name}
-                                                    className="font-semibold text-gray-800 flex-1 min-w-0 pr-2"
+                                                    className="font-semibold text-gray-700 flex-1 min-w-0 pr-2"
                                                     maxLength={30}
                                                   />
                                                   {doc.hasFields && (
@@ -722,8 +722,8 @@ export default function DocumentsFields() {
                                                      text={field.name}
                                                      className={cn(
                                                        'text-sm flex-shrink-0', 
-                                                       field.type === 'array' ? 'text-blue-600 font-medium' :
-                                                       'text-gray-800'
+                                                       field.type === 'array' ? 'text-gray-600 font-semibold' :
+                                                       'text-gray-700'
                                                      )}
                                                      maxLength={field.level > 1 ? 20 : 30}
                                                    />
