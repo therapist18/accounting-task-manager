@@ -422,11 +422,11 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const saveRequirementsForContext = async (context: EditingContext, requirements: ApiRequirement[]) => {
     console.log('[saveRequirementsForContext] Starting save with context:', JSON.stringify(context, null, 2));
     console.log('[saveRequirementsForContext] Requirements to save:', JSON.stringify(requirements, null, 2));
-
+  
     try {
       let classId = '';
       let requirementType = '';
-
+  
       if (context.type === 'subdepartment') {
         classId = context.subdepartmentId;
         requirementType = 'subdepartment';
@@ -437,51 +437,86 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         classId = `${context.subdepartmentId}_${context.classId}_${context.subclassId}`;
         requirementType = 'subclass';
       }
-
+  
       console.log(`[saveRequirementsForContext] Generated classId: ${classId}, type: ${requirementType}`);
-
+  
       const { data: existingRecord, error: fetchError } = await supabase
         .from('tm_class_requirements')
         .select('*')
         .eq('class_id', classId)
         .eq('type', requirementType)
         .single();
-
+  
       if (fetchError && fetchError.code !== 'PGRST116') {
         console.error('[saveRequirementsForContext] Error fetching existing record:', fetchError);
         throw fetchError;
       }
-
-      // Process requirements with structured data
-      const requirementsToSave = requirements.map(req => ({
-        ...req,
-        kycDocumentId: req.kycDocumentId || undefined,
-        // Ensure structured data is preserved
-        web_automation: req.web_automation || null,
-        requirement_context: req.requirement_context || null,
-        // Maintain backward compatibility
-        hasWebForm: req.hasWebForm || false,
-        webFormName: req.webFormName || undefined,
-        automationId: req.automationId || undefined,
-        applicantType: req.applicantType || 'individual',
-        requiredDocumentCount: req.requiredDocumentCount || 1,
-        billingEntity: req.billingEntity || 'applicant',
-        instructions: req.instructions || undefined
+  
+      // Process requirements - clean the data for storage
+      const cleanRequirementsToSave = requirements.map(req => {
+        // Remove JSON columns from the main requirement object to avoid duplication
+        const { requirement_context, web_automation, ...cleanReq } = req;
+        return {
+          ...cleanReq,
+          id: req.id?.toString() || Date.now().toString(),
+          name: req.name || '',
+          description: req.description || '',
+          type: req.type || 'standard',
+          order: req.order || 0,
+          isVisible: req.isVisible !== false,
+          isRequired: req.isRequired !== false,
+          kycDocumentId: req.kycDocumentId || undefined,
+          hasWebForm: req.hasWebForm || false,
+          webFormName: req.webFormName || undefined,
+          automationId: req.automationId || undefined,
+          // Keep backward compatibility fields
+          applicantType: req.applicantType || 'individual',
+          requiredDocumentCount: req.requiredDocumentCount || 1,
+          billingEntity: req.billingEntity || 'applicant',
+          instructions: req.instructions || ''
+        };
+      });
+  
+      // Extract requirement contexts and web automations separately
+      const requirementContexts = requirements.map(req => ({
+        requirementId: req.id?.toString() || Date.now().toString(),
+        context: req.requirement_context || {
+          applicantType: req.applicantType || 'individual',
+          requiredDocumentCount: req.requiredDocumentCount || 1,
+          billingEntity: req.billingEntity || 'applicant',
+          instructions: req.instructions || '',
+          type: req.type || 'standard',
+          conditions: [],
+          documentTypes: []
+        }
       }));
-
-      console.log('[saveRequirementsForContext] Processed requirements:', JSON.stringify(requirementsToSave, null, 2));
-
+  
+      const webAutomations = requirements
+        .filter(req => req.web_automation !== null)
+        .map(req => ({
+          requirementId: req.id?.toString() || Date.now().toString(),
+          automation: req.web_automation
+        }));
+  
+      console.log('[saveRequirementsForContext] Clean requirements:', JSON.stringify(cleanRequirementsToSave, null, 2));
+      console.log('[saveRequirementsForContext] Extracted contexts:', JSON.stringify(requirementContexts, null, 2));
+      console.log('[saveRequirementsForContext] Extracted automations:', JSON.stringify(webAutomations, null, 2));
+  
+      const recordData = {
+        requirements: cleanRequirementsToSave,
+        requirement_context: requirementContexts, // Store as array in single column
+        web_automation: webAutomations.length > 0 ? webAutomations : null,
+        updated_at: new Date().toISOString()
+      };
+  
       if (existingRecord) {
         const { data: updatedRecord, error: updateError } = await supabase
           .from('tm_class_requirements')
-          .update({
-            requirements: requirementsToSave,
-            updated_at: new Date().toISOString()
-          })
+          .update(recordData)
           .eq('class_id', classId)
           .eq('type', requirementType)
           .select();
-
+  
         if (updateError) {
           console.error('[saveRequirementsForContext] Error updating requirements:', updateError);
           throw updateError;
@@ -493,19 +528,18 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           .insert({
             class_id: classId,
             type: requirementType,
-            requirements: requirementsToSave,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            ...recordData,
+            created_at: new Date().toISOString()
           })
           .select();
-
+  
         if (insertError) {
           console.error('[saveRequirementsForContext] Error inserting requirements:', insertError);
           throw insertError;
         }
         console.log('[saveRequirementsForContext] Insert successful');
       }
-
+  
       return true;
     } catch (error) {
       console.error('[saveRequirementsForContext] Error:', error);
@@ -519,17 +553,17 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         .from('tm_departments')
         .select('*, tm_subdepartments(*)')
         .order('name')
-
+  
       if (error) throw error
-
+  
       const { data: requirements, error: reqError } = await supabase
         .from('tm_class_requirements')
         .select('*')
         .order('id')
-
+  
       if (reqError) throw reqError
-
-      // Process departments and include KYC document IDs in requirements
+  
+      // Process departments and merge requirement contexts
       const processedDepartments = departmentsData.map(dept => {
         const subdepartments = (dept.tm_subdepartments || []).map(subdept => {
           const classes = (subdept.classes || []).map(cls => {
@@ -537,78 +571,140 @@ export default function UploadRequirements({ departments: initialDepartments }: 
             const classRequirementsRecord = requirements?.find(req =>
               req.class_id === classId && req.type === 'class'
             )
-
-            const classRequirements = classRequirementsRecord?.requirements?.map((r: any, idx: number) => ({
-              id: r.id?.toString() || generateRequirementId(idx, classRequirementsRecord.requirements),
-              name: r.name || '',
-              description: r.description || '',
-              type: r.type || 'standard',
-              order: r.order || idx,
-              isVisible: r.isVisible !== false,
-              isRequired: r.isRequired !== false,
-              kycDocumentId: r.kycDocumentId || undefined // Include KYC document ID
-            })) || []
-
-            const subClasses = (cls.subClasses || []).map(subCls => {
-              const subClassId = `${classId}_${subCls.id}`
-              const subClassRequirementsRecord = requirements?.find(req =>
-                req.class_id === subClassId && req.type === 'subclass'
-              )
-
-              const subClassRequirements = subClassRequirementsRecord?.requirements?.map((r: any, idx: number) => ({
-                id: r.id?.toString() || generateRequirementId(idx, subClassRequirementsRecord.requirements),
+  
+            const classRequirements = classRequirementsRecord?.requirements?.map((r: any, idx: number) => {
+              // Find the corresponding context and automation
+              const contextData = classRequirementsRecord.requirement_context?.find(
+                (ctx: any) => ctx.requirementId === r.id
+              )?.context;
+              
+              const automationData = classRequirementsRecord.web_automation?.find(
+                (auto: any) => auto.requirementId === r.id
+              )?.automation;
+  
+              return {
+                id: r.id?.toString() || generateRequirementId(idx, classRequirementsRecord.requirements),
                 name: r.name || '',
                 description: r.description || '',
                 type: r.type || 'standard',
                 order: r.order || idx,
                 isVisible: r.isVisible !== false,
                 isRequired: r.isRequired !== false,
-                kycDocumentId: r.kycDocumentId || undefined // Include KYC document ID
-              })) || []
-
+                kycDocumentId: r.kycDocumentId || undefined,
+                hasWebForm: r.hasWebForm || false,
+                webFormName: r.webFormName || '',
+                automationId: r.automationId || '',
+                // Merge the extracted JSON data back
+                requirement_context: contextData || null,
+                web_automation: automationData || null,
+                // Keep backward compatibility
+                applicantType: r.applicantType || contextData?.applicantType || 'individual',
+                requiredDocumentCount: r.requiredDocumentCount || contextData?.requiredDocumentCount || 1,
+                billingEntity: r.billingEntity || contextData?.billingEntity || 'applicant',
+                instructions: r.instructions || contextData?.instructions || ''
+              }
+            }) || []
+  
+            // Apply similar logic for subClasses...
+            const subClasses = (cls.subClasses || []).map(subCls => {
+              const subClassId = `${classId}_${subCls.id}`
+              const subClassRequirementsRecord = requirements?.find(req =>
+                req.class_id === subClassId && req.type === 'subclass'
+              )
+  
+              const subClassRequirements = subClassRequirementsRecord?.requirements?.map((r: any, idx: number) => {
+                const contextData = subClassRequirementsRecord.requirement_context?.find(
+                  (ctx: any) => ctx.requirementId === r.id
+                )?.context;
+                
+                const automationData = subClassRequirementsRecord.web_automation?.find(
+                  (auto: any) => auto.requirementId === r.id
+                )?.automation;
+  
+                return {
+                  id: r.id?.toString() || generateRequirementId(idx, subClassRequirementsRecord.requirements),
+                  name: r.name || '',
+                  description: r.description || '',
+                  type: r.type || 'standard',
+                  order: r.order || idx,
+                  isVisible: r.isVisible !== false,
+                  isRequired: r.isRequired !== false,
+                  kycDocumentId: r.kycDocumentId || undefined,
+                  hasWebForm: r.hasWebForm || false,
+                  webFormName: r.webFormName || '',
+                  automationId: r.automationId || '',
+                  requirement_context: contextData || null,
+                  web_automation: automationData || null,
+                  applicantType: r.applicantType || contextData?.applicantType || 'individual',
+                  requiredDocumentCount: r.requiredDocumentCount || contextData?.requiredDocumentCount || 1,
+                  billingEntity: r.billingEntity || contextData?.billingEntity || 'applicant',
+                  instructions: r.instructions || contextData?.instructions || ''
+                }
+              }) || []
+  
               return {
                 ...subCls,
                 parentClassId: classId,
                 requirements: subClassRequirements
               }
             })
-
+  
             return {
               ...cls,
               requirements: classRequirements,
               subClasses
             }
           })
-
+  
+          // Apply similar logic for subdepartment requirements...
           const subdeptRequirementsRecord = requirements?.find(req =>
             req.class_id === subdept.id.toString() && req.type === 'subdepartment'
           )
-
-          const uploadRequirements = subdeptRequirementsRecord?.requirements?.map((r: any, idx: number) => ({
-            id: r.id?.toString() || generateRequirementId(idx, subdeptRequirementsRecord.requirements),
-            name: r.name || '',
-            description: r.description || '',
-            type: r.type || 'standard',
-            order: r.order || idx,
-            isVisible: r.isVisible !== false,
-            isRequired: r.isRequired !== false,
-            kycDocumentId: r.kycDocumentId || undefined // Include KYC document ID
-          })) || []
-
+  
+          const uploadRequirements = subdeptRequirementsRecord?.requirements?.map((r: any, idx: number) => {
+            const contextData = subdeptRequirementsRecord.requirement_context?.find(
+              (ctx: any) => ctx.requirementId === r.id
+            )?.context;
+            
+            const automationData = subdeptRequirementsRecord.web_automation?.find(
+              (auto: any) => auto.requirementId === r.id
+            )?.automation;
+  
+            return {
+              id: r.id?.toString() || generateRequirementId(idx, subdeptRequirementsRecord.requirements),
+              name: r.name || '',
+              description: r.description || '',
+              type: r.type || 'standard',
+              order: r.order || idx,
+              isVisible: r.isVisible !== false,
+              isRequired: r.isRequired !== false,
+              kycDocumentId: r.kycDocumentId || undefined,
+              hasWebForm: r.hasWebForm || false,
+              webFormName: r.webFormName || '',
+              automationId: r.automationId || '',
+              requirement_context: contextData || null,
+              web_automation: automationData || null,
+              applicantType: r.applicantType || contextData?.applicantType || 'individual',
+              requiredDocumentCount: r.requiredDocumentCount || contextData?.requiredDocumentCount || 1,
+              billingEntity: r.billingEntity || contextData?.billingEntity || 'applicant',
+              instructions: r.instructions || contextData?.instructions || ''
+            }
+          }) || []
+  
           return {
             ...subdept,
             classes,
             upload_requirements: uploadRequirements
           }
         })
-
+  
         return {
           ...dept,
           tm_subdepartments: subdepartments,
           subdepartments: subdepartments
         }
       })
-
+  
       setDepartments(processedDepartments)
     } catch (error) {
       console.error('Error refreshing departments:', error)
@@ -889,108 +985,108 @@ export default function UploadRequirements({ departments: initialDepartments }: 
               {sortedRequirements.length > 0 ? (
                 sortedRequirements.map((req, idx) => (
                   <TableRow key={req.id || req.tempId || idx} className="hover:bg-muted/30 transition-colors">
-                      <TableCell className="sticky left-0 bg-white border-2 border-gray-300 text-center font-mono text-sm z-30 font-semibold">
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs">
-                          {idx + 1}
+                    <TableCell className="sticky left-0 bg-white border-2 border-gray-300 text-center font-mono text-sm z-30 font-semibold">
+                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs">
+                        {idx + 1}
+                      </span>
+                    </TableCell>
+                    <TableCell className="border-r flex-1 whitespace-nowrap">
+                      <div className="space-y-1 font-medium">{req.name}</div>
+                    </TableCell>
+                    <TableCell className="border-r flex-1 whitespace-nowrap">
+                      <div className="space-y-1">
+                        <span className={!req.description ? 'text-gray-400 italic' : ''}>
+                          {req.description || 'No description'}
                         </span>
-                      </TableCell>
-                      <TableCell className="border-r flex-1 whitespace-nowrap">
-                        <div className="space-y-1 font-medium">{req.name}</div>
-                      </TableCell>
-                      <TableCell className="border-r flex-1 whitespace-nowrap">
-                        <div className="space-y-1">
-                          <span className={!req.description ? 'text-gray-400 italic' : ''}>
-                            {req.description || 'No description'}
-                          </span>
-                          {req.requirement_context?.instructions && (
-                            <div className="text-xs text-blue-600 bg-blue-50 p-1 rounded truncate max-w-xs" title={req.requirement_context.instructions}>
-                              💡 {req.requirement_context.instructions}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="border-r w-24">
-                        <div className="flex items-center justify-center">
-                          {getTypeDisplay(req)}
-                        </div>
-                      </TableCell>
-                      <TableCell className="border-r w-32">
-                        <div className="flex items-center justify-center">
-                          {getContextDisplay(req)}
-                        </div>
-                      </TableCell>
-                      <TableCell className="border-r w-24">
-                        <div className="flex items-center justify-center">
-                          {req.kycDocumentId ? (
-                            <div className="flex items-center gap-1">
-                              <FileText className="h-4 w-4 text-green-600" />
-                              <span className="text-xs text-green-600">Linked</span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-1">
-                              <FileText className="h-4 w-4 text-gray-400" />
-                              <span className="text-xs text-gray-400">None</span>
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="border-r w-32">
-                        <div className="flex items-center justify-center">
-                          {getAutomationDisplay(req)}
-                        </div>
-                      </TableCell>
-                      <TableCell className="w-48">
-                        <div className="flex items-center space-x-1 justify-end">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-blue-600"
-                            onClick={() => handleEditClick(idx)}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => handleMove(idx, 'up')}
-                            disabled={idx === 0}
-                          >
-                            <ArrowUp className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => handleMove(idx, 'down')}
-                            disabled={idx === sortedRequirements.length - 1}
-                          >
-                            <ArrowDown className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-red-500"
-                            onClick={() => handleDeleteClick(context.type, idx)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                    ))
-                    ) : (
-                    <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8 text-gray-500">
-                        <div className="flex flex-col items-center space-y-2">
-                          <FileText className="h-8 w-8 text-gray-400" />
-                          <p>No requirements added yet</p>
-                          <p className="text-xs text-gray-400">Click the button above to add requirements</p>
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                        {req.requirement_context?.instructions && (
+                          <div className="text-xs text-blue-600 bg-blue-50 p-1 rounded truncate max-w-xs" title={req.requirement_context.instructions}>
+                            💡 {req.requirement_context.instructions}
+                          </div>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="border-r w-24">
+                      <div className="flex items-center justify-center">
+                        {getTypeDisplay(req)}
+                      </div>
+                    </TableCell>
+                    <TableCell className="border-r w-32">
+                      <div className="flex items-center justify-center">
+                        {getContextDisplay(req)}
+                      </div>
+                    </TableCell>
+                    <TableCell className="border-r w-24">
+                      <div className="flex items-center justify-center">
+                        {req.kycDocumentId ? (
+                          <div className="flex items-center gap-1">
+                            <FileText className="h-4 w-4 text-green-600" />
+                            <span className="text-xs text-green-600">Linked</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <FileText className="h-4 w-4 text-gray-400" />
+                            <span className="text-xs text-gray-400">None</span>
+                          </div>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="border-r w-32">
+                      <div className="flex items-center justify-center">
+                        {getAutomationDisplay(req)}
+                      </div>
+                    </TableCell>
+                    <TableCell className="w-48">
+                      <div className="flex items-center space-x-1 justify-end">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-blue-600"
+                          onClick={() => handleEditClick(idx)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          onClick={() => handleMove(idx, 'up')}
+                          disabled={idx === 0}
+                        >
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          onClick={() => handleMove(idx, 'down')}
+                          disabled={idx === sortedRequirements.length - 1}
+                        >
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-red-500"
+                          onClick={() => handleDeleteClick(context.type, idx)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8 text-gray-500">
+                    <div className="flex flex-col items-center space-y-2">
+                      <FileText className="h-8 w-8 text-gray-400" />
+                      <p>No requirements added yet</p>
+                      <p className="text-xs text-gray-400">Click the button above to add requirements</p>
+                    </div>
+                  </TableCell>
+                </TableRow>
               )}
-                  </TableBody>
+            </TableBody>
           </Table>
         </div>
       </div>

@@ -108,7 +108,7 @@ export function EditRequirementDialog({
   const fetchAutomationTypes = async () => {
     try {
       setLoadingAutomations(true)
-      
+
       const { data, error } = await supabase
         .from('tm_automations')
         .select('id, name, description, webhook_url, webhook_type, is_active')
@@ -177,14 +177,12 @@ export function EditRequirementDialog({
       // Create a copy of the form data to modify
       const updatedData = { ...formData }
 
-      // Handle KYC document selection
+      // Handle KYC document selection (existing code...)
       if (kycDocumentOption === 'create_new') {
         try {
-          // Create new KYC document
           const departmentName = context?.subdepartmentName?.split(' ')[0] || 'General'
           const newDocId = await createNewKycDocument(formData.name, departmentName)
           updatedData.kycDocumentId = newDocId
-          // Refresh KYC documents list
           await fetchKycDocuments()
         } catch (error) {
           console.error('Error creating KYC document:', error)
@@ -198,7 +196,6 @@ export function EditRequirementDialog({
       } else if (kycDocumentOption === 'none') {
         updatedData.kycDocumentId = ''
       } else if (kycDocumentOption === 'existing' && !updatedData.kycDocumentId) {
-        // If existing is selected but no document is chosen
         toast({
           title: 'Error',
           description: 'Please select a document type or choose a different option.',
@@ -217,7 +214,7 @@ export function EditRequirementDialog({
         return
       }
 
-      // Prepare web automation data
+      // Prepare web automation data for JSON column
       let webAutomation = null;
       if (updatedData.hasWebForm && updatedData.automationId) {
         const selectedAutomation = automationTypes.find(a => a.id === updatedData.automationId);
@@ -225,16 +222,17 @@ export function EditRequirementDialog({
           webAutomation = {
             automationId: updatedData.automationId,
             automationName: selectedAutomation.name,
-            webFormName: updatedData.webFormName,
+            webFormName: updatedData.webFormName?.trim(),
             webhookUrl: selectedAutomation.webhook_url,
             webhookType: selectedAutomation.webhook_type,
             isActive: selectedAutomation.is_active,
+            description: selectedAutomation.description,
             createdAt: new Date().toISOString()
           };
         }
       }
 
-      // Prepare requirement context data
+      // Prepare requirement context data for JSON column
       const requirementContext = {
         applicantType: updatedData.applicantType || 'individual',
         requiredDocumentCount: updatedData.requiredDocumentCount || 1,
@@ -247,49 +245,39 @@ export function EditRequirementDialog({
 
       // Prepare the final requirement object
       const updatedRequirement: ApiRequirement = {
-        ...updatedData,
+        id: updatedData.id,
         name: updatedData.name.trim(),
         description: updatedData.description?.trim() || '',
-        // Ensure empty strings are converted to undefined for optional fields
+        type: updatedData.type,
+        order: updatedData.order || 0,
+        isVisible: updatedData.isVisible,
+        isRequired: updatedData.isRequired,
         kycDocumentId: updatedData.kycDocumentId || undefined,
-        webFormName: updatedData.webFormName?.trim() || undefined,
-        automationId: updatedData.automationId || undefined,
-        
-        // Add the new structured data fields
-        web_automation: webAutomation,
+        hasWebForm: updatedData.hasWebForm || false,
+        webFormName: updatedData.webFormName?.trim() || '',
+        automationId: updatedData.automationId || '',
+
+        // JSON column data
         requirement_context: requirementContext,
+        web_automation: webAutomation,
 
-        // Keep the individual fields for backward compatibility
-        applicantType: updatedData.applicantType,
-        requiredDocumentCount: updatedData.requiredDocumentCount,
-        billingEntity: updatedData.billingEntity,
-        instructions: updatedData.instructions,
-
-        // Include legacy Automations array if automation is selected for backward compatibility
-        ...(updatedData.automationId && {
-          Automations: [{
-            id: updatedData.automationId,
-            name: automationTypes.find(a => a.id === updatedData.automationId)?.name || 'Automation',
-            type: 'webhook',
-            status: 'active',
-            triggeredAt: new Date().toISOString()
-          }]
-        })
+        // Backward compatibility fields
+        applicantType: updatedData.applicantType || 'individual',
+        requiredDocumentCount: updatedData.requiredDocumentCount || 1,
+        billingEntity: updatedData.billingEntity || 'applicant',
+        instructions: updatedData.instructions?.trim() || ''
       }
 
-      console.log('Submitting requirement:', updatedRequirement) // Debug log
+      console.log('Submitting requirement with JSON data:', updatedRequirement)
 
-      // Call the parent's onSave function
       await onSave(updatedRequirement)
 
-      // Show success message
       toast({
         title: 'Success',
         description: 'Requirement updated successfully',
         variant: 'default'
       })
 
-      // Close the dialog on successful save
       handleClose()
 
     } catch (error) {
@@ -348,7 +336,7 @@ export function EditRequirementDialog({
               <Users className="h-4 w-4" />
               Requirement Context
             </Label>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-sm">Requirement Type</Label>
@@ -600,7 +588,7 @@ export function EditRequirementDialog({
                     </SelectContent>
                   </Select>
                 </div>
-   
+
                 {formData.automationId && (
                   <div className="text-sm text-muted-foreground bg-green-50 p-3 rounded">
                     <Info className="h-4 w-4 inline mr-2" />
@@ -611,7 +599,7 @@ export function EditRequirementDialog({
             )}
           </div>
         </div>
-   
+
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>
             Cancel

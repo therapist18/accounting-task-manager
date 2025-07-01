@@ -168,12 +168,11 @@ export function AddRequirementsDialog({
           let kycDocumentId = req.kycDocumentId
 
           if (req.kycDocumentOption === 'create_new') {
-            // Create new KYC document
             const departmentName = context?.subdepartmentName?.split(' ')[0] || 'General'
             kycDocumentId = await createNewKycDocument(req.name, departmentName)
           }
 
-          // Prepare web automation data
+          // Prepare web automation data for JSON column
           let webAutomation = null;
           if (req.hasWebForm && req.automationId) {
             const selectedAutomation = automationTypes.find(a => a.id === req.automationId);
@@ -181,16 +180,17 @@ export function AddRequirementsDialog({
               webAutomation = {
                 automationId: req.automationId,
                 automationName: selectedAutomation.name,
-                webFormName: req.webFormName,
+                webFormName: req.webFormName?.trim(),
                 webhookUrl: selectedAutomation.webhook_url,
                 webhookType: selectedAutomation.webhook_type,
                 isActive: selectedAutomation.is_active,
+                description: selectedAutomation.description,
                 createdAt: new Date().toISOString()
               };
             }
           }
 
-          // Prepare requirement context data
+          // Prepare requirement context data for JSON column
           const requirementContext = {
             applicantType: req.applicantType || 'individual',
             requiredDocumentCount: req.requiredDocumentCount || 1,
@@ -201,23 +201,36 @@ export function AddRequirementsDialog({
             documentTypes: []
           };
 
+          // Return the processed requirement
           return {
-            ...req,
-            kycDocumentId,
-            // Ensure automation fields are included
+            name: req.name.trim(),
+            description: req.description?.trim() || '',
+            type: req.type,
+            isVisible: req.isVisible,
+            isRequired: req.isRequired,
+            kycDocumentId: kycDocumentId || undefined,
             hasWebForm: req.hasWebForm || false,
-            webFormName: req.webFormName || '',
+            webFormName: req.webFormName?.trim() || '',
             automationId: req.automationId || '',
-            // Add structured data fields
+
+            // JSON column data
+            requirement_context: requirementContext,
             web_automation: webAutomation,
-            requirement_context: requirementContext
-          }
+
+            // Backward compatibility fields
+            applicantType: req.applicantType || 'individual',
+            requiredDocumentCount: req.requiredDocumentCount || 1,
+            billingEntity: req.billingEntity || 'applicant',
+            instructions: req.instructions?.trim() || ''
+          };
         })
       )
 
+      console.log('Submitting requirements with JSON data:', processedRequirements)
+
       await onSubmit(processedRequirements)
 
-      // Reset the form after successful submission
+      // Reset form after successful submission
       setNewRequirements([{
         name: '',
         description: '',

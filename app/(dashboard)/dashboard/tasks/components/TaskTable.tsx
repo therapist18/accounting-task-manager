@@ -176,12 +176,18 @@ export function TaskTable({
   const formatDateDisplay = (dateStr: string) => {
     if (!dateStr) return '';
     
-    // Handle DD/MM/YYYY format
-    if (dateStr.includes('/')) {
-      return dateStr; // Already in correct format
+    // If it's already in DD/MM/YYYY format, return as is
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
+      return dateStr;
     }
     
-    // Fallback to Date parsing
+    // If it's in MM/DD/YYYY format, convert to DD/MM/YYYY
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
+      const [month, day, year] = dateStr.split('/');
+      return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
+    }
+    
+    // Fallback to Date parsing for other formats (like YYYY-MM-DD)
     try {
       const date = new Date(dateStr);
       if (!isNaN(date.getTime())) {
@@ -189,6 +195,7 @@ export function TaskTable({
       }
       return dateStr;
     } catch (e) {
+      console.warn('Error formatting date:', e);
       return dateStr;
     }
   };
