@@ -697,11 +697,36 @@ export default function DocumentsFields() {
                                           cls.subclasses?.length
                                             ? cls.subclasses.map((subcls, subclsIndex) => {
                                               if (!isMainRow) {
+                                                // For field rows, show checkboxes for each field
+                                                const fieldId = field?.id || ''
+                                                const hasFieldDisplay = getAllocationStatus(
+                                                  `${document.id}-${fieldId}`, 
+                                                  subdept.id, 
+                                                  clsIndex, 
+                                                  subclsIndex
+                                                )
+                                                
                                                 return (
                                                   <TableCell
-                                                    key={`field-cell-${subdept.id}-${clsIndex}-${subclsIndex}-${field?.id}`}
+                                                    key={`field-cell-${subdept.id}-${clsIndex}-${subclsIndex}-${fieldId}`}
                                                     className="border-2 p-0 bg-blue-25"
-                                                  />
+                                                  >
+                                                    <div className="flex items-center justify-center p-3">
+                                                      <Checkbox
+                                                        checked={hasFieldDisplay}
+                                                        onCheckedChange={(checked) =>
+                                                          handleDisplayToggle(
+                                                            `${document.id}-${fieldId}`, 
+                                                            subdept.id, 
+                                                            clsIndex, 
+                                                            subclsIndex, 
+                                                            checked as boolean
+                                                          )
+                                                        }
+                                                        className="h-4 w-4 border-2 border data-[state=checked]:bg-blue-600 data-[state=checked]:border-gray-600"
+                                                      />
+                                                    </div>
+                                                  </TableCell>
                                                 )
                                               }
 
@@ -726,11 +751,36 @@ export default function DocumentsFields() {
                                             })
                                             : (() => {
                                               if (!isMainRow) {
+                                                // For field rows, show checkboxes for each field
+                                                const fieldId = field?.id || ''
+                                                const hasFieldDisplay = getAllocationStatus(
+                                                  `${document.id}-${fieldId}`, 
+                                                  subdept.id, 
+                                                  clsIndex, 
+                                                  null
+                                                )
+                                                
                                                 return (
                                                   <TableCell
-                                                    key={`field-cell-${subdept.id}-${clsIndex}-${field?.id}`}
+                                                    key={`field-cell-${subdept.id}-${clsIndex}-${fieldId}`}
                                                     className="border-2 p-0 bg-blue-25"
-                                                  />
+                                                  >
+                                                    <div className="flex items-center justify-center p-3">
+                                                      <Checkbox
+                                                        checked={hasFieldDisplay}
+                                                        onCheckedChange={(checked) =>
+                                                          handleDisplayToggle(
+                                                            `${document.id}-${fieldId}`, 
+                                                            subdept.id, 
+                                                            clsIndex, 
+                                                            null, 
+                                                            checked as boolean
+                                                          )
+                                                        }
+                                                        className="h-4 w-4 border-2 border data-[state=checked]:bg-blue-600 data-[state=checked]:border-gray-600"
+                                                      />
+                                                    </div>
+                                                  </TableCell>
                                                 )
                                               }
 
@@ -756,11 +806,36 @@ export default function DocumentsFields() {
                                         )
                                       } else {
                                         if (!isMainRow) {
+                                          // For field rows, show checkboxes for each field
+                                          const fieldId = field?.id || ''
+                                          const hasFieldDisplay = getAllocationStatus(
+                                            `${document.id}-${fieldId}`, 
+                                            subdept.id, 
+                                            null, 
+                                            null
+                                          )
+                                          
                                           return (
                                             <TableCell
-                                              key={`field-cell-${subdept.id}-direct-${field?.id}`}
+                                              key={`field-cell-${subdept.id}-direct-${fieldId}`}
                                               className="border-2 p-0 bg-blue-25"
-                                            />
+                                            >
+                                              <div className="flex items-center justify-center p-3">
+                                                <Checkbox
+                                                  checked={hasFieldDisplay}
+                                                  onCheckedChange={(checked) =>
+                                                    handleDisplayToggle(
+                                                      `${document.id}-${fieldId}`, 
+                                                      subdept.id, 
+                                                      null, 
+                                                      null, 
+                                                      checked as boolean
+                                                    )
+                                                  }
+                                                  className="h-4 w-4 border-2 border data-[state=checked]:bg-blue-600 data-[state=checked]:border-gray-600"
+                                                />
+                                              </div>
+                                            </TableCell>
                                           )
                                         }
 

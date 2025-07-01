@@ -134,37 +134,53 @@ export function EditableStageCell({
       });
       return;
     }
-
-    let dateObj: Date;
-    
+  
     try {
+      let day: number, month: number, year: number;
+      
       // Handle both YYYY-MM-DD and DD/MM/YYYY formats
       if (editValue.includes('-')) {
         // Handle YYYY-MM-DD format (from date input)
-        const [year, month, day] = editValue.split('-').map(Number);
-        dateObj = new Date(year, month - 1, day);
+        const [yearStr, monthStr, dayStr] = editValue.split('-');
+        year = parseInt(yearStr, 10);
+        month = parseInt(monthStr, 10);
+        day = parseInt(dayStr, 10);
       } else if (editValue.includes('/')) {
         // Handle DD/MM/YYYY format (from manual input)
-        const [day, month, year] = editValue.split('/').map(Number);
-        if (day > 31 || month > 12 || year < 1000) throw new Error('Invalid date');
-        dateObj = new Date(year, month - 1, day);
+        const [dayStr, monthStr, yearStr] = editValue.split('/');
+        day = parseInt(dayStr, 10);
+        month = parseInt(monthStr, 10);
+        year = parseInt(yearStr, 10);
       } else {
-        throw new Error('Invalid date format');
+        throw new Error('Invalid date format. Use DD/MM/YYYY or YYYY-MM-DD');
       }
-
-      // Validate the date
-      if (isNaN(dateObj.getTime())) {
-        throw new Error('Invalid date');
+  
+      // Validate the date components
+      if (isNaN(day) || isNaN(month) || isNaN(year)) {
+        throw new Error('Invalid date components');
       }
-
+  
+      if (day < 1 || day > 31 || month < 1 || month > 12 || year < 1000) {
+        throw new Error('Invalid date values');
+      }
+  
+      // Create date object to validate the date exists
+      const dateObj = new Date(year, month - 1, day);
+      
+      // Validate the date by checking if the components match
+      if (dateObj.getDate() !== day || 
+          dateObj.getMonth() + 1 !== month || 
+          dateObj.getFullYear() !== year) {
+        throw new Error('Invalid date - date does not exist');
+      }
+  
       // Format as DD/MM/YYYY for storage
-      const day = String(dateObj.getDate()).padStart(2, '0');
-      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-      const year = dateObj.getFullYear();
-      const formattedDate = `${day}/${month}/${year}`;
-
+      const formattedDay = String(day).padStart(2, '0');
+      const formattedMonth = String(month).padStart(2, '0');
+      const formattedDate = `${formattedDay}/${formattedMonth}/${year}`;
+  
       console.log('Date conversion:', { input: editValue, formattedDate });
-
+  
       setIsLoading(true);
       await onSave(stage.id, task.id, formattedDate);
       setIsEditing(false);
