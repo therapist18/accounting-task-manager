@@ -79,20 +79,22 @@ export default function DocumentsFields() {
 
   const { toast } = useToast()
 
-  // Memoized filtered documents
+  // Memoized filtered documents with processed fields
   const filteredDocuments = useMemo(() => {
-    if (!documents.length) return []
+    if (!documents.length) return [];
 
-    return documents
-      .filter(doc => doc.category === CATEGORY_MAPPING[documentTab])
-      .sort((a, b) => {
-        if (a.custom_order !== null && b.custom_order !== null) {
-          return a.custom_order - b.custom_order
-        }
-        if (a.custom_order !== null) return -1
-        if (b.custom_order !== null) return 1
-        return a.document_number - b.document_number
-      })
+    return processDocumentFields(
+      documents
+        .filter(doc => doc.category === CATEGORY_MAPPING[documentTab])
+        .sort((a, b) => {
+          if (a.custom_order !== null && b.custom_order !== null) {
+            return a.custom_order - b.custom_order;
+          }
+          if (a.custom_order !== null) return -1;
+          if (b.custom_order !== null) return 1;
+          return a.document_number - b.document_number;
+        })
+    );
   }, [documents, documentTab])
 
   // Memoized current department
@@ -425,9 +427,6 @@ export default function DocumentsFields() {
                               <TableHead rowSpan={4} className="sticky left-12 bg-blue-600 border-r border-gray-500 font-bold w-48 z-[6] text-white text-center">
                                 Document Details
                               </TableHead>
-                              <TableHead rowSpan={4} className="sticky left-60 bg-blue-600 border-r border-gray-500 font-bold w-24 z-[6] text-white text-center">
-                                Order
-                              </TableHead>
                               <TableHead rowSpan={4} className="sticky left-84 bg-blue-600 border-r border-gray-500 font-bold w-24 z-[6] text-white text-center">
                                 Subdepartment
                               </TableHead>
@@ -559,7 +558,67 @@ export default function DocumentsFields() {
                             {filteredDocuments.map((document, index) => {
                               const isExpanded = expandedDocuments.has(document.id)
                               const hasFields = document.fields && document.fields.length > 0
-                              const rowsToShow = isExpanded && hasFields ? [document, ...document.fields] : [document]
+                              // Process documents to include nested fields with proper hierarchy
+                              const processDocumentFields = (docs: DocumentType[]) => {
+                                return docs.map(doc => {
+                                  if (!doc.fields || doc.fields.length === 0) return doc;
+                                  
+                                  const processField = (field: any, level = 0, parentId: string | null = null, isArrayItem = false) => {
+                                    const fieldId = parentId ? `${parentId}.${field.name}` : field.id;
+                                    const fieldWithLevel = { 
+                                      ...field, 
+                                      id: fieldId,
+                                      level,
+                                      parentId,
+                                      isArrayItem,
+                                      hasChildren: field.type === 'array' && field.fields && field.fields.length > 0
+                                    };
+                                    
+                                    const result = [fieldWithLevel];
+                                    
+                                    // Handle array items
+                                    if (field.type === 'array' && field.fields) {
+                                      const arrayItem = {
+                                        ...field,
+                                        id: `${fieldId}[]`,
+                                        name: '[]',
+                                        type: 'array-item',
+                                        level: level + 1,
+                                        parentId: fieldId,
+                                        isArrayItem: true,
+                                        hasChildren: false
+                                      };
+                                      
+                                      // Only add array item if it has fields
+                                      if (field.fields.length > 0) {
+                                        result.push(arrayItem);
+                                        
+                                        // Process array item fields with increased level and array item parent
+                                        field.fields.forEach((subField: any) => {
+                                          result.push(...processField(subField, level + 2, arrayItem.id, true));
+                                        });
+                                      }
+                                    }
+                                    
+                                    return result;
+                                  };
+                                  
+                                  const processedFields = [];
+                                  doc.fields.forEach(field => {
+                                    processedFields.push(...processField(field, 0));
+                                  });
+                                  
+                                  return {
+                                    ...doc,
+                                    hasFields: processedFields.length > 0,
+                                    fields: processedFields
+                                  };
+                                });
+                              };
+                              const processedDocument = processDocumentFields([document])[0];
+                              const rowsToShow = isExpanded && hasFields 
+                                ? [processedDocument, ...processedDocument.fields] 
+                                : [processedDocument];
 
                               return rowsToShow.map((item, rowIndex) => {
                                 const isMainRow = rowIndex === 0
@@ -629,62 +688,64 @@ export default function DocumentsFields() {
                                             )}
                                           </div>
                                         </TableCell>
-                                        <TableCell className="sticky left-60 bg-white border-r border-gray-200 p-0 z-[7] w-24">
-                                          <div className="flex items-center justify-center p-2">
-                                            <div className="flex flex-col items-center gap-1">
-                                              <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={() => moveDocument(document.id, 'up')}
-                                                disabled={index === 0}
-                                                className={cn(
-                                                  "h-6 w-6 p-0 hover:bg-blue-100",
-                                                  index === 0 && "opacity-30 cursor-not-allowed"
-                                                )}
-                                              >
-                                                <ChevronUp className="h-3 w-3 text-gray-600" />
-                                              </Button>
-                                              <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-6 w-6 p-0 hover:bg-blue-100"
-                                                onClick={() => {
-                                                  setEditingDisplayName(document.id)
-                                                  setEditingValue(document.display_name || document.name)
-                                                }}
-                                              >
-                                                <Pencil className="h-3 w-3 text-gray-600" />
-                                              </Button>
-                                              <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={() => moveDocument(document.id, 'down')}
-                                                disabled={index === filteredDocuments.length - 1}
-                                                className={cn(
-                                                  "h-6 w-6 p-0 hover:bg-blue-100",
-                                                  index === filteredDocuments.length - 1 && "opacity-30 cursor-not-allowed"
-                                                )}
-                                              >
-                                                <ChevronDown className="h-3 w-3 text-gray-600" />
-                                              </Button>
-                                            </div>
-                                          </div>
-                                        </TableCell>
                                         <TableCell className="sticky left-84 bg-white border-r border-gray-200 p-0 z-[7] w-24"></TableCell>
-
                                       </>
                                     )}
 
                                     {!isMainRow && (
                                       <>
-                                        <TableCell className="sticky left-0 bg-blue-25 border-r border-gray-200 z-[6] text-center w-12"></TableCell>
-                                        <TableCell className="sticky left-12 bg-blue-25 border-r border-gray-200 p-0 z-[6] w-48">
-                                          <div className="pl-8 p-3">
-                                            <span className="text-sm text-gray-700">
-                                              {field?.name}
-                                              <span className="text-gray-500">({field?.type})</span>
-                                              {field?.required && <span className="text-red-500 ml-1">*</span>}
-                                            </span>
+                                        <TableCell className="sticky left-0 bg-blue-25 border-r border-gray-200 z-[6] text-center w-12">
+                                          {(field?.hasChildren || field?.type === 'array') && (
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className="h-6 w-6 p-0"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const newExpanded = new Set(expandedDocuments);
+                                                if (expandedDocuments.has(field.id)) {
+                                                  newExpanded.delete(field.id);
+                                                } else {
+                                                  newExpanded.add(field.id);
+                                                }
+                                                setExpandedDocuments(newExpanded);
+                                              }}
+                                            >
+                                              {expandedDocuments.has(field.id) ? (
+                                                <Minus className="h-4 w-4 text-gray-600" />
+                                              ) : (
+                                                <Plus className="h-4 w-4 text-gray-600" />
+                                              )}
+                                            </Button>
+                                          )}
+                                        </TableCell>
+                                        <TableCell 
+                                          className="sticky left-12 bg-blue-25 border-r border-gray-200 p-0 z-[6] w-48"
+                                          onClick={() => {
+                                            if (field?.hasChildren || field?.type === 'array') {
+                                              const newExpanded = new Set(expandedDocuments);
+                                              if (expandedDocuments.has(field.id)) {
+                                                newExpanded.delete(field.id);
+                                              } else {
+                                                newExpanded.add(field.id);
+                                              }
+                                              setExpandedDocuments(newExpanded);
+                                            }
+                                          }}
+                                          style={{ cursor: (field?.hasChildren || field?.type === 'array') ? 'pointer' : 'default' }}
+                                        >
+                                          <div className={`p-3 ${field?.isArrayItem ? 'pl-8' : ''}`}>
+                                            <div className="flex items-center">
+                                              <span 
+                                                className={`text-sm ${field?.isArrayItem ? 'italic' : ''} ${field?.type === 'array-item' ? 'text-gray-500' : 'text-gray-700'}`}
+                                              >
+                                                {field?.name}
+                                                {field?.type !== 'array-item' && (
+                                                  <span className="text-gray-500 text-xs ml-1">({field?.type})</span>
+                                                )}
+                                                {field?.required && <span className="text-red-500 ml-1">*</span>}
+                                              </span>
+                                            </div>
                                           </div>
                                         </TableCell>
                                         <TableCell className="sticky left-60 bg-blue-25 border-r border-gray-200 p-0 z-[6] w-24"></TableCell>
@@ -700,12 +761,12 @@ export default function DocumentsFields() {
                                                 // For field rows, show checkboxes for each field
                                                 const fieldId = field?.id || ''
                                                 const hasFieldDisplay = getAllocationStatus(
-                                                  `${document.id}-${fieldId}`, 
-                                                  subdept.id, 
-                                                  clsIndex, 
+                                                  `${document.id}-${fieldId}`,
+                                                  subdept.id,
+                                                  clsIndex,
                                                   subclsIndex
                                                 )
-                                                
+
                                                 return (
                                                   <TableCell
                                                     key={`field-cell-${subdept.id}-${clsIndex}-${subclsIndex}-${fieldId}`}
@@ -716,10 +777,10 @@ export default function DocumentsFields() {
                                                         checked={hasFieldDisplay}
                                                         onCheckedChange={(checked) =>
                                                           handleDisplayToggle(
-                                                            `${document.id}-${fieldId}`, 
-                                                            subdept.id, 
-                                                            clsIndex, 
-                                                            subclsIndex, 
+                                                            `${document.id}-${fieldId}`,
+                                                            subdept.id,
+                                                            clsIndex,
+                                                            subclsIndex,
                                                             checked as boolean
                                                           )
                                                         }
@@ -727,6 +788,16 @@ export default function DocumentsFields() {
                                                       />
                                                     </div>
                                                   </TableCell>
+                                                )
+                                              }
+
+                                              // Skip document row checkboxes if document has fields
+                                              if (document.fields && document.fields.length > 0) {
+                                                return (
+                                                  <TableCell 
+                                                    key={`cell-${subdept.id}-${clsIndex}-${subclsIndex}-${document.id}`}
+                                                    className="border-2 p-0"
+                                                  ></TableCell>
                                                 )
                                               }
 
@@ -754,12 +825,12 @@ export default function DocumentsFields() {
                                                 // For field rows, show checkboxes for each field
                                                 const fieldId = field?.id || ''
                                                 const hasFieldDisplay = getAllocationStatus(
-                                                  `${document.id}-${fieldId}`, 
-                                                  subdept.id, 
-                                                  clsIndex, 
+                                                  `${document.id}-${fieldId}`,
+                                                  subdept.id,
+                                                  clsIndex,
                                                   null
                                                 )
-                                                
+
                                                 return (
                                                   <TableCell
                                                     key={`field-cell-${subdept.id}-${clsIndex}-${fieldId}`}
@@ -770,10 +841,10 @@ export default function DocumentsFields() {
                                                         checked={hasFieldDisplay}
                                                         onCheckedChange={(checked) =>
                                                           handleDisplayToggle(
-                                                            `${document.id}-${fieldId}`, 
-                                                            subdept.id, 
-                                                            clsIndex, 
-                                                            null, 
+                                                            `${document.id}-${fieldId}`,
+                                                            subdept.id,
+                                                            clsIndex,
+                                                            null,
                                                             checked as boolean
                                                           )
                                                         }
@@ -781,6 +852,16 @@ export default function DocumentsFields() {
                                                       />
                                                     </div>
                                                   </TableCell>
+                                                )
+                                              }
+
+                                              // Skip document row checkboxes if document has fields
+                                              if (document.fields && document.fields.length > 0) {
+                                                return (
+                                                  <TableCell 
+                                                    key={`cell-${subdept.id}-${clsIndex}-${document.id}`}
+                                                    className="border-2 p-0"
+                                                  ></TableCell>
                                                 )
                                               }
 
@@ -809,12 +890,12 @@ export default function DocumentsFields() {
                                           // For field rows, show checkboxes for each field
                                           const fieldId = field?.id || ''
                                           const hasFieldDisplay = getAllocationStatus(
-                                            `${document.id}-${fieldId}`, 
-                                            subdept.id, 
-                                            null, 
+                                            `${document.id}-${fieldId}`,
+                                            subdept.id,
+                                            null,
                                             null
                                           )
-                                          
+
                                           return (
                                             <TableCell
                                               key={`field-cell-${subdept.id}-direct-${fieldId}`}
@@ -825,10 +906,10 @@ export default function DocumentsFields() {
                                                   checked={hasFieldDisplay}
                                                   onCheckedChange={(checked) =>
                                                     handleDisplayToggle(
-                                                      `${document.id}-${fieldId}`, 
-                                                      subdept.id, 
-                                                      null, 
-                                                      null, 
+                                                      `${document.id}-${fieldId}`,
+                                                      subdept.id,
+                                                      null,
+                                                      null,
                                                       checked as boolean
                                                     )
                                                   }
@@ -836,6 +917,16 @@ export default function DocumentsFields() {
                                                 />
                                               </div>
                                             </TableCell>
+                                          )
+                                        }
+
+                                        // Skip document row checkboxes if document has fields
+                                        if (document.fields && document.fields.length > 0) {
+                                          return (
+                                            <TableCell 
+                                              key={`cell-${subdept.id}-direct-${document.id}`}
+                                              className="border-2 p-0"
+                                            ></TableCell>
                                           )
                                         }
 

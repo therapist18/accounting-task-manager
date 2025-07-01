@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { FileText, Info, Zap, Webhook } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { FileText, Info, Zap, Webhook, Users, Building, Layers } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import supabase from "@/lib/supabase/client"
 
@@ -40,7 +41,12 @@ export function EditRequirementDialog({
     kycDocumentId: '',
     hasWebForm: false,
     webFormName: '',
-    automationId: ''
+    automationId: '',
+    // New requirement context fields
+    applicantType: 'individual',
+    requiredDocumentCount: 1,
+    billingEntity: 'applicant',
+    instructions: ''
   })
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
   const [automationTypes, setAutomationTypes] = useState<AutomationType[]>([])
@@ -55,7 +61,12 @@ export function EditRequirementDialog({
         kycDocumentId: requirement.kycDocumentId || '',
         hasWebForm: requirement.hasWebForm || false,
         webFormName: requirement.webFormName || '',
-        automationId: requirement.automationId || ''
+        automationId: requirement.automationId || '',
+        // Set requirement context fields with defaults
+        applicantType: requirement.applicantType || 'individual',
+        requiredDocumentCount: requirement.requiredDocumentCount || 1,
+        billingEntity: requirement.billingEntity || 'applicant',
+        instructions: requirement.instructions || ''
       })
 
       // Determine the current KYC document option
@@ -206,6 +217,34 @@ export function EditRequirementDialog({
         return
       }
 
+      // Prepare web automation data
+      let webAutomation = null;
+      if (updatedData.hasWebForm && updatedData.automationId) {
+        const selectedAutomation = automationTypes.find(a => a.id === updatedData.automationId);
+        if (selectedAutomation) {
+          webAutomation = {
+            automationId: updatedData.automationId,
+            automationName: selectedAutomation.name,
+            webFormName: updatedData.webFormName,
+            webhookUrl: selectedAutomation.webhook_url,
+            webhookType: selectedAutomation.webhook_type,
+            isActive: selectedAutomation.is_active,
+            createdAt: new Date().toISOString()
+          };
+        }
+      }
+
+      // Prepare requirement context data
+      const requirementContext = {
+        applicantType: updatedData.applicantType || 'individual',
+        requiredDocumentCount: updatedData.requiredDocumentCount || 1,
+        billingEntity: updatedData.billingEntity || 'applicant',
+        instructions: updatedData.instructions?.trim() || '',
+        type: updatedData.type,
+        conditions: updatedData.conditions || [],
+        documentTypes: updatedData.documentTypes || []
+      };
+
       // Prepare the final requirement object
       const updatedRequirement: ApiRequirement = {
         ...updatedData,
@@ -215,7 +254,18 @@ export function EditRequirementDialog({
         kycDocumentId: updatedData.kycDocumentId || undefined,
         webFormName: updatedData.webFormName?.trim() || undefined,
         automationId: updatedData.automationId || undefined,
-        // Include Automations array if automation is selected
+        
+        // Add the new structured data fields
+        web_automation: webAutomation,
+        requirement_context: requirementContext,
+
+        // Keep the individual fields for backward compatibility
+        applicantType: updatedData.applicantType,
+        requiredDocumentCount: updatedData.requiredDocumentCount,
+        billingEntity: updatedData.billingEntity,
+        instructions: updatedData.instructions,
+
+        // Include legacy Automations array if automation is selected for backward compatibility
         ...(updatedData.automationId && {
           Automations: [{
             id: updatedData.automationId,
@@ -263,11 +313,11 @@ export function EditRequirementDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-5xl max-h-[95vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Requirement</DialogTitle>
           <DialogDescription>
-            Update the requirement details, document association, and automation settings
+            Update the requirement details, document association, automation settings, and context
           </DialogDescription>
         </DialogHeader>
 
@@ -288,6 +338,95 @@ export function EditRequirementDialog({
                 value={formData.description || ''}
                 onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                 placeholder="Description (optional)"
+              />
+            </div>
+          </div>
+
+          {/* Requirement Type & Context Section */}
+          <div className="space-y-4 border-t pt-4">
+            <Label className="font-medium flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              Requirement Context
+            </Label>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-sm">Requirement Type</Label>
+                <Select
+                  value={formData.type}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, type: value as any }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="standard">Standard</SelectItem>
+                    <SelectItem value="conditional">Conditional</SelectItem>
+                    <SelectItem value="optional">Optional</SelectItem>
+                    <SelectItem value="company">Company Document</SelectItem>
+                    <SelectItem value="multi-document">Multiple Documents</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm">Applies To</Label>
+                <Select
+                  value={formData.applicantType || 'individual'}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, applicantType: value as any }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select applicant type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="individual">Individual Only</SelectItem>
+                    <SelectItem value="company">Company Only</SelectItem>
+                    <SelectItem value="both">Both Individual & Company</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {formData.type === 'company' && (
+              <div className="space-y-2">
+                <Label className="text-sm">Billing Entity</Label>
+                <Select
+                  value={formData.billingEntity || 'company'}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, billingEntity: value as any }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select billing entity" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="company">Company Documents Required</SelectItem>
+                    <SelectItem value="applicant">Applicant Must Provide</SelectItem>
+                    <SelectItem value="either">Either Can Provide</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {formData.type === 'multi-document' && (
+              <div className="space-y-2">
+                <Label className="text-sm">Required Document Count</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={formData.requiredDocumentCount || 1}
+                  onChange={(e) => setFormData(prev => ({ ...prev, requiredDocumentCount: parseInt(e.target.value) }))}
+                  placeholder="Number of documents required"
+                />
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label className="text-sm">Special Instructions</Label>
+              <Textarea
+                value={formData.instructions || ''}
+                onChange={(e) => setFormData(prev => ({ ...prev, instructions: e.target.value }))}
+                placeholder="e.g., 'This document should be from the company that will be billed for this application'"
+                rows={2}
               />
             </div>
           </div>
@@ -354,7 +493,7 @@ export function EditRequirementDialog({
                     </SelectTrigger>
                     <SelectContent>
                       {loadingKycDocs ? (
-                        <SelectItem key="loading" value="loading" disabled>
+                        <SelectItem value="loading" disabled>
                           Loading document types...
                         </SelectItem>
                       ) : (
@@ -426,16 +565,7 @@ export function EditRequirementDialog({
                     onValueChange={(value) => {
                       setFormData(prev => ({
                         ...prev,
-                        automationId: value === 'no-automation' ? '' : value,
-                        // Store the automation data in an Automations field
-                        ...(value !== 'no-automation' && {
-                          Automations: [{
-                            id: value,
-                            name: automationTypes.find(a => a.id === value)?.name,
-                            type: 'webhook',
-                            status: 'active'
-                          }]
-                        })
+                        automationId: value === 'no-automation' ? '' : value
                       }));
                     }}
                   >
@@ -444,12 +574,12 @@ export function EditRequirementDialog({
                     </SelectTrigger>
                     <SelectContent>
                       {loadingAutomations ? (
-                        <SelectItem key="loading" value="loading" disabled>
+                        <SelectItem value="loading" disabled>
                           Loading automation types...
                         </SelectItem>
                       ) : (
                         <>
-                          <SelectItem key="no-automation" value="no-automation">
+                          <SelectItem value="no-automation">
                             No automation
                           </SelectItem>
                           {automationTypes.map((automation) => (
@@ -469,31 +599,31 @@ export function EditRequirementDialog({
                       )}
                     </SelectContent>
                   </Select>
-                  </div>
-   
-                  {formData.automationId && (
-                    <div className="text-sm text-muted-foreground bg-green-50 p-3 rounded">
-                      <Info className="h-4 w-4 inline mr-2" />
-                      This requirement will trigger the selected automation when the form is submitted.
-                    </div>
-                  )}
                 </div>
-              )}
-            </div>
-          </div>
    
-          <DialogFooter>
-            <Button variant="outline" onClick={handleClose}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={isSubmitting || !formData.name.trim()}
-            >
-              {isSubmitting ? 'Saving...' : 'Save Changes'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    )
-   }
+                {formData.automationId && (
+                  <div className="text-sm text-muted-foreground bg-green-50 p-3 rounded">
+                    <Info className="h-4 w-4 inline mr-2" />
+                    This requirement will trigger the selected automation when the form is submitted.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+   
+        <DialogFooter>
+          <Button variant="outline" onClick={handleClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={isSubmitting || !formData.name.trim()}
+          >
+            {isSubmitting ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}

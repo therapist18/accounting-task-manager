@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { cn } from "@/lib/utils"
 import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, Zap } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -40,16 +40,29 @@ interface EditingContext {
   subclassName?: string
 }
 
-// Also update the ApiRequirement interface
 interface ApiRequirement {
   id?: string
   name: string
   description?: string
-  type: 'standard' | 'conditional' | 'optional'
+  type: 'standard' | 'conditional' | 'optional' | 'company' | 'multi-document'
   order: number
   isVisible: boolean
   isRequired: boolean
-  kycDocumentId?: string // Add this field
+  kycDocumentId?: string
+  hasWebForm?: boolean
+  webFormName?: string
+  automationId?: string
+
+  // New fields for complex requirements
+  applicantType?: 'individual' | 'company' | 'both'
+  requiredDocumentCount?: number
+  documentTypes?: string[] // Array of document type IDs
+  billingEntity?: 'applicant' | 'company' | 'either'
+  conditions?: {
+    when: string // e.g., "billing_entity === 'company'"
+    showRequirement: boolean
+  }[]
+  instructions?: string // Special instructions for users
 }
 
 interface RequirementTableEntry extends ApiRequirement {
@@ -110,6 +123,9 @@ export default function UploadRequirements({ departments: initialDepartments }: 
   const [editingRequirement, setEditingRequirement] = useState<ApiRequirement | null>(null)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [addContext, setAddContext] = useState<EditingContext | null>(null);
+
+  // Add sorting state at component level
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
   useEffect(() => {
     if (departments.length === 0 || isReady) return
@@ -217,6 +233,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       isVisible: true
     }])
   }
+
   // Add this function to handle adding new requirements
   const handleAddRequirements = async (requirements: Omit<ApiRequirement, 'id' | 'order'>[]) => {
     if (!addContext) return;
@@ -264,6 +281,7 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       setIsSubmitting(false);
     }
   };
+
   const handleDeleteClick = (type: 'subdepartment' | 'class' | 'subclass', index: number) => {
     setDeleteContext({ type, index })
     // Set the current context for deletion
@@ -422,7 +440,6 @@ export default function UploadRequirements({ departments: initialDepartments }: 
 
       console.log(`[saveRequirementsForContext] Generated classId: ${classId}, type: ${requirementType}`);
 
-      console.log('[saveRequirementsForContext] Checking for existing record...');
       const { data: existingRecord, error: fetchError } = await supabase
         .from('tm_class_requirements')
         .select('*')
@@ -435,18 +452,26 @@ export default function UploadRequirements({ departments: initialDepartments }: 
         throw fetchError;
       }
 
-      console.log('[saveRequirementsForContext] Existing record:', existingRecord || 'No existing record found');
-
-      // Ensure kycDocumentId is preserved
+      // Process requirements with structured data
       const requirementsToSave = requirements.map(req => ({
         ...req,
-        kycDocumentId: req.kycDocumentId || undefined
+        kycDocumentId: req.kycDocumentId || undefined,
+        // Ensure structured data is preserved
+        web_automation: req.web_automation || null,
+        requirement_context: req.requirement_context || null,
+        // Maintain backward compatibility
+        hasWebForm: req.hasWebForm || false,
+        webFormName: req.webFormName || undefined,
+        automationId: req.automationId || undefined,
+        applicantType: req.applicantType || 'individual',
+        requiredDocumentCount: req.requiredDocumentCount || 1,
+        billingEntity: req.billingEntity || 'applicant',
+        instructions: req.instructions || undefined
       }));
 
-      console.log('[saveRequirementsForContext] All processed requirements:', JSON.stringify(requirementsToSave, null, 2));
+      console.log('[saveRequirementsForContext] Processed requirements:', JSON.stringify(requirementsToSave, null, 2));
 
       if (existingRecord) {
-        console.log('[saveRequirementsForContext] Updating existing record...');
         const { data: updatedRecord, error: updateError } = await supabase
           .from('tm_class_requirements')
           .update({
@@ -461,9 +486,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           console.error('[saveRequirementsForContext] Error updating requirements:', updateError);
           throw updateError;
         }
-        console.log('[saveRequirementsForContext] Update successful, response:', updatedRecord);
+        console.log('[saveRequirementsForContext] Update successful');
       } else {
-        console.log('[saveRequirementsForContext] Inserting new record...');
         const { data: insertedRecord, error: insertError } = await supabase
           .from('tm_class_requirements')
           .insert({
@@ -479,14 +503,13 @@ export default function UploadRequirements({ departments: initialDepartments }: 
           console.error('[saveRequirementsForContext] Error inserting requirements:', insertError);
           throw insertError;
         }
-        console.log('[saveRequirementsForContext] Insert successful, response:', insertedRecord);
+        console.log('[saveRequirementsForContext] Insert successful');
       }
 
-      console.log('[saveRequirementsForContext] Requirements saved successfully');
       return true;
     } catch (error) {
       console.error('[saveRequirementsForContext] Error:', error);
-      throw error; // Re-throw to be handled by the caller
+      throw error;
     }
   }
 
@@ -653,52 +676,248 @@ export default function UploadRequirements({ departments: initialDepartments }: 
     setNewRequirements(requirements)
   }
 
- // In the main upload-requirements component, update the renderRequirements function:
+  // Move sorting logic to component level
+  const handleSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
 
-const renderRequirements = (requirements: RequirementTableEntry[] | null | undefined, context: EditingContext) => {
-  const safeRequirements = requirements || [];
+  const getSortIcon = (columnKey: string) => {
+    if (sortConfig?.key !== columnKey) {
+      return <ChevronDown className="h-4 w-4 opacity-50" />;
+    }
+    return sortConfig.direction === 'asc' ? (
+      <ChevronDown className="h-4 w-4 rotate-180" />
+    ) : (
+      <ChevronDown className="h-4 w-4" />
+    );
+  };
 
-  const handleEditClick = (index: number) => {
-    const requirement = safeRequirements[index]
-    setEditingRequirement(requirement)
-    setEditingContext(context)
-    setIsEditDialogOpen(true)
-  }
+  // Create a function to sort requirements
+  const getSortedRequirements = (requirements: RequirementTableEntry[] | null | undefined) => {
+    const safeRequirements = requirements || [];
 
-  return (
-    <div className="relative border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm flex-1 flex flex-col h-full">
-      <div className="flex flex-col h-full">
-        <div className="overflow-auto flex-1 flex flex-col">
-          <Table className="table-fixed w-full">
-            <TableHeader className="sticky top-0 z-10 bg-blue-600 dark:bg-blue-800 block">
-              <TableRow className="flex">
-                <TableHead className="w-12 text-white border-r">#</TableHead>
-                <TableHead className="flex-1 text-white border-r">Requirement</TableHead>
-                <TableHead className="flex-1 text-white border-r">Description</TableHead>
-                <TableHead className="w-24 text-white border-r">Document</TableHead>
-                <TableHead className="w-32 text-white border-r">Automation</TableHead>
-                <TableHead className="w-48 text-white">Actions</TableHead>
+    if (!sortConfig) return safeRequirements;
+
+    return [...safeRequirements].sort((a, b) => {
+      let aValue = a[sortConfig.key as keyof RequirementTableEntry];
+      let bValue = b[sortConfig.key as keyof RequirementTableEntry];
+
+      // Handle different data types
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        aValue = aValue.toLowerCase();
+        bValue = bValue.toLowerCase();
+      }
+
+      if (aValue < bValue) {
+        return sortConfig.direction === 'asc' ? -1 : 1;
+      }
+      if (aValue > bValue) {
+        return sortConfig.direction === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+  };
+
+  // Move helper functions outside of renderRequirements
+  const getTypeDisplay = (req: RequirementTableEntry) => {
+    const context = req.requirement_context || {};
+    const baseType = req.type || 'standard';
+
+    if (baseType === 'company') {
+      return (
+        <div className="flex items-center gap-1">
+          <Badge variant="outline" className="text-xs bg-purple-100 text-purple-800">
+            Company
+          </Badge>
+          {context.billingEntity && context.billingEntity !== 'company' && (
+            <Badge variant="outline" className="text-xs">
+              {context.billingEntity}
+            </Badge>
+          )}
+        </div>
+      );
+    }
+
+    if (baseType === 'multi-document') {
+      return (
+        <div className="flex items-center gap-1">
+          <Badge variant="outline" className="text-xs bg-orange-100 text-orange-800">
+            Multi ({context.requiredDocumentCount || 1})
+          </Badge>
+        </div>
+      );
+    }
+
+    return (
+      <Badge variant="outline" className="text-xs capitalize">
+        {baseType}
+      </Badge>
+    );
+  };
+
+  const getAutomationDisplay = (req: RequirementTableEntry) => {
+    const webAutomation = req.web_automation;
+
+    if (webAutomation && webAutomation.automationId) {
+      return (
+        <div className="flex items-center gap-1">
+          <Zap className="h-4 w-4 text-blue-600" />
+          <span className="text-xs text-blue-600">
+            {webAutomation.automationName || 'Active'}
+          </span>
+        </div>
+      );
+    }
+
+    if (req.hasWebForm) {
+      return (
+        <div className="flex items-center gap-1">
+          <Zap className="h-4 w-4 text-yellow-600" />
+          <span className="text-xs text-yellow-600">Form Only</span>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-1">
+        <Zap className="h-4 w-4 text-gray-400" />
+        <span className="text-xs text-gray-400">None</span>
+      </div>
+    );
+  };
+
+  const getContextDisplay = (req: RequirementTableEntry) => {
+    const context = req.requirement_context || {};
+    const items = [];
+
+    if (context.applicantType && context.applicantType !== 'individual') {
+      items.push(
+        <Badge key="applicant" variant="outline" className="text-xs">
+          {context.applicantType === 'company' ? 'Company Only' :
+            context.applicantType === 'both' ? 'Both' : 'Individual'}
+        </Badge>
+      );
+    }
+
+    if (context.instructions) {
+      items.push(
+        <Badge key="instructions" variant="outline" className="text-xs bg-yellow-50 text-yellow-700">
+          Has Instructions
+        </Badge>
+      );
+    }
+
+    return items.length > 0 ? (
+      <div className="flex flex-wrap gap-1">{items}</div>
+    ) : (
+      <span className="text-xs text-gray-400">Standard</span>
+    );
+  };
+
+  const handleMove = (index: number, direction: 'up' | 'down') => {
+    // Implementation for moving requirements up/down
+    console.log(`Moving requirement at index ${index} ${direction}`);
+  };
+
+  const renderRequirements = (requirements: RequirementTableEntry[] | null | undefined, context: EditingContext) => {
+    const sortedRequirements = getSortedRequirements(requirements);
+
+    const handleEditClick = (index: number) => {
+      const requirement = sortedRequirements[index]
+      setEditingRequirement(requirement)
+      setEditingContext(context)
+      setIsEditDialogOpen(true)
+    }
+
+    return (
+      <div className="relative border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm flex-1 flex flex-col h-full">
+        <div className="relative overflow-auto h-[calc(100vh-240px)] border rounded-lg shadow-lg w-full">
+          <Table>
+            {/* Sticky Headers */}
+            <TableHeader className="sticky top-0 z-50">
+              {/* Stage Names Row */}
+              <TableRow className="bg-blue-800">
+                <TableHead className="sticky left-0 bg-blue-600 border-r-2 border-blue-300 font-bold z-50 text-white">
+                  #
+                </TableHead>
+                <TableHead
+                  className="sticky left-16 bg-blue-600 border-r-2 border-blue-300 font-bold z-50 text-white"
+                  onClick={() => handleSort('name')}
+                >
+                  <div className="flex items-center justify-between">
+                    <span>Requirement</span>
+                    {getSortIcon('name')}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="sticky left-80 bg-blue-600 border-r-2 border-blue-300 font-bold z-50 text-white"
+                  onClick={() => handleSort('description')}
+                >
+                  <div className="flex items-center justify-between">
+                    <span>Description</span>
+                    {getSortIcon('description')}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="sticky left-144 bg-blue-600 border-r-2 border-blue-300 font-bold z-50 text-white"
+                  onClick={() => handleSort('type')}
+                >
+                  <div className="flex items-center justify-between">
+                    <span>Type</span>
+                    {getSortIcon('type')}
+                  </div>
+                </TableHead>
+                <TableHead className="w-32 text-white bg-blue-600 border-r">
+                  Context
+                </TableHead>
+                <TableHead className="w-24 text-white bg-blue-600 border-r">
+                  Document
+                </TableHead>
+                <TableHead className="w-32 text-white bg-blue-600 border-r">
+                  Automation
+                </TableHead>
+                <TableHead className="w-48 text-white bg-blue-600">
+                  Actions
+                </TableHead>
               </TableRow>
             </TableHeader>
-          </Table>
-          <div className="overflow-y-auto flex-1">
-            <Table className="table-fixed w-full">
-              <TableBody className="block">
-                {safeRequirements.length > 0 ? (
-                  safeRequirements.map((req, idx) => (
-                    <TableRow key={req.id || req.tempId || idx} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 flex">
-                      <TableCell className="font-medium border-r w-12">
+            <TableBody>
+              {sortedRequirements.length > 0 ? (
+                sortedRequirements.map((req, idx) => (
+                  <TableRow key={req.id || req.tempId || idx} className="hover:bg-muted/30 transition-colors">
+                      <TableCell className="sticky left-0 bg-white border-2 border-gray-300 text-center font-mono text-sm z-30 font-semibold">
                         <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs">
                           {idx + 1}
                         </span>
                       </TableCell>
-                      <TableCell className="border-r flex-1">
-                        <span className="font-medium">{req.name}</span>
+                      <TableCell className="border-r flex-1 whitespace-nowrap">
+                        <div className="space-y-1 font-medium">{req.name}</div>
                       </TableCell>
-                      <TableCell className="border-r flex-1">
-                        <span className={!req.description ? 'text-gray-400 italic' : ''}>
-                          {req.description || 'No description'}
-                        </span>
+                      <TableCell className="border-r flex-1 whitespace-nowrap">
+                        <div className="space-y-1">
+                          <span className={!req.description ? 'text-gray-400 italic' : ''}>
+                            {req.description || 'No description'}
+                          </span>
+                          {req.requirement_context?.instructions && (
+                            <div className="text-xs text-blue-600 bg-blue-50 p-1 rounded truncate max-w-xs" title={req.requirement_context.instructions}>
+                              💡 {req.requirement_context.instructions}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="border-r w-24">
+                        <div className="flex items-center justify-center">
+                          {getTypeDisplay(req)}
+                        </div>
+                      </TableCell>
+                      <TableCell className="border-r w-32">
+                        <div className="flex items-center justify-center">
+                          {getContextDisplay(req)}
+                        </div>
                       </TableCell>
                       <TableCell className="border-r w-24">
                         <div className="flex items-center justify-center">
@@ -717,22 +936,7 @@ const renderRequirements = (requirements: RequirementTableEntry[] | null | undef
                       </TableCell>
                       <TableCell className="border-r w-32">
                         <div className="flex items-center justify-center">
-                          {req.hasWebForm && req.automationId ? (
-                            <div className="flex items-center gap-1">
-                              <Zap className="h-4 w-4 text-blue-600" />
-                              <span className="text-xs text-blue-600">Active</span>
-                            </div>
-                          ) : req.hasWebForm ? (
-                            <div className="flex items-center gap-1">
-                              <Zap className="h-4 w-4 text-yellow-600" />
-                              <span className="text-xs text-yellow-600">Form Only</span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-1">
-                              <Zap className="h-4 w-4 text-gray-400" />
-                              <span className="text-xs text-gray-400">None</span>
-                            </div>
-                          )}
+                          {getAutomationDisplay(req)}
                         </div>
                       </TableCell>
                       <TableCell className="w-48">
@@ -759,7 +963,7 @@ const renderRequirements = (requirements: RequirementTableEntry[] | null | undef
                             size="sm"
                             className="h-8 w-8 p-0"
                             onClick={() => handleMove(idx, 'down')}
-                            disabled={idx === safeRequirements.length - 1}
+                            disabled={idx === sortedRequirements.length - 1}
                           >
                             <ArrowDown className="h-3.5 w-3.5" />
                           </Button>
@@ -774,26 +978,25 @@ const renderRequirements = (requirements: RequirementTableEntry[] | null | undef
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-gray-500">
-                      <div className="flex flex-col items-center space-y-2">
-                        <FileText className="h-8 w-8 text-gray-400" />
-                        <p>No requirements added yet</p>
-                        <p className="text-xs text-gray-400">Click the button above to add requirements</p>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                    ))
+                    ) : (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8 text-gray-500">
+                        <div className="flex flex-col items-center space-y-2">
+                          <FileText className="h-8 w-8 text-gray-400" />
+                          <p>No requirements added yet</p>
+                          <p className="text-xs text-gray-400">Click the button above to add requirements</p>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+              )}
+                  </TableBody>
+          </Table>
         </div>
       </div>
-    </div>
-  )
-}
+    )
+  }
+
   const handleSaveRequirement = async (updatedRequirement: ApiRequirement) => {
     console.log('[handleSaveRequirement] Starting with requirement:', JSON.stringify(updatedRequirement, null, 2));
     console.log('[handleSaveRequirement] Current editing context:', editingContext);
@@ -917,6 +1120,7 @@ const renderRequirements = (requirements: RequirementTableEntry[] | null | undef
       });
     }
   }
+
   const handleDeptClick = (deptId: string) => {
     setActiveDept(deptId);
   };
@@ -992,7 +1196,7 @@ const renderRequirements = (requirements: RequirementTableEntry[] | null | undef
     const currentSubclass = currentClass?.subClasses?.find(sc => sc.id.toString() === currentSubclassId)
 
     return (
-      <div className="space-y-4 h-[calc(100vh-200px)] flex flex-col flex-1 overflow-hidden h-full overflow-auto">
+      <div className="space-y-4">
         {/* Header */}
         <div className="border-b pb-4">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
@@ -1110,7 +1314,7 @@ const renderRequirements = (requirements: RequirementTableEntry[] | null | undef
     <div className="space-y-4">
       <h2 className="text-2xl font-bold">GOVT Upload Processing Requirements</h2>
       <p className="text-sm text-gray-500">Manage GOVT upload processing requirements for each department, subdepartment, class, and subclass</p>
-      <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-hidden">
+      <div className="flex h-[calc(100vh-70px)] border rounded-lg overflow-hidden">
         <DepartmentSidebar
           departments={departments}
           activeDept={activeDept}
@@ -1128,6 +1332,7 @@ const renderRequirements = (requirements: RequirementTableEntry[] | null | undef
           {renderMainContent()}
         </div>
       </div>
+
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent>
@@ -1160,6 +1365,8 @@ const renderRequirements = (requirements: RequirementTableEntry[] | null | undef
         isSubmitting={isSubmitting}
         context={addContext}
       />
+
+      {/* Edit Requirement Dialog */}
       <EditRequirementDialog
         isOpen={isEditDialogOpen}
         onOpenChange={setIsEditDialogOpen}

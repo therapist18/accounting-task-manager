@@ -8,13 +8,13 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Checkbox } from "@/components/ui/checkbox"
-import { 
-  Loader2, 
-  FileText, 
-  Check, 
-  AlertTriangle, 
-  Eye, 
-  Upload, 
+import {
+  Loader2,
+  FileText,
+  Check,
+  AlertTriangle,
+  Eye,
+  Upload,
   X,
   Plus,
   PlayCircle,
@@ -47,6 +47,9 @@ export function UploadRequirementsDialog({
   const [selectedDocuments, setSelectedDocuments] = useState<Record<string, any[]>>({})
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
   const [previewRequirement, setPreviewRequirement] = useState<any>(null)
+  const [applicantCompanies, setApplicantCompanies] = useState<any[]>([])
+  const [selectedCompanies, setSelectedCompanies] = useState<Record<string, string>>({}) // requirementId -> companyId
+  const [loadingApplicant, setLoadingApplicant] = useState(false)
 
   useEffect(() => {
     if (task && open) {
@@ -143,10 +146,10 @@ export function UploadRequirementsDialog({
   const loadRequirementDocuments = async (task: any) => {
     try {
       let requirementData = null;
-      
+
       // Construct the proper class_id format: subdepartment_id_class_id
       let constructedClassId = null;
-      
+
       if (task.subclass_id && task.class_id) {
         // For subclass, we might need a different format or use subclass_id directly
         constructedClassId = task.subclass_id;
@@ -159,16 +162,16 @@ export function UploadRequirementsDialog({
           constructedClassId = task.class_id;
         }
       }
-      
+
       console.log('Searching for requirements with class_id:', constructedClassId);
-      
+
       if (constructedClassId) {
         const { data, error } = await supabase
           .from('tm_class_requirements')
           .select('*')
           .eq('class_id', constructedClassId)
           .maybeSingle();
-        
+
         if (error) {
           console.error('Database error:', error);
         } else if (data) {
@@ -186,11 +189,11 @@ export function UploadRequirementsDialog({
           document: null, // Will be set after applicant documents are loaded
           status: 'missing'
         }));
-        
+
         console.log('Enriched requirements:', enrichedRequirements);
         return enrichedRequirements;
       }
-      
+
       return [];
     } catch (error) {
       console.error('Error loading requirement documents:', error);
@@ -202,6 +205,8 @@ export function UploadRequirementsDialog({
     if (!task.id) return;
 
     try {
+      setLoadingApplicant(true);
+
       // First, find the individual using registry search
       const individual = {
         full_name: task.applicant_name || task.principal_member_name,
@@ -211,23 +216,53 @@ export function UploadRequirementsDialog({
 
       const registryMatch = await searchRegistryIndividuals(individual);
       let documents = [];
-      
+      let companies = [];
+
       if (registryMatch.exactMatch) {
         // Fetch documents for this individual
         documents = await fetchApplicantDocuments(registryMatch.exactMatch.id);
         setApplicantDocuments(documents);
+
+        // Extract companies from bill_to field
+        if (registryMatch.exactMatch.bill_to) {
+          // Handle different bill_to formats
+          if (Array.isArray(registryMatch.exactMatch.bill_to)) {
+            companies = registryMatch.exactMatch.bill_to;
+          } else if (typeof registryMatch.exactMatch.bill_to === 'object') {
+            companies = [registryMatch.exactMatch.bill_to];
+          }
+        }
+
+        // Also check directorship_history for additional companies
+        if (registryMatch.exactMatch.directorship_history && Array.isArray(registryMatch.exactMatch.directorship_history)) {
+          const directorshipCompanies = registryMatch.exactMatch.directorship_history
+            .filter((dir: any) => dir.company_name)
+            .map((dir: any) => ({
+              id: dir.company_id || `dir_${dir.company_name}`,
+              name: dir.company_name,
+              registration_number: dir.company_registration_number,
+              type: 'directorship',
+              position: dir.position,
+              from_date: dir.from_date,
+              to_date: dir.to_date
+            }));
+
+          companies = [...companies, ...directorshipCompanies];
+        }
+
+        setApplicantCompanies(companies);
       }
 
       // Load requirements from database
       const requirements = await loadRequirementDocuments(task);
-      
+
       // Now match requirements with documents
       const enrichedRequirements = requirements.map(req => {
-        const matchingDocs = documents.filter(doc => 
-          doc.document_id === req.kycDocumentId || 
+        const matchingDocs = documents.filter(doc =>
+          doc.document_id === req.kycDocumentId ||
           doc.kyc_document_id === req.kycDocumentId
         );
-        
+
         return {
           ...req,
           documents: matchingDocs,
@@ -239,13 +274,42 @@ export function UploadRequirementsDialog({
       setRequirementsWithDocuments(enrichedRequirements);
     } catch (error) {
       console.error('Error loading applicant documents:', error);
+    } finally {
+      setLoadingApplicant(false);
     }
   };
 
-  // Add missing helper functions
+  // Add function to fetch company documents
+  const fetchCompanyDocuments = async (companyId: string, requirement: any) => {
+    try {
+      // This would fetch documents for the specific company
+      // You might need to implement this based on your company documents storage
+      const { data: companyDocs, error } = await supabase
+        .from('company_documents') // Adjust table name as needed
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('document_type', requirement.kycDocumentId);
+
+      if (error) throw error;
+      return companyDocs || [];
+    } catch (error) {
+      console.error('Error fetching company documents:', error);
+      return [];
+    }
+  };
+
+  const handleCompanySelection = (requirementId: string, companyId: string) => {
+    setSelectedCompanies(prev => ({
+      ...prev,
+      [requirementId]: companyId
+    }));
+
+    // Optionally refresh documents for this requirement
+    // You might want to fetch company-specific documents here
+  };
   const getDocumentForRequirement = (requirement: any) => {
     if (!requirement.kycDocumentId) return [];
-    
+
     // Return all documents matching this requirement type
     return applicantDocuments.filter(doc =>
       doc.document_id === requirement.kycDocumentId ||
@@ -279,144 +343,164 @@ export function UploadRequirementsDialog({
     // Check if requirement specifies a count, default to 1
     return requirement.requiredCount || 1
   }
-
+  // Update the requirement status function
   const getRequirementStatus = (requirement: any) => {
     const availableDocs = getDocumentForRequirement(requirement)
     const selectedDocs = selectedDocuments[requirement.id] || []
-    const requiredCount = getRequiredDocumentCount(requirement)
+    const requiredCount = requirement.requiredDocumentCount || 1
 
     if (availableDocs.length === 0) {
-      return { status: 'missing', message: 'No documents found', color: 'red' }
+      return {
+        status: 'missing',
+        message: requirement.type === 'company'
+          ? 'Company documents needed'
+          : `No documents found`,
+        color: 'red'
+      }
     }
 
     if (selectedDocs.length === 0) {
-      return { status: 'available', message: `${availableDocs.length} available - Select documents`, color: 'blue' }
+      return {
+        status: 'available',
+        message: `${availableDocs.length} available - Select ${requiredCount}`,
+        color: 'blue'
+      }
     }
 
     if (selectedDocs.length < requiredCount) {
-      return { status: 'partial', message: `${selectedDocs.length}/${requiredCount} selected - Need more`, color: 'yellow' }
+      return {
+        status: 'partial',
+        message: `${selectedDocs.length}/${requiredCount} selected - Need ${requiredCount - selectedDocs.length} more`,
+        color: 'yellow'
+      }
     }
 
     if (selectedDocs.length === requiredCount) {
-      return { status: 'complete', message: `${selectedDocs.length}/${requiredCount} selected - Complete`, color: 'green' }
+      return {
+        status: 'complete',
+        message: `${selectedDocs.length}/${requiredCount} selected - Complete`,
+        color: 'green'
+      }
     }
 
-    return { status: 'excess', message: `${selectedDocs.length}/${requiredCount} selected - Too many`, color: 'orange' }
+    return {
+      status: 'excess',
+      message: `${selectedDocs.length}/${requiredCount} selected - Too many`,
+      color: 'orange'
+    }
   }
 
-// In UploadRequirementsDialog.tsx, update the triggerFormAutomation function:
-
-const triggerFormAutomation = async (requirement: any) => {
-  if (!requirement.automationId) {
-    toast({
-      title: "No Automation Configured",
-      description: "This requirement doesn't have an automation configured.",
-      variant: "destructive"
-    })
-    return
-  }
-
-  try {
-    // Fetch the automation details
-    const { data: automation, error } = await supabase
-      .from('tm_automations')
-      .select('*')
-      .eq('id', requirement.automationId)
-      .single()
-
-    if (error) throw error
-
-    if (!automation.is_active) {
+  const triggerFormAutomation = async (requirement: any) => {
+    if (!requirement.automationId) {
       toast({
-        title: "Automation Inactive",
-        description: "The linked automation is currently inactive.",
+        title: "No Automation Configured",
+        description: "This requirement doesn't have an automation configured.",
         variant: "destructive"
       })
       return
     }
 
-    // Prepare the payload for the webhook
-    const payload = {
-      requirementId: requirement.id,
-      requirementName: requirement.name,
-      formName: requirement.webFormName,
-      taskId: task?.id,
-      applicantName: task?.applicant_name || task?.principal_member_name,
-      rNumber: task?.r_number,
-      timestamp: new Date().toISOString(),
-      // Add any other relevant task data
-      taskData: {
-        jobDescription: task?.job_description,
-        departmentId: task?.department?.id,
-        subdepartmentId: task?.subdepartment?.id,
-        classId: task?.class_id,
-        subclassId: task?.subclass_id
+    try {
+      // Fetch the automation details
+      const { data: automation, error } = await supabase
+        .from('tm_automations')
+        .select('*')
+        .eq('id', requirement.automationId)
+        .single()
+
+      if (error) throw error
+
+      if (!automation.is_active) {
+        toast({
+          title: "Automation Inactive",
+          description: "The linked automation is currently inactive.",
+          variant: "destructive"
+        })
+        return
       }
-    }
 
-    // Show loading state
-    toast({
-      title: "Triggering Automation",
-      description: `Starting ${automation.name} for ${requirement.name}...`,
-    })
+      // Prepare the payload for the webhook
+      const payload = {
+        requirementId: requirement.id,
+        requirementName: requirement.name,
+        formName: requirement.webFormName,
+        taskId: task?.id,
+        applicantName: task?.applicant_name || task?.principal_member_name,
+        rNumber: task?.r_number,
+        timestamp: new Date().toISOString(),
+        // Add any other relevant task data
+        taskData: {
+          jobDescription: task?.job_description,
+          departmentId: task?.department?.id,
+          subdepartmentId: task?.subdepartment?.id,
+          classId: task?.class_id,
+          subclassId: task?.subclass_id
+        }
+      }
 
-    // Call the webhook
-    const webhookResponse = await fetch(automation.webhook_url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'TaskManager-Automation/1.0'
-      },
-      body: JSON.stringify(payload)
-    })
-
-    if (!webhookResponse.ok) {
-      throw new Error(`Webhook failed with status: ${webhookResponse.status}`)
-    }
-
-    const result = await webhookResponse.json()
-
-    // Log the automation trigger
-    await supabase
-      .from('tm_automation_logs')
-      .insert({
-        automation_id: automation.id,
-        requirement_id: requirement.id,
-        task_id: task?.id,
-        payload: payload,
-        response: result,
-        status: 'success',
-        triggered_at: new Date().toISOString()
+      // Show loading state
+      toast({
+        title: "Triggering Automation",
+        description: `Starting ${automation.name} for ${requirement.name}...`,
       })
 
-    toast({
-      title: "Automation Triggered Successfully",
-      description: `${automation.name} has been started for ${requirement.name}`,
-      variant: "default"
-    })
-
-  } catch (error) {
-    console.error('Error triggering automation:', error)
-
-    // Log the error
-    await supabase
-      .from('tm_automation_logs')
-      .insert({
-        automation_id: requirement.automationId,
-        requirement_id: requirement.id,
-        task_id: task?.id,
-        payload: { error: error.message },
-        status: 'error',
-        triggered_at: new Date().toISOString()
+      // Call the webhook
+      const webhookResponse = await fetch(automation.webhook_url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'TaskManager-Automation/1.0'
+        },
+        body: JSON.stringify(payload)
       })
 
-    toast({
-      title: "Automation Failed",
-      description: `Failed to trigger automation: ${error.message}`,
-      variant: "destructive"
-    })
+      if (!webhookResponse.ok) {
+        throw new Error(`Webhook failed with status: ${webhookResponse.status}`)
+      }
+
+      const result = await webhookResponse.json()
+
+      // Log the automation trigger
+      await supabase
+        .from('tm_automation_logs')
+        .insert({
+          automation_id: automation.id,
+          requirement_id: requirement.id,
+          task_id: task?.id,
+          payload: payload,
+          response: result,
+          status: 'success',
+          triggered_at: new Date().toISOString()
+        })
+
+      toast({
+        title: "Automation Triggered Successfully",
+        description: `${automation.name} has been started for ${requirement.name}`,
+        variant: "default"
+      })
+
+    } catch (error) {
+      console.error('Error triggering automation:', error)
+
+      // Log the error
+      await supabase
+        .from('tm_automation_logs')
+        .insert({
+          automation_id: requirement.automationId,
+          requirement_id: requirement.id,
+          task_id: task?.id,
+          payload: { error: error.message },
+          status: 'error',
+          triggered_at: new Date().toISOString()
+        })
+
+      toast({
+        title: "Automation Failed",
+        description: `Failed to trigger automation: ${error.message}`,
+        variant: "destructive"
+      })
+    }
   }
-}
 
   const getDocumentPreviewUrl = async (document: any) => {
     try {
@@ -463,6 +547,57 @@ const triggerFormAutomation = async (requirement: any) => {
     }
   };
 
+  // Update the save selections function
+const handleSaveSelections = async () => {
+  try {
+    setIsLoading(true);
+    
+    // Prepare the selections data
+    const selectionsData = Object.entries(selectedDocuments).map(([requirementId, documents]) => {
+      const requirement = requirementsWithDocuments.find(r => r.id === requirementId);
+      
+      return {
+        requirementId,
+        requirementName: requirement?.name,
+        requirementType: requirement?.type,
+        selectedDocuments: documents,
+        selectedCompany: requirement?.type === 'company' ? selectedCompanies[requirementId] : null,
+        companyDetails: requirement?.type === 'company' && selectedCompanies[requirementId] 
+          ? applicantCompanies.find(c => c.id === selectedCompanies[requirementId])
+          : null
+      };
+    });
+    
+    // Save to your task requirements or create a new table for tracking selections
+    const { error } = await supabase
+      .from('tm_task')
+      .upsert({
+        task_id: task.id,
+        selections: selectionsData,
+        updated_at: new Date().toISOString()
+      });
+    
+    if (error) throw error;
+    
+    toast({
+      title: "Success",
+      description: "Document selections and company assignments saved successfully",
+      variant: "default"
+    });
+    
+    onUploadComplete?.();
+  } catch (error) {
+    console.error('Error saving selections:', error);
+    toast({
+      title: "Error",
+      description: "Failed to save selections. Please try again.",
+      variant: "destructive"
+    });
+  } finally {
+    setIsLoading(false);
+  }
+};
+
   return (
     <>
       <Dialog open={open} onOpenChange={onClose}>
@@ -495,49 +630,143 @@ const triggerFormAutomation = async (requirement: any) => {
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
                               <div className="flex items-center gap-3 mb-2">
-                                <div className="p-2 rounded-lg bg-blue-50">
-                                  <FileText className="h-5 w-5 text-blue-600" />
+                                <div className={`p-2 rounded-lg ${req.type === 'company' ? 'bg-purple-50' :
+                                  req.type === 'multi-document' ? 'bg-orange-50' :
+                                    'bg-blue-50'
+                                  }`}>
+                                  <FileText className={`h-5 w-5 ${req.type === 'company' ? 'text-purple-600' :
+                                    req.type === 'multi-document' ? 'text-orange-600' :
+                                      'text-blue-600'
+                                    }`} />
                                 </div>
                                 <div>
                                   <CardTitle className="text-lg font-semibold">{req.name}</CardTitle>
                                   {req.description && (
                                     <p className="text-sm text-muted-foreground mt-1">{req.description}</p>
                                   )}
+                                  {req.instructions && (
+                                    <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800">
+                                      <Info className="h-3 w-3 inline mr-1" />
+                                      {req.instructions}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
-                              
+
                               <div className="flex items-center gap-2 flex-wrap">
-                                {req.kycDocumentId && (
-                                  <Badge variant="outline" className="text-xs">
-                                    <FileText className="h-3 w-3 mr-1" />
-                                    KYC: {req.kycDocumentId}
-                                  </Badge>
+                                {req.type === 'company' && applicantCompanies.length > 0 && (
+                                  <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                                    <Label className="text-sm font-medium text-purple-800 mb-2 block">
+                                      Select Company for Billing & Documentation
+                                    </Label>
+                                    <Select
+                                      value={selectedCompanies[req.id] || ''}
+                                      onValueChange={(value) => handleCompanySelection(req.id, value)}
+                                    >
+                                      <SelectTrigger className="bg-white">
+                                        <SelectValue placeholder="Choose which company to bill and get documents from" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {applicantCompanies.map((company, idx) => (
+                                          <SelectItem key={company.id || idx} value={company.id || idx}>
+                                            <div className="flex flex-col">
+                                              <span className="font-medium">{company.name || company.company_name}</span>
+                                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                {company.registration_number && (
+                                                  <span>Reg: {company.registration_number}</span>
+                                                )}
+                                                {company.type && (
+                                                  <Badge variant="outline" className="text-xs">
+                                                    {company.type}
+                                                  </Badge>
+                                                )}
+                                                {company.position && (
+                                                  <span>({company.position})</span>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+
+                                    {selectedCompanies[req.id] && (
+                                      <div className="mt-2 text-xs text-purple-700">
+                                        <Info className="h-3 w-3 inline mr-1" />
+                                        Documents will be sourced from and billed to: {
+                                          applicantCompanies.find(c => c.id === selectedCompanies[req.id])?.name ||
+                                          applicantCompanies.find(c => c.id === selectedCompanies[req.id])?.company_name
+                                        }
+                                      </div>
+                                    )}
+                                  </div>
                                 )}
-                                
-                                {req.isRequired && (
-                                  <Badge variant="destructive" className="text-xs">
-                                    Required
+
+                                {/* Show warning if company document required but no companies available */}
+                                {req.type === 'company' && applicantCompanies.length === 0 && !loadingApplicant && (
+                                  <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                    <div className="flex items-center text-yellow-800">
+                                      <AlertTriangle className="h-4 w-4 mr-2" />
+                                      <div>
+                                        <p className="text-sm font-medium">No companies found</p>
+                                        <p className="text-xs text-yellow-700 mt-1">
+                                          This applicant has no associated companies in their profile.
+                                          Company documents cannot be processed without a billing company.
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Loading state for applicant data */}
+                                {loadingApplicant && (
+                                  <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <div className="flex items-center text-blue-800">
+                                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                      <span className="text-sm">Loading applicant companies...</span>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {req.type === 'multi-document' && (
+                                  <Badge variant="outline" className="text-xs bg-orange-100 text-orange-800">
+                                    <Layers className="h-3 w-3 mr-1" />
+                                    Requires {req.requiredDocumentCount || 1} documents
                                   </Badge>
                                 )}
 
-                                <Badge 
-                                  variant={status.color === 'green' ? 'default' : 'secondary'}
-                                  className={`text-xs ${
-                                    status.color === 'red' ? 'bg-red-100 text-red-800' :
-                                    status.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
-                                    status.color === 'blue' ? 'bg-blue-100 text-blue-800' :
-                                    status.color === 'green' ? 'bg-green-100 text-green-800' :
-                                    'bg-orange-100 text-orange-800'
-                                  }`}
-                                >
-                                  {status.message}
-                                </Badge>
-
-                                {requiredCount > 1 && (
+                                {req.applicantType && req.applicantType !== 'individual' && (
                                   <Badge variant="outline" className="text-xs">
-                                    Requires {requiredCount} documents
+                                    {req.applicantType === 'company' ? 'Company Only' :
+                                      req.applicantType === 'both' ? 'Individual & Company' : 'Individual'}
                                   </Badge>
                                 )}
+
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {req.isRequired && (
+                                    <Badge variant="destructive" className="text-xs">
+                                      Required
+                                    </Badge>
+                                  )}
+
+                                  <Badge
+                                    variant={status.color === 'green' ? 'default' : 'secondary'}
+                                    className={`text-xs ${status.color === 'red' ? 'bg-red-100 text-red-800' :
+                                      status.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
+                                        status.color === 'blue' ? 'bg-blue-100 text-blue-800' :
+                                          status.color === 'green' ? 'bg-green-100 text-green-800' :
+                                            'bg-orange-100 text-orange-800'
+                                      }`}
+                                  >
+                                    {status.message}
+                                  </Badge>
+
+                                  {requiredCount > 1 && (
+                                    <Badge variant="outline" className="text-xs">
+                                      Requires {requiredCount} documents
+                                    </Badge>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -573,16 +802,16 @@ const triggerFormAutomation = async (requirement: any) => {
 
                             {/* Form Automation Button */}
                             {req.hasWebForm && req.automationId && (
-  <Button
-    variant="outline"
-    size="sm"
-    className="flex items-center gap-2"
-    onClick={() => triggerFormAutomation(req)}
-  >
-    <PlayCircle className="h-4 w-4" />
-    Trigger {req.webFormName || 'Form'} Automation
-  </Button>
-)}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex items-center gap-2"
+                                onClick={() => triggerFormAutomation(req)}
+                              >
+                                <PlayCircle className="h-4 w-4" />
+                                Trigger {req.webFormName || 'Form'} Automation
+                              </Button>
+                            )}
 
                             {/* Status Indicator */}
                             {status.status === 'complete' && (
@@ -596,26 +825,48 @@ const triggerFormAutomation = async (requirement: any) => {
                           {/* Document Selection Area */}
                           {availableDocs.length > 0 && (
                             <div className="bg-gray-50 rounded-lg p-4">
-                              <h4 className="text-sm font-medium mb-3">
-                                Available Documents ({availableDocs.length})
-                                {requiredCount > 1 && ` - Select ${requiredCount}`}
-                              </h4>
-                              
+                              <div className="flex items-center justify-between mb-3">
+                                <h4 className="text-sm font-medium">
+                                  Available Documents ({availableDocs.length})
+                                  {requiredCount > 1 && ` - Select ${requiredCount}`}
+                                </h4>
+
+                                {req.type === 'company' && selectedCompanies[req.id] && (
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="outline" className="text-xs bg-purple-100 text-purple-800">
+                                      <Building className="h-3 w-3 mr-1" />
+                                      {applicantCompanies.find(c => c.id === selectedCompanies[req.id])?.name ||
+                                        applicantCompanies.find(c => c.id === selectedCompanies[req.id])?.company_name}
+                                    </Badge>
+                                  </div>
+                                )}
+                              </div>
+
+                              {req.type === 'company' && !selectedCompanies[req.id] && (
+                                <div className="mb-3 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-800">
+                                  <AlertTriangle className="h-3 w-3 inline mr-1" />
+                                  Please select a company above to view available documents
+                                </div>
+                              )}
+
                               <div className="space-y-2 max-h-32 overflow-y-auto">
                                 {availableDocs.map((doc, docIndex) => {
                                   const isSelected = selectedDocs.some(selected => selected.id === doc.id)
-                                  
+
                                   return (
                                     <div key={docIndex} className="flex items-center space-x-3 p-2 bg-white rounded border">
                                       <Checkbox
                                         id={`${req.id}-${doc.id}`}
                                         checked={isSelected}
-                                        onCheckedChange={(checked) => 
+                                        onCheckedChange={(checked) =>
                                           handleDocumentSelection(req.id, doc, checked as boolean)
                                         }
-                                        disabled={!isSelected && selectedDocs.length >= requiredCount}
+                                        disabled={
+                                          (!isSelected && selectedDocs.length >= requiredCount) ||
+                                          (req.type === 'company' && !selectedCompanies[req.id])
+                                        }
                                       />
-                                      
+
                                       <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2">
                                           <p className="text-sm font-medium truncate">
@@ -624,12 +875,20 @@ const triggerFormAutomation = async (requirement: any) => {
                                           <Badge variant="outline" className="text-xs">
                                             {doc.status || 'pending'}
                                           </Badge>
+                                          {req.type === 'company' && (
+                                            <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700">
+                                              Company Doc
+                                            </Badge>
+                                          )}
                                         </div>
-                                        <p className="text-xs text-muted-foreground">
-                                          Uploaded: {new Date(doc.created_at).toLocaleDateString()}
-                                        </p>
+                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                          <span>Uploaded: {new Date(doc.created_at).toLocaleDateString()}</span>
+                                          {doc.company_name && (
+                                            <span>• Company: {doc.company_name}</span>
+                                          )}
+                                        </div>
                                       </div>
-                                      
+
                                       <Button
                                         variant="ghost"
                                         size="sm"
@@ -642,27 +901,6 @@ const triggerFormAutomation = async (requirement: any) => {
                                   )
                                 })}
                               </div>
-                              
-                              {/* Selection Summary */}
-                              {selectedDocs.length > 0 && (
-                                <div className="mt-3 pt-3 border-t">
-                                  <div className="flex items-center justify-between text-sm">
-                                    <span className="text-muted-foreground">
-                                      Selected: {selectedDocs.length} / {requiredCount}
-                                    </span>
-                                    {selectedDocs.length !== requiredCount && (
-                                      <span className={`font-medium ${
-                                        selectedDocs.length < requiredCount ? 'text-yellow-600' : 'text-orange-600'
-                                      }`}>
-                                        {selectedDocs.length < requiredCount 
-                                          ? `Need ${requiredCount - selectedDocs.length} more`
-                                          : `${selectedDocs.length - requiredCount} too many`
-                                        }
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
                             </div>
                           )}
 
@@ -702,7 +940,7 @@ const triggerFormAutomation = async (requirement: any) => {
           )}
 
           <Separator className="my-4" />
-          
+
           <div className="flex justify-between items-center">
             <div className="text-sm text-muted-foreground">
               {requirementsWithDocuments.length > 0 && (
@@ -711,12 +949,12 @@ const triggerFormAutomation = async (requirement: any) => {
                 </span>
               )}
             </div>
-            
+
             <div className="flex gap-3">
               <Button variant="outline" onClick={onClose}>
                 Close
               </Button>
-              <Button 
+              <Button
                 onClick={() => {
                   // Handle save/submit logic
                   console.log('Selected documents:', selectedDocuments)
@@ -740,7 +978,7 @@ const triggerFormAutomation = async (requirement: any) => {
               {previewRequirement?.name} - Documents ({getDocumentForRequirement(previewRequirement || {}).length})
             </DialogTitle>
           </DialogHeader>
-          
+
           <div className="flex-1 overflow-auto p-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {getDocumentForRequirement(previewRequirement || {}).map((doc, index) => (
@@ -755,24 +993,23 @@ const triggerFormAutomation = async (requirement: any) => {
                         />
                       )}
                     </div>
-                    
+
                     <div className="p-4 border-t">
                       <div className="flex items-center justify-between mb-2">
                         <p className="text-sm font-medium truncate max-w-[70%]">
                           {doc.file_path?.split('/').pop() || 'Unknown file'}
                         </p>
-                        <Badge 
-                          variant="outline" 
-                          className={`text-xs ${
-                            doc.status === 'valid' ? 'bg-green-50 text-green-700' :
+                        <Badge
+                          variant="outline"
+                          className={`text-xs ${doc.status === 'valid' ? 'bg-green-50 text-green-700' :
                             doc.status === 'pending' ? 'bg-yellow-50 text-yellow-700' :
-                            'bg-red-50 text-red-700'
-                          }`}
+                              'bg-red-50 text-red-700'
+                            }`}
                         >
                           {doc.status || 'pending'}
                         </Badge>
                       </div>
-                      
+
                       <div className="grid grid-cols-2 gap-2 text-sm text-muted-foreground mb-4">
                         <div>
                           <p className="text-xs text-gray-500">Uploaded</p>
@@ -793,7 +1030,7 @@ const triggerFormAutomation = async (requirement: any) => {
                           </div>
                         )}
                       </div>
-                      
+
                       <div className="grid grid-cols-2 gap-3">
                         <Button
                           variant="outline"

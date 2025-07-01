@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
-import { FileText, Info, Plus, X, Zap, Webhook } from "lucide-react"
+import { FileText, Info, Plus, X, Zap, Webhook, Users } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
@@ -15,7 +15,7 @@ import { toast } from "@/hooks/use-toast"
 export interface RequirementForm {
   name: string
   description: string
-  type: 'standard' | 'conditional' | 'optional'
+  type: 'standard' | 'conditional' | 'optional' | 'company' | 'multi-document'
   isRequired: boolean
   isVisible: boolean
   kycDocumentId?: string
@@ -23,6 +23,12 @@ export interface RequirementForm {
   hasWebForm?: boolean
   webFormName?: string
   automationId?: string
+
+  // New fields
+  applicantType?: 'individual' | 'company' | 'both'
+  requiredDocumentCount?: number
+  billingEntity?: 'applicant' | 'company' | 'either'
+  instructions?: string
 }
 
 interface AddRequirementsDialogProps {
@@ -54,11 +60,15 @@ export function AddRequirementsDialog({
     kycDocumentOption: 'create_new',
     hasWebForm: false,
     webFormName: '',
-    automationId: ''
+    automationId: '',
+    applicantType: 'individual',
+    requiredDocumentCount: 1,
+    billingEntity: 'applicant',
+    instructions: ''
   }])
   const [bulkInput, setBulkInput] = useState('')
   const [kycDocuments, setKycDocuments] = useState<any[]>([])
-  const [automationTypes, setAutomationTypes] = useState<AutomationType[]>([])
+  const [automationTypes, setAutomationTypes] = useState<any[]>([])
   const [loadingKycDocs, setLoadingKycDocs] = useState(false)
   const [loadingAutomations, setLoadingAutomations] = useState(false)
 
@@ -73,7 +83,7 @@ export function AddRequirementsDialog({
   const fetchKycDocuments = async () => {
     try {
       setLoadingKycDocs(true)
-      
+
       const { data, error } = await supabase
         .from('acc_portal_kyc')
         .select('id, name, display_name')
@@ -97,7 +107,7 @@ export function AddRequirementsDialog({
   const fetchAutomationTypes = async () => {
     try {
       setLoadingAutomations(true)
-      
+
       const { data, error } = await supabase
         .from('tm_automations')
         .select('id, name, description, webhook_url, webhook_type, is_active')
@@ -163,19 +173,50 @@ export function AddRequirementsDialog({
             kycDocumentId = await createNewKycDocument(req.name, departmentName)
           }
 
+          // Prepare web automation data
+          let webAutomation = null;
+          if (req.hasWebForm && req.automationId) {
+            const selectedAutomation = automationTypes.find(a => a.id === req.automationId);
+            if (selectedAutomation) {
+              webAutomation = {
+                automationId: req.automationId,
+                automationName: selectedAutomation.name,
+                webFormName: req.webFormName,
+                webhookUrl: selectedAutomation.webhook_url,
+                webhookType: selectedAutomation.webhook_type,
+                isActive: selectedAutomation.is_active,
+                createdAt: new Date().toISOString()
+              };
+            }
+          }
+
+          // Prepare requirement context data
+          const requirementContext = {
+            applicantType: req.applicantType || 'individual',
+            requiredDocumentCount: req.requiredDocumentCount || 1,
+            billingEntity: req.billingEntity || 'applicant',
+            instructions: req.instructions?.trim() || '',
+            type: req.type,
+            conditions: [],
+            documentTypes: []
+          };
+
           return {
             ...req,
             kycDocumentId,
             // Ensure automation fields are included
             hasWebForm: req.hasWebForm || false,
             webFormName: req.webFormName || '',
-            automationId: req.automationId || ''
+            automationId: req.automationId || '',
+            // Add structured data fields
+            web_automation: webAutomation,
+            requirement_context: requirementContext
           }
         })
       )
 
       await onSubmit(processedRequirements)
-      
+
       // Reset the form after successful submission
       setNewRequirements([{
         name: '',
@@ -186,10 +227,14 @@ export function AddRequirementsDialog({
         kycDocumentOption: 'create_new',
         hasWebForm: false,
         webFormName: '',
-        automationId: ''
+        automationId: '',
+        applicantType: 'individual',
+        requiredDocumentCount: 1,
+        billingEntity: 'applicant',
+        instructions: ''
       }])
       setBulkInput('')
-      
+
     } catch (error) {
       console.error('Error processing requirements:', error)
       toast({
@@ -211,7 +256,11 @@ export function AddRequirementsDialog({
       kycDocumentOption: 'create_new',
       hasWebForm: false,
       webFormName: '',
-      automationId: ''
+      automationId: '',
+      applicantType: 'individual',
+      requiredDocumentCount: 1,
+      billingEntity: 'applicant',
+      instructions: ''
     }])
     setBulkInput('')
   }
@@ -226,7 +275,11 @@ export function AddRequirementsDialog({
       kycDocumentOption: 'create_new',
       hasWebForm: false,
       webFormName: '',
-      automationId: ''
+      automationId: '',
+      applicantType: 'individual',
+      requiredDocumentCount: 1,
+      billingEntity: 'applicant',
+      instructions: ''
     }])
   }
 
@@ -239,13 +292,13 @@ export function AddRequirementsDialog({
   const handleNewRequirementChange = (index: number, field: string, value: any) => {
     const updated = [...newRequirements]
     updated[index] = { ...updated[index], [field]: value }
-    
+
     // If hasWebForm is turned off, clear the automation fields
     if (field === 'hasWebForm' && !value) {
       updated[index].webFormName = ''
       updated[index].automationId = ''
     }
-    
+
     setNewRequirements(updated)
   }
 
@@ -262,7 +315,11 @@ export function AddRequirementsDialog({
         kycDocumentOption: 'create_new',
         hasWebForm: false,
         webFormName: '',
-        automationId: ''
+        automationId: '',
+        applicantType: 'individual',
+        requiredDocumentCount: 1,
+        billingEntity: 'applicant',
+        instructions: ''
       }])
       return
     }
@@ -277,7 +334,11 @@ export function AddRequirementsDialog({
       kycDocumentOption: 'create_new' as const,
       hasWebForm: false,
       webFormName: '',
-      automationId: ''
+      automationId: '',
+      applicantType: 'individual' as const,
+      requiredDocumentCount: 1,
+      billingEntity: 'applicant' as const,
+      instructions: ''
     }))
 
     setNewRequirements(requirements)
@@ -354,13 +415,102 @@ export function AddRequirementsDialog({
                   </div>
                 </div>
 
+                {/* Requirement Type & Context Section */}
+                <div className="space-y-4 border-t pt-4">
+                  <Label className="font-medium flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    Requirement Context
+                  </Label>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm">Requirement Type</Label>
+                      <Select
+                        value={req.type}
+                        onValueChange={(value) => handleNewRequirementChange(idx, 'type', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="standard">Standard</SelectItem>
+                          <SelectItem value="conditional">Conditional</SelectItem>
+                          <SelectItem value="optional">Optional</SelectItem>
+                          <SelectItem value="company">Company Document</SelectItem>
+                          <SelectItem value="multi-document">Multiple Documents</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-sm">Applies To</Label>
+                      <Select
+                        value={req.applicantType || 'individual'}
+                        onValueChange={(value) => handleNewRequirementChange(idx, 'applicantType', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select applicant type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="individual">Individual Only</SelectItem>
+                          <SelectItem value="company">Company Only</SelectItem>
+                          <SelectItem value="both">Both Individual & Company</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {req.type === 'company' && (
+                    <div className="space-y-2">
+                      <Label className="text-sm">Billing Entity</Label>
+                      <Select
+                        value={req.billingEntity || 'company'}
+                        onValueChange={(value) => handleNewRequirementChange(idx, 'billingEntity', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select billing entity" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="company">Company Documents Required</SelectItem>
+                          <SelectItem value="applicant">Applicant Must Provide</SelectItem>
+                          <SelectItem value="either">Either Can Provide</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {req.type === 'multi-document' && (
+                    <div className="space-y-2">
+                      <Label className="text-sm">Required Document Count</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={req.requiredDocumentCount || 1}
+                        onChange={(e) => handleNewRequirementChange(idx, 'requiredDocumentCount', parseInt(e.target.value))}
+                        placeholder="Number of documents required"
+                      />
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label className="text-sm">Special Instructions</Label>
+                    <Textarea
+                      value={req.instructions || ''}
+                      onChange={(e) => handleNewRequirementChange(idx, 'instructions', e.target.value)}
+                      placeholder="e.g., 'This document should be from the company that will be billed for this application'"
+                      rows={2}
+                    />
+                  </div>
+                </div>
+
                 {/* Document Type Association */}
                 <div className="space-y-4 border-t pt-4">
                   <Label className="font-medium flex items-center gap-2">
                     <FileText className="h-4 w-4" />
                     Document Type Association
                   </Label>
-                  
+
                   <div className="space-y-3">
                     <div className="flex items-center space-x-2">
                       <input
@@ -405,7 +555,7 @@ export function AddRequirementsDialog({
                               </SelectItem>
                             ) : (
                               kycDocuments.map((doc) => (
-                                <SelectItem key={doc.id} value={doc.id}>
+                                <SelectItem key={doc.id} value={doc.id.toString()}>
                                   {doc.display_name || doc.name}
                                 </SelectItem>
                               ))
@@ -473,9 +623,9 @@ export function AddRequirementsDialog({
                               </SelectItem>
                             ) : (
                               <>
-                                <SelectItem value="">No automation</SelectItem>
+                                <SelectItem value="no-automation">No automation</SelectItem>
                                 {automationTypes.map((automation) => (
-                                  <SelectItem key={automation.id} value={automation.id}>
+                                  <SelectItem key={automation.id} value={automation.id.toString()}>
                                     <div className="flex items-center gap-2">
                                       <Webhook className="h-3 w-3" />
                                       <span>{automation.name}</span>
@@ -493,7 +643,7 @@ export function AddRequirementsDialog({
                         </Select>
                       </div>
 
-                      {req.automationId && (
+                      {req.automationId && req.automationId !== 'no-automation' && (
                         <div className="text-sm text-muted-foreground bg-green-50 p-3 rounded">
                           <Info className="h-4 w-4 inline mr-2" />
                           This requirement will trigger the selected automation when the form is submitted.
@@ -504,7 +654,7 @@ export function AddRequirementsDialog({
                 </div>
               </div>
             ))}
-            
+
             <Button
               type="button"
               variant="outline"
