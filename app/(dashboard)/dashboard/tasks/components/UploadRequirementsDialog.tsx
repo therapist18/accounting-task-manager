@@ -20,10 +20,13 @@ import {
   PlayCircle,
   CheckCircle,
   ExternalLink,
-  Download
+  Download,
+  Info
 } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface UploadRequirementsDialogProps {
   open: boolean
@@ -972,7 +975,7 @@ const handleSaveSelections = async () => {
 
       {/* Document Preview Dialog */}
       <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
-        <DialogContent className="w-[95vw] max-w-[1800px] max-h-[95vh] p-0">
+        <DialogContent className="max-w-4xl max-h-[95vh] p-0">
           <DialogHeader className="px-6 pt-6 pb-4 border-b">
             <DialogTitle className="text-xl">
               {previewRequirement?.name} - Documents ({getDocumentForRequirement(previewRequirement || {}).length})
@@ -980,7 +983,7 @@ const handleSaveSelections = async () => {
           </DialogHeader>
 
           <div className="flex-1 overflow-auto p-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="gap-6">
               {getDocumentForRequirement(previewRequirement || {}).map((doc, index) => (
                 <Card key={index} className="border shadow-sm hover:shadow-md transition-shadow">
                   <CardContent className="p-0">

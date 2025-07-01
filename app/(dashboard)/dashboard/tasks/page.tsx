@@ -24,6 +24,7 @@ import { DepartmentSidebar } from "../departments/main-shared-components/departm
 import DocumentPreviewDialog from "../applications/components/document-preview-dialog"
 import { EditableStageCell } from "./components/EditableStageCell"
 import { EnquiryDialog } from "./components/EnquiryDialog"
+import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 
 const fuzzyMatch = (str1: string, str2: string, threshold = 0.8): boolean => {
   if (!str1 || !str2) return false;
@@ -138,6 +139,54 @@ export default function TasksPage() {
   const [reviewDocument, setReviewDocument] = useState<any>(null)
   const [enquiryDialogOpen, setEnquiryDialogOpen] = useState(false)
   const [enquiryTasks, setEnquiryTasks] = useState<Task[]>([])
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [taskToDelete, setTaskToDelete] = useState<Task | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  // Handle task actions (delete, edit, etc.)
+  const handleTaskAction = async (action: string, task: any) => {
+    if (action === 'delete') {
+      setTaskToDelete(task)
+      setDeleteDialogOpen(true)
+    } else if (action === 'edit') {
+      // Handle edit action
+      console.log('Edit task:', task);
+      // You can implement edit functionality here
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!taskToDelete) return;
+
+    setIsDeleting(true);
+    try {
+      const { error } = await supabase
+        .from('tm_tasks')
+        .delete()
+        .eq('id', taskToDelete.id);
+
+      if (error) throw error;
+
+      // Update the tasks state by removing the deleted task
+      setTasks(tasks.filter(t => t.id !== taskToDelete.id));
+
+      toast({
+        title: 'Task deleted',
+        description: 'The task has been successfully deleted.',
+      });
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      toast({
+        title: 'Error',
+        description: 'There was an error deleting the task.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+      setDeleteDialogOpen(false);
+      setTaskToDelete(null);
+    }
+  };
 
   // Define requirement columns
   const requirementColumns = [
@@ -478,9 +527,9 @@ export default function TasksPage() {
     const movedColumns = stageColumns
       .slice(
         stageColumns.findIndex(col => col.key === 'account_used'),
-        stageColumns.findIndex(col => col.key === 'batch') + 1
+        stageColumns.findIndex(col => col.key === 'actions') + 1
       )
-      .filter(col => ['account_used', 'applied_by', 'batch'].includes(col.key) &&
+      .filter(col => ['account_used', 'applied_by', 'batch', 'actions'].includes(col.key) &&
         columnVisibility[col.key] !== false)
 
     const endColumns: any[] = []
@@ -695,24 +744,6 @@ export default function TasksPage() {
       [key]: !prev[key]
     }));
   };
-
-  // Handle task actions
-  const handleTaskAction = (action: string, task: Task) => {
-    switch (action) {
-      case 'edit':
-        // Handle edit task
-        break;
-      case 'delete':
-        // Handle delete task
-        break;
-      case 'view':
-        setSelectedTask(task);
-        break;
-      default:
-        break;
-    }
-  };
-
   const handleViewTask = (task: Task) => {
     setSelectedTask(task);
   };
@@ -872,6 +903,8 @@ export default function TasksPage() {
         departments={transformedDepartments}
         activeDept={selectedDepartment}
         activeSubdept={selectedSubdepartment}
+        activeClass={selectedClass}
+        activeSubclass={selectedSubclass}
         onDeptClick={handleDeptClick}
         onSubdeptClick={handleSubdeptClick}
         onClassClick={handleClassClick}
@@ -1316,7 +1349,7 @@ export default function TasksPage() {
             getCurrentRequirements={getCurrentRequirements}
             fuzzyMatch={fuzzyMatch}
           />
-          
+
           {selectedTask && showUploadDialog && (
             <UploadRequirementsDialog
               open={showUploadDialog}
@@ -1359,6 +1392,21 @@ export default function TasksPage() {
             open={enquiryDialogOpen}
             onOpenChange={setEnquiryDialogOpen}
             onEnquiryCreated={handleEnquiryCreated}
+          />
+          <DeleteConfirmationDialog
+            open={deleteDialogOpen}
+            onOpenChange={setDeleteDialogOpen}
+            onConfirm={handleDeleteConfirm}
+            title={`Delete Task ${taskToDelete?.id || ''}`}
+            description="Are you sure you want to delete this task? This action cannot be undone."
+            confirmText="Delete Task"
+            loading={isDeleting}
+            onDeptClick={handleDeptClick}
+            onSubdeptClick={handleSubdeptClick}
+            onClassClick={handleClassClick}
+            onSubclassClick={handleSubclassClick}
+            onToggleExpand={handleToggleExpand}
+            expandedItems={expandedItems}
           />
         </div>
       </div>

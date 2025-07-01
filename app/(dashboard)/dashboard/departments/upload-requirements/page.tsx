@@ -835,8 +835,8 @@ export default function UploadRequirements({ departments: initialDepartments }: 
 
     return (
       <div className="relative border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm flex-1 flex flex-col h-full">
-        <div className="relative overflow-auto h-[calc(100vh-240px)] border rounded-lg shadow-lg w-full">
-          <Table>
+        <div className="relative overflow-auto h-[calc(100vh-240px)] border rounded-lg shadow-lg">
+          <Table className="w-full overflow-auto">
             {/* Sticky Headers */}
             <TableHeader className="sticky top-0 z-50">
               {/* Stage Names Row */}

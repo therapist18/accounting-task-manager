@@ -9,8 +9,8 @@ import { Button } from "@/components/ui/button"
 import { ChevronUp, ChevronDown, Pencil, Plus, Minus, Expand, Minimize2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
+import { toast } from "@/hooks/use-toast"
 
 interface DocumentField {
   id: string
@@ -77,7 +77,62 @@ export default function DocumentsFields() {
   const [editingDisplayName, setEditingDisplayName] = useState<string | null>(null)
   const [editingValue, setEditingValue] = useState<string>("")
 
-  const { toast } = useToast()
+  const processDocumentFields = (docs: DocumentType[]) => {
+    return docs.map(doc => {
+      if (!doc.fields || doc.fields.length === 0) return doc;
+
+      const processField = (field: any, level = 0, parentId: string | null = null, isArrayItem = false) => {
+        const fieldId = parentId ? `${parentId}.${field.name}` : field.id;
+        const fieldWithLevel = {
+          ...field,
+          id: fieldId,
+          level,
+          parentId,
+          isArrayItem,
+          hasChildren: field.type === 'array' && field.fields && field.fields.length > 0
+        };
+
+        const result = [fieldWithLevel];
+
+        // Handle array items
+        if (field.type === 'array' && field.fields) {
+          const arrayItem = {
+            ...field,
+            id: `${fieldId}[]`,
+            name: '[]',
+            type: 'array-item',
+            level: level + 1,
+            parentId: fieldId,
+            isArrayItem: true,
+            hasChildren: false
+          };
+
+          // Only add array item if it has fields
+          if (field.fields.length > 0) {
+            result.push(arrayItem);
+
+            // Process array item fields with increased level and array item parent
+            field.fields.forEach((subField: any) => {
+              result.push(...processField(subField, level + 2, arrayItem.id, true));
+            });
+          }
+        }
+
+        return result;
+      };
+
+      const processedFields = [];
+      doc.fields.forEach(field => {
+        processedFields.push(...processField(field, 0));
+      });
+
+      return {
+        ...doc,
+        hasFields: processedFields.length > 0,
+        fields: processedFields
+      };
+    });
+  };
 
   // Memoized filtered documents with processed fields
   const filteredDocuments = useMemo(() => {
@@ -428,7 +483,10 @@ export default function DocumentsFields() {
                                 Document Details
                               </TableHead>
                               <TableHead rowSpan={4} className="sticky left-84 bg-blue-600 border-r border-gray-500 font-bold w-24 z-[6] text-white text-center">
-                                Subdepartment
+                                <TableRow> <TableHead rowSpan={1} className="sticky left-84 bg-blue-600 font-bold w-24 z-[6] text-white text-center">Subdepartment</TableHead></TableRow>
+                                <TableRow> <TableHead rowSpan={1} className="sticky left-84 bg-blue-600 font-bold w-24 z-[6] text-white text-center">Class</TableHead></TableRow>
+                                <TableRow> <TableHead rowSpan={1} className="sticky left-84 bg-blue-600 font-bold w-24 z-[6] text-white text-center">Subclass</TableHead></TableRow>
+                                <TableRow> <TableHead rowSpan={1} className="sticky left-84 bg-blue-600 font-bold w-24 z-[6] text-white text-center"></TableHead></TableRow>
                               </TableHead>
                               {normalizedSubdepartments.map((subdept, subIndex) => {
                                 const totalColSpan = getTotalColSpan(subdept)
@@ -559,65 +617,9 @@ export default function DocumentsFields() {
                               const isExpanded = expandedDocuments.has(document.id)
                               const hasFields = document.fields && document.fields.length > 0
                               // Process documents to include nested fields with proper hierarchy
-                              const processDocumentFields = (docs: DocumentType[]) => {
-                                return docs.map(doc => {
-                                  if (!doc.fields || doc.fields.length === 0) return doc;
-                                  
-                                  const processField = (field: any, level = 0, parentId: string | null = null, isArrayItem = false) => {
-                                    const fieldId = parentId ? `${parentId}.${field.name}` : field.id;
-                                    const fieldWithLevel = { 
-                                      ...field, 
-                                      id: fieldId,
-                                      level,
-                                      parentId,
-                                      isArrayItem,
-                                      hasChildren: field.type === 'array' && field.fields && field.fields.length > 0
-                                    };
-                                    
-                                    const result = [fieldWithLevel];
-                                    
-                                    // Handle array items
-                                    if (field.type === 'array' && field.fields) {
-                                      const arrayItem = {
-                                        ...field,
-                                        id: `${fieldId}[]`,
-                                        name: '[]',
-                                        type: 'array-item',
-                                        level: level + 1,
-                                        parentId: fieldId,
-                                        isArrayItem: true,
-                                        hasChildren: false
-                                      };
-                                      
-                                      // Only add array item if it has fields
-                                      if (field.fields.length > 0) {
-                                        result.push(arrayItem);
-                                        
-                                        // Process array item fields with increased level and array item parent
-                                        field.fields.forEach((subField: any) => {
-                                          result.push(...processField(subField, level + 2, arrayItem.id, true));
-                                        });
-                                      }
-                                    }
-                                    
-                                    return result;
-                                  };
-                                  
-                                  const processedFields = [];
-                                  doc.fields.forEach(field => {
-                                    processedFields.push(...processField(field, 0));
-                                  });
-                                  
-                                  return {
-                                    ...doc,
-                                    hasFields: processedFields.length > 0,
-                                    fields: processedFields
-                                  };
-                                });
-                              };
                               const processedDocument = processDocumentFields([document])[0];
-                              const rowsToShow = isExpanded && hasFields 
-                                ? [processedDocument, ...processedDocument.fields] 
+                              const rowsToShow = isExpanded && hasFields
+                                ? [processedDocument, ...processedDocument.fields]
                                 : [processedDocument];
 
                               return rowsToShow.map((item, rowIndex) => {
@@ -634,10 +636,10 @@ export default function DocumentsFields() {
                                   >
                                     {isMainRow && (
                                       <>
-                                        <TableCell className="sticky left-0 bg-white border-r border-gray-200 z-[7] text-center w-12 font-medium text-gray-800">
+                                        <TableCell className="sticky left-0 bg-white border-r border-gray-200 z-[5] text-center w-12 font-medium text-gray-800">
                                           {index + 1}
                                         </TableCell>
-                                        <TableCell className="sticky left-12 bg-white border-r border-gray-200 p-0 z-[7] w-48">
+                                        <TableCell className="sticky left-12 bg-white border-r border-gray-200 p-0 z-[5] w-48">
                                           <div className="flex gap-2 p-3">
                                             {!hasFields && <div className="w-6" />}
                                             {editingDisplayName === document.id ? (
@@ -719,7 +721,7 @@ export default function DocumentsFields() {
                                             </Button>
                                           )}
                                         </TableCell>
-                                        <TableCell 
+                                        <TableCell
                                           className="sticky left-12 bg-blue-25 border-r border-gray-200 p-0 z-[6] w-48"
                                           onClick={() => {
                                             if (field?.hasChildren || field?.type === 'array') {
@@ -736,7 +738,7 @@ export default function DocumentsFields() {
                                         >
                                           <div className={`p-3 ${field?.isArrayItem ? 'pl-8' : ''}`}>
                                             <div className="flex items-center">
-                                              <span 
+                                              <span
                                                 className={`text-sm ${field?.isArrayItem ? 'italic' : ''} ${field?.type === 'array-item' ? 'text-gray-500' : 'text-gray-700'}`}
                                               >
                                                 {field?.name}
@@ -794,7 +796,7 @@ export default function DocumentsFields() {
                                               // Skip document row checkboxes if document has fields
                                               if (document.fields && document.fields.length > 0) {
                                                 return (
-                                                  <TableCell 
+                                                  <TableCell
                                                     key={`cell-${subdept.id}-${clsIndex}-${subclsIndex}-${document.id}`}
                                                     className="border-2 p-0"
                                                   ></TableCell>
@@ -858,7 +860,7 @@ export default function DocumentsFields() {
                                               // Skip document row checkboxes if document has fields
                                               if (document.fields && document.fields.length > 0) {
                                                 return (
-                                                  <TableCell 
+                                                  <TableCell
                                                     key={`cell-${subdept.id}-${clsIndex}-${document.id}`}
                                                     className="border-2 p-0"
                                                   ></TableCell>
@@ -923,7 +925,7 @@ export default function DocumentsFields() {
                                         // Skip document row checkboxes if document has fields
                                         if (document.fields && document.fields.length > 0) {
                                           return (
-                                            <TableCell 
+                                            <TableCell
                                               key={`cell-${subdept.id}-direct-${document.id}`}
                                               className="border-2 p-0"
                                             ></TableCell>
