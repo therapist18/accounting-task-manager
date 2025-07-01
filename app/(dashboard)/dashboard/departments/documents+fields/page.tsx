@@ -1,20 +1,19 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useEffect, useMemo, useCallback } from "react"
+import React, { useState, useEffect, useMemo, useCallback, memo } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { ChevronUp, ChevronDown, Pencil, Plus, Minus, Expand, Minimize2, Info } from "lucide-react"
-import { Input } from "@/components/ui/input"
+import { Plus, Minus, Expand, Minimize2, Info } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 
-// Truncate text and add tooltip if needed
-const TruncatedText = ({ text, maxLength = 30, className = '' }: { text: string, maxLength?: number, className?: string }) => {
+// Memoized TruncatedText component to prevent unnecessary re-renders
+const TruncatedText = memo(({ text, maxLength = 30, className = '' }: { text: string, maxLength?: number, className?: string }) => {
   if (!text) return null;
   const truncated = text.length > maxLength ? `${text.substring(0, maxLength)}...` : text;
 
@@ -28,7 +27,8 @@ const TruncatedText = ({ text, maxLength = 30, className = '' }: { text: string,
       </TooltipContent>
     </Tooltip>
   ) : <span className={className}>{text}</span>;
-};
+});
+TruncatedText.displayName = 'TruncatedText';
 
 interface DocumentField {
   id: string
@@ -203,19 +203,18 @@ export default function DocumentsFields() {
   const [editingDisplayName, setEditingDisplayName] = useState<string | null>(null)
   const [editingValue, setEditingValue] = useState<string>("")
 
-  // Memoized filtered documents with processed fields grouped by category
+  // Memoized filtered documents with stable references and optimized processing
   const { filteredDocuments, groupedDocuments } = useMemo(() => {
     if (!documents.length) return { filteredDocuments: [], groupedDocuments: {} };
 
+    // Filter and sort documents
     const sortedDocs = documents
       .filter(doc => doc.category === CATEGORY_MAPPING[documentTab])
       .sort((a, b) => {
-        // First sort by main_category_number
         const aCatNum = parseInt(a.main_category_number || '999', 10);
         const bCatNum = parseInt(b.main_category_number || '999', 10);
-        if (aCatNum !== bCatNum) return aCatNum - bCatNum;
         
-        // Then by custom_order
+        if (aCatNum !== bCatNum) return aCatNum - bCatNum;
         if (a.custom_order !== null && b.custom_order !== null) {
           return a.custom_order - b.custom_order;
         }
@@ -224,20 +223,34 @@ export default function DocumentsFields() {
         return a.document_number - b.document_number;
       });
 
-    // Process fields after sorting
+    // Process fields with optimized field processing
     const processedDocs = processDocumentFields(sortedDocs);
+    
+    // Group with stable references
     const grouped = groupDocumentsByCategory(processedDocs);
+    
+    // Convert to a stable structure
+    const stableGrouped = Object.entries(grouped).reduce((acc, [key, value]) => {
+      acc[key] = {
+        ...value,
+        documents: [...value.documents] // Ensure new array reference
+      };
+      return acc;
+    }, {} as GroupedDocuments);
 
-    return { filteredDocuments: processedDocs, groupedDocuments: grouped };
+    return { 
+      filteredDocuments: processedDocs, 
+      groupedDocuments: stableGrouped 
+    };
   }, [documents, documentTab])
 
-  // Memoized current department
+  // Memoized current department with stable reference
   const currentDepartment = useMemo(() =>
-    departments.find(d => d.id === activeTab),
+    departments.find(d => d.id === activeTab) || null,
     [departments, activeTab]
   )
 
-  // Memoized normalized subdepartments
+  // Memoized normalized subdepartments with stable references
   const normalizedSubdepartments = useMemo(() => {
     if (!currentDepartment?.subdepartments?.length) {
       return [{
@@ -246,9 +259,15 @@ export default function DocumentsFields() {
         department_id: currentDepartment?.id || '',
         hasClasses: false,
         classes: []
-      }]
+      }];
     }
-    return currentDepartment.subdepartments
+    return currentDepartment.subdepartments.map(dept => ({
+      ...dept,
+      classes: dept.classes?.map(cls => ({
+        ...cls,
+        subclasses: cls.subclasses || []
+      })) || []
+    }));
   }, [currentDepartment])
 
   const fetchData = useCallback(async () => {
@@ -308,18 +327,24 @@ export default function DocumentsFields() {
     fetchData()
   }, [fetchData])
 
-  // Optimized handlers
+  // Optimized expansion toggles with stable references
   const toggleItemExpansion = useCallback((itemId: string) => {
     setExpandedItems(prev => {
-      const newSet = new Set(prev)
+      const newSet = new Set(prev);
       if (newSet.has(itemId)) {
-        newSet.delete(itemId)
+        newSet.delete(itemId);
       } else {
-        newSet.add(itemId)
+        newSet.add(itemId);
       }
-      return newSet
-    })
-  }, [])
+      return newSet;
+    });
+  }, []);
+  
+  // Memoized toggle functions for better performance
+  const getToggleHandler = useCallback((itemId: string) => 
+    () => toggleItemExpansion(itemId),
+    [toggleItemExpansion]
+  );
 
   const toggleCategoryExpansion = useCallback((categoryKey: string) => {
     setExpandedCategories(prev => {
@@ -361,6 +386,7 @@ export default function DocumentsFields() {
     setExpandedCategories(new Set())
   }, [])
 
+  // Memoized display toggle handler with stable reference
   const handleDisplayToggle = useCallback((
     allocationId: string,
     subdeptId: number,
@@ -368,54 +394,81 @@ export default function DocumentsFields() {
     subclassIndex: number | null,
     checked: boolean
   ) => {
-    let allocationKey = `${allocationId}-${subdeptId}`
-    if (classIndex !== null) allocationKey += `-${classIndex}`
-    if (subclassIndex !== null) allocationKey += `-${subclassIndex}`
+    const keyParts = [allocationId, subdeptId];
+    if (classIndex !== null) keyParts.push(String(classIndex));
+    if (subclassIndex !== null) keyParts.push(String(subclassIndex));
+    const allocationKey = keyParts.join('-')
 
     setDocumentAllocations(prev => ({
       ...prev,
       [allocationKey]: checked
-    }))
+    }));
 
+    // Debounce or batch these toasts in a real app
     toast({
       title: "Configuration updated",
       description: `Display setting changed for allocation key: ${allocationKey}`,
-    })
-  }, [])
+    });
+  }, []);
 
+  // Memoized checkbox change handler factory
+  const getCheckboxChangeHandler = useCallback((
+    allocationId: string,
+    subdeptId: number,
+    classIndex: number | null = null,
+    subclassIndex: number | null = null
+  ) => (checked: boolean) => {
+    handleDisplayToggle(allocationId, subdeptId, classIndex, subclassIndex, checked);
+  }, [handleDisplayToggle]);
+
+  // Memoized allocation status checker with stable reference
   const getAllocationStatus = useCallback((
     allocationId: string,
     subdeptId: number,
     classIndex: number | null,
     subclassIndex: number | null = null
   ) => {
-    let allocationKey = `${allocationId}-${subdeptId}`
-    if (classIndex !== null) allocationKey += `-${classIndex}`
-    if (subclassIndex !== null) allocationKey += `-${subclassIndex}`
+    const keyParts = [allocationId, subdeptId];
+    if (classIndex !== null) keyParts.push(String(classIndex));
+    if (subclassIndex !== null) keyParts.push(String(subclassIndex));
+    const allocationKey = keyParts.join('-')
 
-    return documentAllocations[allocationKey] || false
-  }, [documentAllocations])
+    return documentAllocations[allocationKey] || false;
+  }, [documentAllocations]);
 
-  // Calculate total column span for complex headers
+  // Memoized checkbox status getter factory
+  const getCheckboxStatus = useCallback((
+    allocationId: string,
+    subdeptId: number,
+    classIndex: number | null = null,
+    subclassIndex: number | null = null
+  ) => {
+    return getAllocationStatus(allocationId, subdeptId, classIndex, subclassIndex);
+  }, [getAllocationStatus]);
+
+  // Memoized calculation for column spans
   const getTotalColSpan = useCallback((subdept: Subdepartment) => {
-    if (!subdept.hasClasses) return 1
-
-    return subdept.classes?.reduce((total, cls) => {
-      return total + (cls.subclasses?.length || 1)
-    }, 0) || 1
+    if (!subdept.hasClasses) return 1;
+    
+    const colSpan = subdept.classes?.reduce((total, cls) => {
+      return total + (cls.subclasses?.length || 1);
+    }, 0) || 1;
+    
+    return Math.max(1, colSpan);
   }, [])
 
-  // Helper function to determine if a field should show checkboxes
-  const shouldShowCheckbox = (field: DocumentField) => {
+  // Memoized helper function to determine if a field should show checkboxes
+  const shouldShowCheckbox = useCallback((field: DocumentField) => {
     return field.type !== 'array' && 
            field.type !== 'array-container' && 
            !field.isArrayItem &&
            field.type !== 'object';
-  }
+  }, [])
 
-  if (loading) return <div className="p-12 text-center">Loading...</div>
-  if (error) return <div className="p-12 text-center text-red-500">{error}</div>
-  if (!currentDepartment) return <div className="p-12 text-center">No department selected.</div>
+  // Early returns for loading/error states
+  if (loading) return <div className="p-12 text-center">Loading...</div>;
+  if (error) return <div className="p-12 text-center text-red-500">{error}</div>;
+  if (!currentDepartment) return <div className="p-12 text-center">No department selected.</div>;
 
   return (
     <div className="w-full min-h-screen">
