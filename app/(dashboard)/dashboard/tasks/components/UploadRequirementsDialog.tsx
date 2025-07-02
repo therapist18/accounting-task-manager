@@ -64,8 +64,6 @@ export function UploadRequirementsDialog({
 
   const searchRegistryIndividuals = async (individual: any) => {
     try {
-      console.log('Searching registry for individual:', individual)
-
       let exactMatch = null
       let fuzzyMatches = []
 
@@ -120,15 +118,12 @@ export function UploadRequirementsDialog({
         }
       }
     } catch (error) {
-      console.error('Error searching registry:', error)
       throw new Error(`Registry search failed: ${error.message}`)
     }
   }
 
   const fetchApplicantDocuments = async (individualData: any) => {
-    console.log('Fetching id:', individualData.id);
     if (!individualData?.id) {
-      console.error('No individual data or ID provided');
       return [];
     }
     
@@ -150,7 +145,6 @@ export function UploadRequirementsDialog({
       if (error) throw error;
       return documents || [];
     } catch (error) {
-      console.error('Error fetching applicant documents:', error);
       return [];
     }
   }
@@ -175,8 +169,6 @@ export function UploadRequirementsDialog({
         }
       }
 
-      console.log('Searching for requirements with class_id:', constructedClassId);
-
       if (constructedClassId) {
         const { data, error } = await supabase
           .from('tm_class_requirements')
@@ -185,12 +177,12 @@ export function UploadRequirementsDialog({
           .maybeSingle();
 
         if (error) {
-          console.error('Database error:', error);
+          return [];
         } else if (data) {
           requirementData = data;
-          console.log('Found requirements:', data);
+          // Requirements found
         } else {
-          console.log('No requirements found for class_id:', constructedClassId);
+          // No requirements found for this class
         }
       }
 
@@ -202,13 +194,12 @@ export function UploadRequirementsDialog({
           status: 'missing'
         }));
 
-        console.log('Enriched requirements:', enrichedRequirements);
+        // Enriched requirements ready
         return enrichedRequirements;
       }
 
       return [];
     } catch (error) {
-      console.error('Error loading requirement documents:', error);
       return [];
     }
   };
@@ -226,7 +217,7 @@ export function UploadRequirementsDialog({
 
       // First, fetch the individual's data from registry_individuals
       if (task.r_number) {
-        console.log('Fetching individual data for r_number:', task.r_number);
+        // Fetching individual data
         const { data: individual, error } = await supabase
           .from('registry_individuals')
           .select('*')
@@ -234,15 +225,12 @@ export function UploadRequirementsDialog({
           .single();
 
         if (error) {
-          console.error('Error fetching individual data:', error);
+          return;
         } else if (individual) {
           individualData = individual;
-          console.log('Fetched individual data:', individualData);
-          
           // Extract billing information from individual data
           if (individualData.bill_to) {
             billToInfo = individualData.bill_to;
-            console.log('Found billing information in registry_individuals:', billToInfo);
           }
           
           // Get director roles from employment_history
@@ -255,7 +243,7 @@ export function UploadRequirementsDialog({
             )];
             
             if (directorCompanyIds.length > 0) {
-              console.log('Fetching details for director companies:', directorCompanyIds);
+              // Fetching director company details
               
               // Fetch company details in a single query
               const { data: companyDetails, error: companyError } = await supabase
@@ -264,7 +252,7 @@ export function UploadRequirementsDialog({
                 .in('id', directorCompanyIds);
               
               if (companyError) {
-                console.error('Error fetching company details:', companyError);
+                return;
               } else if (companyDetails?.length > 0) {
                 // Create a map of company ID to company details
                 const companyMap = new Map(companyDetails.map(company => [company.id.toString(), company]));
@@ -291,7 +279,7 @@ export function UploadRequirementsDialog({
                 
                 // Add director companies to companies array
                 companies.push(...directorCompanies);
-                console.log('Added director companies with details:', directorCompanies);
+                // Director companies added
               }
             }
           }
@@ -308,7 +296,6 @@ export function UploadRequirementsDialog({
             .single();
 
           if (error) {
-            console.error(`Error fetching company ${companyId}:`, error);
             return null;
           }
           
@@ -321,7 +308,6 @@ export function UploadRequirementsDialog({
             source: 'bill_to'
           } : null;
         } catch (error) {
-          console.error(`Error fetching company ${companyId}:`, error);
           return null;
         }
       };
@@ -334,7 +320,7 @@ export function UploadRequirementsDialog({
                                (typeof billToInfo === 'object' && billToInfo.companyId);
         
         if (billingCompanyId) {
-          console.log('Fetching billing company details for ID:', billingCompanyId);
+          // Fetching billing company details
           billingCompany = await fetchCompanyDetails(billingCompanyId);
           if (billingCompany) {
             // Add billing company at the beginning of the array
@@ -343,16 +329,15 @@ export function UploadRequirementsDialog({
               is_primary: true,
               source: 'billing'
             });
-            console.log('Added billing company:', billingCompany);
+            // Billing company added
           }
         } else {
-          console.log('No valid billing company ID found in bill_to:', billToInfo);
+          // No valid billing company ID found
         }
       }
 
       // Check for bill_to company first
       if (task.bill_to?.type === 'company' && task.bill_to.company) {
-        console.log('Fetching company details for ID:', task.bill_to.company);
         try {
           // Fetch company details from acc_portal_company_duplicate
           const { data: companyData, error: companyError } = await supabase
@@ -361,14 +346,7 @@ export function UploadRequirementsDialog({
             .eq('id', task.bill_to.company)
             .single();
 
-          console.log('Company fetch result:', { companyData, companyError });
-
-          if (companyData && !companyError) {
-            console.log('Company found:', {
-              id: companyData.id,
-              name: companyData.company_name,
-              registration_number: companyData.registration_number
-            });
+              if (companyData && !companyError) {
             
             companies = [{
               id: companyData.id,
@@ -378,21 +356,17 @@ export function UploadRequirementsDialog({
               is_primary: true
             }];
           } else if (companyError) {
-            console.error('Error fetching company:', companyError);
+            return;
           }
         } catch (error) {
-          console.error('Error fetching bill_to company:', error);
+          return;
         }
       }
 
       if (individualData) {
         // Fetch documents for this individual using their data
-        console.log('Fetching documents for individual:', individualData);
         documents = await fetchApplicantDocuments(individualData);
-        console.log('Fetched documents:', documents);
         setApplicantDocuments(documents);
-
-        console.log('Current companies array before adding registry companies:', companies);
         
         // Get the billing company from individual data if available
         const billingCompany = individualData.bill_to?.company
@@ -404,7 +378,7 @@ export function UploadRequirementsDialog({
 
         // We've already processed the directorship history earlier
         // No need to process it again here
-        console.log('Using companies from individual data:', companies);
+        // Using companies from individual data
 
         // Ensure companies are unique by ID
         const uniqueCompanies = [];
@@ -421,11 +395,7 @@ export function UploadRequirementsDialog({
         // Update the companies array with deduplicated list
         companies = uniqueCompanies;
 
-        console.log('Merged companies:', companies);
-
-        console.log('Final companies array before setting state:', companies);
         setApplicantCompanies(companies);
-        console.log('Applicant companies after state update:', companies);
       }
 
       // Load requirements from database
@@ -448,7 +418,7 @@ export function UploadRequirementsDialog({
       // Store both for rendering
       setRequirementsWithDocuments(enrichedRequirements);
     } catch (error) {
-      console.error('Error loading applicant documents:', error);
+      return;
     } finally {
       setLoadingApplicant(false);
     }
@@ -459,7 +429,7 @@ export function UploadRequirementsDialog({
     try {
       // Skip if this is a directorship company (starts with 'dir_')
       if (companyId.startsWith('dir_')) {
-        console.log('Skipping document fetch for directorship company:', companyId);
+        // Skipping document fetch for directorship company
         return [];
       }
 
@@ -473,7 +443,6 @@ export function UploadRequirementsDialog({
       if (error) throw error;
       return companyDocs || [];
     } catch (error) {
-      console.error('Error fetching company documents:', error);
       return [];
     }
   };
@@ -517,11 +486,10 @@ export function UploadRequirementsDialog({
         )
       );
     } catch (error) {
-      console.error('Error fetching company documents:', error);
       toast({
-        title: 'Error',
-        description: 'Failed to load company documents',
-        variant: 'destructive'
+        title: "Error",
+        description: "Failed to load company documents",
+        variant: "destructive"
       });
     }
   };
@@ -742,7 +710,6 @@ export function UploadRequirementsDialog({
       }
 
       if (!document.file_path) {
-        console.warn('No file path for document:', document);
         return null;
       }
 
@@ -751,7 +718,6 @@ export function UploadRequirementsDialog({
         .createSignedUrl(document.file_path, 3600);
 
       if (error) {
-        console.error('Error creating signed URL:', error);
         return null;
       }
 
@@ -762,7 +728,6 @@ export function UploadRequirementsDialog({
 
       return fileUrl.signedUrl;
     } catch (error) {
-      console.error('Error getting document preview URL:', error);
       return null;
     }
   };
@@ -820,7 +785,6 @@ const handleSaveSelections = async () => {
     
     onUploadComplete?.();
   } catch (error) {
-    console.error('Error saving selections:', error);
     toast({
       title: "Error",
       description: "Failed to save selections. Please try again.",
@@ -1013,7 +977,6 @@ const handleSaveSelections = async () => {
                               size="sm"
                               className="flex items-center gap-2"
                               onClick={() => {
-                                console.log('Upload document for requirement:', req.kycDocumentId)
                                 // Handle document upload
                               }}
                             >
@@ -1190,7 +1153,8 @@ const handleSaveSelections = async () => {
               <Button
                 onClick={() => {
                   // Handle save/submit logic
-                  console.log('Selected documents:', selectedDocuments)
+                  // Save selected documents
+
                   onUploadComplete?.()
                 }}
                 disabled={loading}

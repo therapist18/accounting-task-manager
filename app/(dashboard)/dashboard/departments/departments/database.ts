@@ -175,183 +175,24 @@ export async function fetchUsers(): Promise<User[]> {
  }
 }
 
-export async function fetchDepartments(): Promise<Department[]> {
+export async function createDepartment(departmentData: any): Promise<Department> {
   try {
-    // Fetch departments with subdepartments
-    const { data: departmentsData, error: deptError } = await supabase
+    // Get the next order number for departments
+    const { data: maxOrderData } = await supabase
       .from('tm_departments')
-      .select(`
-        *,
-        tm_subdepartments (*)
-      `)
-      .order('name')
+      .select('order')
+      .order('order', { ascending: false })
+      .limit(1)
 
-    if (deptError) throw deptError
+    const nextOrder = (maxOrderData?.[0]?.order || 0) + 1
 
-    // Fetch all class requirements
-    const { data: requirements, error: reqError } = await supabase
-      .from('tm_class_requirements')
-      .select('*')
-      .order('id')
-
-    if (reqError) throw reqError
-
-    // Group requirements by class_id
-    const requirementsByClass = new Map<string, Requirement[]>()
-
-    if (requirements) {
-      for (const req of requirements) {
-        const classId = req.class_id;
-        if (!requirementsByClass.has(classId)) {
-          requirementsByClass.set(classId, []);
-        }
-        
-        // Parse the requirements JSON array
-        const reqArray = Array.isArray(req.requirements) ? req.requirements : [];
-        const parsedRequirements = reqArray.map((r: any, index: number) => ({
-          id: r.id || (index + 1).toString(),
-          name: r.name || '',
-          description: r.description || '',
-          isRequired: r.isRequired !== false,
-          order: r.order || index,
-          isVisible: r.isVisible !== false,
-          type: r.type || req.type || 'standard'
-        }));
-
-        requirementsByClass.get(classId)?.push(...parsedRequirements);
-      }
-    }
-
-
-    return (departmentsData || []).map((dept: any) => {
-      const subdepartments = (dept.tm_subdepartments || []).map((subdept: any) => {
-        // Parse classes from JSONB
-        const classes = (subdept.classes || []).map((cls: any) => {
-          const classId = `${subdept.id}_${cls.id}`
-          const classRequirements = requirementsByClass.get(classId) || []
-
-          // Process sub-classes
-          const subClasses = (cls.subClasses || []).map((subCls: any) => {
-            const subClassId = `${classId}_${subCls.id}`
-            const subClassRequirements = requirementsByClass.get(subClassId) || []
-
-            return {
-              ...subCls,
-              parentClassId: classId,
-              requirements: subClassRequirements
-            }
-          })
-
-
-          return {
-            ...cls,
-            subdepartmentId: subdept.id,
-            requirements: classRequirements,
-            subClasses
-          }
-        })
-
-        // Parse task assistants
-        const taskAssistants = Array.isArray(subdept.task_assistant)
-          ? subdept.task_assistant
-          : subdept.task_assistant
-            ? [subdept.task_assistant]
-            : []
-
-        // Parse subdepartment requirements
-        const uploadRequirements = (subdept.upload_requirements || []).map((req: any, index: number) => ({
-          id: req.id || (index + 1).toString(),
-          name: req.name || '',
-          description: req.description || '',
-          isRequired: req.isRequired !== false,
-          order: req.order || index,
-          isVisible: req.isVisible !== false,
-          type: req.type || 'standard'
-        }))
-
-        return {
-          ...subdept,
-          classes,
-          upload_requirements: uploadRequirements,
-          taskAssistants: taskAssistants.map((ta: any) => ({
-            id: ta.id || `ta_${Date.now()}`,
-            userId: ta.userId || ta.id,
-            startDate: ta.startDate || ta.start_date || new Date().toISOString(),
-            endDate: ta.endDate || ta.end_date,
-            isActive: ta.isActive !== false
-          })),
-          taskManagerId: subdept.task_manager?.id || subdept.task_manager_id
-        }
-      })
-
-      return {
-        ...dept,
-        subdepartments: subdepartments,
-        tm_subdepartments: subdepartments // For compatibility
-      };
-    });
-  } catch (error) {
-    console.error('Error fetching departments:', error);
-    throw new Error('Failed to fetch departments');
-  }
-}
-
-export async function createDepartment(departmentData: {
-  name: string;
-  description: string | null;
-  subdepartments: Array<{
-    id?: string;
-    name: string;
-    description: string | null
-    classes: Array<{
-      id: number
-      name: string
-      description: string | null
-      order: number
-      isVisible: boolean
-      requirements: Array<{
-        id: number
-        name: string
-        description: string | null
-        isRequired: boolean
-        order: number
-        isVisible: boolean
-      }>
-      subClasses: Array<{
-        id: number
-        name: string
-        description: string | null
-        order: number
-        isVisible: boolean
-        requirements: Array<{
-          id: number
-          name: string
-          description: string | null
-          isRequired: boolean
-          order: number
-          isVisible: boolean
-        }>
-      }>
-    }>
-    task_manager: {
-      id: string
-      start_date: string
-      end_date: string | null
-    } | null
-    task_assistants: Array<{
-      id: string
-      start_date: string
-      end_date: string | null
-    }>
-  }>
-}): Promise<Department> {
-  try {
-    // Create department
+    // Create department with order
     const { data: department, error: deptError } = await supabase
       .from('tm_departments')
       .insert({
         name: departmentData.name,
-        description: departmentData.description
+        description: departmentData.description,
+        order: nextOrder
       })
       .select()
       .single()
@@ -359,20 +200,22 @@ export async function createDepartment(departmentData: {
     if (deptError) throw deptError
     if (!department) throw new Error('Failed to create department')
 
-    // Process each subdepartment
-    for (const subdept of departmentData.subdepartments) {
-      // Prepare classes without requirements for JSONB storage
-      const classesForStorage = subdept.classes.map(cls => ({
+    // Process subdepartments with ordering
+    for (const [index, subdept] of departmentData.subdepartments.entries()) {
+      const subdeptOrder = index + 1
+
+      // Prepare classes for storage
+      const classesForStorage = subdept.classes.map((cls, clsIndex) => ({
         id: cls.id,
         name: cls.name,
         description: cls.description,
-        order: cls.order,
+        order: clsIndex + 1,
         isVisible: cls.isVisible,
-        subClasses: cls.subClasses.map(subCls => ({
+        subClasses: cls.subClasses.map((subCls, subClsIndex) => ({
           id: subCls.id,
           name: subCls.name,
           description: subCls.description,
-          order: subCls.order,
+          order: subClsIndex + 1,
           isVisible: subCls.isVisible
         }))
       }))
@@ -381,15 +224,15 @@ export async function createDepartment(departmentData: {
         name: subdept.name,
         description: subdept.description,
         department_id: department.id,
+        order: subdeptOrder,
         classes: classesForStorage,
         task_manager: subdept.task_manager,
         task_assistant: subdept.task_assistants
       }
 
+      // Create or update subdepartment
       let subdepartmentId: string
-
       if (subdept.id) {
-        // Update existing subdepartment
         const { data: updatedSubdept, error: updateError } = await supabase
           .from('tm_subdepartments')
           .update(subdeptData)
@@ -400,7 +243,6 @@ export async function createDepartment(departmentData: {
         if (updateError) throw updateError
         subdepartmentId = subdept.id
       } else {
-        // Create new subdepartment
         const { data: newSubdept, error: insertError } = await supabase
           .from('tm_subdepartments')
           .insert(subdeptData)
@@ -411,23 +253,23 @@ export async function createDepartment(departmentData: {
         subdepartmentId = newSubdept.id
       }
 
-      // Save requirements to tm_class_requirements table
-      for (const cls of subdept.classes) {
+      // Save requirements with proper ordering
+      for (const [clsIndex, cls] of subdept.classes.entries()) {
         const classId = `${subdepartmentId}_${cls.id}`
 
-        // Delete existing requirements for this class
+        // Delete existing requirements
         await supabase
           .from('tm_class_requirements')
           .delete()
           .eq('class_id', classId)
 
-        // Insert class requirements if any exist
+        // Insert class requirements with ordering
         if (cls.requirements.length > 0) {
-          const requirementsArray = cls.requirements.map(req => ({
+          const requirementsArray = cls.requirements.map((req, reqIndex) => ({
             name: req.name,
             description: req.description,
             isRequired: req.isRequired,
-            order: req.order,
+            order: reqIndex + 1,
             isVisible: req.isVisible,
             type: 'standard'
           }))
@@ -444,23 +286,21 @@ export async function createDepartment(departmentData: {
           if (reqError) throw reqError
         }
 
-        // Handle sub-class requirements
-        for (const subCls of cls.subClasses) {
+        // Handle sub-class requirements with ordering
+        for (const [subClsIndex, subCls] of cls.subClasses.entries()) {
           const subClassId = `${classId}_${subCls.id}`
 
-          // Delete existing requirements for this sub-class
           await supabase
             .from('tm_class_requirements')
             .delete()
             .eq('class_id', subClassId)
 
-          // Insert sub-class requirements if any exist
           if (subCls.requirements.length > 0) {
-            const subRequirementsArray = subCls.requirements.map(req => ({
+            const subRequirementsArray = subCls.requirements.map((req, reqIndex) => ({
               name: req.name,
               description: req.description,
               isRequired: req.isRequired,
-              order: req.order,
+              order: reqIndex + 1,
               isVisible: req.isVisible,
               type: 'standard'
             }))
@@ -480,11 +320,72 @@ export async function createDepartment(departmentData: {
       }
     }
 
-    // Return the created department
     return await fetchDepartmentById(department.id)
   } catch (error) {
     console.error('Error in createDepartment:', error)
     throw error
+  }
+}
+
+// Enhanced fetchDepartments with proper ordering
+export async function fetchDepartments(): Promise<Department[]> {
+  try {
+    const { data: departmentsData, error: deptError } = await supabase
+      .from('tm_departments')
+      .select(`
+        *,
+        tm_subdepartments (*)
+      `)
+      .order('order', { ascending: true })
+
+    if (deptError) throw deptError
+
+    // Process and order the data
+    const processedData = (departmentsData || []).map((dept: any) => {
+      const subdepartments = (dept.tm_subdepartments || [])
+        .sort((a, b) => (a.order || 0) - (b.order || 0))
+        .map((subdept: any) => {
+          // Process classes with ordering
+          const classes = (subdept.classes || [])
+            .sort((a, b) => (a.order || 0) - (b.order || 0))
+            .map((cls: any) => ({
+              ...cls,
+              subdepartmentId: subdept.id,
+              subClasses: (cls.subClasses || []).sort((a, b) => (a.order || 0) - (b.order || 0))
+            }))
+
+          // Process task assistants
+          const taskAssistants = Array.isArray(subdept.task_assistant)
+            ? subdept.task_assistant
+            : subdept.task_assistant
+              ? [subdept.task_assistant]
+              : []
+
+          return {
+            ...subdept,
+            classes,
+            taskAssistants: taskAssistants.map((ta: any) => ({
+              id: ta.id || `ta_${Date.now()}`,
+              userId: ta.userId || ta.id,
+              startDate: ta.startDate || ta.start_date || new Date().toISOString(),
+              endDate: ta.endDate || ta.end_date,
+              isActive: ta.isActive !== false
+            })),
+            taskManagerId: subdept.task_manager?.id || subdept.task_manager_id
+          }
+        })
+
+      return {
+        ...dept,
+        subdepartments,
+        tm_subdepartments: subdepartments
+      }
+    })
+
+    return processedData
+  } catch (error) {
+    console.error('Error fetching departments:', error)
+    throw new Error('Failed to fetch departments')
   }
 }
 

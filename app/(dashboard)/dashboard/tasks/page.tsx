@@ -7,14 +7,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Plus, FileText, Upload } from "lucide-react"
+import { Plus, FileText, Upload, Globe } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import type { Database } from "@/lib/supabase/database.types"
 import type { Stage, Department } from "@/lib/supabase/departments"
 import { StageUploadDialog } from "./components/StageUploadDialog"
 import { UploadRequirementsDialog } from "./components/UploadRequirementsDialog"
-import { TaskTable } from "./components/TaskTable"
+import { StagesTable } from "./components/StagesTable"
+import { RequirementsTable } from "./components/RequirementsTable"
+import { WebDataTable } from "./components/WebDataTable"
 import { StageTransitionDialog } from "@/components/stage-transition-dialog"
 import { NewTaskDialog } from "@/app/(dashboard)/dashboard/tasks/components/new-task-dialog"
 import { getTasks, updateTaskAssignment } from "@/lib/supabase/tasks"
@@ -142,6 +144,10 @@ export default function TasksPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [webDataStatus, setWebDataStatus] = useState<Record<number, any>>({})
+
+  // Add these constants at the top of your component
+  const TASK_STAGE_STATUS_KEY = 'taskStageStatuses';
 
   // Handle task actions (delete, edit, etc.)
   const handleTaskAction = async (action: string, task: any) => {
@@ -188,6 +194,41 @@ export default function TasksPage() {
     }
   };
 
+  // Web data handlers
+  const handleRefreshWebData = async (task: any) => {
+    console.log('Refreshing web data for task:', task.id)
+    setWebDataStatus(prev => ({
+      ...prev,
+      [task.id]: { ...prev[task.id], status: 'in_progress' }
+    }))
+    // Implement web scraping/data refresh logic
+    setTimeout(() => {
+      setWebDataStatus(prev => ({
+        ...prev,
+        [task.id]: {
+          status: 'completed',
+          last_scraped: new Date().toISOString(),
+          quality_score: Math.floor(Math.random() * 40) + 60 // Random score between 60-100
+        }
+      }))
+    }, 2000)
+  }
+
+  const handleViewWebData = (task: any) => {
+    console.log('Viewing web data for task:', task.id)
+    // Implement web data viewing logic
+  }
+
+  const handleExtractData = (task: any) => {
+    console.log('Extracting data for task:', task.id)
+    // Implement data extraction logic
+  }
+
+  const handleViewDocument = (task: any, requirement: any) => {
+    console.log('Viewing document for requirement:', requirement.name)
+    // Implement document viewing logic
+  }
+
   // Define requirement columns
   const requirementColumns = [
     { key: 'index', header: '#', width: '50px' },
@@ -203,7 +244,7 @@ export default function TasksPage() {
     { key: 'applied_by', header: 'Applied by Who', width: '120px' },
     { key: 'batch', header: 'Batch', width: '100px' },
   ];
-
+ 
   // Define stage columns
   const stageColumns = [
     { key: 'index', header: '#', width: '50px' },
@@ -230,17 +271,17 @@ export default function TasksPage() {
       width: '120px'
     }
   ];
-
+ 
   // Transform departments data
   const transformDepartments = useCallback((depts: any[]) => {
     if (!depts || !Array.isArray(depts)) {
       console.error('Invalid departments data:', depts);
       return [];
     }
-
+ 
     return depts.map(dept => {
       if (!dept) return null;
-
+ 
       const transformedDept = {
         ...dept,
         id: String(dept.id),
@@ -272,25 +313,25 @@ export default function TasksPage() {
             }))
           : []
       };
-
+ 
       return transformedDept;
     }).filter(Boolean);
   }, []);
-
+ 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
-
+ 
         const [tasksData, deptsData, usersData, stagesData] = await Promise.all([
           getTasks(),
           fetchDepartments(),
           supabase.from('tm_users').select('id, name, email, role'),
           getStages(),
         ]);
-
+ 
         const transformedDepts = transformDepartments(deptsData);
-
+ 
         setTasks(tasksData);
         setDepartments(transformedDepts);
         setUsers(usersData);
@@ -301,63 +342,63 @@ export default function TasksPage() {
         setLoading(false);
       }
     };
-
+ 
     loadData();
   }, [transformDepartments]);
-
+ 
   // Get filtered tasks based on selected department/subdepartment/class/subclass
   const getFilteredTasks = useCallback((status?: string) => {
     // If no filters are selected, return all tasks or filter by status if provided
     if (!selectedDepartment && !selectedSubdepartment && !selectedClass && !selectedSubclass) {
       return status ? tasks.filter(task => task.status === status) : [...tasks];
     }
-
+ 
     // Helper function to compare IDs, handling both string and number types
     const idsMatch = (id1: any, id2: any): boolean => {
       if (id1 === undefined || id2 === undefined) return false;
       return String(id1) === String(id2);
     };
-
+ 
     // First filter by status if provided
     const tasksToFilter = status ? tasks.filter(task => task.status === status) : [...tasks];
-
+ 
     return tasksToFilter.filter(task => {
       // For enquiry tasks, we need to check the task's department/subdepartment/class/subclass
       // against the selected filters
       let matches = true;
-
+ 
       // Check department match
       if (selectedDepartment) {
         const deptMatch = idsMatch(task.department?.id, selectedDepartment);
         if (!deptMatch) matches = false;
       }
-
+ 
       // Only check subdepartment if department matches (or isn't selected)
       if (matches && selectedSubdepartment) {
         const subdeptMatch = idsMatch(task.subdepartment?.id, selectedSubdepartment);
         if (!subdeptMatch) matches = false;
       }
-
+ 
       // Only check class if department and subdepartment match (or aren't selected)
       if (matches && selectedClass) {
         const classMatch = idsMatch(task.class_id, selectedClass);
         if (!classMatch) matches = false;
       }
-
+ 
       // Only check subclass if all parent levels match (or aren't selected)
       if (matches && selectedSubclass) {
         const subclassMatch = idsMatch(task.subclass_id, selectedSubclass);
         if (!subclassMatch) matches = false;
       }
-
+ 
       return matches;
     });
   }, [tasks, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
-
+ 
   const filteredTasks = useMemo(() => {
     return getFilteredTasks();
   }, [getFilteredTasks]);
-
+ 
   // In TasksPage.tsx, update the getCurrentRequirements function:
   const getCurrentRequirements = useCallback(() => {
     // Don't pass task parameter anymore - use selection state instead
@@ -367,87 +408,42 @@ export default function TasksPage() {
         .flatMap(sd => sd.classes || [])
         .flatMap(c => c.subClasses || [])
         .find(sc => String(sc.id) === String(selectedSubclass));
-
+ 
       return subclass?.requirements || [];
     } else if (selectedClass) {
       let cls = departments
         .flatMap(d => d.tm_subdepartments || [])
         .flatMap(sd => sd.classes || [])
         .find(c => String(c.id) === String(selectedClass));
-
+ 
       if (!cls) {
         cls = departments
           .flatMap(d => d.tm_subdepartments || [])
           .flatMap(sd => sd.classes || [])
           .find(c => c.name === selectedClass);
       }
-
+ 
       return cls?.requirements || [];
     } else if (selectedSubdepartment) {
       const subdept = departments
         .flatMap(d => d.tm_subdepartments || [])
         .find(sd => String(sd.id) === String(selectedSubdepartment));
-
+ 
       return subdept?.requirements || [];
     } else if (selectedDepartment) {
       const dept = departments.find(d => String(d.id) === String(selectedDepartment));
       return dept?.requirements || [];
     }
-
+ 
     return [];
   }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
-
-  // Also update the generateRequirementColumns function to not call getCurrentRequirements with task:
-  const generateRequirementColumns = useCallback(() => {
-    const baseColumns = stageColumns.slice(0, stageColumns.findIndex(col => col.key === 'renewal_status') + 1);
-
-    const requirementColumns = [
-      ...baseColumns,
-      {
-        key: 'requirements',
-        header: 'Requirements',
-        width: '200px',
-        render: (value: any, task: any) => {
-          const requirements = getCurrentRequirements(); // Remove task parameter
-          return (
-            <div className="space-y-2">
-              {requirements.map((req, idx) => (
-                <div key={idx} className="flex items-center space-x-2">
-                  <span className="text-sm font-medium">{req.name}:</span>
-                  <Badge variant={req.status === 'completed' ? 'default' : 'outline'}>
-                    {req.status || 'Pending'}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          );
-        }
-      },
-      {
-        key: 'actions',
-        header: 'Actions',
-        width: '150px',
-        render: (value: any, task: any) => (
-          <div className="flex space-x-2">
-            <Button variant="outline" size="sm" onClick={() => handleViewTask(task)}>
-              View
-            </Button>
-          </div>
-        )
-      }
-    ];
-
-    return requirementColumns;
-  }, [getCurrentRequirements]); // Update dependency
-
+ 
   const getTaskStageStatus = (taskId: string, stageId: string) => {
     const stageStatuses = JSON.parse(localStorage.getItem(TASK_STAGE_STATUS_KEY) || '{}');
     const taskStatuses = stageStatuses[taskId] || {};
     return taskStatuses[stageId];
   };
-  // Add these constants at the top of your component
-  const TASK_STAGE_STATUS_KEY = 'taskStageStatuses';
-
+ 
   // Add this function to handle enquiry creation
   const handleEnquiryCreated = (newEnquiry: any) => {
     setEnquiryTasks(prev => [newEnquiry, ...prev])
@@ -458,7 +454,7 @@ export default function TasksPage() {
     }
     loadTasks()
   }
-
+ 
   const handleStageStatusSave = async (stageId: string, taskId: string, date: string) => {
     try {
       // Get current task data
@@ -467,18 +463,18 @@ export default function TasksPage() {
         .select('stages')
         .eq('id', taskId)
         .single()
-
+ 
       if (fetchError) throw fetchError
-
+ 
       // Parse existing stages or create new object
       const existingStages = currentTask.stages || {}
-
+ 
       // Format date as DD/MM/YYYY for consistency
       const parsedDate = new Date(date);
       const formattedDate = `${String(parsedDate.getDate()).padStart(2, '0')}/` +
         `${String(parsedDate.getMonth() + 1).padStart(2, '0')}/` +
         `${parsedDate.getFullYear()}`;
-
+ 
       // Update stages object
       const updatedStages = {
         ...existingStages,
@@ -488,11 +484,11 @@ export default function TasksPage() {
           completedAt: new Date().toISOString()
         }
       }
-
+ 
       // Check if this is confirmation stage
       const confirmationStageId = "a19b270e-6d1e-4e6d-b2bc-f21db72cde08"
       const shouldMoveToProgress = stageId === confirmationStageId
-
+ 
       // Update task with new stages data and potentially new status
       const { error: updateError } = await supabase
         .from('tm_tasks')
@@ -502,28 +498,28 @@ export default function TasksPage() {
           updated_at: new Date().toISOString()
         })
         .eq('id', taskId)
-
+ 
       if (updateError) throw updateError
-
+ 
       // Refresh tasks if status changed
       if (shouldMoveToProgress) {
         const [tasksData] = await Promise.all([getTasks()])
         setTasks(tasksData)
       }
-
+ 
       return Promise.resolve()
     } catch (error) {
       console.error('Error saving stage status:', error)
       throw error
     }
   }
-
+ 
   // Update the generateStageColumns function to handle enquiry stages
   const generateStageColumns = useCallback(() => {
     const baseColumns = stageColumns
       .slice(0, stageColumns.findIndex(col => col.key === 'renewal_status') + 1)
       .filter(col => columnVisibility[col.key] !== false)
-
+ 
     const movedColumns = stageColumns
       .slice(
         stageColumns.findIndex(col => col.key === 'account_used'),
@@ -531,17 +527,17 @@ export default function TasksPage() {
       )
       .filter(col => ['account_used', 'applied_by', 'batch', 'actions'].includes(col.key) &&
         columnVisibility[col.key] !== false)
-
+ 
     const endColumns: any[] = []
-
+ 
     const currentDept = departments.find(d => d.id === selectedDepartment)
     if (!currentDept) {
       return [...baseColumns, ...endColumns]
     }
-
+ 
     // Get stages - for enquiry tab, only show enquiry and confirmation stages
     let departmentStages = currentDept.stages || []
-
+ 
     // Filter stages for enquiry view
     const isEnquiryView = window.location.hash.includes('enquiry')
     if (isEnquiryView) {
@@ -549,52 +545,52 @@ export default function TasksPage() {
         stage.name === 'Enquiry' || stage.name === 'Confirmation'
       )
     }
-
+ 
     // Apply subdepartment and class filters as before...
     if (selectedSubdepartment) {
       const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id === selectedSubdepartment)
       if (currentSubdept) {
         departmentStages = departmentStages.filter(stage => {
           const subdeptStageConfig = currentSubdept.stages?.find(s => s.stage_id === stage.id)
-
+ 
           if (subdeptStageConfig && subdeptStageConfig.applicable === false) {
             return false
           }
-
+ 
           if (subdeptStageConfig && subdeptStageConfig.display !== undefined) {
             return subdeptStageConfig.display
           }
-
+ 
           return true
         })
       }
     }
-
+ 
     if (selectedClass) {
       const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id === selectedSubdepartment)
       if (currentSubdept) {
         const currentClass = currentSubdept.classes?.find(c =>
           c.id === selectedClass || c.name === selectedClass
         )
-
+ 
         if (currentClass && currentClass.stages) {
           departmentStages = departmentStages.filter(stage => {
             const classStageConfig = currentClass.stages?.find(s => s.stage_id === stage.id)
-
+ 
             if (classStageConfig && classStageConfig.applicable === false) {
               return false
             }
-
+ 
             if (classStageConfig && classStageConfig.display !== undefined) {
               return classStageConfig.display
             }
-
+ 
             return true
           })
         }
       }
     }
-
+ 
     // Generate stage columns from filtered stages
     const stageColumnsList = departmentStages
       .filter(stage => columnVisibility[`stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`] !== false)
@@ -607,7 +603,7 @@ export default function TasksPage() {
         stage: stage,
         render: (value: any, task: any) => {
           const taskStageStatus = getTaskStageStatus(task.id, stage.id)
-
+ 
           return (
             <EditableStageCell
               stage={stage}
@@ -620,7 +616,7 @@ export default function TasksPage() {
           )
         }
       }))
-
+ 
     return [
       ...baseColumns,
       ...stageColumnsList,
@@ -631,138 +627,109 @@ export default function TasksPage() {
       ...endColumns
     ]
   }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, columnVisibility])
-
+ 
   // Helper function to check if IDs match
   const idsMatch = (id1: any, id2: any): boolean => {
     if (id1 === undefined || id2 === undefined) return false;
     return String(id1) === String(id2);
   };
-
+ 
   // Function to get enquiry tasks filtered by selected data level
   const getEnquiryTasks = useCallback(() => {
     // First filter by status
     let filtered = tasks.filter(task => task.status === 'enquiry');
-
+ 
     // If no filters are selected, return all enquiry tasks
     if (!selectedDepartment && !selectedSubdepartment && !selectedClass && !selectedSubclass) {
       return filtered;
     }
-
+ 
     // Apply department filter if selected
     if (selectedDepartment) {
       filtered = filtered.filter(task =>
         idsMatch(task.department?.id, selectedDepartment)
       );
     }
-
+ 
     // Apply subdepartment filter if selected
     if (selectedSubdepartment) {
       filtered = filtered.filter(task =>
         idsMatch(task.subdepartment?.id, selectedSubdepartment)
       );
     }
-
+ 
     // Apply class filter if selected
     if (selectedClass) {
       filtered = filtered.filter(task =>
         idsMatch(task.class_id, selectedClass)
       );
     }
-
+ 
     // Apply subclass filter if selected
     if (selectedSubclass) {
       filtered = filtered.filter(task =>
         idsMatch(task.subclass_id, selectedSubclass)
       );
     }
-
+ 
     return filtered;
   }, [tasks, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass])
-
+ 
   // Handle sidebar navigation
   const handleDeptClick = (deptId: string) => {
     setSelectedDepartment(deptId);
-    const dept = departments.find(d => d.id === deptId);
-    if (dept?.subdepartments?.length > 0) {
-      setSelectedSubdepartment(dept.subdepartments[0].id);
-      if (dept.subdepartments[0].classes?.length > 0) {
-        setSelectedClass(dept.subdepartments[0].classes[0].name);
-        if (dept.subdepartments[0].classes[0].subClasses?.length > 0) {
-          setSelectedSubclass(dept.subdepartments[0].classes[0].subClasses[0].id);
-        } else {
-          setSelectedSubclass('');
-        }
-      } else {
-        setSelectedClass('');
-        setSelectedSubclass('');
-      }
-    }
+    setSelectedSubdepartment('');
+    setSelectedClass('');
+    setSelectedSubclass('');
   };
-
+ 
   const handleSubdeptClick = (deptId: string, subdeptId: string) => {
     setSelectedDepartment(deptId);
     setSelectedSubdepartment(subdeptId);
-    const dept = departments.find(d => d.id === deptId);
-    const subdept = dept?.subdepartments?.find(s => s.id === subdeptId);
-    if (subdept?.classes?.length > 0) {
-      setSelectedClass(subdept.classes[0].name);
-      if (subdept.classes[0].subClasses?.length > 0) {
-        setSelectedSubclass(subdept.classes[0].subClasses[0].id);
-      } else {
-        setSelectedSubclass('');
-      }
-    } else {
-      setSelectedClass('');
-      setSelectedSubclass('');
-    }
+    setSelectedClass('');
+    setSelectedSubclass('');
   };
-
+ 
   const handleClassClick = (deptId: string, subdeptId: string, classId: string) => {
     setSelectedDepartment(deptId);
     setSelectedSubdepartment(subdeptId);
     setSelectedClass(classId);
-    const dept = departments.find(d => d.id === deptId);
-    const subdept = dept?.subdepartments?.find(s => s.id === subdeptId);
-    const cls = subdept?.classes?.find(c => c.name === classId);
-    if (cls?.subClasses?.length > 0) {
-      setSelectedSubclass(cls.subClasses[0].id);
-    } else {
-      setSelectedSubclass('');
-    }
+    setSelectedSubclass('');
   };
-
+ 
   const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => {
     setSelectedDepartment(deptId);
     setSelectedSubdepartment(subdeptId);
     setSelectedClass(classId);
     setSelectedSubclass(subclassId);
   };
-
+ 
   const handleToggleExpand = (key: string) => {
     setExpandedItems(prev => ({
       ...prev,
       [key]: !prev[key]
     }));
   };
+ 
   const handleViewTask = (task: Task) => {
     setSelectedTask(task);
   };
-
+ 
   // Handle stage document upload
   const handleStageDocumentUpload = (task: Task, stage: any) => {
     setSelectedStageTask({ task, stage });
     setStageUploadDialogOpen(true);
   };
-
+ 
   // Handle view stage document
   const handleViewStageDocument = async (task: Task, stage: any, stageDoc: any, document: any) => {
     try {
       const { data: fileUrl, error } = await supabase.storage
         .from('kyc-documents')
         .createSignedUrl(document.file_path, 3600);
-
+ 
       if (error) throw error;
-
+ 
       setPreviewDocument({
         ...document,
         fileUrl: fileUrl.signedUrl,
@@ -780,13 +747,13 @@ export default function TasksPage() {
       });
     }
   };
-
+ 
   // Handle show upload dialog
   const handleShowUploadDialog = (task: Task) => {
     setSelectedTask(task);
     setShowUploadDialog(true);
   };
-
+ 
   // Handle sort
   const handleSort = (key: string) => {
     let direction: 'asc' | 'desc' = 'asc';
@@ -795,13 +762,13 @@ export default function TasksPage() {
     }
     setSortConfig({ key, direction });
   };
-
+ 
   // Transform departments for sidebar
   const transformedDepartments = departments.map(dept => {
     const transformedDept = {
       ...dept,
       id: dept.id.toString(),
-      subdepartments: dept.subdepartments?.map(subdept => {
+      subdepartments: dept.tm_subdepartments?.map(subdept => {
         const transformedSubdept = {
           ...subdept,
           id: subdept.id.toString(),
@@ -823,22 +790,22 @@ export default function TasksPage() {
     };
     return transformedDept;
   });
-
+ 
   // Get current selection details for display
   const getCurrentSelectionDetails = () => {
     const dept = departments.find(d => d.id === selectedDepartment);
-    const subdept = dept?.subdepartments?.find(s => s.id === selectedSubdepartment);
+    const subdept = dept?.tm_subdepartments?.find(s => s.id === selectedSubdepartment);
     const cls = subdept?.classes?.find(c => c.name === selectedClass);
     const subcls = cls?.subClasses?.find(sc => sc.id === selectedSubclass);
-
+ 
     return { dept, subdept, cls, subcls };
   };
-
+ 
   // Get display title based on current selection
   const getDisplayTitle = () => {
     const { dept, subdept, cls, subcls } = getCurrentSelectionDetails();
     const selectionLevel = getCurrentSelectionLevel();
-
+ 
     switch (selectionLevel) {
       case 'subclass':
         return `${subcls?.name} (${cls?.name} - ${subdept?.name})`;
@@ -852,7 +819,7 @@ export default function TasksPage() {
         return 'Task Management';
     }
   };
-
+ 
   // Get current selection level
   const getCurrentSelectionLevel = () => {
     if (selectedSubclass) return 'subclass';
@@ -861,15 +828,15 @@ export default function TasksPage() {
     if (selectedDepartment) return 'department';
     return 'none';
   };
-
+ 
   const { dept, subdept, cls, subcls } = getCurrentSelectionDetails();
   const selectionLevel = getCurrentSelectionLevel();
-
+ 
   const handleReviewDocument = (document: any) => {
     setReviewDocument(document)
     setDocumentReviewOpen(true)
   }
-
+ 
   if (loading) {
     return (
       <div className="flex-1 space-y-4 p-2">
@@ -882,20 +849,7 @@ export default function TasksPage() {
       </div>
     );
   }
-
-
-  // Add this to TasksPage.tsx for debugging:
-  const debugClassId = (task: any) => {
-    console.log('Task debug info:', {
-      taskId: task.id,
-      class_id: task.class_id,
-      subclass_id: task.subclass_id,
-      subdepartment_id: task.subdepartment?.id,
-      constructedClassId: task.subdepartment?.id ? `${task.subdepartment.id}_${task.class_id}` : task.class_id
-    });
-  };
-
-
+ 
   return (
     <div className="flex h-screen">
       {/* Sidebar */}
@@ -912,10 +866,11 @@ export default function TasksPage() {
         onToggleExpand={handleToggleExpand}
         expandedItems={expandedItems}
       />
-
+ 
       {/* Main Content */}
       <div className="flex-1 overflow-hidden">
         <div className="flex-1 space-y-4 p-4 h-full overflow-auto">
+          {/* Header - same as before */}
           <div className="flex items-center justify-between space-y-2">
             <div>
               <h2 className="text-3xl font-bold tracking-tight">Task Management</h2>
@@ -961,7 +916,7 @@ export default function TasksPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="p-4">
-                    <TaskTable
+                    <StagesTable
                       tasks={getEnquiryTasks()}
                       columns={generateStageColumns()}
                       loading={loading}
@@ -992,7 +947,7 @@ export default function TasksPage() {
                       Upload Requirements
                     </TabsTrigger>
                     <TabsTrigger value="webdata">
-                      <Upload className="h-4 w-4 mr-2" />
+                      <Globe className="h-4 w-4 mr-2" />
                       Web Data
                     </TabsTrigger>
                   </TabsList>
@@ -1006,7 +961,7 @@ export default function TasksPage() {
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="p-4">
-                        <TaskTable
+                        <StagesTable
                           tasks={getFilteredTasks('in_progress')}
                           columns={generateStageColumns()}
                           loading={loading}
@@ -1037,18 +992,17 @@ export default function TasksPage() {
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="p-4">
-                        <TaskTable
+                        <RequirementsTable
                           tasks={getFilteredTasks('in_progress')}
-                          columns={generateRequirementColumns()}
                           loading={loading}
                           error={error}
                           onTaskAction={handleTaskAction}
                           onShowUploadDialog={handleShowUploadDialog}
-                          applicantDocuments={applicantDocuments}
+                          onViewDocument={handleViewDocument}
+                          requirements={getCurrentRequirements()}
                           sortConfig={sortConfig}
                           onSort={handleSort}
-                          columnVisibility={columnVisibility}
-                          showRequirements={true}
+                          applicantDocuments={applicantDocuments}
                         />
                       </CardContent>
                     </Card>
@@ -1059,22 +1013,21 @@ export default function TasksPage() {
                       <CardHeader>
                         <CardTitle>Web Data - {getDisplayTitle()}</CardTitle>
                         <CardDescription>
-                          Web data for {getDisplayTitle()}
+                          Scrape and manage web data for {getDisplayTitle()}
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="p-4">
-                        <TaskTable
+                        <WebDataTable
                           tasks={getFilteredTasks('in_progress')}
-                          columns={generateRequirementColumns()}
                           loading={loading}
                           error={error}
                           onTaskAction={handleTaskAction}
-                          onShowUploadDialog={handleShowUploadDialog}
-                          applicantDocuments={applicantDocuments}
+                          onRefreshWebData={handleRefreshWebData}
+                          onViewWebData={handleViewWebData}
+                          onExtractData={handleExtractData}
                           sortConfig={sortConfig}
                           onSort={handleSort}
-                          columnVisibility={columnVisibility}
-                          showRequirements={true}
+                          webDataStatus={webDataStatus}
                         />
                       </CardContent>
                     </Card>
@@ -1089,7 +1042,7 @@ export default function TasksPage() {
                     <CardDescription>Successfully completed tasks with performance metrics</CardDescription>
                   </CardHeader>
                   <CardContent className="p-4">
-                    <TaskTable
+                    <StagesTable
                       tasks={getFilteredTasks('completed')}
                       columns={generateStageColumns()}
                       loading={loading}
@@ -1108,308 +1061,176 @@ export default function TasksPage() {
                 </Card>
               </TabsContent>
             </Tabs>
-          ) : selectedSubdepartment ? (
-            <Tabs defaultValue="work-in-progress" className="space-y-4">
-              <TabsList>
-                <TabsTrigger value="work-in-progress">Work in Progress</TabsTrigger>
-                <TabsTrigger value="completed">Completed</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="work-in-progress" className="space-y-4">
-                <Tabs defaultValue="stages" className="space-y-4">
-                  <TabsList>
-                    <TabsTrigger value="stages">
-                      <FileText className="h-4 w-4 mr-2" />
-                      Stages (Department-based)
-                    </TabsTrigger>
-                    <TabsTrigger value="upload-requirements">
-                      <Upload className="h-4 w-4 mr-2" />
-                      Upload Requirements (Class-based)
-                    </TabsTrigger>
-                    <TabsTrigger value="webdata">
-                      <Upload className="h-4 w-4 mr-2" />
-                      Web Data
-                    </TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="stages" className="space-y-4">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Stages Progress</CardTitle>
-                        <CardDescription>
-                          Track tasks through various stages of completion (Department-level stages)
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="p-4">
-                        <TaskTable
-                          tasks={getFilteredTasks('in_progress')}
-                          columns={generateStageColumns()}
-                          loading={loading}
-                          error={error}
-                          onTaskAction={handleTaskAction}
-                          onStageDocumentUpload={handleStageDocumentUpload}
-                          onViewStageDocument={handleViewStageDocument}
-                          onShowUploadDialog={handleShowUploadDialog}
-                          applicantDocuments={applicantDocuments}
-                          departments={departments}
-                          sortConfig={sortConfig}
-                          onSort={handleSort}
-                          columnVisibility={columnVisibility}
-                        />
-                      </CardContent>
-                    </Card>
-                  </TabsContent>
-
-                  <TabsContent value="upload-requirements" className="space-y-4">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Upload Requirements</CardTitle>
-                        <CardDescription>
-                          Manage document requirements for this subdepartment (Class/Subclass-level requirements)
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="p-4">
-                        <TaskTable
-                          tasks={getFilteredTasks('in_progress')}
-                          columns={generateRequirementColumns()}
-                          loading={loading}
-                          error={error}
-                          onTaskAction={handleTaskAction}
-                          onShowUploadDialog={handleShowUploadDialog}
-                          applicantDocuments={applicantDocuments}
-                          sortConfig={sortConfig}
-                          onSort={handleSort}
-                          columnVisibility={columnVisibility}
-                          showRequirements={true}
-                        />
-                      </CardContent>
-                    </Card>
-                  </TabsContent>
-
-                  <TabsContent value="webdata" className="space-y-4">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Web Data</CardTitle>
-                        <CardDescription>
-                          Web data for this subdepartment
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="p-4">
-                        <TaskTable
-                          tasks={getFilteredTasks('in_progress')}
-                          columns={generateRequirementColumns()}
-                          loading={loading}
-                          error={error}
-                          onTaskAction={handleTaskAction}
-                          onShowUploadDialog={handleShowUploadDialog}
-                          applicantDocuments={applicantDocuments}
-                          sortConfig={sortConfig}
-                          onSort={handleSort}
-                          columnVisibility={columnVisibility}
-                          showRequirements={true}
-                        />
-                      </CardContent>
-                    </Card>
-                  </TabsContent>
-                </Tabs>
-              </TabsContent>
-
-              <TabsContent value="completed" className="space-y-4">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Completed Tasks</CardTitle>
-                    <CardDescription>Successfully completed tasks with performance metrics</CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-4">
-                    <TaskTable
-                      tasks={getFilteredTasks('completed')}
-                      columns={generateStageColumns()}
-                      loading={loading}
-                      error={error}
-                      onTaskAction={handleTaskAction}
-                      onStageDocumentUpload={handleStageDocumentUpload}
-                      onViewStageDocument={handleViewStageDocument}
-                      onShowUploadDialog={handleShowUploadDialog}
-                      applicantDocuments={applicantDocuments}
-                      departments={departments}
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                      columnVisibility={columnVisibility}
-                    />
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
-          ) : selectedDepartment ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Department Overview</CardTitle>
-                <CardDescription>
-                  Select a subdepartment from the sidebar to view tasks
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-4">
-                <div className="text-center py-8">
-                  <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <div className="space-y-2">
-                    <p className="text-muted-foreground">
-                      Choose a subdepartment from the sidebar to view and manage tasks
-                    </p>
-                    <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md inline-block">
-                      <div className="font-medium mb-1">Data Dependencies:</div>
-                      <div>• Stages: Based on Department level</div>
-                      <div>• Requirements: Based on Class/Subclass level</div>
-                    </div>
+         ) : selectedDepartment ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Department Overview</CardTitle>
+              <CardDescription>
+                Select a subdepartment from the sidebar to view tasks
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-4">
+              <div className="text-center py-8">
+                <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <div className="space-y-2">
+                  <p className="text-muted-foreground">
+                    Choose a subdepartment from the sidebar to view and manage tasks
+                  </p>
+                  <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md inline-block">
+                    <div className="font-medium mb-1">Data Dependencies:</div>
+                    <div>• Stages: Based on Department level</div>
+                    <div>• Requirements: Based on Class/Subclass level</div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <CardHeader>
-                <CardTitle>Task Management Dashboard</CardTitle>
-                <CardDescription>
-                  Select a department from the sidebar to get started
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-4">
-                <div className="text-center py-8">
-                  <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <div className="space-y-2">
-                    <p className="text-muted-foreground">
-                      Choose a department from the sidebar to view and manage tasks
-                    </p>
-                    <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md inline-block">
-                      <div className="font-medium mb-1">System Overview:</div>
-                      <div>• Departments → Subdepartments → Classes → Subclasses</div>
-                      <div>• Stages: Department-dependent</div>
-                      <div>• Requirements: Class/Subclass-dependent</div>
-                    </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader>
+              <CardTitle>Task Management Dashboard</CardTitle>
+              <CardDescription>
+                Select a department from the sidebar to get started
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-4">
+              <div className="text-center py-8">
+                <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <div className="space-y-2">
+                  <p className="text-muted-foreground">
+                    Choose a department from the sidebar to view and manage tasks
+                  </p>
+                  <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md inline-block">
+                    <div className="font-medium mb-1">System Overview:</div>
+                    <div>• Departments → Subdepartments → Classes → Subclasses</div>
+                    <div>• Stages: Department-dependent</div>
+                    <div>• Requirements: Class/Subclass-dependent</div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-          {/* Dialogs */}
-          <NewTaskDialog
-            open={newTaskDialogOpen}
-            onOpenChange={setNewTaskDialogOpen}
-            onCreate={(newTask) => {
-              setTasks(prev => [newTask, ...prev]);
+        {/* Dialogs */}
+        <NewTaskDialog
+          open={newTaskDialogOpen}
+          onOpenChange={setNewTaskDialogOpen}
+          onCreate={(newTask) => {
+            setTasks(prev => [newTask, ...prev]);
+          }}
+        />
+
+        {selectedTask && (
+          <StageTransitionDialog
+            open={stageTransitionDialogOpen}
+            onOpenChange={setStageTransitionDialogOpen}
+            currentStage={{
+              id: selectedTask.current_stage?.id?.toString() || '',
+              name: selectedTask.current_stage?.name || 'Not Started',
+              estimatedDuration: selectedTask.current_stage?.estimated_time || 0,
+              actualDuration: selectedTask.current_stage_started_at
+                ? (new Date().getTime() - new Date(selectedTask.current_stage_started_at).getTime()) / (1000 * 60)
+                : 0
+            }}
+            stages={stages}
+            currentStageId={selectedTask.current_stage?.id?.toString()}
+            onTransition={async (data) => {
+              try {
+                const { data: updatedTask, error } = await supabase
+                  .from('tm_tasks')
+                  .update({
+                    current_stage_id: data.nextStageId ? parseInt(data.nextStageId) : null,
+                    current_stage_started_at: data.nextStageId ? new Date().toISOString() : null,
+                    status: data.nextStageId ? 'in_progress' : 'completed',
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', selectedTask.id)
+                  .select('*')
+                  .single();
+
+                if (error) throw error;
+
+                setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
+
+                const [tasksData] = await Promise.all([getTasks()]);
+                setTasks(tasksData);
+                setStageTransitionDialogOpen(false);
+              } catch (err) {
+                console.error("Error updating stage:", err);
+              }
             }}
           />
+        )}
 
-          {selectedTask && (
-            <StageTransitionDialog
-              open={stageTransitionDialogOpen}
-              onOpenChange={setStageTransitionDialogOpen}
-              currentStage={{
-                id: selectedTask.current_stage?.id?.toString() || '',
-                name: selectedTask.current_stage?.name || 'Not Started',
-                estimatedDuration: selectedTask.current_stage?.estimated_time || 0,
-                actualDuration: selectedTask.current_stage_started_at
-                  ? (new Date().getTime() - new Date(selectedTask.current_stage_started_at).getTime()) / (1000 * 60)
-                  : 0
-              }}
-              stages={stages}
-              currentStageId={selectedTask.current_stage?.id?.toString()}
-              onTransition={async (data) => {
-                try {
-                  const { data: updatedTask, error } = await supabase
-                    .from('tm_tasks')
-                    .update({
-                      current_stage_id: data.nextStageId ? parseInt(data.nextStageId) : null,
-                      current_stage_started_at: data.nextStageId ? new Date().toISOString() : null,
-                      status: data.nextStageId ? 'in_progress' : 'completed',
-                      updated_at: new Date().toISOString()
-                    })
-                    .eq('id', selectedTask.id)
-                    .select('*')
-                    .single();
+        <StageUploadDialog
+          open={stageUploadDialogOpen}
+          onOpenChange={setStageUploadDialogOpen}
+          selectedStageTask={selectedStageTask}
+          getCurrentRequirements={getCurrentRequirements}
+          fuzzyMatch={fuzzyMatch}
+        />
 
-                  if (error) throw error;
-
-                  setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
-
-                  const [tasksData] = await Promise.all([getTasks()]);
-                  setTasks(tasksData);
-                  setStageTransitionDialogOpen(false);
-                } catch (err) {
-                  console.error("Error updating stage:", err);
-                }
-              }}
-            />
-          )}
-
-          <StageUploadDialog
-            open={stageUploadDialogOpen}
-            onOpenChange={setStageUploadDialogOpen}
-            selectedStageTask={selectedStageTask}
-            getCurrentRequirements={getCurrentRequirements}
-            fuzzyMatch={fuzzyMatch}
-          />
-
-          {selectedTask && showUploadDialog && (
-            <UploadRequirementsDialog
-              open={showUploadDialog}
-              onClose={() => {
-                setSelectedTask(null);
-                setShowUploadDialog(false);
-              }}
-              task={selectedTask}
-              requirements={getCurrentRequirements()} // Remove task parameter
-              onUploadComplete={() => {
-                if (selectedTask) {
-                  // Refresh task data or update UI as needed
-                  console.log('Upload completed for task:', selectedTask.id);
-                }
-              }}
-            />
-          )}
-
-          <DocumentPreviewDialog
-            open={documentReviewOpen}
-            onOpenChange={setDocumentReviewOpen}
-            document={reviewDocument}
+        {selectedTask && showUploadDialog && (
+          <UploadRequirementsDialog
+            open={showUploadDialog}
+            onClose={() => {
+              setSelectedTask(null);
+              setShowUploadDialog(false);
+            }}
             task={selectedTask}
-            onReviewComplete={(documentId, status, comments) => {
-              console.log('Review completed:', { documentId, status, comments })
-              // Handle review completion
-              toast({
-                title: 'Review Completed',
-                description: `Document ${status} successfully`,
-                variant: status === 'approved' ? 'default' : 'destructive'
-              })
-            }}
-            onExtractedDataUpdate={(documentId, updatedData) => {
-              console.log('Extracted data updated:', { documentId, updatedData })
-              // Handle extracted data update
+            requirements={getCurrentRequirements()} // Remove task parameter
+            onUploadComplete={() => {
+              if (selectedTask) {
+                // Refresh task data or update UI as needed
+                console.log('Upload completed for task:', selectedTask.id);
+              }
             }}
           />
+        )}
 
-          <EnquiryDialog
-            open={enquiryDialogOpen}
-            onOpenChange={setEnquiryDialogOpen}
-            onEnquiryCreated={handleEnquiryCreated}
-          />
-          <DeleteConfirmationDialog
-            open={deleteDialogOpen}
-            onOpenChange={setDeleteDialogOpen}
-            onConfirm={handleDeleteConfirm}
-            title={`Delete Task ${taskToDelete?.id || ''}`}
-            description="Are you sure you want to delete this task? This action cannot be undone."
-            confirmText="Delete Task"
-            loading={isDeleting}
-            onDeptClick={handleDeptClick}
-            onSubdeptClick={handleSubdeptClick}
-            onClassClick={handleClassClick}
-            onSubclassClick={handleSubclassClick}
-            onToggleExpand={handleToggleExpand}
-            expandedItems={expandedItems}
-          />
-        </div>
+        <DocumentPreviewDialog
+          open={documentReviewOpen}
+          onOpenChange={setDocumentReviewOpen}
+          document={reviewDocument}
+          task={selectedTask}
+          onReviewComplete={(documentId, status, comments) => {
+            console.log('Review completed:', { documentId, status, comments })
+            // Handle review completion
+            toast({
+              title: 'Review Completed',
+              description: `Document ${status} successfully`,
+              variant: status === 'approved' ? 'default' : 'destructive'
+            })
+          }}
+          onExtractedDataUpdate={(documentId, updatedData) => {
+            console.log('Extracted data updated:', { documentId, updatedData })
+            // Handle extracted data update
+          }}
+        />
+
+        <EnquiryDialog
+          open={enquiryDialogOpen}
+          onOpenChange={setEnquiryDialogOpen}
+          onEnquiryCreated={handleEnquiryCreated}
+        />
+        <DeleteConfirmationDialog
+          open={deleteDialogOpen}
+          onOpenChange={setDeleteDialogOpen}
+          onConfirm={handleDeleteConfirm}
+          title={`Delete Task ${taskToDelete?.id || ''}`}
+          description="Are you sure you want to delete this task? This action cannot be undone."
+          confirmText="Delete Task"
+          loading={isDeleting}
+          onDeptClick={handleDeptClick}
+          onSubdeptClick={handleSubdeptClick}
+          onClassClick={handleClassClick}
+          onSubclassClick={handleSubclassClick}
+          onToggleExpand={handleToggleExpand}
+          expandedItems={expandedItems}
+        />
       </div>
     </div>
-  );
+  </div>
+);
 }
