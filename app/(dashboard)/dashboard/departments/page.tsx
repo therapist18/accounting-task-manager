@@ -64,7 +64,7 @@ export default function DepartmentsPage() {
               webdata
             )
           `)
-          .order('name')
+          .order('order', { ascending: true })
 
         if (error) throw error
         setDepartments(data || [])

@@ -552,14 +552,14 @@ export default function UploadRequirements({ departments: initialDepartments }: 
       const { data: departmentsData, error } = await supabase
         .from('tm_departments')
         .select('*, tm_subdepartments(*)')
-        .order('name')
+        .order('order', { ascending: true })
   
       if (error) throw error
   
       const { data: requirements, error: reqError } = await supabase
         .from('tm_class_requirements')
         .select('*')
-        .order('id')
+        .order('id', { ascending: true })
   
       if (reqError) throw reqError
   

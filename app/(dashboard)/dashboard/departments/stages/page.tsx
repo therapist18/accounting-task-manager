@@ -123,7 +123,7 @@ export default function Stages() {
               classes
             )
           `)
-          .order('name')
+          .order('order', { ascending: true })
 
         if (deptsError) throw deptsError
 

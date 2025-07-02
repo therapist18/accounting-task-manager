@@ -291,7 +291,7 @@ export default function DepartmentGuidelines({ departments: initialDepartments }
       const { data: departmentsData, error } = await supabase
         .from('tm_departments')
         .select('*, tm_subdepartments(*)')
-        .order('name')
+        .order('order', { ascending: true })
 
       if (error) throw error
 

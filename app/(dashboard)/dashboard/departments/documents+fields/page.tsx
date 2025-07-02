@@ -119,7 +119,7 @@ const processDocumentFields = (docs: DocumentType[]) => {
     ): DocumentField[] => {
       // Generate hierarchical path
       const currentIndex = baseIndex ? `${baseIndex}.${index + 1}` : `${docIndex + 1}.${index + 1}`;
-      
+
       // Check if field has sub-fields (for arrays)
       const subFields = field.arrayConfig?.fields || field.fields || [];
       const hasChildren = (field.type === 'array' || field.isArray) && subFields.length > 0;
@@ -145,10 +145,10 @@ const processDocumentFields = (docs: DocumentType[]) => {
         // Process each sub-field within the array
         subFields.forEach((subField: any, subIndex: number) => {
           const subFieldResults = processField(
-            subField, 
-            level + 1, 
-            currentField.id, 
-            currentIndex, 
+            subField,
+            level + 1,
+            currentField.id,
+            currentIndex,
             subIndex,
             `${currentIndex}`
           );
@@ -213,7 +213,7 @@ export default function DocumentsFields() {
       .sort((a, b) => {
         const aCatNum = parseInt(a.main_category_number || '999', 10);
         const bCatNum = parseInt(b.main_category_number || '999', 10);
-        
+
         if (aCatNum !== bCatNum) return aCatNum - bCatNum;
         if (a.custom_order !== null && b.custom_order !== null) {
           return a.custom_order - b.custom_order;
@@ -225,10 +225,10 @@ export default function DocumentsFields() {
 
     // Process fields with optimized field processing
     const processedDocs = processDocumentFields(sortedDocs);
-    
+
     // Group with stable references
     const grouped = groupDocumentsByCategory(processedDocs);
-    
+
     // Convert to a stable structure
     const stableGrouped = Object.entries(grouped).reduce((acc, [key, value]) => {
       acc[key] = {
@@ -238,9 +238,9 @@ export default function DocumentsFields() {
       return acc;
     }, {} as GroupedDocuments);
 
-    return { 
-      filteredDocuments: processedDocs, 
-      groupedDocuments: stableGrouped 
+    return {
+      filteredDocuments: processedDocs,
+      groupedDocuments: stableGrouped
     };
   }, [documents, documentTab])
 
@@ -270,30 +270,72 @@ export default function DocumentsFields() {
     }));
   }, [currentDepartment])
 
+  const loadDisplaySettings = useCallback(async (classIds: string[]) => {
+    if (classIds.length === 0) {
+      setDocumentAllocations({});
+      return;
+    }
+
+    try {
+      const { data: requirements, error } = await supabase
+        .from('tm_class_requirements')
+        .select('documents_and_fields, class_id')
+        .in('class_id', classIds);
+
+      if (error) throw error;
+
+      const settings: Record<string, boolean> = {};
+
+      requirements?.forEach(req => {
+        if (req.documents_and_fields) {
+          Object.entries(req.documents_and_fields).forEach(([key, value]: [string, any]) => {
+            settings[key] = value.display === true;
+          });
+        }
+      });
+
+      setDocumentAllocations(settings);
+    } catch (error) {
+      console.error('Error loading display settings:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load display settings",
+        variant: "destructive",
+      });
+    }
+  }, []);
+
   const fetchData = useCallback(async () => {
     try {
-      setLoading(true)
+      setLoading(true);
+      setDocumentAllocations({}); // Reset display settings
 
-      const [deptsResponse, documentsResponse] = await Promise.all([
+      // First, fetch departments and documents in parallel
+      const [deptsResponse, documentsResponse, requirementsResponse] = await Promise.all([
         supabase
           .from('tm_departments')
           .select(`*, tm_subdepartments (*, classes)`)
-          .order('name'),
+          .order('order', { ascending: true }),
         supabase
           .from('acc_portal_kyc')
           .select('*')
           .order('main_category_number', { ascending: true, nullsLast: true })
-          .order('custom_order', { ascending: true, nullsLast: true })
-      ])
+          .order('custom_order', { ascending: true, nullsLast: true }),
+        // Fetch all requirements in one go
+        supabase
+          .from('tm_class_requirements')
+          .select('documents_and_fields, class_id')
+      ]);
 
-      if (deptsResponse.error) throw deptsResponse.error
-      if (documentsResponse.error) throw documentsResponse.error
+      if (deptsResponse.error) throw deptsResponse.error;
+      if (documentsResponse.error) throw documentsResponse.error;
+      if (requirementsResponse.error) throw requirementsResponse.error;
 
       const processedDocuments = (documentsResponse.data || []).map(doc => ({
         ...doc,
         fields: Array.isArray(doc.fields) ? doc.fields : [],
         display_name: doc.display_name || doc.name
-      }))
+      }));
 
       const transformedDepartments = (deptsResponse.data || []).map(dept => ({
         ...dept,
@@ -302,26 +344,40 @@ export default function DocumentsFields() {
           classes: Array.isArray(subdept.classes) ? subdept.classes : [],
           hasClasses: subdept.classes && Array.isArray(subdept.classes) && subdept.classes.length > 0
         }))
-      }))
+      }));
 
-      setDepartments(transformedDepartments)
-      setDocuments(processedDocuments)
+      setDepartments(transformedDepartments);
+      setDocuments(processedDocuments);
 
+      // Process requirements data
+      const settings: Record<string, boolean> = {};
+      requirementsResponse.data?.forEach(req => {
+        if (Array.isArray(req.documents_and_fields)) {
+          req.documents_and_fields.forEach((item: any) => {
+            if (item && item.id !== undefined) {
+              settings[item.id] = item.display === true;
+            }
+          });
+        }
+      });
+      setDocumentAllocations(settings);
+
+      // Set active tab if we have departments
       if (transformedDepartments.length > 0) {
-        setActiveTab(transformedDepartments[0].id)
+        setActiveTab(transformedDepartments[0].id);
       }
 
       // Auto-expand all categories initially
       const categoryKeys = Object.keys(groupDocumentsByCategory(processedDocuments.filter(doc => doc.category === CATEGORY_MAPPING[documentTab])));
       setExpandedCategories(new Set(categoryKeys));
-      
+
     } catch (err) {
-      console.error('Error fetching data:', err)
-      setError('Failed to load data. Please try again.')
+      console.error('Error fetching data:', err);
+      setError('Failed to load data. Please try again.');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [documentTab])
+  }, [documentTab, loadDisplaySettings])
 
   useEffect(() => {
     fetchData()
@@ -339,9 +395,9 @@ export default function DocumentsFields() {
       return newSet;
     });
   }, []);
-  
+
   // Memoized toggle functions for better performance
-  const getToggleHandler = useCallback((itemId: string) => 
+  const getToggleHandler = useCallback((itemId: string) =>
     () => toggleItemExpansion(itemId),
     [toggleItemExpansion]
   );
@@ -361,11 +417,11 @@ export default function DocumentsFields() {
   const expandAll = useCallback(() => {
     const allExpandableIds = new Set<string>();
     const allCategoryKeys = new Set<string>();
-    
+
     Object.keys(groupedDocuments).forEach(key => {
       allCategoryKeys.add(key);
     });
-    
+
     filteredDocuments.forEach(doc => {
       if (doc.hasFields) {
         allExpandableIds.add(doc.id);
@@ -376,7 +432,7 @@ export default function DocumentsFields() {
         });
       }
     });
-    
+
     setExpandedCategories(allCategoryKeys);
     setExpandedItems(allExpandableIds);
   }, [filteredDocuments, groupedDocuments]);
@@ -385,32 +441,115 @@ export default function DocumentsFields() {
     setExpandedItems(new Set())
     setExpandedCategories(new Set())
   }, [])
-
-  // Memoized display toggle handler with stable reference
-  const handleDisplayToggle = useCallback((
+  const handleDisplayToggle = useCallback(async (
     allocationId: string,
     subdeptId: number,
-    classIndex: number | null,
-    subclassIndex: number | null,
-    checked: boolean
+    classIndex: number,
+    subclassIndex: number | null = null,
+    checked: boolean = false
   ) => {
-    const keyParts = [allocationId, subdeptId];
-    if (classIndex !== null) keyParts.push(String(classIndex));
-    if (subclassIndex !== null) keyParts.push(String(subclassIndex));
-    const allocationKey = keyParts.join('-')
+    // Build the allocation key in format: allocationId_subdeptId_classIndex[_subclassIndex]
+    const allocationKey = [
+      allocationId,
+      subdeptId,
+      classIndex,
+      ...(subclassIndex !== null ? [subclassIndex] : [])
+    ].join('_');
 
+    // Optimistic UI update
     setDocumentAllocations(prev => ({
       ...prev,
       [allocationKey]: checked
     }));
 
-    // Debounce or batch these toasts in a real app
-    toast({
-      title: "Configuration updated",
-      description: `Display setting changed for allocation key: ${allocationKey}`,
-    });
-  }, []);
+    try {
+      // Find the class from the current department's subdepartments and classes
+      const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId);
+      const classItem = subdept?.classes?.[classIndex];
+      
+      if (!subdept || !classItem) {
+        throw new Error('Could not find class or subdepartment');
+      }
+      
+      // Generate the class_id in the format: subdeptId_classId[_subclassIndex]
+      const classId = [
+        subdeptId,
+        classItem.id,
+        ...(subclassIndex !== null ? [subclassIndex] : [])
+      ].join('_');
+  
+      // Get the current documents_and_fields for this class
+      const { data: existingData, error: fetchError } = await supabase
+        .from('tm_class_requirements')
+        .select('documents_and_fields')
+        .eq('class_id', classId)
+        .single();
+  
+      if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 = not found
+        throw fetchError;
+      }
+  
+      // Prepare the new documents_and_fields as an array of objects
+      const currentFields = Array.isArray(existingData?.documents_and_fields) 
+        ? existingData.documents_and_fields 
+        : [];
+      
+      // Remove existing entry with the same ID if it exists
+      const filteredFields = currentFields.filter((item: any) => item.id !== allocationKey);
+      
+      // Add the updated entry
+      const updatedFields = [
+        ...filteredFields,
+        {
+          id: allocationKey,
+          display: checked,
+          updated_at: new Date().toISOString()
+        }
+      ];
+  
+      // Prepare the record data
+      const recordData = {
+        class_id: classId,
+        documents_and_fields: updatedFields,
+        type: 'class', // Match the upload-requirements implementation
+        updated_at: new Date().toISOString()
+      };
 
+      // Only include created_at for new records
+      if (!existingData) {
+        recordData.created_at = new Date().toISOString();
+      }
+
+      // Update or insert the record
+      const { error: upsertError } = await supabase
+        .from('tm_class_requirements')
+        .upsert(recordData, {
+          onConflict: 'class_id'
+        });
+  
+      if (upsertError) throw upsertError;
+  
+      toast({
+        title: "Success",
+        description: "Display setting updated successfully",
+        variant: "default",
+      });
+    } catch (error) {
+      console.error('Error updating display setting:', error);
+      
+      // Revert on error
+      setDocumentAllocations(prev => ({
+        ...prev,
+        [allocationKey]: !checked // Revert to previous state
+      }));
+  
+      toast({
+        title: "Error",
+        description: "Failed to update display setting",
+        variant: "destructive",
+      });
+    }
+  }, [currentDepartment]);
   // Memoized checkbox change handler factory
   const getCheckboxChangeHandler = useCallback((
     allocationId: string,
@@ -431,7 +570,7 @@ export default function DocumentsFields() {
     const keyParts = [allocationId, subdeptId];
     if (classIndex !== null) keyParts.push(String(classIndex));
     if (subclassIndex !== null) keyParts.push(String(subclassIndex));
-    const allocationKey = keyParts.join('-')
+    const allocationKey = keyParts.join('-');
 
     return documentAllocations[allocationKey] || false;
   }, [documentAllocations]);
@@ -449,20 +588,20 @@ export default function DocumentsFields() {
   // Memoized calculation for column spans
   const getTotalColSpan = useCallback((subdept: Subdepartment) => {
     if (!subdept.hasClasses) return 1;
-    
+
     const colSpan = subdept.classes?.reduce((total, cls) => {
       return total + (cls.subclasses?.length || 1);
     }, 0) || 1;
-    
+
     return Math.max(1, colSpan);
   }, [])
 
   // Memoized helper function to determine if a field should show checkboxes
   const shouldShowCheckbox = useCallback((field: DocumentField) => {
-    return field.type !== 'array' && 
-           field.type !== 'array-container' && 
-           !field.isArrayItem &&
-           field.type !== 'object';
+    return field.type !== 'array' &&
+      field.type !== 'array-container' &&
+      !field.isArrayItem &&
+      field.type !== 'object';
   }, [])
 
   // Early returns for loading/error states
@@ -664,7 +803,7 @@ export default function DocumentsFields() {
                                 })
                                 .map(([categoryKey, group]) => {
                                   const isCategoryExpanded = expandedCategories.has(categoryKey);
-                                  
+
                                   return [
                                     // Category Header Row
                                     <TableRow key={`category-${categoryKey}`} className="bg-blue-50 hover:bg-blue-50/80 transition-colors cursor-pointer" onClick={() => toggleCategoryExpansion(categoryKey)}>
@@ -696,7 +835,7 @@ export default function DocumentsFields() {
                                         )
                                       )}
                                     </TableRow>,
-                                    
+
                                     // Document Rows (only if category is expanded)
                                     ...(isCategoryExpanded ? group.documents.map((doc, docIndex) => {
                                       const isDocExpanded = expandedItems.has(doc.id);
@@ -709,134 +848,141 @@ export default function DocumentsFields() {
                                         if (item.isMainRow) {
                                           // RENDER DOCUMENT ROW
                                           return (
-                                            <TableRow key={`doc-${doc.id}`} className="group bg-white hover:bg-gray-50">
-                                              <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-[5] text-center font-semibold w-16">
+                                            <TableRow key={`doc-${doc.id}`} className="group bg-blue-50 hover:bg-blue-100">
+                                              <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center font-semibold w-16">
                                                 {`${group.mainCategoryNumber}.${docIndex + 1}`}
                                               </TableCell>
-                                              <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-[5] w-[300px]">
-                                                <div className="flex items-center justify-between px-4 pl-8">
-                                                  <TruncatedText
-                                                    text={doc.display_name}
-                                                    className="font-semibold text-gray-700 flex-1 min-w-0 pr-2"
-                                                    maxLength={30}
-                                                  />
-                                                  {doc.hasFields && (
-                                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 flex-shrink-0" onClick={() => toggleItemExpansion(doc.id)}>
-                                                      {isDocExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                                              <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] w-[300px] pr-2">
+                                                <div className="flex items-center gap-2 px-4">
+                                                  <div className="flex items-center justify-between flex-1">
+                                                    <TruncatedText
+                                                      text={doc.display_name}
+                                                      className="font-semibold text-gray-800 flex-1 min-w-0 pr-2"
+                                                      maxLength={25}
+                                                    />
+                                                    {doc.hasFields && (
+                                                      <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-6 w-6 p-0 flex-shrink-0 text-blue-600 hover:bg-blue-200"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          toggleItemExpansion(doc.id);
+                                                        }}
+                                                      >
+                                                        {isDocExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                                                      </Button>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              </TableCell>
+                                              {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                                subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
+                                                  (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
+                                                    <TableCell key={`doc-cell-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-50 group-hover:bg-blue-100">
+                                                      <Checkbox
+                                                        checked={getAllocationStatus(doc.id, subdept.id, clsIndex, subcls ? subclsIndex : null)}
+                                                        onCheckedChange={c => handleDisplayToggle(doc.id, subdept.id, clsIndex, subcls ? subclsIndex : null, c as boolean)}
+                                                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                      />
+                                                    </TableCell>
+                                                  ))
+                                                ) : (
+                                                  <TableCell key={`doc-cell-${doc.id}-${subdept.id}`} className="text-center border bg-blue-50 group-hover:bg-blue-100">
+                                                    <Checkbox
+                                                      checked={getAllocationStatus(doc.id, subdept.id, null, null)}
+                                                      onCheckedChange={c => handleDisplayToggle(doc.id, subdept.id, null, null, c as boolean)}
+                                                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                    />
+                                                  </TableCell>
+                                                )
+                                              )}
+                                            </TableRow>
+                                          );
+                                        } else {
+                                          // RENDER FIELD ROW
+                                          const field = item as DocumentField;
+                                          const isFieldExpanded = expandedItems.has(field.id);
+
+                                          // Hide nested fields of a collapsed parent
+                                          if (field.parentId && !expandedItems.has(field.parentId)) {
+                                            return null;
+                                          }
+
+                                          return (
+                                            <TableRow key={`field-${field.id}`} className="group bg-blue-25 hover:bg-blue-50">
+                                              <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-16 text-center text-sm text-gray-500">
+                                                {field.path}
+                                              </TableCell>
+                                              <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-[300px]">
+                                                <div className="flex items-center px-4" style={{ paddingLeft: `${(field.level + 2) * 1.25}rem` }}>
+                                                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                                                    <TruncatedText
+                                                      text={field.name}
+                                                      className={cn(
+                                                        'text-sm flex-shrink-0',
+                                                        field.type === 'array' ? 'text-gray-600 font-semibold' :
+                                                          'text-gray-700'
+                                                      )}
+                                                      maxLength={field.level > 1 ? 20 : 30}
+                                                    />
+                                                    {field.type && (
+                                                      <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0">
+                                                        ({field.type})
+                                                        {field.required && <span className="text-red-500 ml-1">*</span>}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                  {field.hasChildren && field.type === 'array' && (
+                                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 flex-shrink-0" onClick={() => toggleItemExpansion(field.id)}>
+                                                      {isFieldExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                                                     </Button>
                                                   )}
                                                 </div>
                                               </TableCell>
-                                              {/* Render checkboxes for documents without fields */}
+                                              {/* Render checkboxes for appropriate field types */}
                                               {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                 subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                   (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                    <TableCell key={`doc-cell-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border">
-                                                      {!doc.hasFields && (
+                                                    <TableCell key={`field-cell-${field.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border">
+                                                      {shouldShowCheckbox(field) && (
                                                         <Checkbox
-                                                          checked={getAllocationStatus(doc.id, subdept.id, clsIndex, subcls ? subclsIndex : null)}
-                                                          onCheckedChange={c => handleDisplayToggle(doc.id, subdept.id, clsIndex, subcls ? subclsIndex : null, c as boolean)}
+                                                          checked={getAllocationStatus(`${doc.id}-${field.id}`, subdept.id, clsIndex, subcls ? subclsIndex : null)}
+                                                          onCheckedChange={c => handleDisplayToggle(`${doc.id}-${field.id}`, subdept.id, clsIndex, subcls ? subclsIndex : null, c as boolean)}
                                                         />
                                                       )}
                                                     </TableCell>
                                                   ))
                                                 ) : (
-                                                  <TableCell key={`doc-cell-${doc.id}-${subdept.id}`} className="text-center border">
-                                                  {!doc.hasFields && (
-                                                     <Checkbox
-                                                       checked={getAllocationStatus(doc.id, subdept.id, null, null)}
-                                                       onCheckedChange={c => handleDisplayToggle(doc.id, subdept.id, null, null, c as boolean)}
-                                                     />
-                                                   )}
-                                                 </TableCell>
-                                               )
-                                             )}
-                                           </TableRow>
-                                         );
-                                       } else {
-                                         // RENDER FIELD ROW
-                                         const field = item as DocumentField;
-                                         const isFieldExpanded = expandedItems.has(field.id);
-                                         
-                                         // Hide nested fields of a collapsed parent
-                                         if (field.parentId && !expandedItems.has(field.parentId)) {
-                                           return null;
-                                         }
-
-                                         return (
-                                           <TableRow key={`field-${field.id}`} className="group bg-blue-25 hover:bg-blue-50">
-                                             <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-16 text-center text-sm text-gray-500">
-                                               {field.path}
-                                             </TableCell>
-                                             <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-[300px]">
-                                               <div className="flex items-center px-4" style={{ paddingLeft: `${(field.level + 2) * 1.25}rem` }}>
-                                                 <div className="flex items-center gap-1 flex-1 min-w-0">
-                                                   <TruncatedText
-                                                     text={field.name}
-                                                     className={cn(
-                                                       'text-sm flex-shrink-0', 
-                                                       field.type === 'array' ? 'text-gray-600 font-semibold' :
-                                                       'text-gray-700'
-                                                     )}
-                                                     maxLength={field.level > 1 ? 20 : 30}
-                                                   />
-                                                   {field.type && (
-                                                     <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0">
-                                                       ({field.type})
-                                                       {field.required && <span className="text-red-500 ml-1">*</span>}
-                                                     </span>
-                                                   )}
-                                                 </div>
-                                                 {field.hasChildren && field.type === 'array' && (
-                                                   <Button variant="ghost" size="sm" className="h-6 w-6 p-0 flex-shrink-0" onClick={() => toggleItemExpansion(field.id)}>
-                                                     {isFieldExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                                   </Button>
-                                                 )}
-                                               </div>
-                                             </TableCell>
-                                             {/* Render checkboxes for appropriate field types */}
-                                             {normalizedSubdepartments.flatMap((subdept, subIndex) =>
-                                               subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                                 (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                   <TableCell key={`field-cell-${field.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border">
-                                                     {shouldShowCheckbox(field) && (
-                                                       <Checkbox
-                                                         checked={getAllocationStatus(`${doc.id}-${field.id}`, subdept.id, clsIndex, subcls ? subclsIndex : null)}
-                                                         onCheckedChange={c => handleDisplayToggle(`${doc.id}-${field.id}`, subdept.id, clsIndex, subcls ? subclsIndex : null, c as boolean)}
-                                                       />
-                                                     )}
-                                                   </TableCell>
-                                                 ))
-                                               ) : (
-                                                 <TableCell key={`field-cell-${field.id}-${subdept.id}`} className="text-center border">
-                                                   {shouldShowCheckbox(field) && (
-                                                     <Checkbox
-                                                       checked={getAllocationStatus(`${doc.id}-${field.id}`, subdept.id, null, null)}
-                                                       onCheckedChange={c => handleDisplayToggle(`${doc.id}-${field.id}`, subdept.id, null, null, c as boolean)}
-                                                     />
-                                                   )}
-                                                 </TableCell>
-                                               )
-                                             )}
-                                           </TableRow>
-                                         );
-                                       }
-                                     });
-                                   }) : [])
-                                 ].flat();
-                               })}
-                           </TableBody>
-                         </Table>
-                       </TooltipProvider>
-                     </div>
-                   </div>
-                 )}
-               </TabsContent>
-             </Tabs>
-           </TabsContent>
-         ))}
-       </Tabs>
-     </div>
-   </div>
- )
+                                                  <TableCell key={`field-cell-${field.id}-${subdept.id}`} className="text-center border">
+                                                    {shouldShowCheckbox(field) && (
+                                                      <Checkbox
+                                                        checked={getAllocationStatus(`${doc.id}-${field.id}`, subdept.id, null, null)}
+                                                        onCheckedChange={c => handleDisplayToggle(`${doc.id}-${field.id}`, subdept.id, null, null, c as boolean)}
+                                                      />
+                                                    )}
+                                                  </TableCell>
+                                                )
+                                              )}
+                                            </TableRow>
+                                          );
+                                        }
+                                      });
+                                    }) : [])
+                                  ].flat();
+                                })}
+                            </TableBody>
+                          </Table>
+                        </TooltipProvider>
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+            </TabsContent>
+          ))}
+        </Tabs>
+      </div>
+    </div>
+  )
 }

@@ -154,6 +154,7 @@ export async function fetchDepartmentWithStages(departmentId: string): Promise<D
         tm_subdepartments (*)
       `)
             .eq('id', departmentId)
+            .order('order', { ascending: true })
             .single()
 
         if (error) throw error
@@ -195,6 +196,7 @@ export async function createStage(departmentId: string, stageData: StageForm): P
         const { data: currentDept, error: fetchError } = await supabase
             .from('tm_departments')
             .select('stages')
+            .order('order', { ascending: true })
             .eq('id', departmentId)
             .single()
 
@@ -238,6 +240,7 @@ export async function updateStage(departmentId: string, stageId: string, stageDa
         const { data: currentDept, error: fetchError } = await supabase
             .from('tm_departments')
             .select('stages')
+            .order('order', { ascending: true })
             .eq('id', departmentId)
             .single()
 
@@ -281,6 +284,7 @@ export async function deleteStage(departmentId: string, stageId: string): Promis
         const { data: currentDept, error: fetchError } = await supabase
             .from('tm_departments')
             .select('stages')
+            .order('order', { ascending: true })
             .eq('id', departmentId)
             .single()
 
@@ -316,6 +320,7 @@ export async function updateStageOrder(departmentId: string, stageOrders: Array<
         const { data: currentDept, error: fetchError } = await supabase
             .from('tm_departments')
             .select('stages')
+            .order('order', { ascending: true })
             .eq('id', departmentId)
             .single()
 
