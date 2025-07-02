@@ -125,7 +125,13 @@ export function UploadRequirementsDialog({
     }
   }
 
-  const fetchApplicantDocuments = async (applicantId: number) => {
+  const fetchApplicantDocuments = async (individualData: any) => {
+    console.log('Fetching id:', individualData.id);
+    if (!individualData?.id) {
+      console.error('No individual data or ID provided');
+      return [];
+    }
+    
     try {
       const { data: documents, error } = await supabase
         .from('acc_portal_directors_documents')
@@ -138,13 +144,14 @@ export function UploadRequirementsDialog({
             fields
           )
         `)
-        .eq('director_id', applicantId)
+        .eq('director_id', individualData.id)
+        .order('created_at', { ascending: false });
 
-      if (error) throw error
-      return documents || []
+      if (error) throw error;
+      return documents || [];
     } catch (error) {
-      console.error('Error fetching applicant documents:', error)
-      return []
+      console.error('Error fetching applicant documents:', error);
+      return [];
     }
   }
 
@@ -379,8 +386,10 @@ export function UploadRequirementsDialog({
       }
 
       if (individualData) {
-        // Fetch documents for this individual using the r_number we already have
-        documents = await fetchApplicantDocuments(individualData.r_number);
+        // Fetch documents for this individual using their data
+        console.log('Fetching documents for individual:', individualData);
+        documents = await fetchApplicantDocuments(individualData);
+        console.log('Fetched documents:', documents);
         setApplicantDocuments(documents);
 
         console.log('Current companies array before adding registry companies:', companies);
