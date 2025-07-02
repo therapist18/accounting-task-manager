@@ -311,11 +311,24 @@ export default function DocumentsFields() {
       setDocumentAllocations({}); // Reset display settings
 
       // First, fetch departments and documents in parallel
-      const [deptsResponse, documentsResponse, requirementsResponse] = await Promise.all([
-        supabase
-          .from('tm_departments')
-          .select(`*, tm_subdepartments (*, classes)`)
-          .order('order', { ascending: true }),
+      // First fetch departments with their subdepartments
+      const deptsResponse = await supabase
+        .from('tm_departments')
+        .select(`*, tm_subdepartments (*, classes)`)
+        .order('order', { ascending: true });
+
+      // Then sort subdepartments by order
+      if (deptsResponse.data) {
+        deptsResponse.data = deptsResponse.data.map(dept => ({
+          ...dept,
+          tm_subdepartments: dept.tm_subdepartments
+            ? [...dept.tm_subdepartments].sort((a, b) => (a.order || 0) - (b.order || 0))
+            : []
+        }));
+      }
+
+      // Then fetch other data in parallel
+      const [documentsResponse, requirementsResponse] = await Promise.all([
         supabase
           .from('acc_portal_kyc')
           .select('*')
@@ -326,8 +339,6 @@ export default function DocumentsFields() {
           .from('tm_class_requirements')
           .select('documents_and_fields, class_id')
       ]);
-
-      if (deptsResponse.error) throw deptsResponse.error;
       if (documentsResponse.error) throw documentsResponse.error;
       if (requirementsResponse.error) throw requirementsResponse.error;
 
