@@ -38,12 +38,12 @@ export function RequirementsTable({
   onSort,
   applicantDocuments = {},
   activeTab = "work-in-progress",
-  documentTab = "company"
+  documentTab = "individual"
 }: RequirementsTableProps) {
   
   const [documents, setDocuments] = useState<any[]>([])
   const [documentsLoading, setDocumentsLoading] = useState(true)
-  const [taskRequirements, setTaskRequirements] = useState<Record<string, any[]>>({})
+  const [taskClassRequirements, setTaskClassRequirements] = useState<Record<string, any>>({})
   const [taskIndividualData, setTaskIndividualData] = useState<Record<string, any>>({})
 
   // Get client form fields based on document tab
@@ -62,6 +62,54 @@ export function RequirementsTable({
     });
   }, [tasks, activeTab]);
 
+  // Helper function to extract document ID from selection ID
+  const extractDocumentId = useCallback((selectionId: string) => {
+    // Remove the suffix pattern like "_1_2" or "_2_0"
+    return selectionId.replace(/_\d+_\d+$/, '');
+  }, []);
+
+  // Helper function to parse field ID from selection ID
+  const parseFieldId = useCallback((selectionId: string) => {
+    console.log('parseFieldId input:', selectionId);
+    
+    if (!selectionId) {
+      console.warn('parseFieldId received empty selectionId');
+      return { documentId: null, fieldId: null };
+    }
+    
+    const cleanId = extractDocumentId(selectionId);
+    console.log('parseFieldId cleaned ID:', cleanId);
+    
+    if (cleanId.includes('-')) {
+      // This is a field: format "documentId-fieldId"
+      const parts = cleanId.split('-');
+      const result = {
+        documentId: parts[0]?.toLowerCase(),
+        fieldId: parts.slice(1).join('-') // In case field ID contains dashes
+      };
+      console.log('parseFieldId result (field):', result);
+      return result;
+    }
+    
+    const result = {
+      documentId: cleanId?.toLowerCase(),
+      fieldId: null
+    };
+    
+    console.log('parseFieldId result (document):', result);
+    return result;
+  }, [extractDocumentId]);
+
+  // Debug effect to log documents when they change
+  useEffect(() => {
+    console.log('Current documents:', documents.map(d => ({
+      id: d.id,
+      name: d.name || 'No name',
+      display_name: d.display_name || 'No display name',
+      fields_count: d.fields?.length || 0
+    })));
+  }, [documents]);
+
   // Fetch all required data
   useEffect(() => {
     const fetchData = async () => {
@@ -69,25 +117,32 @@ export function RequirementsTable({
         setDocumentsLoading(true);
         
         // 1. Fetch all documents from KYC table
+        const category = documentTab === 'company' ? 'company-docs' : 'directors-docs';
+        console.log(`Fetching documents for category: ${category}`);
+        
         const documentsResponse = await supabase
           .from('acc_portal_kyc')
           .select('*')
-          .eq('category', documentTab === 'company' ? 'company-docs' : 'directors-docs')
           .order('main_category_number', { ascending: true, nullsLast: true })
           .order('custom_order', { ascending: true, nullsLast: true });
 
-        if (documentsResponse.error) throw documentsResponse.error;
+        if (documentsResponse.error) {
+          console.error('Error fetching documents:', documentsResponse.error);
+          throw documentsResponse.error;
+        }
 
+        console.log(`Fetched ${documentsResponse.data?.length || 0} documents`);
         const processedDocuments = (documentsResponse.data || []).map(doc => ({
           ...doc,
+          id: doc.id?.toLowerCase(), // Normalize IDs to lowercase
           fields: Array.isArray(doc.fields) ? doc.fields : [],
           display_name: doc.display_name || doc.name
         }));
 
         setDocuments(processedDocuments);
 
-        // 2. Fetch task requirements and individual data for all filtered tasks
-        const taskRequirementsPromises = filteredTasks.map(async (task) => {
+        // 2. Fetch task class requirements and individual data for all filtered tasks
+        const taskDataPromises = filteredTasks.map(async (task) => {
           // Construct class_id from task data
           let constructedClassId = null;
           if (task.subclass_id && task.class_id) {
@@ -101,12 +156,24 @@ export function RequirementsTable({
             }
           }
 
-          // Fetch requirements for this task's class
-          const requirementsResponse = await supabase
-            .from('tm_class_requirements')
-            .select('*')
-            .eq('class_id', constructedClassId)
-            .maybeSingle();
+          console.log(`Task ${task.id}: Constructed class_id = ${constructedClassId}`);
+
+          // Fetch class requirements for this task's class
+          let classRequirements = null;
+          if (constructedClassId) {
+            const requirementsResponse = await supabase
+              .from('tm_class_requirements')
+              .select('*')
+              .eq('class_id', constructedClassId)
+              .maybeSingle();
+
+            if (!requirementsResponse.error && requirementsResponse.data) {
+              classRequirements = requirementsResponse.data;
+              console.log(`Task ${task.id}: Found class requirements:`, classRequirements);
+            } else {
+              console.log(`Task ${task.id}: No class requirements found for class_id: ${constructedClassId}`);
+            }
+          }
 
           // Fetch individual data if task has r_number
           let individualData = null;
@@ -124,25 +191,28 @@ export function RequirementsTable({
 
           return {
             taskId: task.id,
-            requirements: requirementsResponse.data || null,
+            classRequirements: classRequirements,
             individualData: individualData
           };
         });
 
-        const taskRequirementsResults = await Promise.all(taskRequirementsPromises);
+        const taskDataResults = await Promise.all(taskDataPromises);
 
         // Process results into state
-        const requirementsMap: Record<string, any[]> = {};
+        const classRequirementsMap: Record<string, any> = {};
         const individualDataMap: Record<string, any> = {};
 
-        taskRequirementsResults.forEach(({ taskId, requirements, individualData }) => {
-          requirementsMap[taskId] = requirements;
+        taskDataResults.forEach(({ taskId, classRequirements, individualData }) => {
+          if (classRequirements) {
+            classRequirementsMap[taskId] = classRequirements;
+          }
           if (individualData) {
             individualDataMap[taskId] = individualData;
           }
         });
 
-        setTaskRequirements(requirementsMap);
+        console.log('Final class requirements map:', classRequirementsMap);
+        setTaskClassRequirements(classRequirementsMap);
         setTaskIndividualData(individualDataMap);
 
       } catch (err) {
@@ -161,93 +231,99 @@ export function RequirementsTable({
 
   // Get selected documents and fields for a specific task
   const getTaskDocumentItems = useCallback((taskId: string) => {
-    const taskReqs = taskRequirements[taskId];
-    if (!taskReqs) return [];
+    const classRequirements = taskClassRequirements[taskId];
+    if (!classRequirements) {
+      console.log(`No class requirements found for task ${taskId}`);
+      return [];
+    }
+
+    console.log(`Processing documents and fields for task ${taskId}`, {
+      clientFieldsCount: classRequirements.client_fields?.length || 0,
+      documentsAndFieldsCount: classRequirements.documents_and_fields?.length || 0
+    });
 
     const selectedItems: any[] = [];
 
-    // Process documents_and_fields (KYC documents and their fields)
-    if (taskReqs.documents_and_fields) {
-      taskReqs.documents_and_fields
-        .filter(item => item.display === true)
-        .forEach(selection => {
-          // Parse the selection ID to determine if it's a document or field
-          const idParts = selection.id.split('_');
+    // Process documents_and_fields
+    if (Array.isArray(classRequirements.documents_and_fields)) {
+      classRequirements.documents_and_fields
+        .filter((item: any) => item.display === true)
+        .forEach((item: any) => {
+          const [docId, fieldId] = item.id.split('_');
+          const document = documents.find(doc => doc.id === docId);
           
-          if (selection.id.includes('-')) {
-            // This is a field: format "documentId-fieldId_..."
-            const [documentId, fieldId] = selection.id.split('-');
-            const document = documents.find(doc => doc.id === documentId);
-            
-            if (document) {
-              const field = document.fields?.find(f => f.id === fieldId);
+          if (document) {
+            if (fieldId) {
+              // This is a document field
+              const field = document.fields?.find((f: any) => f.id === fieldId);
               if (field) {
                 selectedItems.push({
                   type: 'field',
-                  id: `${document.id}-${field.id}`,
+                  id: item.id,
                   name: field.name,
-                  field: field,
                   document: document,
-                  selection: selection
+                  field: field,
+                  isRequired: true
                 });
               }
-            }
-          } else {
-            // This is a document: format "documentId_..."
-            const documentId = idParts[0];
-            const document = documents.find(doc => doc.id === documentId);
-            
-            if (document) {
+            } else {
+              // This is a document
               selectedItems.push({
                 type: 'document',
                 id: document.id,
-                name: document.display_name,
+                name: document.display_name || document.name,
                 document: document,
-                selection: selection
+                isRequired: true
               });
             }
           }
         });
     }
 
-    // Process client_fields (form fields from registry_individuals)
-    if (taskReqs.client_fields) {
-      taskReqs.client_fields
-        .filter(item => item.display === true)
-        .forEach(selection => {
+    // Process client_fields
+    if (Array.isArray(classRequirements.client_fields)) {
+      classRequirements.client_fields
+        .filter((item: any) => item.display === true)
+        .forEach((item: any) => {
           // Extract field name from ID: "form-field-fieldName_..."
-          const fieldName = selection.id.replace(/^form-field-/, '').split('_')[0];
+          const fieldName = item.id.replace(/^form-field-/, '').split('_')[0];
           const field = clientFormFields.find(f => f.name === fieldName);
           
           if (field) {
             selectedItems.push({
               type: 'client-field',
-              id: selection.id,
+              id: item.id,
               name: field.tableHeader || field.label,
               field: field,
-              selection: selection
+              selection: item
             });
           }
         });
     }
 
+    console.log(`Task ${taskId} final items:`, selectedItems);
     return selectedItems;
-  }, [taskRequirements, documents, clientFormFields]);
+  }, [taskClassRequirements, documents, clientFormFields]);
 
-  // Get all unique document items across all tasks
-  const allDocumentItems = useMemo(() => {
+  // Get all unique requirement items across all tasks
+  const allDocumentAndFieldItems = useMemo(() => {
     const uniqueItems = new Map();
+    const allItems: any[] = [];
 
     filteredTasks.forEach(task => {
       const taskItems = getTaskDocumentItems(task.id);
       taskItems.forEach(item => {
-        if (item.type === 'document' || item.type === 'field') {
+        // Include all item types in the map
+        if (!uniqueItems.has(item.id)) {
           uniqueItems.set(item.id, item);
+          allItems.push(item);
         }
       });
     });
 
-    return Array.from(uniqueItems.values());
+    console.log('All document and field items:', allItems);
+    console.log(`Found ${allItems.length} unique requirement items across all tasks`);
+    return allItems;
   }, [filteredTasks, getTaskDocumentItems]);
 
   // Get all unique client field items across all tasks
@@ -263,6 +339,7 @@ export function RequirementsTable({
       });
     });
 
+    console.log('All client field items:', Array.from(uniqueItems.values()));
     return Array.from(uniqueItems.values());
   }, [filteredTasks, getTaskDocumentItems]);
 
@@ -445,7 +522,14 @@ export function RequirementsTable({
     );
   }
 
-  const allItems = [...allDocumentItems, ...allClientFieldItems];
+  const allItems = [...allDocumentAndFieldItems, ...allClientFieldItems];
+
+  // Debug logging
+  console.log('Filtered tasks:', filteredTasks);
+  console.log('Documents:', documents);
+  console.log('Task class requirements:', taskClassRequirements);
+  console.log('All document and field items:', allDocumentAndFieldItems);
+  console.log('All client field items:', allClientFieldItems);
 
   return (
     <div className="rounded-md border w-full flex flex-col bg-background shadow-sm" style={{ maxHeight: '85vh', maxWidth: '98vw' }}>
@@ -542,7 +626,7 @@ export function RequirementsTable({
             ) : allItems.length > 0 ? (
               <>
                 {/* Documents & Fields Section */}
-                {allDocumentItems.length > 0 && (
+                {allDocumentAndFieldItems.length > 0 && (
                   <>
                     <TableRow className="bg-gradient-to-r from-slate-100 to-slate-50 border-y-2 border-slate-300">
                       <TableCell className="sticky left-0 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5] text-center font-bold text-slate-700">
@@ -553,7 +637,7 @@ export function RequirementsTable({
                           <FileText className="h-5 w-5 text-slate-600" />
                           <span className="font-bold text-slate-700 text-lg">Documents & Fields</span>
                           <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">
-                            {allDocumentItems.length}
+                            {allDocumentAndFieldItems.length}
                           </span>
                         </div>
                       </TableCell>
@@ -564,8 +648,8 @@ export function RequirementsTable({
                       ))}
                     </TableRow>
 
-                    {/* Document items */}
-                    {allDocumentItems.map((item, index) => (
+                    {/* Document and Field items */}
+                    {allDocumentAndFieldItems.map((item, index) => (
                       <TableRow key={item.id} className="group bg-blue-50 hover:bg-blue-100">
                         <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
                           {index + 1}
@@ -573,19 +657,41 @@ export function RequirementsTable({
                         <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
                           <div className="flex items-center px-2">
                             <span className="text-sm font-semibold text-gray-800">
-                              {item.name}
+                              {item.name || item.document?.name || item.field?.name || 'Unnamed Item'}
                             </span>
-                            {item.type === 'field' && item.field.type && (
+                            {item.type === 'field' && item.field?.type && (
                               <span className="text-xs text-gray-400 ml-2">
                                 ({item.field.type})
                                 {item.field.required && <span className="text-red-500 ml-1">*</span>}
                               </span>
                             )}
+                            {item.type === 'document' && (
+                              <Badge variant="outline" className="text-xs ml-2">
+                                Document
+                              </Badge>
+                            )}
+                            {item.type === 'field' && (
+                              <Badge variant="outline" className="text-xs ml-2 bg-yellow-50 text-yellow-700">
+                                Field
+                              </Badge>
+                            )}
+                            {item.type === 'web-form' && (
+                              <Badge variant="outline" className="text-xs ml-2 bg-green-50 text-green-700">
+                                Web Form
+                              </Badge>
+                            )}
                           </div>
+                          {item.description && (
+                            <div className="text-xs text-gray-500 mt-1 px-2">
+                              {item.description}
+                            </div>
+                          )}
                         </TableCell>
                         {filteredTasks.map((task) => (
                           <TableCell key={`${item.id}-${task.id}`} className="text-center border p-1">
-                            {renderDocumentStatus(task, item)}
+                            {item.type === 'client-field' 
+                              ? renderClientFieldData(task, item) 
+                              : renderDocumentStatus(task, item)}
                           </TableCell>
                         ))}
                       </TableRow>
@@ -638,6 +744,9 @@ export function RequirementsTable({
                                       Required
                                     </span>
                                   )}
+                                  <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700">
+                                    Client Field
+                                  </Badge>
                                 </div>
                               )}
                             </div>
@@ -681,7 +790,7 @@ export function RequirementsTable({
               <strong>{filteredTasks.length}</strong> {activeTab === 'completed' ? 'completed' : 'active'} applications
             </span>
             <span>
-              <strong>{allDocumentItems.length}</strong> document items
+              <strong>{allDocumentAndFieldItems.length}</strong> document items
             </span>
             <span>
               <strong>{allClientFieldItems.length}</strong> client fields
@@ -703,10 +812,10 @@ export function RequirementsTable({
             <div className="flex items-center gap-1">
               <div className="w-3 h-3 bg-gray-400 rounded"></div>
               <span className="text-xs">N/A</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+              </div>
+         </div>
+       </div>
+     </div>
+   </div>
+ );
 }
