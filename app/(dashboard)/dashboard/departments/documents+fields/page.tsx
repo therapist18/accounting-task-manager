@@ -34,17 +34,17 @@ TruncatedText.displayName = 'TruncatedText';
 
 // Memoized SectionHeader component
 const SectionHeader = memo(({ title, icon: Icon, count }: { title: string, icon: React.ElementType, count: number }) => (
-  <TableRow className="bg-orange-50 border-y-2 border-slate-300">
-    <TableCell className="sticky left-0 bg-orange-50 border-r z-[5] text-center font-bold text-slate-700 w-16">
+  <TableRow className="bg-blue-500 border-y-2 border-slate-300">
+    <TableCell className="sticky left-0 bg-blue-500 border-r z-[5] text-center font-bold text-slate-700 w-16">
       <Icon className="h-4 w-4 mx-auto" />
     </TableCell>
-    <TableCell className="sticky left-16 bg-orange-50 border-r z-[5] w-[300px]">
+    <TableCell className="sticky left-16 bg-blue-500 border-r z-[5] w-[300px]">
       <div className="flex items-center gap-2 px-4 py-2">
         <span className="font-bold text-slate-700 text-lg">{title}</span>
         <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">{count}</span>
       </div>
     </TableCell>
-    <TableCell colSpan={100} className="bg-orange-50 border-r">
+    <TableCell colSpan={100} className="bg-blue-500 border-r">
       <div className="h-px bg-slate-300 w-full"></div>
     </TableCell>
   </TableRow>
@@ -65,6 +65,7 @@ interface DocumentField {
   path?: string
   index?: number
   parentPath?: string | null
+  kycdocumentid?: string
   arrayConfig?: {
     maxItems?: number
     fields?: any[]
@@ -90,6 +91,7 @@ interface DocumentType {
   listed: boolean
   subcategory: string
   document_type: string
+  kycdocumentid?: string
   hasFields?: boolean
 }
 
@@ -184,7 +186,7 @@ export default function DocumentsFields() {
   const [departments, setDepartments] = useState<Department[]>([])
   const [documents, setDocuments] = useState<DocumentType[]>([])
   const [clientData, setClientData] = useState<ClientData[]>([])
-  const [documentAllocations, setDocumentAllocations] = useState<Record<string, boolean>>({})
+  const [documentAllocations, setDocumentAllocations] = useState<Record<string, { display: boolean; kycdocumentid: string | null }>>({})
   const [clientFieldAllocations, setClientFieldAllocations] = useState<Record<string, boolean>>({})
   const [activeTab, setActiveTab] = useState<string>("")
   const [documentTab, setDocumentTab] = useState<"company" | "individual">("company")
@@ -212,6 +214,7 @@ export default function DocumentsFields() {
         const currentField: DocumentField = {
           ...field,
           id: field.id || `${doc.id}-${field.name}-${currentIndex}`,
+          kycdocumentid: field.kycdocumentid || doc.kycdocumentid || doc.id,
           level,
           parentId,
           hasChildren,
@@ -385,7 +388,7 @@ export default function DocumentsFields() {
       }));
 
       // Process requirements (both documents and client fields)
-      const documentSettings: Record<string, boolean> = {};
+      const documentSettings: Record<string, { display: boolean; kycdocumentid: string | null }> = {};
       const clientFieldSettings: Record<string, boolean> = {};
       
       requirementsResponse.data?.forEach(req => {
@@ -393,7 +396,10 @@ export default function DocumentsFields() {
         if (Array.isArray(req.documents_and_fields)) {
           req.documents_and_fields.forEach((item: any) => {
             if (item && item.id !== undefined) {
-              documentSettings[item.id] = item.display === true;
+              documentSettings[item.id] = {
+                display: item.display === true,
+                kycdocumentid: item.kycdocumentid || null
+              };
             }
           });
         }
@@ -444,7 +450,7 @@ export default function DocumentsFields() {
 
       if (error) throw error;
 
-      const documentSettings: Record<string, boolean> = {};
+      const documentSettings: Record<string, { display: boolean; kycdocumentid: string | null }> = {};
       const clientFieldSettings: Record<string, boolean> = {};
       
       requirementsData?.forEach(req => {
@@ -452,7 +458,10 @@ export default function DocumentsFields() {
         if (Array.isArray(req.documents_and_fields)) {
           req.documents_and_fields.forEach((item: any) => {
             if (item && item.id !== undefined) {
-              documentSettings[item.id] = item.display === true;
+              documentSettings[item.id] = {
+                display: item.display === true,
+                kycdocumentid: item.kycdocumentid || null
+              };
             }
           });
         }
@@ -568,10 +577,18 @@ export default function DocumentsFields() {
     // Add to submitting set
     setSubmittingIds(prev => new Set(prev).add(allocationKey));
 
-    // Optimistic UI update
+    // Get the document or field to get its kycdocumentid
+    const documentOrField = filteredDocuments
+      .flatMap(doc => [doc, ...(doc.fields || [])])
+      .find(item => item.id === allocationId);
+    
+    // Optimistic UI update with kycdocumentid
     setDocumentAllocations(prev => ({
       ...prev,
-      [allocationKey]: checked
+      [allocationKey]: {
+        display: checked,
+        kycdocumentid: documentOrField?.kycdocumentid || null
+      }
     }));
 
     try {
@@ -647,7 +664,10 @@ export default function DocumentsFields() {
       // Revert on error
       setDocumentAllocations(prev => ({
         ...prev,
-        [allocationKey]: !checked
+        [allocationKey]: {
+          display: !checked,
+          kycdocumentid: prev[allocationKey]?.kycdocumentid || null
+        }
       }));
 
       toast({
@@ -791,7 +811,7 @@ export default function DocumentsFields() {
     if (classIndex !== null) keyParts.push(String(classIndex));
     if (subclassIndex !== null) keyParts.push(String(subclassIndex));
     const allocationKey = keyParts.join('_');
-    return documentAllocations[allocationKey] || false;
+    return documentAllocations[allocationKey]?.display || false;
   }, [documentAllocations]);
 
   const getClientFieldAllocationStatus = useCallback((

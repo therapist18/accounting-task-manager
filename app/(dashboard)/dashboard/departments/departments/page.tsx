@@ -477,12 +477,14 @@ export default function Departments() {
                 <React.Fragment key={dept.id}>
                   <TableRow className="bg-gray-50 font-semibold border-b-2 border-gray-200">
                     <TableCell className="text-center">
-                      <Button variant="ghost" size="icon" onClick={() => toggleExpansion(dept.id)} className="h-8 w-8"><ChevronDown className={`h-5 w-5 transition-transform ${expanded[dept.id] ? '' : '-rotate-90'}`} /></Button>
+                      {deptIndex + 1}
                     </TableCell>
                     <TableCell className="text-base text-gray-800 flex items-center gap-3">
-                      <Building className="h-5 w-5 text-gray-400" />
-                      {dept.name}
-                      <Badge variant="secondary">{(dept.tm_subdepartments || []).length} subs</Badge>
+                      <div className="flex gap-2">
+                        {dept.name}
+                        <Badge variant="secondary">{(dept.tm_subdepartments || []).length} subs</Badge>
+                      </div>
+                      <Button variant="ghost" size="icon" onClick={() => toggleExpansion(dept.id)} className="h-8 w-8"><Minus className={`h-5 w-5 transition-transform ${expanded[dept.id] ? '' : 'hidden'}`} /><Plus className={`h-5 w-5 transition-transform ${expanded[dept.id] ? 'hidden' : ''}`} /></Button>
                     </TableCell>
                     <TableCell colSpan={3}></TableCell>
                     <TableCell className="text-right">
@@ -508,7 +510,7 @@ export default function Departments() {
                           <div className="flex flex-col space-y-1">{(subdept.taskAssistants || []).map((ta, i) => <UserDetailsPopover key={i} userId={ta.userId} users={users} role="assistant">{getUserName(ta.userId)}</UserDetailsPopover>)}</div>
                         ) : <span className="text-gray-400">None</span>}
                       </TableCell>
-                       <TableCell>
+                      <TableCell>
                         <Badge variant="outline">{subdept.classes?.length || 0} Classes</Badge>
                       </TableCell>
                       <TableCell>
@@ -562,27 +564,27 @@ export default function Departments() {
                     </TabsList>
 
                     <TabsContent value="details" className="pt-6 space-y-6">
-                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                         <div className="space-y-1"><Label>Subdepartment Name</Label><Input value={subdept.name} onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)} /></div>
-                         <div className="space-y-1"><Label>Description</Label><Textarea value={subdept.description} onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)} /></div>
-                       </div>
-                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                         <div className="space-y-1"><Label>Task Manager</Label><Select value={subdept.taskManagerId || 'none'} onValueChange={(v) => handleSubdepartmentChange(subdeptIndex, 'taskManagerId', v === 'none' ? '' : v)}><SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger><SelectContent>{[<SelectItem value="none">None</SelectItem>, ...users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)]}</SelectContent></Select></div>
-                         <div className="space-y-2">
-                           <div className="flex items-center justify-between"><Label>Task Assistants</Label><Button variant="outline" size="xs" onClick={() => handleAddTaskAssistant(subdeptIndex)}><Plus className="h-3 w-3 mr-1" />Add</Button></div>
-                           <div className="space-y-2">{subdept.taskAssistantIds.map((id, assistantIndex) => (<div key={assistantIndex} className="flex items-center gap-2"><Select value={id || 'none'} onValueChange={(v) => handleTaskAssistantChange(subdeptIndex, assistantIndex, v === 'none' ? '' : v)}><SelectTrigger><SelectValue placeholder="Select assistant" /></SelectTrigger><SelectContent>{[<SelectItem value="none">None</SelectItem>, ...users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)]}</SelectContent></Select><Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => handleRemoveTaskAssistant(subdeptIndex, assistantIndex)}><X className="h-4 w-4" /></Button></div>))}</div>
-                         </div>
-                       </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-1"><Label>Subdepartment Name</Label><Input value={subdept.name} onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)} /></div>
+                        <div className="space-y-1"><Label>Description</Label><Textarea value={subdept.description} onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)} /></div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-1"><Label>Task Manager</Label><Select value={subdept.taskManagerId || 'none'} onValueChange={(v) => handleSubdepartmentChange(subdeptIndex, 'taskManagerId', v === 'none' ? '' : v)}><SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger><SelectContent>{[<SelectItem value="none">None</SelectItem>, ...users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)]}</SelectContent></Select></div>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between"><Label>Task Assistants</Label><Button variant="outline" size="xs" onClick={() => handleAddTaskAssistant(subdeptIndex)}><Plus className="h-3 w-3 mr-1" />Add</Button></div>
+                          <div className="space-y-2">{subdept.taskAssistantIds.map((id, assistantIndex) => (<div key={assistantIndex} className="flex items-center gap-2"><Select value={id || 'none'} onValueChange={(v) => handleTaskAssistantChange(subdeptIndex, assistantIndex, v === 'none' ? '' : v)}><SelectTrigger><SelectValue placeholder="Select assistant" /></SelectTrigger><SelectContent>{[<SelectItem value="none">None</SelectItem>, ...users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)]}</SelectContent></Select><Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => handleRemoveTaskAssistant(subdeptIndex, assistantIndex)}><X className="h-4 w-4" /></Button></div>))}</div>
+                        </div>
+                      </div>
                     </TabsContent>
 
                     <TabsContent value="workflow" className="pt-6 space-y-4">
-                       <div className="flex items-center justify-between"><h4 className="font-semibold text-gray-800">Classes & Requirements</h4><Button variant="outline" size="sm" onClick={() => handleAddClass(subdeptIndex)}><Plus className="h-4 w-4 mr-1" /> Add Class</Button></div>
-                       <div className="space-y-4 bg-gray-50 p-4 rounded-md border">
-                         {subdept.classes.map((classItem, classIndex) => (
-                           <ClassComponent key={classItem.id} classItem={classItem} onUpdate={updateFormState} onRemove={() => handleRemoveClass(subdeptIndex, classIndex)} path={['subdepartments', subdeptIndex, 'classes', classIndex]} index={`${subdeptIndex + 1}.${classIndex + 1}`} />
-                         ))}
-                         {subdept.classes.length === 0 && <div className="text-center py-8 text-gray-500 border-2 border-dashed rounded-lg">No classes created yet. Click "Add Class" to begin.</div>}
-                       </div>
+                      <div className="flex items-center justify-between"><h4 className="font-semibold text-gray-800">Classes & Requirements</h4><Button variant="outline" size="sm" onClick={() => handleAddClass(subdeptIndex)}><Plus className="h-4 w-4 mr-1" /> Add Class</Button></div>
+                      <div className="space-y-4 bg-gray-50 p-4 rounded-md border">
+                        {subdept.classes.map((classItem, classIndex) => (
+                          <ClassComponent key={classItem.id} classItem={classItem} onUpdate={updateFormState} onRemove={() => handleRemoveClass(subdeptIndex, classIndex)} path={['subdepartments', subdeptIndex, 'classes', classIndex]} index={`${subdeptIndex + 1}.${classIndex + 1}`} />
+                        ))}
+                        {subdept.classes.length === 0 && <div className="text-center py-8 text-gray-500 border-2 border-dashed rounded-lg">No classes created yet. Click "Add Class" to begin.</div>}
+                      </div>
                     </TabsContent>
                   </Tabs>
                 </div>
