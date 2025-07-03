@@ -34,18 +34,17 @@ TruncatedText.displayName = 'TruncatedText';
 
 // Memoized SectionHeader component
 const SectionHeader = memo(({ title, icon: Icon, count }: { title: string, icon: React.ElementType, count: number }) => (
-  <TableRow className="bg-gradient-to-r from-slate-100 to-slate-50 border-y-2 border-slate-300">
-    <TableCell className="sticky left-0 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5] text-center font-bold text-slate-700 w-16">
+  <TableRow className="bg-orange-50 border-y-2 border-slate-300">
+    <TableCell className="sticky left-0 bg-orange-50 border-r z-[5] text-center font-bold text-slate-700 w-16">
       <Icon className="h-4 w-4 mx-auto" />
     </TableCell>
-    <TableCell className="sticky left-16 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5] w-[300px]">
+    <TableCell className="sticky left-16 bg-orange-50 border-r z-[5] w-[300px]">
       <div className="flex items-center gap-2 px-4 py-2">
-        <Icon className="h-5 w-5 text-slate-600" />
         <span className="font-bold text-slate-700 text-lg">{title}</span>
         <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">{count}</span>
       </div>
     </TableCell>
-    <TableCell colSpan={100} className="bg-gradient-to-r from-slate-100 to-slate-50 border-r">
+    <TableCell colSpan={100} className="bg-orange-50 border-r">
       <div className="h-px bg-slate-300 w-full"></div>
     </TableCell>
   </TableRow>
@@ -1253,18 +1252,18 @@ export default function DocumentsFields() {
                                  {/* Render form sections */}
                                  {Object.entries(groupedClientFields.formSections).map(([sectionKey, section], sectionIndex) => [
                                    // Section Header Row
-                                   <TableRow key={`form-section-${sectionKey}`} className="bg-purple-50 hover:bg-purple-50/80 transition-colors">
-                                     <TableCell className="sticky left-0 bg-purple-100 border-r z-[5] text-center font-semibold text-purple-700 w-16">
+                                   <TableRow key={`form-section-${sectionKey}`} className="bg-blue-50 hover:bg-blue-50/80 transition-colors">
+                                     <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700 w-16">
                                        {sectionIndex + 1}
                                      </TableCell>
-                                     <TableCell className="sticky left-16 bg-purple-100 border-r z-[5] w-[300px]">
+                                     <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] w-[300px]">
                                        <div className="flex items-center justify-between px-4">
                                          <TruncatedText
                                            text={section.title}
-                                           className="font-semibold text-purple-700 flex-1 min-w-0 pr-2"
+                                           className="font-semibold text-blue-700 flex-1 min-w-0 pr-2"
                                            maxLength={35}
                                          />
-                                         <span className="text-xs bg-purple-200 text-purple-700 px-2 py-1 rounded-full mr-2">
+                                         <span className="text-xs bg-blue-200 text-blue-700 px-2 py-1 rounded-full mr-2">
                                            {section.fields.filter(f => f.showInTable).length}
                                          </span>
                                        </div>
@@ -1272,12 +1271,12 @@ export default function DocumentsFields() {
                                      {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                        subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                          (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                           <TableCell key={`form-section-cell-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-purple-100">
+                                           <TableCell key={`form-section-cell-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-100">
                                              -
                                            </TableCell>
                                          ))
                                        ) : (
-                                         <TableCell key={`form-section-cell-${sectionKey}-${subdept.id}`} className="text-center border bg-purple-100">
+                                         <TableCell key={`form-section-cell-${sectionKey}-${subdept.id}`} className="text-center border bg-blue-100">
                                            -
                                          </TableCell>
                                        )
@@ -1286,11 +1285,11 @@ export default function DocumentsFields() {
 
                                    // Field Rows
                                    ...section.fields.filter(field => field.showInTable).map((field, fieldIndex) => (
-                                     <TableRow key={`form-field-${field.name}`} className="group bg-purple-25 hover:bg-purple-50">
-                                       <TableCell className="sticky left-0 bg-purple-25 group-hover:bg-purple-50 border-r z-[5] w-16 text-center text-sm text-purple-500">
+                                     <TableRow key={`form-field-${field.name}`} className="group bg-blue-25 hover:bg-blue-50">
+                                       <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-16 text-center text-sm text-blue-500">
                                          {sectionIndex + 1}.{fieldIndex + 1}
                                        </TableCell>
-                                       <TableCell className="sticky left-16 bg-purple-25 group-hover:bg-purple-50 border-r z-[5] w-[300px]">
+                                       <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-[300px]">
                                          <div className="flex items-center px-4 pl-8">
                                            <div className="flex items-center gap-2 flex-1 min-w-0">
                                              <div className="flex flex-col flex-1 min-w-0">
@@ -1311,11 +1310,6 @@ export default function DocumentsFields() {
                                                    </span>
                                                  )}
                                                </div>
-                                               {field.placeholder && (
-                                                 <span className="text-xs text-gray-500 mt-1">
-                                                   {field.placeholder}
-                                                 </span>
-                                               )}
                                              </div>
                                            </div>
                                          </div>
@@ -1326,23 +1320,23 @@ export default function DocumentsFields() {
                                              const fieldId = `form-field-${field.name}`;
                                              const isSubmitting = getSubmittingStatus(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null);
                                              return (
-                                               <TableCell key={`form-field-cell-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-purple-25 group-hover:bg-purple-50">
+                                               <TableCell key={`form-field-cell-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-25 group-hover:bg-blue-50">
                                                  <Checkbox
                                                    checked={getClientFieldAllocationStatus(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null)}
                                                    onCheckedChange={c => handleClientFieldToggle(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null, c as boolean)}
                                                    disabled={isSubmitting}
-                                                   className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                                   className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                                                  />
                                                </TableCell>
                                              );
                                            })
                                          ) : (
-                                           <TableCell key={`form-field-cell-${field.name}-${subdept.id}`} className="text-center border bg-purple-25 group-hover:bg-purple-50">
+                                           <TableCell key={`form-field-cell-${field.name}-${subdept.id}`} className="text-center border bg-blue-25 group-hover:bg-blue-50">
                                              <Checkbox
                                                checked={getClientFieldAllocationStatus(`form-field-${field.name}`, subdept.id, null, null)}
                                                onCheckedChange={c => handleClientFieldToggle(`form-field-${field.name}`, subdept.id, null, null, c as boolean)}
                                                disabled={getSubmittingStatus(`form-field-${field.name}`, subdept.id, null, null)}
-                                               className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                               className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                                              />
                                            </TableCell>
                                          )
@@ -1352,11 +1346,11 @@ export default function DocumentsFields() {
                                  ])}
 
                                  {/* Platform Credentials Section */}
-                                 {Object.entries(groupedClientFields.platformCredentials).map(([platformKey, platform], platformIndex) => [
+                                 {Object.entries(groupedClientFields.platformCredentials).map(([platformKey, platform], sectionIndex) => [
                                    // Platform Header Row
                                    <TableRow key={`platform-${platformKey}`} className="bg-blue-50 hover:bg-blue-50/80 transition-colors">
                                      <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700 w-16">
-                                       P{platformIndex + 1}
+                                     {sectionIndex + 1}
                                      </TableCell>
                                      <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] w-[300px]">
                                        <div className="flex items-center justify-between px-4">
@@ -1389,7 +1383,7 @@ export default function DocumentsFields() {
                                    ...platform.fields.filter(field => field.showInTable).map((field, fieldIndex) => (
                                      <TableRow key={`platform-field-${platformKey}-${field.name}`} className="group bg-blue-25 hover:bg-blue-50">
                                        <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-16 text-center text-sm text-blue-500">
-                                         P{platformIndex + 1}.{fieldIndex + 1}
+                                        {sectionIndex + 1}.{fieldIndex + 1}
                                        </TableCell>
                                        <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-[300px]">
                                          <div className="flex items-center px-4 pl-8">
@@ -1417,11 +1411,6 @@ export default function DocumentsFields() {
                                                    </span>
                                                  )}
                                                </div>
-                                               {field.placeholder && (
-                                                 <span className="text-xs text-gray-500 mt-1">
-                                                   {field.placeholder}
-                                                 </span>
-                                               )}
                                              </div>
                                            </div>
                                          </div>
@@ -1657,20 +1646,20 @@ export default function DocumentsFields() {
                                        });
 
                                        // Add Platform Credentials Sections (only if they have data)
-                                       Object.entries(groupedClientFields.platformCredentials).forEach(([platformKey, platform], platformIndex) => {
+                                       Object.entries(groupedClientFields.platformCredentials).forEach(([platformKey, platform], sectionIndex) => {
                                          const platformFields = platform.fields.filter(field => {
                                            const fieldValue = client[field.name];
                                            return fieldValue && fieldValue !== '' && fieldValue !== null && fieldValue !== undefined;
                                          });
 
                                          if (platformFields.length > 0) {
-                                           const sectionNumber = Object.keys(groupedClientFields.formSections).length + platformIndex + 1;
+                                           const sectionNumber = Object.keys(groupedClientFields.formSections).length + sectionIndex + 1;
                                            
                                            // Platform Header
                                            sectionRows.push(
                                              <TableRow key={`client-platform-${client.id}-${platformKey}`} className="bg-blue-100">
                                                <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] w-16 text-center text-sm font-semibold text-blue-800">
-                                                 C{clientIndex + 1}.P{platformIndex + 1}
+                                                 {clientIndex + 1}.{sectionIndex + 1}
                                                </TableCell>
                                                <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] w-[300px]">
                                                  <div className="flex items-center px-4 py-2">
@@ -1703,7 +1692,7 @@ export default function DocumentsFields() {
                                              sectionRows.push(
                                                <TableRow key={`client-platform-data-field-${client.id}-${field.name}`} className="group bg-blue-25 hover:bg-blue-50">
                                                  <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-16 text-center text-sm text-gray-500">
-                                                   C{clientIndex + 1}.P{platformIndex + 1}.{fieldIndex + 1}
+                                                   {clientIndex + 1}.{sectionIndex + 1}.{fieldIndex + 1}
                                                  </TableCell>
                                                  <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-[300px]">
                                                    <div className="flex items-center px-4 pl-8">

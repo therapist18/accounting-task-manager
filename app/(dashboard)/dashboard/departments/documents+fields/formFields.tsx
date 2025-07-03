@@ -192,14 +192,7 @@ export const companyFields = {
                 { name: "office_number", label: "Office Number", type: "text", placeholder: "Enter Office Number", showInTable: true, showInDialog: true, tableHeader: "Office Number" },
             ]
         },
-        coordinateInformation: {
-            title: "3.4. Location Coordinates",
-            fields: [
-                { name: "latitude", label: "Latitude", type: "number", placeholder: "Latitude", disabled: true, className: "bg-gray-50", showInTable: true, showInDialog: true, tableHeader: "Latitude" },
-                { name: "longitude", label: "Longitude", type: "number", placeholder: "Longitude", disabled: true, className: "bg-gray-50", showInTable: true, showInDialog: true, tableHeader: "Longitude" },
-            ]
-        },
-        postalAddress: {
+               postalAddress: {
             title: "3.5. Postal Address",
             fields: [
                 { name: "postal_address", label: "P.O. Box", type: "text", placeholder: "Enter P.O. Box number", callback: "updateFullPostalAddress", showInTable: true, showInDialog: true, tableHeader: "P.O. Box" },
@@ -215,29 +208,6 @@ export const companyFields = {
                 { name: "industry", label: "Industry", type: "text", placeholder: "Enter Industry", showInTable: true, showInDialog: true, tableHeader: "Industry" },
                 { name: "source_of_income_employment", label: "Source Of Income Employment", type: "text", placeholder: "Enter Source of Income", showInTable: true, showInDialog: true, tableHeader: "Source Of Income Employment" },
                 { name: "nature_of_business", label: "Nature Of Business", type: "text", placeholder: "Enter Nature of Business", showInTable: true, showInDialog: true, tableHeader: "Nature Of Business" },
-                {
-                    name: "machine_type", label: "Machine Type", type: "select", placeholder: "Select Machine Type", showInTable: true, showInDialog: true, tableHeader: "Machine Type", dataSource: [
-                        { id: "1", value: "ETIMS", label: "ETIMS" },
-                        { id: "2", value: "TIMS", label: "TIMS" },
-                    ], dependsOn: "machine_type", onChange: (value) => {
-                        if (value === "ETIMS") {
-                            return [
-                                {
-                                    name: "machine_subtype", label: "Machine Subtype", type: "select", placeholder: "Select Desktop", dataSource: [
-                                        { id: "1", value: "Desktop", label: "Desktop" },
-                                        { id: "2", value: "Online", label: "Online" },
-                                    ]
-                                },
-                            ];
-                        } else if (value === "TIMS") {
-                            return [
-                                { name: "model_no", label: "Model No", type: "text", placeholder: "Enter Model No" },
-                                { name: "serial_no", label: "Serial No", type: "text", placeholder: "Enter Serial No" },
-                            ];
-                        }
-                        return [];
-                    }
-                },
             ]
         }
     } as FormSections
@@ -290,13 +260,6 @@ export const individualFields = {
                 { name: "apartment_number", label: "Apartment Number", type: "text", placeholder: "Enter Apartment Number", showInTable: true, showInDialog: true, tableHeader: "Apartment Number" },
             ]
         },
-        coordinateInformation: {
-            title: "2.4. Location Coordinates",
-            fields: [
-                { name: "latitude", label: "Latitude", type: "number", placeholder: "Latitude", disabled: true, className: "bg-gray-50", showInTable: true, showInDialog: true, tableHeader: "Latitude" },
-                { name: "longitude", label: "Longitude", type: "number", placeholder: "Longitude", disabled: true, className: "bg-gray-50", showInTable: true, showInDialog: true, tableHeader: "Longitude" },
-            ]
-        },
         postalAddress: {
             title: "2.5. Postal Address",
             fields: [
@@ -306,16 +269,6 @@ export const individualFields = {
                 { name: "full_postal_address", label: "Full Postal Address (Auto-generated)", type: "text", placeholder: "Full postal address will be generated", disabled: true, className: "bg-gray-50", colSpan: 2, showInTable: true, showInDialog: true, tableHeader: "Full Postal Address" }
             ]
         },
-        employmentInformation: {
-            title: "2.6. Employment Information",
-            fields: [
-                { name: "occupation", label: "Occupation", type: "text", placeholder: "Enter Occupation", showInTable: true, showInDialog: true, tableHeader: "Occupation" },
-                { name: "employer_name", label: "Employer Name", type: "text", placeholder: "Enter Employer Name", showInTable: true, showInDialog: true, tableHeader: "Employer Name" },
-                { name: "employer_address", label: "Employer Address", type: "text", placeholder: "Enter Employer Address", showInTable: true, showInDialog: true, tableHeader: "Employer Address" },
-                { name: "monthly_income", label: "Monthly Income", type: "number", placeholder: "Enter Monthly Income", showInTable: true, showInDialog: true, tableHeader: "Monthly Income" },
-                { name: "source_of_income", label: "Source of Income", type: "text", placeholder: "Enter Source of Income", showInTable: true, showInDialog: true, tableHeader: "Source of Income" },
-            ]
-        }
     } as FormSections
 };
 
