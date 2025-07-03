@@ -163,11 +163,30 @@ const CATEGORY_MAPPING = {
   individual: "directors-docs"
 } as const
 
+// Helper function to format field values based on type
+const formatFieldValue = (value: any, type: string): string => {
+  if (!value && value !== 0) return '-';
+  
+  switch (type) {
+    case 'date':
+      return new Date(value).toLocaleDateString();
+    case 'email':
+      return value;
+    case 'number':
+      return typeof value === 'number' ? value.toLocaleString() : value;
+    case 'password':
+      return '••••••••';
+    default:
+      return String(value);
+  }
+};
+
 export default function DocumentsFields() {
   const [departments, setDepartments] = useState<Department[]>([])
   const [documents, setDocuments] = useState<DocumentType[]>([])
   const [clientData, setClientData] = useState<ClientData[]>([])
   const [documentAllocations, setDocumentAllocations] = useState<Record<string, boolean>>({})
+  const [clientFieldAllocations, setClientFieldAllocations] = useState<Record<string, boolean>>({})
   const [activeTab, setActiveTab] = useState<string>("")
   const [documentTab, setDocumentTab] = useState<"company" | "individual">("company")
   const [loading, setLoading] = useState(true)
@@ -311,13 +330,18 @@ export default function DocumentsFields() {
     return getTableFields(documentTab);
   }, [documentTab]);
 
+  // Get grouped form fields for current document tab
+  const groupedClientFields = useMemo(() => {
+    return getGroupedFields(documentTab);
+  }, [documentTab]);
+
   // Optimized data fetching with better error handling
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Fetch all data in parallel
+      // Fetch all data in parallel - replace 'your_client_table' with actual table name
       const [deptsResponse, documentsResponse, requirementsResponse, clientDataResponse] = await Promise.all([
         supabase
           .from('tm_departments')
@@ -330,19 +354,17 @@ export default function DocumentsFields() {
           .order('custom_order', { ascending: true, nullsLast: true }),
         supabase
           .from('tm_class_requirements')
-          .select('documents_and_fields, class_id'),
-        // Update this to match your actual client table name and structure
-        supabase
-          .from('clients') // Replace with your actual client table name
-          .select('*')
-          .limit(100) // Adjust as needed
+          .select('documents_and_fields, client_fields, class_id'),
       ]);
 
       // Handle errors
       if (deptsResponse.error) throw deptsResponse.error;
       if (documentsResponse.error) throw documentsResponse.error;
       if (requirementsResponse.error) throw requirementsResponse.error;
-      // Note: clientDataResponse might not exist if table doesn't exist, so we'll handle it gracefully
+      // Handle client data error gracefully
+      if (clientDataResponse?.error) {
+        console.warn('Client data fetch failed:', clientDataResponse.error);
+      }
 
       // Process departments
       const transformedDepartments = (deptsResponse.data || []).map(dept => ({
@@ -363,13 +385,25 @@ export default function DocumentsFields() {
         display_name: doc.display_name || doc.name
       }));
 
-      // Process requirements
-      const settings: Record<string, boolean> = {};
+      // Process requirements (both documents and client fields)
+      const documentSettings: Record<string, boolean> = {};
+      const clientFieldSettings: Record<string, boolean> = {};
+      
       requirementsResponse.data?.forEach(req => {
+        // Process document fields
         if (Array.isArray(req.documents_and_fields)) {
           req.documents_and_fields.forEach((item: any) => {
             if (item && item.id !== undefined) {
-              settings[item.id] = item.display === true;
+              documentSettings[item.id] = item.display === true;
+            }
+          });
+        }
+        
+        // Process client fields
+        if (Array.isArray(req.client_fields)) {
+          req.client_fields.forEach((item: any) => {
+            if (item && item.id !== undefined) {
+              clientFieldSettings[item.id] = item.display === true;
             }
           });
         }
@@ -382,7 +416,8 @@ export default function DocumentsFields() {
       setDepartments(transformedDepartments);
       setDocuments(processedDocuments);
       setClientData(processedClientData);
-      setDocumentAllocations(settings);
+      setDocumentAllocations(documentSettings);
+      setClientFieldAllocations(clientFieldSettings);
 
       // Set active tab
       if (transformedDepartments.length > 0) {
@@ -406,22 +441,35 @@ export default function DocumentsFields() {
     try {
       const { data: requirementsData, error } = await supabase
         .from('tm_class_requirements')
-        .select('documents_and_fields, class_id');
+        .select('documents_and_fields, client_fields, class_id');
 
       if (error) throw error;
 
-      const settings: Record<string, boolean> = {};
+      const documentSettings: Record<string, boolean> = {};
+      const clientFieldSettings: Record<string, boolean> = {};
+      
       requirementsData?.forEach(req => {
+        // Process document fields
         if (Array.isArray(req.documents_and_fields)) {
           req.documents_and_fields.forEach((item: any) => {
             if (item && item.id !== undefined) {
-              settings[item.id] = item.display === true;
+              documentSettings[item.id] = item.display === true;
+            }
+          });
+        }
+        
+        // Process client fields
+        if (Array.isArray(req.client_fields)) {
+          req.client_fields.forEach((item: any) => {
+            if (item && item.id !== undefined) {
+              clientFieldSettings[item.id] = item.display === true;
             }
           });
         }
       });
 
-      setDocumentAllocations(settings);
+      setDocumentAllocations(documentSettings);
+      setClientFieldAllocations(clientFieldSettings);
     } catch (error) {
       console.error('Error refreshing data:', error);
     }
@@ -503,7 +551,7 @@ export default function DocumentsFields() {
     setExpandedClientItems(new Set());
   }, []);
 
-  // Optimized display toggle with immediate refresh
+  // Optimized display toggle with immediate refresh (for documents)
   const handleDisplayToggle = useCallback(async (
     allocationId: string,
     subdeptId: number,
@@ -543,7 +591,7 @@ export default function DocumentsFields() {
 
       const { data: existingData, error: fetchError } = await supabase
         .from('tm_class_requirements')
-        .select('documents_and_fields')
+        .select('documents_and_fields, client_fields')
         .eq('class_id', classId)
         .single();
 
@@ -569,6 +617,7 @@ export default function DocumentsFields() {
       const recordData = {
         class_id: classId,
         documents_and_fields: updatedFields,
+        client_fields: existingData?.client_fields || [], // Preserve existing client fields
         type: 'class',
         updated_at: new Date().toISOString()
       };
@@ -617,6 +666,121 @@ export default function DocumentsFields() {
     }
   }, [currentDepartment, refreshData]);
 
+  // New function for handling client field toggles
+  const handleClientFieldToggle = useCallback(async (
+    fieldId: string,
+    subdeptId: number,
+    classIndex: number,
+    subclassIndex: number | null = null,
+    checked: boolean = false
+  ) => {
+    const allocationKey = [
+      fieldId,
+      subdeptId,
+      classIndex,
+      ...(subclassIndex !== null ? [subclassIndex] : [])
+    ].join('_');
+
+    // Add to submitting set
+    setSubmittingIds(prev => new Set(prev).add(allocationKey));
+
+    // Optimistic UI update
+    setClientFieldAllocations(prev => ({
+      ...prev,
+      [allocationKey]: checked
+    }));
+
+    try {
+      const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId);
+      const classItem = subdept?.classes?.[classIndex];
+      
+      if (!subdept || !classItem) {
+        throw new Error('Could not find class or subdepartment');
+      }
+      
+      const classId = [
+        subdeptId,
+        classItem.id,
+        ...(subclassIndex !== null ? [subclassIndex] : [])
+      ].join('_');
+
+      const { data: existingData, error: fetchError } = await supabase
+        .from('tm_class_requirements')
+        .select('documents_and_fields, client_fields')
+        .eq('class_id', classId)
+        .single();
+
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        throw fetchError;
+      }
+
+      const currentClientFields = Array.isArray(existingData?.client_fields) 
+        ? existingData.client_fields 
+        : [];
+      
+      const filteredClientFields = currentClientFields.filter((item: any) => item.id !== allocationKey);
+      
+      const updatedClientFields = [
+        ...filteredClientFields,
+        {
+          id: allocationKey,
+          display: checked,
+          updated_at: new Date().toISOString()
+        }
+      ];
+
+      const recordData = {
+        class_id: classId,
+        documents_and_fields: existingData?.documents_and_fields || [], // Preserve existing document fields
+        client_fields: updatedClientFields,
+        type: 'class',
+        updated_at: new Date().toISOString()
+      };
+
+      if (!existingData) {
+        recordData.created_at = new Date().toISOString();
+      }
+
+      const { error: upsertError } = await supabase
+        .from('tm_class_requirements')
+        .upsert(recordData, {
+          onConflict: 'class_id'
+        });
+
+      if (upsertError) throw upsertError;
+
+      // Refresh data immediately after successful submission
+      await refreshData();
+
+      toast({
+        title: "Success",
+        description: "Client field setting updated successfully",
+        variant: "default",
+      });
+    } catch (error) {
+      console.error('Error updating client field setting:', error);
+      
+      // Revert on error
+      setClientFieldAllocations(prev => ({
+        ...prev,
+        [allocationKey]: !checked
+      }));
+
+      toast({
+        title: "Error",
+        description: "Failed to update client field setting",
+        variant: "destructive",
+      });
+    } finally {
+      // Remove from submitting set
+      setSubmittingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(allocationKey);
+        return newSet;
+      });
+    }
+  }, [currentDepartment, refreshData]);
+
   // Optimized helper functions
   const getAllocationStatus = useCallback((
     allocationId: string,
@@ -630,6 +794,19 @@ export default function DocumentsFields() {
     const allocationKey = keyParts.join('_');
     return documentAllocations[allocationKey] || false;
   }, [documentAllocations]);
+
+  const getClientFieldAllocationStatus = useCallback((
+    fieldId: string,
+    subdeptId: number,
+    classIndex: number | null,
+    subclassIndex: number | null = null
+  ) => {
+    const keyParts = [fieldId, subdeptId];
+    if (classIndex !== null) keyParts.push(String(classIndex));
+    if (subclassIndex !== null) keyParts.push(String(subclassIndex));
+    const allocationKey = keyParts.join('_');
+    return clientFieldAllocations[allocationKey] || false;
+  }, [clientFieldAllocations]);
 
   const getTotalColSpan = useCallback((subdept: Subdepartment) => {
     if (!subdept.hasClasses) return 1;
@@ -683,118 +860,118 @@ export default function DocumentsFields() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="mb-4">
-            {departments.map(dept => (
-              <TabsTrigger key={dept.id} value={dept.id}>{dept.name}</TabsTrigger>
-            ))}
-          </TabsList>
+         <TabsList className="mb-4">
+           {departments.map(dept => (
+             <TabsTrigger key={dept.id} value={dept.id}>{dept.name}</TabsTrigger>
+           ))}
+         </TabsList>
 
-          {departments.map(dept => (
-            <TabsContent key={dept.id} value={dept.id} className="space-y-4">
-              <Tabs value={documentTab} onValueChange={setDocumentTab as (value: string) => void} className="w-full">
-                <TabsList>
-                  <TabsTrigger value="company">Company Documents</TabsTrigger>
-                  <TabsTrigger value="individual">Individual Documents</TabsTrigger>
-                </TabsList>
+         {departments.map(dept => (
+           <TabsContent key={dept.id} value={dept.id} className="space-y-4">
+             <Tabs value={documentTab} onValueChange={setDocumentTab as (value: string) => void} className="w-full">
+               <TabsList>
+                 <TabsTrigger value="company">Company Documents</TabsTrigger>
+                 <TabsTrigger value="individual">Individual Documents</TabsTrigger>
+               </TabsList>
 
-                <TabsContent value={documentTab} className="mt-6">
-                  {Object.keys(groupedDocuments).length === 0 && clientData.length === 0 ? (
-                    <div className="text-center py-12 bg-white rounded-lg border">No data found.</div>
-                  ) : (
-                    <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-                      <div className="relative overflow-auto max-h-[calc(100vh-300px)]">
-                        <TooltipProvider>
-                          <Table className="min-w-max">
-                            <TableHeader className="sticky top-0 bg-blue-600 z-10">
-                              {/* Header rows */}
-                              <TableRow>
-                                <TableHead rowSpan={4} className="sticky left-0 bg-blue-600 border-r border-blue-500 w-16 z-20 text-white text-center">#</TableHead>
-                                <TableHead rowSpan={4} className="sticky left-16 bg-blue-600 border-r border-blue-500 w-[300px] z-20 text-white">
-                                  <div className="flex items-center justify-between px-4">
-                                    <span className="truncate">Document / Field Details</span>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Info className="h-3.5 w-3.5 text-gray-200 flex-shrink-0" />
-                                      </TooltipTrigger>
-                                      <TooltipContent className="max-w-[300px]">
-                                        <p>Hover over truncated text to see full content. Click + to expand array fields.</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </div>
-                                </TableHead>
-                                {normalizedSubdepartments.map((subdept, subIndex) => {
-                                  const colSpan = getTotalColSpan(subdept);
-                                  const width = colSpan * 120;
-                                  return (
-                                    <TableHead
-                                      key={`subdept-header-${subdept.id}`}
-                                      colSpan={colSpan}
-                                      style={{ width: `${width}px` }}
-                                      className={cn("border-r border-blue-400 px-2 text-center font-semibold text-white", subIndex % 2 === 0 ? "bg-blue-700" : "bg-blue-600")}
-                                    >
-                                      <div className="flex items-center justify-center">
-                                        <TruncatedText
-                                          text={subdept.name}
-                                          className="font-semibold text-white"
-                                          maxLength={15}
-                                        />
-                                      </div>
-                                    </TableHead>
-                                  );
-                                })}
-                              </TableRow>
+               <TabsContent value={documentTab} className="mt-6">
+                 {Object.keys(groupedDocuments).length === 0 && clientData.length === 0 && clientFormFields.length === 0 ? (
+                   <div className="text-center py-12 bg-white rounded-lg border">No data found.</div>
+                 ) : (
+                   <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                     <div className="relative overflow-auto max-h-[calc(100vh-300px)]">
+                       <TooltipProvider>
+                         <Table className="min-w-max">
+                           <TableHeader className="sticky top-0 bg-blue-600 z-10">
+                             {/* Header rows - same as before */}
+                             <TableRow>
+                               <TableHead rowSpan={4} className="sticky left-0 bg-blue-600 border-r border-blue-500 w-16 z-20 text-white text-center">#</TableHead>
+                               <TableHead rowSpan={4} className="sticky left-16 bg-blue-600 border-r border-blue-500 w-[300px] z-20 text-white">
+                                 <div className="flex items-center justify-between px-4">
+                                   <span className="truncate">Document / Field Details</span>
+                                   <Tooltip>
+                                     <TooltipTrigger asChild>
+                                       <Info className="h-3.5 w-3.5 text-gray-200 flex-shrink-0" />
+                                     </TooltipTrigger>
+                                     <TooltipContent className="max-w-[300px]">
+                                       <p>Hover over truncated text to see full content. Click + to expand array fields.</p>
+                                     </TooltipContent>
+                                   </Tooltip>
+                                 </div>
+                               </TableHead>
+                               {normalizedSubdepartments.map((subdept, subIndex) => {
+                                 const colSpan = getTotalColSpan(subdept);
+                                 const width = colSpan * 120;
+                                 return (
+                                   <TableHead
+                                     key={`subdept-header-${subdept.id}`}
+                                     colSpan={colSpan}
+                                     style={{ width: `${width}px` }}
+                                     className={cn("border-r border-blue-400 px-2 text-center font-semibold text-white", subIndex % 2 === 0 ? "bg-blue-700" : "bg-blue-600")}
+                                   >
+                                     <div className="flex items-center justify-center">
+                                       <TruncatedText
+                                         text={subdept.name}
+                                         className="font-semibold text-white"
+                                         maxLength={15}
+                                       />
+                                     </div>
+                                   </TableHead>
+                                 );
+                               })}
+                             </TableRow>
 
-                              {/* Class Header Row */}
-                              <TableRow>
-                                {normalizedSubdepartments.map((subdept, subIndex) =>
-                                  subdept.hasClasses ? subdept.classes?.map((cls, clsIndex) => {
-                                    const colSpan = cls.subclasses?.length || 1;
-                                    const width = colSpan * 120;
-                                    return (
-                                      <TableHead
-                                        key={`class-header-${subdept.id}-${clsIndex}`}
-                                        colSpan={colSpan}
-                                        style={{ width: `${width}px` }}
-                                        className={cn("border-r border-blue-400 px-2 text-center text-white text-sm", subIndex % 2 === 0 ? "bg-blue-600" : "bg-blue-500")}
-                                      >
-                                        <div className="flex items-center justify-center">
-                                          <TruncatedText
-                                            text={cls.name}
-                                            className="text-sm text-white"
-                                            maxLength={15}
-                                          />
-                                        </div>
-                                      </TableHead>
-                                    );
-                                  }) : (
-                                    <TableHead
-                                      key={`subdept-direct-${subdept.id}`}
-                                      style={{ width: '120px' }}
-                                      className={cn("border-r border-blue-400 text-center text-white text-sm", subIndex % 2 === 0 ? "bg-blue-600" : "bg-blue-500")}
-                                    >
-                                      -
-                                    </TableHead>
-                                  )
-                                )}
-                              </TableRow>
+                             {/* Class Header Row */}
+                             <TableRow>
+                               {normalizedSubdepartments.map((subdept, subIndex) =>
+                                 subdept.hasClasses ? subdept.classes?.map((cls, clsIndex) => {
+                                   const colSpan = cls.subclasses?.length || 1;
+                                   const width = colSpan * 120;
+                                   return (
+                                     <TableHead
+                                       key={`class-header-${subdept.id}-${clsIndex}`}
+                                       colSpan={colSpan}
+                                       style={{ width: `${width}px` }}
+                                       className={cn("border-r border-blue-400 px-2 text-center text-white text-sm", subIndex % 2 === 0 ? "bg-blue-600" : "bg-blue-500")}
+                                     >
+                                       <div className="flex items-center justify-center">
+                                         <TruncatedText
+                                           text={cls.name}
+                                           className="text-sm text-white"
+                                           maxLength={15}
+                                         />
+                                       </div>
+                                     </TableHead>
+                                   );
+                                 }) : (
+                                   <TableHead
+                                     key={`subdept-direct-${subdept.id}`}
+                                     style={{ width: '120px' }}
+                                     className={cn("border-r border-blue-400 text-center text-white text-sm", subIndex % 2 === 0 ? "bg-blue-600" : "bg-blue-500")}
+                                   >
+                                     -
+                                   </TableHead>
+                                 )
+                               )}
+                             </TableRow>
 
-                              {/* Subclass Header Row */}
-                              <TableRow>
-                                {normalizedSubdepartments.map((subdept, subIndex) =>
-                                  subdept.hasClasses ? subdept.classes?.flatMap((cls, clsIndex) =>
-                                    cls.subclasses?.length ? cls.subclasses.map((subcls, subclsIndex) => (
-                                      <TableHead
-                                        key={`subclass-header-${subdept.id}-${clsIndex}-${subclsIndex}`}
-                                        style={{ width: '120px' }}
-                                        className={cn("border-r border-blue-400 px-2 text-center text-white text-xs", subIndex % 2 === 0 ? "bg-blue-500" : "bg-blue-400")}
-                                      >
-                                        <div className="flex items-center justify-center">
-                                          <TruncatedText
-                                            text={subcls.name}
-                                            className="text-xs text-white"
-                                            maxLength={10}
-                                          />
-                                          </div>
+                             {/* Subclass Header Row */}
+                             <TableRow>
+                               {normalizedSubdepartments.map((subdept, subIndex) =>
+                                 subdept.hasClasses ? subdept.classes?.flatMap((cls, clsIndex) =>
+                                   cls.subclasses?.length ? cls.subclasses.map((subcls, subclsIndex) => (
+                                     <TableHead
+                                       key={`subclass-header-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                       style={{ width: '120px' }}
+                                       className={cn("border-r border-blue-400 px-2 text-center text-white text-xs", subIndex % 2 === 0 ? "bg-blue-500" : "bg-blue-400")}
+                                     >
+                                       <div className="flex items-center justify-center">
+                                         <TruncatedText
+                                           text={subcls.name}
+                                           className="text-xs text-white"
+                                           maxLength={10}
+                                         />
+                                       </div>
                                      </TableHead>
                                    )) : (
                                      <TableHead
@@ -1056,7 +1233,7 @@ export default function DocumentsFields() {
                              )}
 
                              {/* Separator between sections */}
-                             {Object.keys(groupedDocuments).length > 0 && clientData.length > 0 && (
+                             {(Object.keys(groupedDocuments).length > 0 || clientFormFields.length > 0) && (
                                <TableRow>
                                  <TableCell colSpan={100} className="p-0">
                                    <Separator className="my-4" />
@@ -1064,9 +1241,236 @@ export default function DocumentsFields() {
                                </TableRow>
                              )}
 
-                             {/* Client Data Section */}
+                             {/* Client Fields Section (from formFields.tsx) */}
+                             {clientFormFields.length > 0 && (
+                               <>
+                                 <SectionHeader 
+                                   title="Client Form Fields" 
+                                   icon={Users} 
+                                   count={clientFormFields.length} 
+                                 />
+                                 
+                                 {/* Render form sections */}
+                                 {Object.entries(groupedClientFields.formSections).map(([sectionKey, section], sectionIndex) => [
+                                   // Section Header Row
+                                   <TableRow key={`form-section-${sectionKey}`} className="bg-purple-50 hover:bg-purple-50/80 transition-colors">
+                                     <TableCell className="sticky left-0 bg-purple-100 border-r z-[5] text-center font-semibold text-purple-700 w-16">
+                                       {sectionIndex + 1}
+                                     </TableCell>
+                                     <TableCell className="sticky left-16 bg-purple-100 border-r z-[5] w-[300px]">
+                                       <div className="flex items-center justify-between px-4">
+                                         <TruncatedText
+                                           text={section.title}
+                                           className="font-semibold text-purple-700 flex-1 min-w-0 pr-2"
+                                           maxLength={35}
+                                         />
+                                         <span className="text-xs bg-purple-200 text-purple-700 px-2 py-1 rounded-full mr-2">
+                                           {section.fields.filter(f => f.showInTable).length}
+                                         </span>
+                                       </div>
+                                     </TableCell>
+                                     {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                       subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
+                                         (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
+                                           <TableCell key={`form-section-cell-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-purple-100">
+                                             -
+                                           </TableCell>
+                                         ))
+                                       ) : (
+                                         <TableCell key={`form-section-cell-${sectionKey}-${subdept.id}`} className="text-center border bg-purple-100">
+                                           -
+                                         </TableCell>
+                                       )
+                                     )}
+                                   </TableRow>,
+
+                                   // Field Rows
+                                   ...section.fields.filter(field => field.showInTable).map((field, fieldIndex) => (
+                                     <TableRow key={`form-field-${field.name}`} className="group bg-purple-25 hover:bg-purple-50">
+                                       <TableCell className="sticky left-0 bg-purple-25 group-hover:bg-purple-50 border-r z-[5] w-16 text-center text-sm text-purple-500">
+                                         {sectionIndex + 1}.{fieldIndex + 1}
+                                       </TableCell>
+                                       <TableCell className="sticky left-16 bg-purple-25 group-hover:bg-purple-50 border-r z-[5] w-[300px]">
+                                         <div className="flex items-center px-4 pl-8">
+                                           <div className="flex items-center gap-2 flex-1 min-w-0">
+                                             <div className="flex flex-col flex-1 min-w-0">
+                                               <div className="flex items-center gap-2">
+                                                 <TruncatedText
+                                                   text={field.tableHeader || field.label}
+                                                   className="text-sm font-medium text-gray-700"
+                                                   maxLength={25}
+                                                 />
+                                                 {field.type && (
+                                                   <span className="text-xs text-gray-400 bg-gray-100 px-1 py-0.5 rounded">
+                                                     {field.type}
+                                                   </span>
+                                                 )}
+                                                 {field.required && (
+                                                   <span className="text-xs text-red-500 bg-red-100 px-1 py-0.5 rounded">
+                                                     Required
+                                                   </span>
+                                                 )}
+                                               </div>
+                                               {field.placeholder && (
+                                                 <span className="text-xs text-gray-500 mt-1">
+                                                   {field.placeholder}
+                                                 </span>
+                                               )}
+                                             </div>
+                                           </div>
+                                         </div>
+                                       </TableCell>
+                                       {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                         subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
+                                           (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => {
+                                             const fieldId = `form-field-${field.name}`;
+                                             const isSubmitting = getSubmittingStatus(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null);
+                                             return (
+                                               <TableCell key={`form-field-cell-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-purple-25 group-hover:bg-purple-50">
+                                                 <Checkbox
+                                                   checked={getClientFieldAllocationStatus(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null)}
+                                                   onCheckedChange={c => handleClientFieldToggle(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null, c as boolean)}
+                                                   disabled={isSubmitting}
+                                                   className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                                 />
+                                               </TableCell>
+                                             );
+                                           })
+                                         ) : (
+                                           <TableCell key={`form-field-cell-${field.name}-${subdept.id}`} className="text-center border bg-purple-25 group-hover:bg-purple-50">
+                                             <Checkbox
+                                               checked={getClientFieldAllocationStatus(`form-field-${field.name}`, subdept.id, null, null)}
+                                               onCheckedChange={c => handleClientFieldToggle(`form-field-${field.name}`, subdept.id, null, null, c as boolean)}
+                                               disabled={getSubmittingStatus(`form-field-${field.name}`, subdept.id, null, null)}
+                                               className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                             />
+                                           </TableCell>
+                                         )
+                                       )}
+                                     </TableRow>
+                                   ))
+                                 ])}
+
+                                 {/* Platform Credentials Section */}
+                                 {Object.entries(groupedClientFields.platformCredentials).map(([platformKey, platform], platformIndex) => [
+                                   // Platform Header Row
+                                   <TableRow key={`platform-${platformKey}`} className="bg-blue-50 hover:bg-blue-50/80 transition-colors">
+                                     <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700 w-16">
+                                       P{platformIndex + 1}
+                                     </TableCell>
+                                     <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] w-[300px]">
+                                       <div className="flex items-center justify-between px-4">
+                                         <TruncatedText
+                                           text={platform.title}
+                                           className="font-semibold text-blue-700 flex-1 min-w-0 pr-2"
+                                           maxLength={35}
+                                         />
+                                         <span className="text-xs bg-blue-200 text-blue-700 px-2 py-1 rounded-full mr-2">
+                                           {platform.fields.filter(f => f.showInTable).length}
+                                         </span>
+                                       </div>
+                                       </TableCell>
+                                     {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                       subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
+                                         (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
+                                           <TableCell key={`platform-cell-${platformKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-100">
+                                             -
+                                           </TableCell>
+                                         ))
+                                       ) : (
+                                         <TableCell key={`platform-cell-${platformKey}-${subdept.id}`} className="text-center border bg-blue-100">
+                                           -
+                                         </TableCell>
+                                       )
+                                     )}
+                                   </TableRow>,
+
+                                   // Platform Field Rows
+                                   ...platform.fields.filter(field => field.showInTable).map((field, fieldIndex) => (
+                                     <TableRow key={`platform-field-${platformKey}-${field.name}`} className="group bg-blue-25 hover:bg-blue-50">
+                                       <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-16 text-center text-sm text-blue-500">
+                                         P{platformIndex + 1}.{fieldIndex + 1}
+                                       </TableCell>
+                                       <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-[300px]">
+                                         <div className="flex items-center px-4 pl-8">
+                                           <div className="flex items-center gap-2 flex-1 min-w-0">
+                                             <div className="flex flex-col flex-1 min-w-0">
+                                               <div className="flex items-center gap-2">
+                                                 <TruncatedText
+                                                   text={field.tableHeader || field.label}
+                                                   className="text-sm font-medium text-gray-700"
+                                                   maxLength={25}
+                                                 />
+                                                 {field.type && (
+                                                   <span className="text-xs text-gray-400 bg-gray-100 px-1 py-0.5 rounded">
+                                                     {field.type}
+                                                   </span>
+                                                 )}
+                                                 {field.type === 'password' && (
+                                                   <span className="text-xs text-orange-600 bg-orange-100 px-1 py-0.5 rounded">
+                                                     🔒
+                                                   </span>
+                                                 )}
+                                                 {field.required && (
+                                                   <span className="text-xs text-red-500 bg-red-100 px-1 py-0.5 rounded">
+                                                     Required
+                                                   </span>
+                                                 )}
+                                               </div>
+                                               {field.placeholder && (
+                                                 <span className="text-xs text-gray-500 mt-1">
+                                                   {field.placeholder}
+                                                 </span>
+                                               )}
+                                             </div>
+                                           </div>
+                                         </div>
+                                       </TableCell>
+                                       {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                         subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
+                                           (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => {
+                                             const fieldId = `platform-${platformKey}-${field.name}`;
+                                             const isSubmitting = getSubmittingStatus(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null);
+                                             return (
+                                               <TableCell key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-25 group-hover:bg-blue-50">
+                                                 <Checkbox
+                                                   checked={getClientFieldAllocationStatus(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null)}
+                                                   onCheckedChange={c => handleClientFieldToggle(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null, c as boolean)}
+                                                   disabled={isSubmitting}
+                                                   className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                 />
+                                               </TableCell>
+                                             );
+                                           })
+                                         ) : (
+                                           <TableCell key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}`} className="text-center border bg-blue-25 group-hover:bg-blue-50">
+                                             <Checkbox
+                                               checked={getClientFieldAllocationStatus(`platform-${platformKey}-${field.name}`, subdept.id, null, null)}
+                                               onCheckedChange={c => handleClientFieldToggle(`platform-${platformKey}-${field.name}`, subdept.id, null, null, c as boolean)}
+                                               disabled={getSubmittingStatus(`platform-${platformKey}-${field.name}`, subdept.id, null, null)}
+                                               className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                             />
+                                           </TableCell>
+                                         )
+                                       )}
+                                     </TableRow>
+                                   ))
+                                 ])}
+                               </>
+                             )}
+
+                             {/* Client Data Section (actual client data from database) */}
                              {clientData.length > 0 && (
                                <>
+                                 {/* Separator if we have both form fields and client data */}
+                                 {clientFormFields.length > 0 && (
+                                   <TableRow>
+                                     <TableCell colSpan={100} className="p-0">
+                                       <Separator className="my-4" />
+                                     </TableCell>
+                                   </TableRow>
+                                 )}
+
                                  <SectionHeader 
                                    title="Data from Clients" 
                                    icon={Users} 
@@ -1084,7 +1488,7 @@ export default function DocumentsFields() {
                                        onClick={() => toggleClientItemExpansion(client.id)}
                                      >
                                        <TableCell className="sticky left-0 bg-green-50 group-hover:bg-green-100 border-r z-[5] text-center font-semibold w-16">
-                                         {clientIndex + 1}
+                                         C{clientIndex + 1}
                                        </TableCell>
                                        <TableCell className="sticky left-16 bg-green-50 group-hover:bg-green-100 border-r z-[5] w-[300px]">
                                          <div className="flex items-center gap-2 px-4">
@@ -1107,6 +1511,14 @@ export default function DocumentsFields() {
                                                    maxLength={25}
                                                  />
                                                )}
+                                               <span className={cn(
+                                                 "text-xs px-2 py-1 rounded-full mt-1 w-fit",
+                                                 client.status === 'Active' ? "bg-green-100 text-green-700" :
+                                                 client.status === 'Pending' ? "bg-yellow-100 text-yellow-700" :
+                                                 "bg-gray-100 text-gray-700"
+                                               )}>
+                                                 {client.status}
+                                               </span>
                                              </div>
                                              <Button
                                                variant="ghost"
@@ -1126,71 +1538,229 @@ export default function DocumentsFields() {
                                          subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                            (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
                                              <TableCell key={`client-cell-${client.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-green-50 group-hover:bg-green-100">
-                                               <span className="text-xs text-gray-500">{client.status || '-'}</span>
+                                               <span className={cn(
+                                                 "text-xs px-2 py-1 rounded-full",
+                                                 client.status === 'Active' ? "bg-green-100 text-green-700" :
+                                                 client.status === 'Pending' ? "bg-yellow-100 text-yellow-700" :
+                                                 "bg-gray-100 text-gray-700"
+                                               )}>
+                                                 {client.status || '-'}
+                                               </span>
                                              </TableCell>
                                            ))
                                          ) : (
                                            <TableCell key={`client-cell-${client.id}-${subdept.id}`} className="text-center border bg-green-50 group-hover:bg-green-100">
-                                             <span className="text-xs text-gray-500">{client.status || '-'}</span>
+                                             <span className={cn(
+                                               "text-xs px-2 py-1 rounded-full",
+                                               client.status === 'Active' ? "bg-green-100 text-green-700" :
+                                               client.status === 'Pending' ? "bg-yellow-100 text-yellow-700" :
+                                               "bg-gray-100 text-gray-700"
+                                             )}>
+                                               {client.status || '-'}
+                                             </span>
                                            </TableCell>
                                          )
                                        )}
                                      </TableRow>,
 
-                                     // Client Detail Rows (only if client is expanded)
-                                     ...(isClientExpanded ? clientFormFields.map((field, fieldIndex) => {
-                                       const fieldValue = client[field.name];
+                                     // Client Detail Rows organized by sections (only if client is expanded)
+                                     ...(isClientExpanded ? (() => {
+                                       const sectionRows: React.ReactNode[] = [];
                                        
-                                       // Only show rows that have data
-                                       if (!fieldValue && fieldValue !== 0) return null;
-                                       
-                                       return (
-                                         <TableRow key={`client-field-${client.id}-${field.name}`} className="group bg-green-25 hover:bg-green-50">
-                                           <TableCell className="sticky left-0 bg-green-25 group-hover:bg-green-50 border-r z-[5] w-16 text-center text-sm text-gray-500">
-                                             {clientIndex + 1}.{fieldIndex + 1}
-                                           </TableCell>
-                                           <TableCell className="sticky left-16 bg-green-25 group-hover:bg-green-50 border-r z-[5] w-[300px]">
-                                             <div className="flex items-center px-4 pl-8">
-                                               <div className="flex items-center gap-1 flex-1 min-w-0">
-                                                 <span className="text-sm text-gray-700 font-medium mr-2">
-                                                   {field.tableHeader || field.label}:
-                                                 </span>
-                                                 <TruncatedText
-                                                   text={fieldValue?.toString() || ''}
-                                                   className="text-sm text-gray-800"
-                                                   maxLength={30}
-                                                 />
-                                                 {field.type && (
-                                                   <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0 ml-1">
-                                                     ({field.type})
-                                                   </span>
-                                                 )}
-                                               </div>
-                                             </div>
-                                           </TableCell>
-                                           {normalizedSubdepartments.flatMap((subdept, subIndex) =>
-                                             subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                               (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                 <TableCell key={`client-field-cell-${client.id}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-green-25 group-hover:bg-green-50">
-                                                   <span className="text-xs text-gray-400">-</span>
-                                                 </TableCell>
-                                               ))
-                                             ) : (
-                                               <TableCell key={`client-field-cell-${client.id}-${field.name}-${subdept.id}`} className="text-center border bg-green-25 group-hover:bg-green-50">
-                                                 <span className="text-xs text-gray-400">-</span>
+                                       // Add Form Sections
+                                       Object.entries(groupedClientFields.formSections).forEach(([sectionKey, section], sectionIndex) => {
+                                         const sectionFields = section.fields.filter(field => {
+                                           const fieldValue = client[field.name];
+                                           return fieldValue && fieldValue !== '' && fieldValue !== null && fieldValue !== undefined;
+                                         });
+
+                                         if (sectionFields.length > 0) {
+                                           // Section Header
+                                           sectionRows.push(
+                                             <TableRow key={`client-section-${client.id}-${sectionKey}`} className="bg-green-100">
+                                               <TableCell className="sticky left-0 bg-green-100 border-r z-[5] w-16 text-center text-sm font-semibold text-green-800">
+                                                 C{clientIndex + 1}.{sectionIndex + 1}
                                                </TableCell>
-                                             )
-                                           )}
-                                         </TableRow>
-                                       );
-                                     }).filter(Boolean) : [])
+                                               <TableCell className="sticky left-16 bg-green-100 border-r z-[5] w-[300px]">
+                                                 <div className="flex items-center px-4 py-2">
+                                                   <span className="font-semibold text-green-800 text-sm">{section.title}</span>
+                                                   <span className="text-xs bg-green-200 text-green-700 px-2 py-1 rounded-full ml-2">
+                                                     {sectionFields.length}
+                                                   </span>
+                                                 </div>
+                                               </TableCell>
+                                               {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                                 subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
+                                                   (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
+                                                     <TableCell key={`client-section-cell-${client.id}-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-green-100">
+                                                       <span className="text-xs text-green-600">-</span>
+                                                     </TableCell>
+                                                   ))
+                                                 ) : (
+                                                   <TableCell key={`client-section-cell-${client.id}-${sectionKey}-${subdept.id}`} className="text-center border bg-green-100">
+                                                     <span className="text-xs text-green-600">-</span>
+                                                   </TableCell>
+                                                 )
+                                               )}
+                                             </TableRow>
+                                           );
+
+                                           // Section Fields
+                                           sectionFields.forEach((field, fieldIndex) => {
+                                             const fieldValue = client[field.name];
+                                             
+                                             sectionRows.push(
+                                               <TableRow key={`client-data-field-${client.id}-${field.name}`} className="group bg-green-25 hover:bg-green-50">
+                                                 <TableCell className="sticky left-0 bg-green-25 group-hover:bg-green-50 border-r z-[5] w-16 text-center text-sm text-gray-500">
+                                                   C{clientIndex + 1}.{sectionIndex + 1}.{fieldIndex + 1}
+                                                 </TableCell>
+                                                 <TableCell className="sticky left-16 bg-green-25 group-hover:bg-green-50 border-r z-[5] w-[300px]">
+                                                   <div className="flex items-center px-4 pl-8">
+                                                     <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                       <div className="flex flex-col flex-1 min-w-0">
+                                                         <div className="flex items-center gap-2">
+                                                           <span className="text-sm text-gray-700 font-medium">
+                                                             {field.tableHeader || field.label}:
+                                                           </span>
+                                                           {field.type && (
+                                                             <span className="text-xs text-gray-400 bg-gray-100 px-1 py-0.5 rounded">
+                                                               {field.type}
+                                                             </span>
+                                                           )}
+                                                         </div>
+                                                         <TruncatedText
+                                                           text={formatFieldValue(fieldValue, field.type)}
+                                                           className="text-sm text-gray-800 mt-1"
+                                                           maxLength={35}
+                                                         />
+                                                       </div>
+                                                     </div>
+                                                   </div>
+                                                 </TableCell>
+                                                 {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                                   subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
+                                                     (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
+                                                       <TableCell key={`client-data-field-cell-${client.id}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-green-25 group-hover:bg-green-50">
+                                                         <span className="text-xs text-gray-400">-</span>
+                                                       </TableCell>
+                                                     ))
+                                                   ) : (
+                                                     <TableCell key={`client-data-field-cell-${client.id}-${field.name}-${subdept.id}`} className="text-center border bg-green-25 group-hover:bg-green-50">
+                                                       <span className="text-xs text-gray-400">-</span>
+                                                     </TableCell>
+                                                   )
+                                                 )}
+                                               </TableRow>
+                                             );
+                                           });
+                                         }
+                                       });
+
+                                       // Add Platform Credentials Sections (only if they have data)
+                                       Object.entries(groupedClientFields.platformCredentials).forEach(([platformKey, platform], platformIndex) => {
+                                         const platformFields = platform.fields.filter(field => {
+                                           const fieldValue = client[field.name];
+                                           return fieldValue && fieldValue !== '' && fieldValue !== null && fieldValue !== undefined;
+                                         });
+
+                                         if (platformFields.length > 0) {
+                                           const sectionNumber = Object.keys(groupedClientFields.formSections).length + platformIndex + 1;
+                                           
+                                           // Platform Header
+                                           sectionRows.push(
+                                             <TableRow key={`client-platform-${client.id}-${platformKey}`} className="bg-blue-100">
+                                               <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] w-16 text-center text-sm font-semibold text-blue-800">
+                                                 C{clientIndex + 1}.P{platformIndex + 1}
+                                               </TableCell>
+                                               <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] w-[300px]">
+                                                 <div className="flex items-center px-4 py-2">
+                                                   <span className="font-semibold text-blue-800 text-sm">{platform.title}</span>
+                                                   <span className="text-xs bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                                     {platformFields.length}
+                                                   </span>
+                                                 </div>
+                                               </TableCell>
+                                               {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                                 subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
+                                                   (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
+                                                     <TableCell key={`client-platform-cell-${client.id}-${platformKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-100">
+                                                       <span className="text-xs text-blue-600">-</span>
+                                                     </TableCell>
+                                                   ))
+                                                 ) : (
+                                                   <TableCell key={`client-platform-cell-${client.id}-${platformKey}-${subdept.id}`} className="text-center border bg-blue-100">
+                                                     <span className="text-xs text-blue-600">-</span>
+                                                   </TableCell>
+                                                 )
+                                               )}
+                                             </TableRow>
+                                           );
+
+                                           // Platform Fields
+                                           platformFields.forEach((field, fieldIndex) => {
+                                             const fieldValue = client[field.name];
+                                             
+                                             sectionRows.push(
+                                               <TableRow key={`client-platform-data-field-${client.id}-${field.name}`} className="group bg-blue-25 hover:bg-blue-50">
+                                                 <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-16 text-center text-sm text-gray-500">
+                                                   C{clientIndex + 1}.P{platformIndex + 1}.{fieldIndex + 1}
+                                                 </TableCell>
+                                                 <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] w-[300px]">
+                                                   <div className="flex items-center px-4 pl-8">
+                                                     <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                       <div className="flex flex-col flex-1 min-w-0">
+                                                         <div className="flex items-center gap-2">
+                                                           <span className="text-sm text-gray-700 font-medium">
+                                                             {field.tableHeader || field.label}:
+                                                           </span>
+                                                           {field.type && (
+                                                             <span className="text-xs text-gray-400 bg-gray-100 px-1 py-0.5 rounded">
+                                                               {field.type}
+                                                             </span>
+                                                           )}
+                                                           {field.type === 'password' && (
+                                                             <span className="text-xs text-orange-600 bg-orange-100 px-1 py-0.5 rounded">
+                                                               🔒
+                                                             </span>
+                                                           )}
+                                                         </div>
+                                                         <TruncatedText
+                                                           text={formatFieldValue(fieldValue, field.type)}
+                                                           className="text-sm text-gray-800 mt-1"
+                                                           maxLength={35}
+                                                         />
+                                                       </div>
+                                                     </div>
+                                                   </div>
+                                                 </TableCell>
+                                                 {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                                   subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
+                                                     (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
+                                                       <TableCell key={`client-platform-data-field-cell-${client.id}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-25 group-hover:bg-blue-50">
+                                                         <span className="text-xs text-gray-400">-</span>
+                                                       </TableCell>
+                                                     ))
+                                                   ) : (
+                                                     <TableCell key={`client-platform-data-field-cell-${client.id}-${field.name}-${subdept.id}`} className="text-center border bg-blue-25 group-hover:bg-blue-50">
+                                                       <span className="text-xs text-gray-400">-</span>
+                                                     </TableCell>
+                                                   )
+                                                 )}
+                                               </TableRow>
+                                             );
+                                           });
+                                         }
+                                       });
+
+                                       return sectionRows;
+                                     })() : [])
                                    ].flat();
                                  })}
                                </>
                              )}
 
                              {/* Empty state */}
-                             {Object.keys(groupedDocuments).length === 0 && clientData.length === 0 && (
+                             {Object.keys(groupedDocuments).length === 0 && clientFormFields.length === 0 && clientData.length === 0 && (
                                <TableRow>
                                  <TableCell colSpan={100} className="text-center py-12 text-gray-500">
                                    No data available for this category.
@@ -1211,4 +1781,4 @@ export default function DocumentsFields() {
      </div>
    </div>
  );
-} 
+}
