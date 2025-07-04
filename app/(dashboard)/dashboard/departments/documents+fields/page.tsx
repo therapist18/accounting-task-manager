@@ -591,10 +591,23 @@ export default function DocumentsFields() {
   const handleDisplayToggle = useCallback(async (
     allocationId: string,
     subdeptId: number,
-    classIndex: number,
+    classIndex: number | null,
     subclassIndex: number | null = null,
     checked: boolean = false
   ) => {
+    // Handle toggling at subdepartment level (when classIndex is null)
+    if (classIndex === null) {
+      const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId);
+      if (subdept?.classes?.length) {
+        // Toggle all classes in this subdepartment
+        const togglePromises = subdept.classes.map((_, idx) => 
+          handleDisplayToggle(allocationId, subdeptId, idx, null, checked)
+        );
+        await Promise.all(togglePromises);
+        return;
+      }
+    }
+
     const allocationKey = [
       allocationId,
       subdeptId,
@@ -609,7 +622,7 @@ export default function DocumentsFields() {
       .find(item => item.id === allocationId);
     
     const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId);
-    const classItem = subdept?.classes?.[classIndex];
+    const classItem = classIndex !== null ? subdept?.classes?.[classIndex] : null;
     
     const classId = subdept && classItem 
       ? [
@@ -812,12 +825,31 @@ export default function DocumentsFields() {
     classIndex: number | null,
     subclassIndex: number | null = null
   ) => {
+    // First check for specific allocation
     const keyParts = [allocationId, subdeptId];
     if (classIndex !== null) keyParts.push(String(classIndex));
     if (subclassIndex !== null) keyParts.push(String(subclassIndex));
     const allocationKey = keyParts.join('_');
-    return documentAllocations[allocationKey]?.display || false;
-  }, [documentAllocations]);
+    
+    // If we have a specific allocation, return its status
+    if (documentAllocations[allocationKey] !== undefined) {
+      return documentAllocations[allocationKey].display;
+    }
+
+    // If checking at subdepartment level, check if any class is checked
+    if (classIndex === null) {
+      const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId);
+      if (subdept?.classes?.length) {
+        // Check if any class in this subdepartment has this allocation checked
+        return subdept.classes.some((_, clsIdx) => {
+          const classKey = [allocationId, subdeptId, clsIdx].join('_');
+          return documentAllocations[classKey]?.display === true;
+        });
+      }
+    }
+
+    return false;
+  }, [documentAllocations, currentDepartment]);
 
   const getClientFieldAllocationStatus = useCallback((
     fieldId: string,
