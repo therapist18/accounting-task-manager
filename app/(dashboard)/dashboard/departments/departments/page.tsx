@@ -240,6 +240,7 @@ export default function Departments() {
   const [users, setUsers] = useState<User[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
   const [expanded, setExpanded] = useState<{ [key: string]: boolean }>({});
+  const [expandedClasses, setExpandedClasses] = useState<{ [key: string]: boolean }>({});
   const [isOrderChanged, setIsOrderChanged] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
   const [departmentForm, setDepartmentForm] = useState({ name: '', description: '', subdepartments: [] as SubdepartmentForm[] })
@@ -321,14 +322,38 @@ export default function Departments() {
     }
   };
 
-  const toggleExpansion = (id: string) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+  const toggleExpansion = (type: 'dept' | 'class' | 'subclass', id: string) => {
+    if (type === 'dept') {
+      setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+    } else if (type === 'class') {
+      setExpandedClasses(prev => ({ ...prev, [id]: !prev[id] }));
+    }
+  };
+
   const expandAll = () => {
     const allExpanded = {};
-    departments.forEach(dept => { allExpanded[dept.id] = true; });
+    departments.forEach(dept => { 
+      allExpanded[dept.id] = true;
+      (dept.tm_subdepartments || []).forEach(subdept => {
+        allExpanded[`class-${subdept.id}`] = true;
+      });
+    });
     setExpanded(allExpanded);
+    setExpandedClasses(allExpanded);
   };
-  const collapseAll = () => setExpanded({});
-  const areAllExpanded = departments.length > 0 && departments.every(dept => expanded[dept.id]);
+
+  const collapseAll = () => {
+    setExpanded({});
+    setExpandedClasses({});
+  };
+
+  const areAllExpanded = departments.length > 0 && 
+    departments.every(dept => expanded[dept.id]) &&
+    departments.every(dept => 
+      (dept.tm_subdepartments || []).every(subdept => 
+        expandedClasses[`class-${subdept.id}`]
+      )
+    );
 
   const filteredDepartments = departments.filter(dept =>
     dept.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -475,7 +500,7 @@ export default function Departments() {
             ) : (
               filteredDepartments.map((dept, deptIndex) => (
                 <React.Fragment key={dept.id}>
-                  <TableRow className="bg-gray-50 font-semibold border-b-2 border-gray-200">
+                  <TableRow className="bg-blue-50 font-semibold border-b-2 border-gray-200">
                     <TableCell className="text-center">
                       {deptIndex + 1}
                     </TableCell>
@@ -484,7 +509,18 @@ export default function Departments() {
                         {dept.name}
                         <Badge variant="secondary">{(dept.tm_subdepartments || []).length} subs</Badge>
                       </div>
-                      <Button variant="ghost" size="icon" onClick={() => toggleExpansion(dept.id)} className="h-8 w-8"><Minus className={`h-5 w-5 transition-transform ${expanded[dept.id] ? '' : 'hidden'}`} /><Plus className={`h-5 w-5 transition-transform ${expanded[dept.id] ? 'hidden' : ''}`} /></Button>
+                      <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      onClick={() => toggleExpansion('dept', dept.id)} 
+                      className="h-8 w-8"
+                    >
+                      {expanded[dept.id] ? (
+                        <Minus className="h-5 w-5" />
+                      ) : (
+                        <Plus className="h-5 w-5" />
+                      )}
+                    </Button>
                     </TableCell>
                     <TableCell colSpan={3}></TableCell>
                     <TableCell className="text-right">
@@ -580,10 +616,45 @@ export default function Departments() {
                     <TabsContent value="workflow" className="pt-6 space-y-4">
                       <div className="flex items-center justify-between"><h4 className="font-semibold text-gray-800">Classes & Requirements</h4><Button variant="outline" size="sm" onClick={() => handleAddClass(subdeptIndex)}><Plus className="h-4 w-4 mr-1" /> Add Class</Button></div>
                       <div className="space-y-4 bg-gray-50 p-4 rounded-md border">
-                        {subdept.classes.map((classItem, classIndex) => (
-                          <ClassComponent key={classItem.id} classItem={classItem} onUpdate={updateFormState} onRemove={() => handleRemoveClass(subdeptIndex, classIndex)} path={['subdepartments', subdeptIndex, 'classes', classIndex]} index={`${subdeptIndex + 1}.${classIndex + 1}`} />
-                        ))}
-                        {subdept.classes.length === 0 && <div className="text-center py-8 text-gray-500 border-2 border-dashed rounded-lg">No classes created yet. Click "Add Class" to begin.</div>}
+                        {subdept.classes.map((classItem, classIndex) => {
+                          const classId = `class-${subdept.id}-${classItem.id}`;
+                          const isExpanded = expandedClasses[classId] !== false; // Default to expanded
+                          
+                          return (
+                            <div key={classItem.id} className="border rounded-md overflow-hidden">
+                              <div 
+                                className="flex items-center bg-white p-3 border-b cursor-pointer hover:bg-gray-50"
+                                onClick={() => toggleExpansion('class', classId)}
+                              >
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-6 w-6 mr-2 text-gray-500 hover:bg-transparent"
+                                >
+                                  {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                                </Button>
+                                <span className="font-medium">{classItem.name || `Class ${classIndex + 1}`}</span>
+                              </div>
+                              
+                              {isExpanded && (
+                                <div className="p-4 bg-gray-50">
+                                  <ClassComponent 
+                                    classItem={classItem} 
+                                    onUpdate={updateFormState} 
+                                    onRemove={() => handleRemoveClass(subdeptIndex, classIndex)} 
+                                    path={['subdepartments', subdeptIndex, 'classes', classIndex]} 
+                                    index={`${subdeptIndex + 1}.${classIndex + 1}`} 
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {subdept.classes.length === 0 && (
+                          <div className="text-center py-8 text-gray-500 border-2 border-dashed rounded-lg">
+                            No classes created yet. Click "Add Class" to begin.
+                          </div>
+                        )}
                       </div>
                     </TabsContent>
                   </Tabs>
