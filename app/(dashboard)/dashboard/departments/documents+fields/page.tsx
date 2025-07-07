@@ -23,6 +23,9 @@ const CATEGORY_MAPPING = {
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes cache
 const DEBOUNCE_DELAY = 300
 
+// Class D ID for understudy column
+const CLASS_D_ID = 1750687058159
+
 // Enhanced cache system
 const cache = new Map()
 const getCachedData = (key: string) => {
@@ -248,8 +251,21 @@ export default function DocumentsFields() {
   const [departments, setDepartments] = useState<Department[]>([])
   const [documents, setDocuments] = useState<DocumentType[]>([])
   const [clientData, setClientData] = useState<ClientData[]>([])
-  const [documentAllocations, setDocumentAllocations] = useState<Record<string, { display: boolean; kycdocumentid: string | null }>>({})
-  const [clientFieldAllocations, setClientFieldAllocations] = useState<Record<string, boolean>>({})
+  
+  // Updated allocation states for AP, DP, and understudy
+  const [documentAllocations, setDocumentAllocations] = useState<Record<string, { 
+    ap: boolean
+    dp: boolean
+    understudy: boolean
+    kycdocumentid: string | null 
+  }>>({})
+  
+  const [clientFieldAllocations, setClientFieldAllocations] = useState<Record<string, {
+    ap: boolean
+    dp: boolean
+    understudy: boolean
+  }>>({})
+  
   const [activeTab, setActiveTab] = useState<string>("")
   const [documentTab, setDocumentTab] = useState<"company" | "individual">("company")
   const [loading, setLoading] = useState(true)
@@ -258,10 +274,53 @@ export default function DocumentsFields() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [expandedClientItems, setExpandedClientItems] = useState<Set<string>>(new Set())
   const [submittingIds, setSubmittingIds] = useState<Set<string>>(new Set())
+  
+  // New state for column expansion
+  const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set())
 
   // Refs for performance tracking
   const renderCountRef = useRef(0)
   const lastFetchTimeRef = useRef(0)
+
+  // Helper function to get column key
+  const getColumnKey = useCallback((subdeptId: number, clsIndex: number | null, subclsIndex: number | null = null) => {
+    const keyParts = [subdeptId]
+    if (clsIndex !== null) keyParts.push(clsIndex)
+    if (subclsIndex !== null) keyParts.push(subclsIndex)
+    return keyParts.join('_')
+  }, [])
+
+  // Helper function to check if understudy should be shown
+  const shouldShowUnderstudy = useCallback((subdept: Subdepartment, clsIndex: number | null) => {
+    if (!subdept.hasClasses || clsIndex === null) return false
+    const cls = subdept.classes?.[clsIndex]
+    return cls?.id === CLASS_D_ID
+  }, [])
+
+  // Calculate dynamic column width based on expanded state
+  const getColumnWidth = useCallback((subdept: Subdepartment, clsIndex: number | null, subclsIndex: number | null = null) => {
+    const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
+    const isExpanded = expandedColumns.has(columnKey)
+    const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+    
+    if (isExpanded) {
+      return hasUnderstudy ? 360 : 240 // 3 columns (AP, DP, understudy) or 2 columns (AP, DP)
+    }
+    return 120 // Just AP column
+  }, [expandedColumns, getColumnKey, shouldShowUnderstudy])
+
+  // Toggle column expansion
+  const toggleColumnExpansion = useCallback((columnKey: string) => {
+    setExpandedColumns(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(columnKey)) {
+        newSet.delete(columnKey)
+      } else {
+        newSet.add(columnKey)
+      }
+      return newSet
+    })
+  }, [])
 
   
 // Helper function to format field values (memoized)
@@ -525,16 +584,18 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
         display_name: doc.display_name || doc.name
       }))
 
-      // Optimize allocation processing with better indexing
-      const documentSettings: Record<string, { display: boolean; kycdocumentid: string | null }> = {}
-      const clientFieldSettings: Record<string, boolean> = {}
+      // Updated allocation processing with AP, DP, and understudy
+      const documentSettings: Record<string, { ap: boolean, dp: boolean, understudy: boolean, kycdocumentid: string | null }> = {}
+      const clientFieldSettings: Record<string, { ap: boolean, dp: boolean, understudy: boolean }> = {}
 
       requirementsResponse.data?.forEach((req: any) => {
         if (Array.isArray(req.documents_and_fields)) {
           req.documents_and_fields.forEach((item: any) => {
             if (item?.id !== undefined) {
               documentSettings[item.id] = {
-                display: Boolean(item.display),
+                ap: Boolean(item.ap || item.display), // Backward compatibility
+                dp: Boolean(item.dp),
+                understudy: Boolean(item.understudy),
                 kycdocumentid: item.kycdocumentid || null
               }
             }
@@ -544,7 +605,11 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
         if (Array.isArray(req.client_fields)) {
           req.client_fields.forEach((item: any) => {
             if (item?.id !== undefined) {
-              clientFieldSettings[item.id] = Boolean(item.display)
+              clientFieldSettings[item.id] = {
+                ap: Boolean(item.ap || item.display), // Backward compatibility
+                dp: Boolean(item.dp),
+                understudy: Boolean(item.understudy)
+              }
             }
           })
         }
@@ -600,15 +665,17 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
 
         if (error) throw error
 
-        const documentSettings: Record<string, { display: boolean; kycdocumentid: string | null }> = {}
-        const clientFieldSettings: Record<string, boolean> = {}
+        const documentSettings: Record<string, { ap: boolean, dp: boolean, understudy: boolean, kycdocumentid: string | null }> = {}
+        const clientFieldSettings: Record<string, { ap: boolean, dp: boolean, understudy: boolean }> = {}
 
         requirementsData?.forEach((req: any) => {
           if (Array.isArray(req.documents_and_fields)) {
             req.documents_and_fields.forEach((item: any) => {
               if (item?.id !== undefined) {
                 documentSettings[item.id] = {
-                  display: Boolean(item.display),
+                  ap: Boolean(item.ap || item.display), // Backward compatibility
+                  dp: Boolean(item.dp),
+                  understudy: Boolean(item.understudy),
                   kycdocumentid: item.kycdocumentid || null
                 }
               }
@@ -618,7 +685,11 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
           if (Array.isArray(req.client_fields)) {
             req.client_fields.forEach((item: any) => {
               if (item?.id !== undefined) {
-                clientFieldSettings[item.id] = Boolean(item.display)
+                clientFieldSettings[item.id] = {
+                  ap: Boolean(item.ap || item.display), // Backward compatibility
+                  dp: Boolean(item.dp),
+                  understudy: Boolean(item.understudy)
+                }
               }
             })
           }
@@ -680,6 +751,7 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
     const allExpandableIds = new Set<string>()
     const allCategoryKeys = new Set<string>(Object.keys(groupedDocuments))
     const allClientIds = new Set<string>(clientData.map(c => c.id))
+    const allColumnKeys = new Set<string>()
 
     filteredDocuments.forEach(doc => {
       if (doc.hasFields) {
@@ -692,27 +764,47 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
       }
     })
 
+    // Add all column keys for expansion
+    normalizedSubdepartments.forEach(subdept => {
+      if (subdept.hasClasses) {
+        subdept.classes?.forEach((cls, clsIndex) => {
+          if (cls.subclasses?.length) {
+            cls.subclasses.forEach((_, subclsIndex) => {
+              allColumnKeys.add(getColumnKey(subdept.id, clsIndex, subclsIndex))
+            })
+          } else {
+            allColumnKeys.add(getColumnKey(subdept.id, clsIndex))
+          }
+        })
+      } else {
+        allColumnKeys.add(getColumnKey(subdept.id, null))
+      }
+    })
+
     startTransition(() => {
       setExpandedCategories(allCategoryKeys)
       setExpandedItems(allExpandableIds)
       setExpandedClientItems(allClientIds)
+      setExpandedColumns(allColumnKeys)
     })
-  }, [filteredDocuments, groupedDocuments, clientData])
+  }, [filteredDocuments, groupedDocuments, clientData, normalizedSubdepartments, getColumnKey])
 
   const collapseAll = useCallback(() => {
     startTransition(() => {
       setExpandedItems(new Set())
       setExpandedCategories(new Set())
       setExpandedClientItems(new Set())
+      setExpandedColumns(new Set())
     })
   }, [])
 
-  // Enhanced display toggle with support for subdepartments without classes
+  // Enhanced display toggle with support for AP, DP, and understudy
   const handleDisplayToggle = useCallback(async (
     allocationId: string,
     subdeptId: number,
     classIndex: number | null,
     subclassIndex: number | null = null,
+    columnType: 'ap' | 'dp' | 'understudy',
     checked: boolean = false
   ) => {
     const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId)
@@ -734,7 +826,8 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
       setDocumentAllocations(prev => ({
         ...prev,
         [allocationKey]: {
-          display: checked,
+          ...prev[allocationKey],
+          [columnType]: checked,
           kycdocumentid: documentOrField?.kycdocumentid || null
         }
       }))
@@ -754,13 +847,15 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
           ? existingData.documents_and_fields
           : []
 
+        const existingField = currentFields.find((item: any) => item.id === allocationKey)
         const filteredFields = currentFields.filter((item: any) => item.id !== allocationKey)
 
         const updatedFields = [
           ...filteredFields,
           {
             id: allocationKey,
-            display: checked,
+            ...(existingField || {}),
+            [columnType]: checked,
             updated_at: new Date().toISOString()
           }
         ]
@@ -784,7 +879,7 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
 
         toast({
           title: "Success",
-          description: "Display setting updated successfully",
+          description: `${columnType.toUpperCase()} setting updated successfully`,
           variant: "default",
         })
       } catch (error) {
@@ -794,14 +889,14 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
         setDocumentAllocations(prev => ({
           ...prev,
           [allocationKey]: {
-            display: !checked,
-            kycdocumentid: prev[allocationKey]?.kycdocumentid || null
+            ...prev[allocationKey],
+            [columnType]: !checked
           }
         }))
 
         toast({
           title: "Error",
-          description: "Failed to update display setting",
+          description: `Failed to update ${columnType.toUpperCase()} setting`,
           variant: "destructive",
         })
       } finally {
@@ -817,7 +912,7 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
     // Handle toggling at subdepartment level for subdepartments with classes
     if (classIndex === null && subdept?.hasClasses) {
       const togglePromises = subdept.classes?.map((_, idx) =>
-        handleDisplayToggle(allocationId, subdeptId, idx, null, checked)
+        handleDisplayToggle(allocationId, subdeptId, idx, null, columnType, checked)
       ) || []
       await Promise.all(togglePromises)
       return
@@ -851,7 +946,8 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
     setDocumentAllocations(prev => ({
       ...prev,
       [allocationKey]: {
-        display: checked,
+        ...prev[allocationKey],
+        [columnType]: checked,
         kycdocumentid: documentOrField?.kycdocumentid || null
       }
     }))
@@ -871,13 +967,15 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
         ? existingData.documents_and_fields
         : []
 
+      const existingField = currentFields.find((item: any) => item.id === allocationKey)
       const filteredFields = currentFields.filter((item: any) => item.id !== allocationKey)
 
       const updatedFields = [
         ...filteredFields,
         {
           id: allocationKey,
-          display: checked,
+          ...(existingField || {}),
+          [columnType]: checked,
           updated_at: new Date().toISOString()
         }
       ]
@@ -901,7 +999,7 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
 
       toast({
         title: "Success",
-        description: "Display setting updated successfully",
+        description: `${columnType.toUpperCase()} setting updated successfully`,
         variant: "default",
       })
     } catch (error) {
@@ -911,14 +1009,14 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
       setDocumentAllocations(prev => ({
         ...prev,
         [allocationKey]: {
-          display: !checked,
-          kycdocumentid: prev[allocationKey]?.kycdocumentid || null
+          ...prev[allocationKey],
+          [columnType]: !checked
         }
       }))
 
       toast({
         title: "Error",
-        description: "Failed to update display setting",
+        description: `Failed to update ${columnType.toUpperCase()} setting`,
         variant: "destructive",
       })
     } finally {
@@ -930,12 +1028,13 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
     }
   }, [currentDepartment, refreshData, filteredDocuments])
 
-  // Enhanced client field toggle with support for subdepartments without classes
+  // Enhanced client field toggle with support for AP, DP, and understudy
   const handleClientFieldToggle = useCallback(async (
     fieldId: string,
     subdeptId: number,
     classIndex: number | null,
     subclassIndex: number | null = null,
+    columnType: 'ap' | 'dp' | 'understudy',
     checked: boolean = false
   ) => {
     const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId)
@@ -949,7 +1048,10 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
 
       setClientFieldAllocations(prev => ({
         ...prev,
-        [allocationKey]: checked
+        [allocationKey]: {
+          ...prev[allocationKey],
+          [columnType]: checked
+        }
       }))
 
       try {
@@ -967,13 +1069,15 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
           ? existingData.client_fields
           : []
 
+        const existingField = currentClientFields.find((item: any) => item.id === allocationKey)
         const filteredClientFields = currentClientFields.filter((item: any) => item.id !== allocationKey)
 
         const updatedClientFields = [
           ...filteredClientFields,
           {
             id: allocationKey,
-            display: checked,
+            ...(existingField || {}),
+            [columnType]: checked,
             updated_at: new Date().toISOString()
           }
         ]
@@ -997,7 +1101,7 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
 
         toast({
           title: "Success",
-          description: "Client field setting updated successfully",
+          description: `${columnType.toUpperCase()} client field setting updated successfully`,
           variant: "default",
         })
       } catch (error) {
@@ -1005,12 +1109,15 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
 
         setClientFieldAllocations(prev => ({
           ...prev,
-          [allocationKey]: !checked
+          [allocationKey]: {
+            ...prev[allocationKey],
+            [columnType]: !checked
+          }
         }))
 
         toast({
           title: "Error",
-          description: "Failed to update client field setting",
+          description: `Failed to update ${columnType.toUpperCase()} client field setting`,
           variant: "destructive",
         })
       } finally {
@@ -1045,7 +1152,10 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
 
     setClientFieldAllocations(prev => ({
       ...prev,
-      [allocationKey]: checked
+      [allocationKey]: {
+        ...prev[allocationKey],
+        [columnType]: checked
+      }
     }))
 
     try {
@@ -1063,13 +1173,15 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
         ? existingData.client_fields
         : []
 
+      const existingField = currentClientFields.find((item: any) => item.id === allocationKey)
       const filteredClientFields = currentClientFields.filter((item: any) => item.id !== allocationKey)
 
       const updatedClientFields = [
         ...filteredClientFields,
         {
           id: allocationKey,
-          display: checked,
+          ...(existingField || {}),
+          [columnType]: checked,
           updated_at: new Date().toISOString()
         }
       ]
@@ -1093,7 +1205,7 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
 
       toast({
         title: "Success",
-        description: "Client field setting updated successfully",
+        description: `${columnType.toUpperCase()} client field setting updated successfully`,
         variant: "default",
       })
     } catch (error) {
@@ -1101,12 +1213,15 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
 
       setClientFieldAllocations(prev => ({
         ...prev,
-        [allocationKey]: !checked
+        [allocationKey]: {
+          ...prev[allocationKey],
+          [columnType]: !checked
+        }
       }))
 
       toast({
         title: "Error",
-        description: "Failed to update client field setting",
+        description: `Failed to update ${columnType.toUpperCase()} client field setting`,
         variant: "destructive",
       })
     } finally {
@@ -1118,19 +1233,20 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
     }
   }, [currentDepartment, refreshData])
 
-  // Enhanced helper functions with better caching and support for subdepartments without classes
+  // Enhanced helper functions with better caching and support for AP, DP, and understudy
   const getAllocationStatus = useCallback((
     allocationId: string,
     subdeptId: number,
     classIndex: number | null,
-    subclassIndex: number | null = null
+    subclassIndex: number | null = null,
+    columnType: 'ap' | 'dp' | 'understudy'
   ) => {
     const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId)
 
     // Handle subdepartments without classes
     if (!subdept?.hasClasses && classIndex === null) {
       const directKey = [allocationId, subdeptId, 'direct'].join('_')
-      return documentAllocations[directKey]?.display || false
+      return documentAllocations[directKey]?.[columnType] || false
     }
 
     // Handle specific allocation
@@ -1140,14 +1256,14 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
     const allocationKey = keyParts.join('_')
 
     if (documentAllocations[allocationKey] !== undefined) {
-      return documentAllocations[allocationKey].display
+      return documentAllocations[allocationKey][columnType] || false
     }
 
     // Handle subdepartment level checking for subdepartments with classes
     if (classIndex === null && subdept?.hasClasses) {
       return subdept.classes?.some((_, clsIdx) => {
         const classKey = [allocationId, subdeptId, clsIdx].join('_')
-        return documentAllocations[classKey]?.display === true
+        return documentAllocations[classKey]?.[columnType] === true
       }) || false
     }
 
@@ -1158,30 +1274,41 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
     fieldId: string,
     subdeptId: number,
     classIndex: number | null,
-    subclassIndex: number | null = null
+    subclassIndex: number | null = null,
+    columnType: 'ap' | 'dp' | 'understudy'
   ) => {
     const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId)
 
     // Handle subdepartments without classes
     if (!subdept?.hasClasses && classIndex === null) {
       const directKey = [fieldId, subdeptId, 'direct'].join('_')
-      return clientFieldAllocations[directKey] || false
+      return clientFieldAllocations[directKey]?.[columnType] || false
     }
 
     const keyParts = [fieldId, subdeptId]
     if (classIndex !== null) keyParts.push(String(classIndex))
     if (subclassIndex !== null) keyParts.push(String(subclassIndex))
     const allocationKey = keyParts.join('_')
-    return clientFieldAllocations[allocationKey] || false
+    return clientFieldAllocations[allocationKey]?.[columnType] || false
   }, [clientFieldAllocations, currentDepartment])
 
   const getTotalColSpan = useCallback((subdept: Subdepartment) => {
     if (!subdept.hasClasses) return 1
-    const colSpan = subdept.classes?.reduce((total, cls) => {
-      return total + (cls.subclasses?.length || 1)
+    const colSpan = subdept.classes?.reduce((total, cls, clsIndex) => {
+      const columnKey = getColumnKey(subdept.id, clsIndex)
+      const isExpanded = expandedColumns.has(columnKey)
+      const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+      const subclassCount = cls.subclasses?.length || 1
+      
+      if (isExpanded) {
+        const columnsPerSubclass = hasUnderstudy ? 3 : 2 // AP, DP, (understudy)
+        return total + (subclassCount * columnsPerSubclass)
+      } else {
+        return total + subclassCount // Just AP column
+      }
     }, 0) || 1
     return Math.max(1, colSpan)
-  }, [])
+  }, [expandedColumns, getColumnKey, shouldShowUnderstudy])
 
   const shouldShowCheckbox = useCallback((field: DocumentField) => {
     return field.type !== 'array' &&
@@ -1211,28 +1338,69 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
     return submittingIds.has(allocationKey)
   }, [submittingIds, currentDepartment])
 
-  // Memoized render functions for better performance
-  const renderDocumentCheckbox = useCallback((
+  // Updated render functions for multiple columns
+  const renderDocumentCheckboxes = useCallback((
     doc: DocumentType,
     subdept: Subdepartment,
     clsIndex: number | null,
     subclsIndex: number | null
   ) => {
+    const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
+    const isExpanded = expandedColumns.has(columnKey)
+    const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
     const isSubmitting = getSubmittingStatus(doc.id, subdept.id, clsIndex, subclsIndex)
-    const allocationKey = [doc.id, subdept.id, clsIndex, subclsIndex].filter(x => x !== null).join('_')
-
+    
+    if (!isExpanded) {
+      // Just show AP column
+      return (
+        <OptimizedCheckbox
+          checked={getAllocationStatus(doc.id, subdept.id, clsIndex, subclsIndex, 'ap')}
+          onCheckedChange={(c) => handleDisplayToggle(doc.id, subdept.id, clsIndex, subclsIndex, 'ap', c)}
+          disabled={isSubmitting}
+          allocationKey={`ap-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+        />
+      )
+    }
+    
+    // Show expanded columns: AP, DP, and optionally understudy
     return (
-      <OptimizedCheckbox
-        key={allocationKey}
-        checked={getAllocationStatus(doc.id, subdept.id, clsIndex, subclsIndex)}
-        onCheckedChange={(c) => handleDisplayToggle(doc.id, subdept.id, clsIndex, subclsIndex, c)}
-        disabled={isSubmitting}
-        allocationKey={allocationKey}
-      />
+      <div className="flex gap-1 justify-center">
+        {/* AP Column */}
+        <div className="flex justify-center" style={{ width: '40px' }}>
+          <OptimizedCheckbox
+            checked={getAllocationStatus(doc.id, subdept.id, clsIndex, subclsIndex, 'ap')}
+            onCheckedChange={(c) => handleDisplayToggle(doc.id, subdept.id, clsIndex, subclsIndex, 'ap', c)}
+            disabled={isSubmitting}
+            allocationKey={`ap-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+          />
+        </div>
+        
+        {/* DP Column */}
+        <div className="flex justify-center" style={{ width: '40px' }}>
+          <OptimizedCheckbox
+            checked={getAllocationStatus(doc.id, subdept.id, clsIndex, subclsIndex, 'dp')}
+            onCheckedChange={(c) => handleDisplayToggle(doc.id, subdept.id, clsIndex, subclsIndex, 'dp', c)}
+            disabled={isSubmitting}
+            allocationKey={`dp-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+          />
+        </div>
+        
+        {/* Understudy Column (only for Class D) */}
+        {hasUnderstudy && (
+          <div className="flex justify-center" style={{ width: '40px' }}>
+            <OptimizedCheckbox
+              checked={getAllocationStatus(doc.id, subdept.id, clsIndex, subclsIndex, 'understudy')}
+              onCheckedChange={(c) => handleDisplayToggle(doc.id, subdept.id, clsIndex, subclsIndex, 'understudy', c)}
+              disabled={isSubmitting}
+              allocationKey={`us-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+            />
+          </div>
+        )}
+      </div>
     )
-  }, [getAllocationStatus, handleDisplayToggle, getSubmittingStatus])
+  }, [expandedColumns, getColumnKey, shouldShowUnderstudy, getSubmittingStatus, getAllocationStatus, handleDisplayToggle])
 
-  const renderFieldCheckbox = useCallback((
+  const renderFieldCheckboxes = useCallback((
     field: DocumentField,
     doc: DocumentType,
     subdept: Subdepartment,
@@ -1242,19 +1410,121 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
     if (!shouldShowCheckbox(field)) return null
 
     const fieldId = `${doc.id}-${field.id}`
+    const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
+    const isExpanded = expandedColumns.has(columnKey)
+    const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
     const isSubmitting = getSubmittingStatus(fieldId, subdept.id, clsIndex, subclsIndex)
-    const allocationKey = [fieldId, subdept.id, clsIndex, subclsIndex].filter(x => x !== null).join('_')
 
+    if (!isExpanded) {
+      // Just show AP column
+      return (
+        <OptimizedCheckbox
+          checked={getAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'ap')}
+          onCheckedChange={(c) => handleDisplayToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'ap', c)}
+          disabled={isSubmitting}
+          allocationKey={`ap-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+        />
+      )
+    }
+
+    // Show expanded columns: AP, DP, and optionally understudy
     return (
-      <OptimizedCheckbox
-        key={allocationKey}
-        checked={getAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex)}
-        onCheckedChange={(c) => handleDisplayToggle(fieldId, subdept.id, clsIndex, subclsIndex, c)}
-        disabled={isSubmitting}
-        allocationKey={allocationKey}
-      />
+      <div className="flex gap-1 justify-center">
+        {/* AP Column */}
+        <div className="flex justify-center" style={{ width: '40px' }}>
+          <OptimizedCheckbox
+            checked={getAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'ap')}
+            onCheckedChange={(c) => handleDisplayToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'ap', c)}
+            disabled={isSubmitting}
+            allocationKey={`ap-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+          />
+        </div>
+        
+        {/* DP Column */}
+        <div className="flex justify-center" style={{ width: '40px' }}>
+          <OptimizedCheckbox
+            checked={getAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'dp')}
+            onCheckedChange={(c) => handleDisplayToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'dp', c)}
+            disabled={isSubmitting}
+            allocationKey={`dp-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+          />
+        </div>
+        
+        {/* Understudy Column (only for Class D) */}
+        {hasUnderstudy && (
+          <div className="flex justify-center" style={{ width: '40px' }}>
+            <OptimizedCheckbox
+              checked={getAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'understudy')}
+              onCheckedChange={(c) => handleDisplayToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'understudy', c)}
+              disabled={isSubmitting}
+              allocationKey={`us-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+            />
+          </div>
+        )}
+      </div>
     )
-  }, [shouldShowCheckbox, getAllocationStatus, handleDisplayToggle, getSubmittingStatus])
+  }, [shouldShowCheckbox, expandedColumns, getColumnKey, shouldShowUnderstudy, getSubmittingStatus, getAllocationStatus, handleDisplayToggle])
+
+  const renderClientFieldCheckboxes = useCallback((
+    fieldId: string,
+    subdept: Subdepartment,
+    clsIndex: number | null,
+    subclsIndex: number | null
+  ) => {
+    const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
+    const isExpanded = expandedColumns.has(columnKey)
+    const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+    const isSubmitting = getSubmittingStatus(fieldId, subdept.id, clsIndex, subclsIndex)
+
+    if (!isExpanded) {
+      // Just show AP column
+      return (
+        <OptimizedCheckbox
+          checked={getClientFieldAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'ap')}
+          onCheckedChange={(c) => handleClientFieldToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'ap', c)}
+          disabled={isSubmitting}
+          allocationKey={`ap-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+        />
+      )
+    }
+
+    // Show expanded columns: AP, DP, and optionally understudy
+    return (
+      <div className="flex gap-1 justify-center">
+        {/* AP Column */}
+        <div className="flex justify-center" style={{ width: '40px' }}>
+          <OptimizedCheckbox
+            checked={getClientFieldAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'ap')}
+            onCheckedChange={(c) => handleClientFieldToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'ap', c)}
+            disabled={isSubmitting}
+            allocationKey={`ap-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+          />
+        </div>
+        
+        {/* DP Column */}
+        <div className="flex justify-center" style={{ width: '40px' }}>
+          <OptimizedCheckbox
+            checked={getClientFieldAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'dp')}
+            onCheckedChange={(c) => handleClientFieldToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'dp', c)}
+            disabled={isSubmitting}
+            allocationKey={`dp-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+          />
+        </div>
+        
+        {/* Understudy Column (only for Class D) */}
+        {hasUnderstudy && (
+          <div className="flex justify-center" style={{ width: '40px' }}>
+            <OptimizedCheckbox
+              checked={getClientFieldAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'understudy')}
+              onCheckedChange={(c) => handleClientFieldToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'understudy', c)}
+              disabled={isSubmitting}
+              allocationKey={`us-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+            />
+          </div>
+        )}
+      </div>
+    )
+  }, [expandedColumns, getColumnKey, shouldShowUnderstudy, getSubmittingStatus, getClientFieldAllocationStatus, handleClientFieldToggle])
 
   // Early returns with better error states
   if (loading) {
@@ -1351,7 +1621,7 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                 </TableHead>
                                 {normalizedSubdepartments.map((subdept, subIndex) => {
                                   const colSpan = getTotalColSpan(subdept)
-                                  const width = colSpan * 120
+                                  const width = Math.max(colSpan * 120, 120)
                                   return (
                                     <TableHead
                                       key={`subdept-header-${subdept.id}`}
@@ -1375,7 +1645,16 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                               <TableRow>
                                 {normalizedSubdepartments.map((subdept, subIndex) =>
                                   subdept.hasClasses ? subdept.classes?.map((cls, clsIndex) => {
-                                    const colSpan = cls.subclasses?.length || 1
+                                    const hasSubclasses = cls.subclasses?.length || 0
+                                    const columnKey = getColumnKey(subdept.id, clsIndex)
+                                    const isExpanded = expandedColumns.has(columnKey)
+                                    const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                    
+                                    let colSpan = hasSubclasses || 1
+                                    if (isExpanded) {
+                                      colSpan *= hasUnderstudy ? 3 : 2
+                                    }
+                                    
                                     const width = colSpan * 120
                                     return (
                                       <TableHead
@@ -1396,7 +1675,7 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                   }) : (
                                     <TableHead
                                       key={`subdept-direct-${subdept.id}`}
-                                      style={{ width: '120px' }}
+                                      style={{ width: `${getColumnWidth(subdept, null)}px` }}
                                       className={cn("border-r border-blue-400 text-center text-white text-sm", subIndex % 2 === 0 ? "bg-blue-600" : "bg-blue-500")}
                                     >
                                       Direct
@@ -1408,34 +1687,45 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                               {/* Subclass Header Row */}
                               <TableRow>
                                 {normalizedSubdepartments.map((subdept, subIndex) =>
-                                  subdept.hasClasses ? subdept.classes?.flatMap((cls, clsIndex) =>
-                                    cls.subclasses?.length ? cls.subclasses.map((subcls, subclsIndex) => (
-                                      <TableHead
-                                        key={`subclass-header-${subdept.id}-${clsIndex}-${subclsIndex}`}
-                                        style={{ width: '120px' }}
-                                        className={cn("border-r border-blue-400 px-2 text-center text-white text-xs", subIndex % 2 === 0 ? "bg-blue-500" : "bg-blue-400")}
-                                      >
-                                        <div className="flex items-center justify-center">
-                                          <TruncatedText
-                                            text={subcls.name}
-                                            className="text-xs text-white"
-                                            maxLength={10}
-                                          />
-                                        </div>
-                                      </TableHead>
-                                    )) : (
+                                  subdept.hasClasses ? subdept.classes?.flatMap((cls, clsIndex) => {
+                                    const columnKey = getColumnKey(subdept.id, clsIndex)
+                                    const isExpanded = expandedColumns.has(columnKey)
+                                    const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                    
+                                    return cls.subclasses?.length ? cls.subclasses.map((subcls, subclsIndex) => {
+                                      const colSpan = isExpanded ? (hasUnderstudy ? 3 : 2) : 1
+                                      const width = colSpan * 120
+                                      
+                                      return (
+                                        <TableHead
+                                          key={`subclass-header-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                          colSpan={colSpan}
+                                          style={{ width: `${width}px` }}
+                                          className={cn("border-r border-blue-400 px-2 text-center text-white text-xs", subIndex % 2 === 0 ? "bg-blue-500" : "bg-blue-400")}
+                                        >
+                                          <div className="flex items-center justify-center">
+                                            <TruncatedText
+                                              text={subcls.name}
+                                              className="text-xs text-white"
+                                              maxLength={10}
+                                            />
+                                          </div>
+                                        </TableHead>
+                                      )
+                                    }) : (
                                       <TableHead
                                         key={`class-direct-${subdept.id}-${clsIndex}`}
-                                        style={{ width: '120px' }}
+                                        colSpan={isExpanded ? (hasUnderstudy ? 3 : 2) : 1}
+                                        style={{ width: `${getColumnWidth(subdept, clsIndex)}px` }}
                                         className={cn("border-r border-blue-400 text-center text-white text-xs", subIndex % 2 === 0 ? "bg-blue-500" : "bg-blue-400")}
                                       >
                                         -
                                       </TableHead>
                                     )
-                                  ) : (
+                                  }) : (
                                     <TableHead
                                       key={`subdept-main-${subdept.id}`}
-                                      style={{ width: '120px' }}
+                                      style={{ width: `${getColumnWidth(subdept, null)}px` }}
                                       className={cn("border-r border-blue-400 text-center text-white text-xs", subIndex % 2 === 0 ? "bg-blue-500" : "bg-blue-400")}
                                     >
                                       -
@@ -1444,36 +1734,141 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                 )}
                               </TableRow>
 
-                              {/* Display Header Row */}
+                              {/* Updated Column Header Row - AP with expandable DP and understudy */}
                               <TableRow>
                                 {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                   subdept.hasClasses ? subdept.classes?.flatMap((cls, clsIndex) =>
-                                    cls.subclasses?.length ? cls.subclasses.map((_, subclsIndex) => (
+                                    cls.subclasses?.length ? cls.subclasses.map((_, subclsIndex) => {
+                                      const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
+                                      const isExpanded = expandedColumns.has(columnKey)
+                                      const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                      const width = getColumnWidth(subdept, clsIndex, subclsIndex)
+                                      
+                                      return (
+                                        <TableHead
+                                          key={`col-header-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                          style={{ width: `${width}px` }}
+                                          className="border-r border-blue-400 px-1 text-center text-white text-xs bg-blue-300"
+                                        >
+                                          <div className="flex items-center justify-center gap-1">
+                                            {!isExpanded ? (
+                                              <>
+                                                <span className="truncate">AP</span>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-4 w-4 p-0 text-white hover:bg-blue-400"
+                                                  onClick={() => toggleColumnExpansion(columnKey)}
+                                                >
+                                                  <Plus className="h-3 w-3" />
+                                                </Button>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <div className="flex gap-1">
+                                                  <span className="text-xs">AP</span>
+                                                  <span className="text-xs">DP</span>
+                                                  {hasUnderstudy && <span className="text-xs">US</span>}
+                                                </div>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-4 w-4 p-0 text-white hover:bg-blue-400"
+                                                  onClick={() => toggleColumnExpansion(columnKey)}
+                                                >
+                                                  <Minus className="h-3 w-3" />
+                                                </Button>
+                                              </>
+                                            )}
+                                          </div>
+                                        </TableHead>
+                                      )
+                                    }) : (
                                       <TableHead
-                                        key={`d-h-${subdept.id}-${clsIndex}-${subclsIndex}`}
-                                        style={{ width: '120px' }}
-                                        className="border-r border-blue-400 px-2 text-center text-white text-xs bg-blue-300"
+                                        key={`col-header-${subdept.id}-${clsIndex}`}
+                                        style={{ width: `${getColumnWidth(subdept, clsIndex)}px` }}
+                                        className="border-r border-blue-400 px-1 text-center text-white text-xs bg-blue-300"
                                       >
-                                        <div className="flex items-center justify-center">
-                                          <span className="truncate">Display</span>
+                                        <div className="flex items-center justify-center gap-1">
+                                          {(() => {
+                                            const columnKey = getColumnKey(subdept.id, clsIndex)
+                                            const isExpanded = expandedColumns.has(columnKey)
+                                            const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                            
+                                            return !isExpanded ? (
+                                              <>
+                                                <span className="truncate">AP</span>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-4 w-4 p-0 text-white hover:bg-blue-400"
+                                                  onClick={() => toggleColumnExpansion(columnKey)}
+                                                >
+                                                  <Plus className="h-3 w-3" />
+                                                </Button>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <div className="flex gap-1">
+                                                  <span className="text-xs">AP</span>
+                                                  <span className="text-xs">DP</span>
+                                                  {hasUnderstudy && <span className="text-xs">US</span>}
+                                                </div>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-4 w-4 p-0 text-white hover:bg-blue-400"
+                                                  onClick={() => toggleColumnExpansion(columnKey)}
+                                                >
+                                                  <Minus className="h-3 w-3" />
+                                                </Button>
+                                              </>
+                                            )
+                                          })()}
                                         </div>
-                                      </TableHead>
-                                    )) : (
-                                      <TableHead
-                                        key={`d-h-${subdept.id}-${clsIndex}`}
-                                        style={{ width: '120px' }}
-                                        className="border-r border-blue-400 text-center text-white text-xs bg-blue-300"
-                                      >
-                                        Display
                                       </TableHead>
                                     )
                                   ) : (
                                     <TableHead
-                                      key={`d-h-${subdept.id}`}
-                                      style={{ width: '120px' }}
-                                      className="border-r border-blue-400 text-center text-white text-xs bg-blue-300"
+                                      key={`col-header-${subdept.id}`}
+                                      style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                      className="border-r border-blue-400 px-1 text-center text-white text-xs bg-blue-300"
                                     >
-                                      Display
+                                      <div className="flex items-center justify-center gap-1">
+                                        {(() => {
+                                          const columnKey = getColumnKey(subdept.id, null)
+                                          const isExpanded = expandedColumns.has(columnKey)
+                                          
+                                          return !isExpanded ? (
+                                            <>
+                                              <span className="truncate">AP</span>
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-4 w-4 p-0 text-white hover:bg-blue-400"
+                                                onClick={() => toggleColumnExpansion(columnKey)}
+                                              >
+                                                <Plus className="h-3 w-3" />
+                                              </Button>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <div className="flex gap-1">
+                                                <span className="text-xs">AP</span>
+                                                <span className="text-xs">DP</span>
+                                              </div>
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-4 w-4 p-0 text-white hover:bg-blue-400"
+                                                onClick={() => toggleColumnExpansion(columnKey)}
+                                              >
+                                                <Minus className="h-3 w-3" />
+                                              </Button>
+                                            </>
+                                          )
+                                        })()}
+                                      </div>
                                     </TableHead>
                                   )
                                 )}
@@ -1523,12 +1918,20 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                             {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                               subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                 (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                  <TableCell key={`cat-cell-${categoryKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-100">
+                                                  <TableCell 
+                                                    key={`cat-cell-${categoryKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
+                                                    className="text-center border bg-blue-100"
+                                                    style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
+                                                  >
                                                     -
                                                   </TableCell>
                                                 ))
                                               ) : (
-                                                <TableCell key={`cat-cell-${categoryKey}-${subdept.id}`} className="text-center border bg-blue-100">
+                                                <TableCell 
+                                                  key={`cat-cell-${categoryKey}-${subdept.id}`} 
+                                                  className="text-center border bg-blue-100"
+                                                  style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                                >
                                                   -
                                                 </TableCell>
                                               )
@@ -1573,13 +1976,21 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                                   {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                     subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                       (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                        <TableCell key={`doc-cell-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-50 group-hover:bg-blue-100">
-                                                          {renderDocumentCheckbox(doc, subdept, clsIndex, subcls ? subclsIndex : null)}
+                                                        <TableCell 
+                                                          key={`doc-cell-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
+                                                          className="text-center border bg-blue-50 group-hover:bg-blue-100"
+                                                          style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
+                                                        >
+                                                          {renderDocumentCheckboxes(doc, subdept, clsIndex, subcls ? subclsIndex : null)}
                                                         </TableCell>
                                                       ))
                                                     ) : (
-                                                      <TableCell key={`doc-cell-${doc.id}-${subdept.id}`} className="text-center border bg-blue-50 group-hover:bg-blue-100">
-                                                        {renderDocumentCheckbox(doc, subdept, null, null)}
+                                                      <TableCell 
+                                                        key={`doc-cell-${doc.id}-${subdept.id}`} 
+                                                        className="text-center border bg-blue-50 group-hover:bg-blue-100"
+                                                        style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                                      >
+                                                        {renderDocumentCheckboxes(doc, subdept, null, null)}
                                                       </TableCell>
                                                     )
                                                   )}
@@ -1629,13 +2040,21 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                                         {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                           subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                             (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                              <TableCell key={`field-cell-${field.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border">
-                                                                {renderFieldCheckbox(field, doc, subdept, clsIndex, subcls ? subclsIndex : null)}
+                                                              <TableCell 
+                                                                key={`field-cell-${field.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
+                                                                className="text-center border"
+                                                                style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
+                                                              >
+                                                                {renderFieldCheckboxes(field, doc, subdept, clsIndex, subcls ? subclsIndex : null)}
                                                               </TableCell>
                                                             ))
                                                           ) : (
-                                                            <TableCell key={`field-cell-${field.id}-${subdept.id}`} className="text-center border">
-                                                              {renderFieldCheckbox(field, doc, subdept, null, null)}
+                                                            <TableCell 
+                                                              key={`field-cell-${field.id}-${subdept.id}`} 
+                                                              className="text-center border"
+                                                              style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                                            >
+                                                              {renderFieldCheckboxes(field, doc, subdept, null, null)}
                                                             </TableCell>
                                                           )
                                                         )}
@@ -1691,12 +2110,20 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                       {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                         subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                           (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                            <TableCell key={`form-section-cell-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-100">
+                                            <TableCell 
+                                              key={`form-section-cell-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
+                                              className="text-center border bg-blue-100"
+                                              style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
+                                            >
                                               -
                                             </TableCell>
                                           ))
                                         ) : (
-                                          <TableCell key={`form-section-cell-${sectionKey}-${subdept.id}`} className="text-center border bg-blue-100">
+                                          <TableCell 
+                                            key={`form-section-cell-${sectionKey}-${subdept.id}`} 
+                                            className="text-center border bg-blue-100"
+                                            style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                          >
                                             -
                                           </TableCell>
                                         )
@@ -1736,30 +2163,22 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                         </TableCell>
                                         {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                           subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                            (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => {
-                                              const fieldId = `form-field-${field.name}`
-                                              const isSubmitting = getSubmittingStatus(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null)
-                                              const allocationKey = [fieldId, subdept.id, clsIndex, subclsIndex].filter(x => x !== null).join('_')
-
-                                              return (
-                                                <TableCell key={`form-field-cell-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-25 group-hover:bg-blue-50">
-                                                  <OptimizedCheckbox
-                                                    checked={getClientFieldAllocationStatus(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null)}
-                                                    onCheckedChange={c => handleClientFieldToggle(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null, c)}
-                                                    disabled={isSubmitting}
-                                                    allocationKey={allocationKey}
-                                                  />
-                                                </TableCell>
-                                              )
-                                            })
+                                            (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
+                                              <TableCell 
+                                                key={`form-field-cell-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
+                                                className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
+                                              >
+                                                {renderClientFieldCheckboxes(`form-field-${field.name}`, subdept, clsIndex, subcls ? subclsIndex : null)}
+                                              </TableCell>
+                                            ))
                                           ) : (
-                                            <TableCell key={`form-field-cell-${field.name}-${subdept.id}`} className="text-center border bg-blue-25 group-hover:bg-blue-50">
-                                              <OptimizedCheckbox
-                                                checked={getClientFieldAllocationStatus(`form-field-${field.name}`, subdept.id, null, null)}
-                                                onCheckedChange={c => handleClientFieldToggle(`form-field-${field.name}`, subdept.id, null, null, c)}
-                                                disabled={getSubmittingStatus(`form-field-${field.name}`, subdept.id, null, null)}
-                                                allocationKey={`form-field-${field.name}-${subdept.id}-direct`}
-                                              />
+                                            <TableCell 
+                                              key={`form-field-cell-${field.name}-${subdept.id}`} 
+                                              className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                              style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                            >
+                                              {renderClientFieldCheckboxes(`form-field-${field.name}`, subdept, null, null)}
                                             </TableCell>
                                           )
                                         )}
@@ -1789,12 +2208,20 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                       {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                         subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                           (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                            <TableCell key={`platform-cell-${platformKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-100">
+                                            <TableCell 
+                                              key={`platform-cell-${platformKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
+                                              className="text-center border bg-blue-100"
+                                              style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
+                                            >
                                               -
                                             </TableCell>
                                           ))
                                         ) : (
-                                          <TableCell key={`platform-cell-${platformKey}-${subdept.id}`} className="text-center border bg-blue-100">
+                                          <TableCell 
+                                            key={`platform-cell-${platformKey}-${subdept.id}`} 
+                                            className="text-center border bg-blue-100"
+                                            style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                          >
                                             -
                                           </TableCell>
                                         )
@@ -1839,30 +2266,22 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                         </TableCell>
                                         {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                           subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                            (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => {
-                                              const fieldId = `platform-${platformKey}-${field.name}`
-                                              const isSubmitting = getSubmittingStatus(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null)
-                                              const allocationKey = [fieldId, subdept.id, clsIndex, subclsIndex].filter(x => x !== null).join('_')
-
-                                              return (
-                                                <TableCell key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-25 group-hover:bg-blue-50">
-                                                  <OptimizedCheckbox
-                                                    checked={getClientFieldAllocationStatus(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null)}
-                                                    onCheckedChange={c => handleClientFieldToggle(fieldId, subdept.id, clsIndex, subcls ? subclsIndex : null, c)}
-                                                    disabled={isSubmitting}
-                                                    allocationKey={allocationKey}
-                                                  />
-                                                </TableCell>
-                                              )
-                                            })
+                                            (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
+                                              <TableCell 
+                                                key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
+                                                className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
+                                              >
+                                                {renderClientFieldCheckboxes(`platform-${platformKey}-${field.name}`, subdept, clsIndex, subcls ? subclsIndex : null)}
+                                              </TableCell>
+                                            ))
                                           ) : (
-                                            <TableCell key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}`} className="text-center border bg-blue-25 group-hover:bg-blue-50">
-                                              <OptimizedCheckbox
-                                                checked={getClientFieldAllocationStatus(`platform-${platformKey}-${field.name}`, subdept.id, null, null)}
-                                                onCheckedChange={c => handleClientFieldToggle(`platform-${platformKey}-${field.name}`, subdept.id, null, null, c)}
-                                                disabled={getSubmittingStatus(`platform-${platformKey}-${field.name}`, subdept.id, null, null)}
-                                                allocationKey={`platform-${platformKey}-${field.name}-${subdept.id}-direct`}
-                                              />
+                                            <TableCell 
+                                              key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}`} 
+                                              className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                              style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                            >
+                                              {renderClientFieldCheckboxes(`platform-${platformKey}-${field.name}`, subdept, null, null)}
                                             </TableCell>
                                           )
                                         )}
@@ -1950,7 +2369,11 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                         {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                           subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                             (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                              <TableCell key={`client-cell-${client.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-green-50 group-hover:bg-green-100">
+                                              <TableCell 
+                                                key={`client-cell-${client.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
+                                                className="text-center border bg-green-50 group-hover:bg-green-100"
+                                                style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
+                                              >
                                                 <span className={cn(
                                                   "text-xs px-2 py-1 rounded-full",
                                                   client.status === 'Active' ? "bg-green-100 text-green-700" :
@@ -1962,7 +2385,11 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                               </TableCell>
                                             ))
                                           ) : (
-                                            <TableCell key={`client-cell-${client.id}-${subdept.id}`} className="text-center border bg-green-50 group-hover:bg-green-100">
+                                            <TableCell 
+                                              key={`client-cell-${client.id}-${subdept.id}`} 
+                                              className="text-center border bg-green-50 group-hover:bg-green-100"
+                                              style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                            >
                                               <span className={cn(
                                                 "text-xs px-2 py-1 rounded-full",
                                                 client.status === 'Active' ? "bg-green-100 text-green-700" :
@@ -1976,7 +2403,7 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                         )}
                                       </TableRow>,
 
-                                      // Client Detail Rows (only if expanded - same as before but optimized)
+                                      // Client Detail Rows (only if expanded)
                                       ...(isClientExpanded ? (() => {
                                         const sectionRows: React.ReactNode[] = []
 
@@ -2005,12 +2432,20 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                                 {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                   subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                     (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                      <TableCell key={`client-section-cell-${client.id}-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-green-100">
+                                                      <TableCell 
+                                                        key={`client-section-cell-${client.id}-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
+                                                        className="text-center border bg-green-100"
+                                                        style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
+                                                      >
                                                         <span className="text-xs text-green-600">-</span>
                                                       </TableCell>
                                                     ))
                                                   ) : (
-                                                    <TableCell key={`client-section-cell-${client.id}-${sectionKey}-${subdept.id}`} className="text-center border bg-green-100">
+                                                    <TableCell 
+                                                      key={`client-section-cell-${client.id}-${sectionKey}-${subdept.id}`} 
+                                                      className="text-center border bg-green-100"
+                                                      style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                                    >
                                                       <span className="text-xs text-green-600">-</span>
                                                     </TableCell>
                                                   )
@@ -2053,12 +2488,20 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                                   {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                     subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                       (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                        <TableCell key={`client-data-field-cell-${client.id}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-green-25 group-hover:bg-green-50">
+                                                        <TableCell 
+                                                          key={`client-data-field-cell-${client.id}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
+                                                          className="text-center border bg-green-25 group-hover:bg-green-50"
+                                                          style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
+                                                        >
                                                           <span className="text-xs text-gray-400">-</span>
                                                         </TableCell>
                                                       ))
                                                     ) : (
-                                                      <TableCell key={`client-data-field-cell-${client.id}-${field.name}-${subdept.id}`} className="text-center border bg-green-25 group-hover:bg-green-50">
+                                                      <TableCell 
+                                                        key={`client-data-field-cell-${client.id}-${field.name}-${subdept.id}`} 
+                                                        className="text-center border bg-green-25 group-hover:bg-green-50"
+                                                        style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                                      >
                                                         <span className="text-xs text-gray-400">-</span>
                                                       </TableCell>
                                                     )
@@ -2096,12 +2539,20 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                                 {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                   subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                     (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                      <TableCell key={`client-platform-cell-${client.id}-${platformKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-100">
+                                                      <TableCell 
+                                                        key={`client-platform-cell-${client.id}-${platformKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
+                                                        className="text-center border bg-blue-100"
+                                                        style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
+                                                      >
                                                         <span className="text-xs text-blue-600">-</span>
                                                       </TableCell>
                                                     ))
                                                   ) : (
-                                                    <TableCell key={`client-platform-cell-${client.id}-${platformKey}-${subdept.id}`} className="text-center border bg-blue-100">
+                                                    <TableCell 
+                                                      key={`client-platform-cell-${client.id}-${platformKey}-${subdept.id}`} 
+                                                      className="text-center border bg-blue-100"
+                                                      style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                                    >
                                                       <span className="text-xs text-blue-600">-</span>
                                                     </TableCell>
                                                   )
@@ -2149,12 +2600,20 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                                   {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                     subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                       (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                        <TableCell key={`client-platform-data-field-cell-${client.id}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} className="text-center border bg-blue-25 group-hover:bg-blue-50">
+                                                        <TableCell 
+                                                          key={`client-platform-data-field-cell-${client.id}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
+                                                          className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                          style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
+                                                        >
                                                           <span className="text-xs text-gray-400">-</span>
                                                         </TableCell>
                                                       ))
                                                     ) : (
-                                                      <TableCell key={`client-platform-data-field-cell-${client.id}-${field.name}-${subdept.id}`} className="text-center border bg-blue-25 group-hover:bg-blue-50">
+                                                      <TableCell 
+                                                        key={`client-platform-data-field-cell-${client.id}-${field.name}-${subdept.id}`} 
+                                                        className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                        style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                                      >
                                                         <span className="text-xs text-gray-400">-</span>
                                                       </TableCell>
                                                     )

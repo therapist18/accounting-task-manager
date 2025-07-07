@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Plus, FileText, Upload, Globe } from "lucide-react"
+import { Plus, FileText, Upload, Globe, CheckCheckIcon } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import type { Database } from "@/lib/supabase/database.types"
@@ -943,8 +943,8 @@ export default function TasksPage() {
                       Stages
                     </TabsTrigger>
                     <TabsTrigger value="upload-requirements">
-                      <Upload className="h-4 w-4 mr-2" />
-                      Upload Requirements
+                      <CheckCheckIcon className="h-4 w-4 mr-2" />
+                     Requirements Checklist
                     </TabsTrigger>
                     <TabsTrigger value="webdata">
                       <Globe className="h-4 w-4 mr-2" />
@@ -983,7 +983,7 @@ export default function TasksPage() {
                   <TabsContent value="upload-requirements" className="space-y-4">
                     <Card>
                       <CardHeader>
-                        <CardTitle>Upload Requirements - {getDisplayTitle()}</CardTitle>
+                        <CardTitle>Requirements Checklist - {getDisplayTitle()}</CardTitle>
                         <CardDescription>
                           {selectionLevel === 'subclass'
                             ? `Manage document requirements for ${subcls?.name} (Subclass-level requirements)`
