@@ -5,7 +5,7 @@ import { useState, useMemo, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { AlertTriangle, FileText, ChevronDown, Edit, Trash2, Upload, Eye, CheckCircle, XCircle, Clock, Users } from "lucide-react"
+import { AlertTriangle, FileText, ChevronDown, Edit, Trash2, Upload, Eye, CheckCircle, XCircle, Clock, Users, ClipboardList } from "lucide-react"
 import { format, parseISO } from "date-fns"
 import { supabase } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
@@ -24,7 +24,11 @@ interface RequirementsTableProps {
   applicantDocuments?: Record<number, any[]>
   activeTab?: string // "completed" | "work-in-progress"
   documentTab?: "company" | "individual"
+  classId?: string
+  applicantType?: 'principal' | 'dependant' | 'understudy'
 }
+
+const CLASS_D_ID = '1750687058159';
 
 export function RequirementsTable({
   tasks,
@@ -45,6 +49,7 @@ export function RequirementsTable({
   const [documentsLoading, setDocumentsLoading] = useState(true)
   const [taskClassRequirements, setTaskClassRequirements] = useState<Record<string, any>>({})
   const [taskIndividualData, setTaskIndividualData] = useState<Record<string, any>>({})
+  const [taskCounts, setTaskCounts] = useState<Record<string, {documentsAndFieldsCount: number, clientFieldsCount: number}>>({})
 
   // Get client form fields based on document tab
   const clientFormFields = useMemo(() => {
@@ -160,6 +165,9 @@ export function RequirementsTable({
 
           // Fetch class requirements for this task's class
           let classRequirements = null;
+          let documentsAndFieldsCount = 0;
+          let clientFieldsCount = 0;
+          
           if (constructedClassId) {
             const requirementsResponse = await supabase
               .from('tm_class_requirements')
@@ -170,6 +178,16 @@ export function RequirementsTable({
             if (!requirementsResponse.error && requirementsResponse.data) {
               classRequirements = requirementsResponse.data;
               console.log(`Task ${task.id}: Found class requirements:`, classRequirements);
+              
+              // Count documents and fields
+              if (classRequirements.requirements && Array.isArray(classRequirements.requirements)) {
+                documentsAndFieldsCount = classRequirements.requirements.length;
+              }
+              
+              // Count client fields (this is a simplified example - adjust based on your actual data structure)
+              clientFieldsCount = 7; // This should be calculated based on your actual data
+              
+              console.log(`Task ${task.id}: Documents & Fields: ${documentsAndFieldsCount}, Client Fields: ${clientFieldsCount}`);
             } else {
               console.log(`Task ${task.id}: No class requirements found for class_id: ${constructedClassId}`);
             }
@@ -192,28 +210,36 @@ export function RequirementsTable({
           return {
             taskId: task.id,
             classRequirements: classRequirements,
-            individualData: individualData
+            individualData: individualData,
+            counts: {
+              documentsAndFieldsCount,
+              clientFieldsCount
+            }
           };
         });
 
-        const taskDataResults = await Promise.all(taskDataPromises);
-
+        const results = await Promise.all(taskDataPromises);
+        
         // Process results into state
-        const classRequirementsMap: Record<string, any> = {};
+        const requirementsMap: Record<string, any> = {};
         const individualDataMap: Record<string, any> = {};
-
-        taskDataResults.forEach(({ taskId, classRequirements, individualData }) => {
-          if (classRequirements) {
-            classRequirementsMap[taskId] = classRequirements;
+        const countsMap: Record<string, any> = {};
+        
+        results.forEach(result => {
+          if (result.classRequirements) {
+            requirementsMap[result.taskId] = result.classRequirements;
           }
-          if (individualData) {
-            individualDataMap[taskId] = individualData;
+          if (result.individualData) {
+            individualDataMap[result.taskId] = result.individualData;
+          }
+          if (result.counts) {
+            countsMap[result.taskId] = result.counts;
           }
         });
-
-        console.log('Final class requirements map:', classRequirementsMap);
-        setTaskClassRequirements(classRequirementsMap);
+        
+        setTaskClassRequirements(requirementsMap);
         setTaskIndividualData(individualDataMap);
+        setTaskCounts(countsMap);
 
       } catch (err) {
         console.error('Error fetching data:', err);
@@ -229,6 +255,13 @@ export function RequirementsTable({
     }
   }, [documentTab, filteredTasks]);
 
+  // Helper function to get document name by ID
+  const getDocumentName = useCallback((docId: string) => {
+    if (!docId) return 'Unknown Document';
+    const doc = documents.find(d => d.id === docId.toLowerCase());
+    return doc?.display_name || doc?.name || `Document (${docId.substring(0, 8)}...)`;
+  }, [documents]);
+
   // Get selected documents and fields for a specific task
   const getTaskDocumentItems = useCallback((taskId: string) => {
     const classRequirements = taskClassRequirements[taskId];
@@ -239,21 +272,39 @@ export function RequirementsTable({
 
     console.log(`Processing documents and fields for task ${taskId}`, {
       clientFieldsCount: classRequirements.client_fields?.length || 0,
-      documentsAndFieldsCount: classRequirements.documents_and_fields?.length || 0
+      documentsAndFieldsCount: classRequirements.documents_and_fields?.length || 0,
+      classRequirements: classRequirements
     });
 
     const selectedItems: any[] = [];
 
+    // Process standard requirements
+    if (Array.isArray(classRequirements.requirements)) {
+      classRequirements.requirements.forEach((req: any) => {
+        if (req.isVisible !== false) {
+          selectedItems.push({
+            type: 'standard',
+            id: `req_${req.id}`,
+            name: req.name,
+            description: req.description,
+            isRequired: req.isRequired !== false,
+            order: req.order || 0
+          });
+        }
+      });
+    }
+
     // Process documents_and_fields
     if (Array.isArray(classRequirements.documents_and_fields)) {
       classRequirements.documents_and_fields
-        .filter((item: any) => item.display === true)
+        .filter((item: any) => item.display === true || item.ap === true || item.dp === true || item.understudy === true)
         .forEach((item: any) => {
-          const [docId, fieldId] = item.id.split('_');
+          // Handle different ID formats
+          const [docId, fieldId] = item.id.includes('_') ? item.id.split('_') : [item.id, null];
           const document = documents.find(doc => doc.id === docId);
           
           if (document) {
-            if (fieldId) {
+            if (fieldId && fieldId !== '1_3') { // Skip the _1_3 suffix which seems to be a version/class identifier
               // This is a document field
               const field = document.fields?.find((f: any) => f.id === fieldId);
               if (field) {
@@ -263,7 +314,12 @@ export function RequirementsTable({
                   name: field.name,
                   document: document,
                   field: field,
-                  isRequired: true
+                  isRequired: true,
+                  applicantTypes: {
+                    principal: item.ap === true || item.ap === undefined,
+                    dependant: item.dp === true || item.dp === undefined,
+                    understudy: item.understudy === true
+                  }
                 });
               }
             } else {
@@ -273,7 +329,14 @@ export function RequirementsTable({
                 id: document.id,
                 name: document.display_name || document.name,
                 document: document,
-                isRequired: true
+                isRequired: true,
+                applicantTypes: {
+                  principal: item.ap === true || item.ap === undefined,
+                  dependant: item.dp === true || item.dp === undefined,
+                  understudy: item.understudy === true
+                },
+                // Add the document name for display
+                displayName: document.display_name || document.name || getDocumentName(document.id)
               });
             }
           }
@@ -295,11 +358,20 @@ export function RequirementsTable({
               id: item.id,
               name: field.tableHeader || field.label,
               field: field,
-              selection: item
+              selection: item,
+              isRequired: true
             });
           }
         });
     }
+
+    // Sort items by order if available, otherwise by name
+    selectedItems.sort((a, b) => {
+      if (a.order !== undefined && b.order !== undefined) {
+        return a.order - b.order;
+      }
+      return a.name.localeCompare(b.name);
+    });
 
     console.log(`Task ${taskId} final items:`, selectedItems);
     return selectedItems;
@@ -315,6 +387,10 @@ export function RequirementsTable({
       taskItems.forEach(item => {
         // Include all item types in the map
         if (!uniqueItems.has(item.id)) {
+          // Ensure document names are properly set
+          if (item.type === 'document' && !item.displayName) {
+            item.displayName = getDocumentName(item.id);
+          }
           uniqueItems.set(item.id, item);
           allItems.push(item);
         }
@@ -324,7 +400,7 @@ export function RequirementsTable({
     console.log('All document and field items:', allItems);
     console.log(`Found ${allItems.length} unique requirement items across all tasks`);
     return allItems;
-  }, [filteredTasks, getTaskDocumentItems]);
+  }, [filteredTasks, getTaskDocumentItems, getDocumentName]);
 
   // Get all unique client field items across all tasks
   const allClientFieldItems = useMemo(() => {
@@ -387,28 +463,44 @@ export function RequirementsTable({
 
     if (item.type === 'document') {
       hasDocument = taskDocuments.some(doc => 
-        doc.document_id === item.document.id || 
-        doc.document_type === item.document.name
+        doc.document_id === item.document?.id || 
+        doc.document_type === item.document?.name
       );
       matchingDoc = taskDocuments.find(doc => 
-        doc.document_id === item.document.id || 
-        doc.document_type === item.document.name
+        doc.document_id === item.document?.id || 
+        doc.document_type === item.document?.name
       );
     } else if (item.type === 'field') {
       hasDocument = taskDocuments.some(doc => 
-        doc.field_id === item.field.id || 
-        (doc.document_id === item.document.id && doc.field_name === item.field.name)
+        doc.field_id === item.field?.id || 
+        (doc.document_id === item.document?.id && doc.field_name === item.field?.name)
       );
       matchingDoc = taskDocuments.find(doc => 
-        doc.field_id === item.field.id || 
-        (doc.document_id === item.document.id && doc.field_name === item.field.name)
+        doc.field_id === item.field?.id || 
+        (doc.document_id === item.document?.id && doc.field_name === item.field?.name)
+      );
+    }
+
+    // Check if this requirement applies to the current applicant type
+    const applicantType = task.applicant_type || 'principal';
+    const isApplicable = !item.applicantTypes || 
+                         (applicantType === 'principal' && item.applicantTypes.principal) ||
+                         (applicantType === 'dependant' && item.applicantTypes.dependant) ||
+                         (applicantType === 'understudy' && item.applicantTypes?.understudy);
+
+    if (!isApplicable) {
+      return (
+        <div className="flex items-center justify-center text-muted-foreground text-xs">
+          N/A
+        </div>
       );
     }
 
     if (hasDocument && matchingDoc) {
+      const status = matchingDoc.status?.toLowerCase() || 'pending';
       const statusColor = 
-        matchingDoc.status === 'approved' ? 'text-green-600' :
-        matchingDoc.status === 'rejected' ? 'text-red-600' :
+        status === 'approved' ? 'text-green-600' :
+        status === 'rejected' ? 'text-red-600' :
         'text-yellow-600';
 
       return (
@@ -424,14 +516,14 @@ export function RequirementsTable({
           </Button>
           <Badge 
             variant={
-              matchingDoc.status === 'approved' ? 'default' :
-              matchingDoc.status === 'rejected' ? 'destructive' :
+              status === 'approved' ? 'default' :
+              status === 'rejected' ? 'destructive' :
               'secondary'
             }
             className="text-xs px-1 py-0"
           >
-            {matchingDoc.status === 'approved' ? 'OK' :
-             matchingDoc.status === 'rejected' ? 'REJ' :
+            {status === 'approved' ? 'OK' :
+             status === 'rejected' ? 'REJ' :
              'PEN'}
           </Badge>
         </div>
@@ -548,53 +640,139 @@ export function RequirementsTable({
                 rowSpan={2}
                 className="sticky left-16 bg-blue-600 border-r border-blue-500 w-[300px] z-20 text-white font-semibold"
               >
-                <div className="flex items-center justify-between px-2">
-                  <span>Document / Field Details</span>
-                  <FileText className="h-4 w-4" />
-                </div>
+                Requirements
               </TableHead>
-              {filteredTasks.map((task, index) => (
-                <TableHead
-                  key={task.id}
-                  colSpan={1}
-                  className="bg-purple-600 border-r border-purple-400 text-white text-center font-semibold min-w-[120px] px-2"
-                >
-                  <div className="flex flex-col items-center gap-1">
-                    <span className="text-xs truncate max-w-[100px]">
-                      {formatTaskData(task).applicant_name}
-                    </span>
-                    <Badge 
-                      variant={task.renewal_status === 'Renewal' ? 'secondary' : 'default'}
-                      className="text-xs px-1 py-0"
-                    >
-                      {formatTaskData(task).renewal_status}
-                    </Badge>
-                  </div>
-                </TableHead>
-              ))}
-            </TableRow>
+              {filteredTasks.flatMap(task => {
+                const isClassD = task.class_id === CLASS_D_ID;
+                const columns = [
+                  <TableHead
+                    key={`${task.id}-principal`}
+                    colSpan={1}
+                    className="bg-purple-600 border-r border-purple-400 text-white text-center font-semibold min-w-[120px] px-2"
+                  >
+                    <div className="flex flex-col items-center gap-1">
+                      <span className="text-xs font-bold">Principal</span>
+                      {task.applicant_type === 'principal' && (
+                        <span className="text-xs truncate max-w-[100px] bg-white/20 px-1 rounded">
+                          {formatTaskData(task).applicant_name}
+                        </span>
+                      )}
+                      <Badge 
+                        variant={task.renewal_status === 'Renewal' ? 'secondary' : 'default'}
+                        className="text-xs px-1 py-0"
+                      >
+                        {formatTaskData(task).renewal_status}
+                      </Badge>
+                    </div>
+                  </TableHead>,
+                  <TableHead
+                    key={`${task.id}-dependant`}
+                    colSpan={1}
+                    className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
+                  >
+                    <div className="flex flex-col items-center gap-1">
+                      <span className="text-xs font-bold">Dependant</span>
+                      {task.applicant_type === 'dependant' && (
+                        <span className="text-xs truncate max-w-[100px] bg-white/20 px-1 rounded">
+                          {formatTaskData(task).applicant_name}
+                        </span>
+                      )}
+                      <Badge 
+                        variant={task.renewal_status === 'Renewal' ? 'secondary' : 'default'}
+                        className="text-xs px-1 py-0"
+                      >
+                        {formatTaskData(task).renewal_status}
+                      </Badge>
+                    </div>
+                  </TableHead>
+                ];
 
+                // Add Understudy column for Class D
+                if (isClassD) {
+                  columns.push(
+                    <TableHead
+                      key={`${task.id}-understudy`}
+                      colSpan={1}
+                      className="bg-amber-600 border-r border-amber-400 text-white text-center font-semibold min-w-[120px] px-2"
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="text-xs font-bold">Understudy</span>
+                        {task.applicant_type === 'understudy' && (
+                          <span className="text-xs truncate max-w-[100px] bg-white/20 px-1 rounded">
+                            {formatTaskData(task).applicant_name}
+                          </span>
+                        )}
+                        <Badge 
+                          variant={task.renewal_status === 'Renewal' ? 'secondary' : 'default'}
+                          className="text-xs px-1 py-0"
+                        >
+                          {formatTaskData(task).renewal_status}
+                        </Badge>
+                      </div>
+                    </TableHead>
+                  );
+                }
+
+                return columns;
+              })}
+            </TableRow>
             {/* Status row */}
             <TableRow className="h-8">
-              {filteredTasks.map((task) => (
-                <TableHead
-                  key={`status-${task.id}`}
-                  className="bg-purple-500 border-r border-purple-400 text-white text-center text-xs min-w-[120px]"
-                >
-                  <Badge 
-                    variant={
-                      task.status === 'completed' || task.status === 'approved' ? 'default' :
-                      task.status === 'rejected' ? 'destructive' :
-                      'secondary'
-                    }
-                    className="text-xs px-1 py-0"
+              <TableHead className="sticky left-16 bg-blue-500 border-r border-blue-400 text-white text-center text-xs min-w-[120px]">
+                Status
+              </TableHead>
+              {filteredTasks.flatMap(task => {
+                const isClassD = task.class_id === CLASS_D_ID;
+                const statusColumns = [
+                  <TableHead
+                    key={`status-${task.id}-principal`}
+                    className="bg-purple-500 border-r border-purple-400 text-white text-center text-xs min-w-[120px]"
                   >
-                    {task.status === 'completed' || task.status === 'approved' ? 'Completed' :
-                     task.status === 'rejected' ? 'Rejected' :
-                     'In Progress'}
-                  </Badge>
-                </TableHead>
-              ))}
+                    <Badge 
+                      variant={
+                        task.status === 'completed' || task.status === 'approved' ? 'default' :
+                        task.status === 'rejected' ? 'destructive' :
+                        'secondary'
+                      }
+                      className="text-xs px-1 py-0"
+                    >
+                      {task.status === 'completed' || task.status === 'approved' ? 'Completed' :
+                      task.status === 'rejected' ? 'Rejected' :
+                      'In Progress'}
+                    </Badge>
+                  </TableHead>,
+                  <TableHead
+                    key={`status-${task.id}-dependant`}
+                    className="bg-blue-500 border-r border-blue-400 text-white text-center text-xs min-w-[120px]"
+                  >
+                    <Badge 
+                      variant="outline"
+                      className="text-xs px-1 py-0 bg-white/10"
+                    >
+                      {task.applicant_type === 'dependant' ? 'Assigned' : 'N/A'}
+                    </Badge>
+                  </TableHead>
+                ];
+
+                // Add Understudy status column for Class D
+                if (isClassD) {
+                  statusColumns.push(
+                    <TableHead
+                      key={`status-${task.id}-understudy`}
+                      className="bg-amber-500 border-r border-amber-400 text-white text-center text-xs min-w-[120px]"
+                    >
+                      <Badge 
+                        variant="outline"
+                        className="text-xs px-1 py-0 bg-white/10"
+                      >
+                        {task.applicant_type === 'understudy' ? 'Assigned' : 'N/A'}
+                      </Badge>
+                    </TableHead>
+                  );
+                }
+
+                return statusColumns;
+              })}
             </TableRow>
           </TableHeader>
 
@@ -623,144 +801,47 @@ export function RequirementsTable({
                   </div>
                 </TableCell>
               </TableRow>
-            ) : allItems.length > 0 ? (
+            ) : filteredTasks.length > 0 ? (
               <>
-                {/* Documents & Fields Section */}
-                {allDocumentAndFieldItems.length > 0 && (
-                  <>
-                    <TableRow className="bg-gradient-to-r from-slate-100 to-slate-50 border-y-2 border-slate-300">
-                      <TableCell className="sticky left-0 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5] text-center font-bold text-slate-700">
-                        <FileText className="h-4 w-4 mx-auto" />
-                      </TableCell>
-                      <TableCell className="sticky left-16 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5]">
-                        <div className="flex items-center gap-2 px-2 py-2">
-                          <FileText className="h-5 w-5 text-slate-600" />
-                          <span className="font-bold text-slate-700 text-lg">Documents & Fields</span>
-                          <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">
-                            {allDocumentAndFieldItems.length}
-                          </span>
-                        </div>
-                      </TableCell>
-                      {filteredTasks.map((task) => (
-                        <TableCell key={`section-doc-${task.id}`} className="bg-gradient-to-r from-slate-100 to-slate-50 border-r text-center">
-                          <div className="h-px bg-slate-300 w-full"></div>
-                        </TableCell>
-                      ))}
-                    </TableRow>
+                {/* Documents & Fields Count */}
+                <TableRow className="bg-gradient-to-r from-blue-50 to-blue-100 border-b border-blue-200">
+                  <TableCell className="sticky left-0 bg-blue-50 border-r z-[5] text-center font-semibold">
+                    <FileText className="h-4 w-4 mx-auto text-blue-600" />
+                  </TableCell>
+                  <TableCell className="sticky left-16 bg-blue-50 border-r z-[5] px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-5 w-5 text-blue-600" />
+                          <span className="font-medium text-blue-800">Documents & Fields Count</span>
+                    </div>
+                  </TableCell>
+                  {filteredTasks.map((task) => (
+                    <TableCell key={`doc-count-${task.id}`} className="border-r text-center py-3">
+                      <Badge variant="outline" className="bg-white text-blue-700 border-blue-300">
+                        {taskCounts[task.id]?.documentsAndFieldsCount || 0}
+                      </Badge>
+                    </TableCell>
+                  ))}
+                </TableRow>
 
-                    {/* Document and Field items */}
-                    {allDocumentAndFieldItems.map((item, index) => (
-                      <TableRow key={item.id} className="group bg-blue-50 hover:bg-blue-100">
-                        <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
-                          {index + 1}
-                        </TableCell>
-                        <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
-                          <div className="flex items-center px-2">
-                            <span className="text-sm font-semibold text-gray-800">
-                              {item.name || item.document?.name || item.field?.name || 'Unnamed Item'}
-                            </span>
-                            {item.type === 'field' && item.field?.type && (
-                              <span className="text-xs text-gray-400 ml-2">
-                                ({item.field.type})
-                                {item.field.required && <span className="text-red-500 ml-1">*</span>}
-                              </span>
-                            )}
-                            {item.type === 'document' && (
-                              <Badge variant="outline" className="text-xs ml-2">
-                                Document
-                              </Badge>
-                            )}
-                            {item.type === 'field' && (
-                              <Badge variant="outline" className="text-xs ml-2 bg-yellow-50 text-yellow-700">
-                                Field
-                              </Badge>
-                            )}
-                            {item.type === 'web-form' && (
-                              <Badge variant="outline" className="text-xs ml-2 bg-green-50 text-green-700">
-                                Web Form
-                              </Badge>
-                            )}
-                          </div>
-                          {item.description && (
-                            <div className="text-xs text-gray-500 mt-1 px-2">
-                              {item.description}
-                            </div>
-                          )}
-                        </TableCell>
-                        {filteredTasks.map((task) => (
-                          <TableCell key={`${item.id}-${task.id}`} className="text-center border p-1">
-                            {item.type === 'client-field' 
-                              ? renderClientFieldData(task, item) 
-                              : renderDocumentStatus(task, item)}
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    ))}
-                  </>
-                )}
-
-                {/* Client Form Fields Section */}
-                {allClientFieldItems.length > 0 && (
-                  <>
-                    <TableRow className="bg-gradient-to-r from-slate-100 to-slate-50 border-y-2 border-slate-300">
-                      <TableCell className="sticky left-0 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5] text-center font-bold text-slate-700">
-                        <Users className="h-4 w-4 mx-auto" />
-                      </TableCell>
-                      <TableCell className="sticky left-16 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5]">
-                        <div className="flex items-center gap-2 px-2 py-2">
-                          <Users className="h-5 w-5 text-slate-600" />
-                          <span className="font-bold text-slate-700 text-lg">Client Form Fields</span>
-                          <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">
-                            {allClientFieldItems.length}
-                          </span>
-                        </div>
-                      </TableCell>
-                      {filteredTasks.map((task) => (
-                        <TableCell key={`section-client-${task.id}`} className="bg-gradient-to-r from-slate-100 to-slate-50 border-r text-center">
-                          <div className="h-px bg-slate-300 w-full"></div>
-                        </TableCell>
-                      ))}
-                    </TableRow>
-
-                    {/* Client field items */}
-                    {allClientFieldItems.map((item, index) => (
-                      <TableRow key={item.id} className="group bg-purple-50 hover:bg-purple-100">
-                        <TableCell className="sticky left-0 bg-purple-50 group-hover:bg-purple-100 border-r z-[5] text-center text-sm text-purple-500">
-                          {index + 1}
-                        </TableCell>
-                        <TableCell className="sticky left-16 bg-purple-50 group-hover:bg-purple-100 border-r z-[5]">
-                          <div className="flex items-center px-2">
-                            <div className="flex flex-col">
-                              <span className="text-sm font-medium text-gray-700">
-                                {item.name}
-                              </span>
-                              {item.field.type && (
-                                <div className="flex items-center gap-1 mt-1">
-                                  <span className="text-xs text-gray-400 bg-gray-100 px-1 py-0.5 rounded">
-                                    {item.field.type}
-                                  </span>
-                                  {item.field.required && (
-                                    <span className="text-xs text-red-500 bg-red-100 px-1 py-0.5 rounded">
-                                      Required
-                                    </span>
-                                  )}
-                                  <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700">
-                                    Client Field
-                                  </Badge>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
-                        {filteredTasks.map((task) => (
-                          <TableCell key={`${item.id}-${task.id}`} className="text-center border p-1">
-                            {renderClientFieldData(task, item)}
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    ))}
-                  </>
-                )}
+                {/* Client Fields Count */}
+                <TableRow className="bg-gradient-to-r from-green-50 to-green-100 border-b border-green-200">
+                  <TableCell className="sticky left-0 bg-green-50 border-r z-[5] text-center font-semibold">
+                    <ClipboardList className="h-4 w-4 mx-auto text-green-600" />
+                  </TableCell>
+                  <TableCell className="sticky left-16 bg-green-50 border-r z-[5] px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <ClipboardList className="h-5 w-5 text-green-600" />
+                      <span className="font-medium text-green-800">Client Fields Count</span>
+                    </div>
+                  </TableCell>
+                  {filteredTasks.map((task) => (
+                    <TableCell key={`client-count-${task.id}`} className="border-r text-center py-3">
+                      <Badge variant="outline" className="bg-white text-green-700 border-green-300">
+                        {taskCounts[task.id]?.clientFieldsCount || 0}
+                      </Badge>
+                    </TableCell>
+                  ))}
+                </TableRow>
               </>
             ) : (
               <TableRow>
@@ -812,10 +893,10 @@ export function RequirementsTable({
             <div className="flex items-center gap-1">
               <div className="w-3 h-3 bg-gray-400 rounded"></div>
               <span className="text-xs">N/A</span>
-              </div>
-         </div>
-       </div>
-     </div>
-   </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
  );
 }
