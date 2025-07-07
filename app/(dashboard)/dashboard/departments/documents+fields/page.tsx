@@ -251,21 +251,21 @@ export default function DocumentsFields() {
   const [departments, setDepartments] = useState<Department[]>([])
   const [documents, setDocuments] = useState<DocumentType[]>([])
   const [clientData, setClientData] = useState<ClientData[]>([])
-  
+
   // Updated allocation states for AP, DP, and understudy
-  const [documentAllocations, setDocumentAllocations] = useState<Record<string, { 
+  const [documentAllocations, setDocumentAllocations] = useState<Record<string, {
     ap: boolean
     dp: boolean
     understudy: boolean
-    kycdocumentid: string | null 
+    kycdocumentid: string | null
   }>>({})
-  
+
   const [clientFieldAllocations, setClientFieldAllocations] = useState<Record<string, {
     ap: boolean
     dp: boolean
     understudy: boolean
   }>>({})
-  
+
   const [activeTab, setActiveTab] = useState<string>("")
   const [documentTab, setDocumentTab] = useState<"company" | "individual">("company")
   const [loading, setLoading] = useState(true)
@@ -274,7 +274,7 @@ export default function DocumentsFields() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [expandedClientItems, setExpandedClientItems] = useState<Set<string>>(new Set())
   const [submittingIds, setSubmittingIds] = useState<Set<string>>(new Set())
-  
+
   // New state for column expansion
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set())
 
@@ -297,12 +297,12 @@ export default function DocumentsFields() {
     return cls?.id === CLASS_D_ID
   }, [])
 
-  // Calculate dynamic column width based on expanded state
+  // Update the getColumnWidth function to handle colspan 3
   const getColumnWidth = useCallback((subdept: Subdepartment, clsIndex: number | null, subclsIndex: number | null = null) => {
     const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
     const isExpanded = expandedColumns.has(columnKey)
     const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-    
+
     if (isExpanded) {
       return hasUnderstudy ? 360 : 240 // 3 columns (AP, DP, understudy) or 2 columns (AP, DP)
     }
@@ -322,24 +322,23 @@ export default function DocumentsFields() {
     })
   }, [])
 
-  
-// Helper function to format field values (memoized)
-const formatFieldValue = useMemo(() => (value: any, type: string): string => {
-  if (!value && value !== 0) return '-'
+  // Helper function to format field values (memoized)
+  const formatFieldValue = useMemo(() => (value: any, type: string): string => {
+    if (!value && value !== 0) return '-'
 
-  switch (type) {
-    case 'date':
-      return new Date(value).toLocaleDateString()
-    case 'email':
-      return value
-    case 'number':
-      return typeof value === 'number' ? value.toLocaleString() : value
-    case 'password':
-      return '••••••••'
-    default:
-      return String(value)
-  }
-}, [])
+    switch (type) {
+      case 'date':
+        return new Date(value).toLocaleDateString()
+      case 'email':
+        return value
+      case 'number':
+        return typeof value === 'number' ? value.toLocaleString() : value
+      case 'password':
+        return '••••••••'
+      default:
+        return String(value)
+    }
+  }, [])
 
   // Enhanced memoized data processing with caching
   const processDocumentFields = useCallback((docs: DocumentType[]) => {
@@ -1292,21 +1291,29 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
     return clientFieldAllocations[allocationKey]?.[columnType] || false
   }, [clientFieldAllocations, currentDepartment])
 
+  // Update the getTotalColSpan function to handle colspan 3
   const getTotalColSpan = useCallback((subdept: Subdepartment) => {
-    if (!subdept.hasClasses) return 1
+    if (!subdept.hasClasses) {
+      const columnKey = getColumnKey(subdept.id, null)
+      const isExpanded = expandedColumns.has(columnKey)
+      return isExpanded ? 3 : 1
+    }
+
     const colSpan = subdept.classes?.reduce((total, cls, clsIndex) => {
+      const hasSubclasses = cls.subclasses?.length || 0
       const columnKey = getColumnKey(subdept.id, clsIndex)
       const isExpanded = expandedColumns.has(columnKey)
       const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-      const subclassCount = cls.subclasses?.length || 1
-      
-      if (isExpanded) {
-        const columnsPerSubclass = hasUnderstudy ? 3 : 2 // AP, DP, (understudy)
-        return total + (subclassCount * columnsPerSubclass)
+
+      if (hasSubclasses > 0) {
+        // For subclasses, each subclass gets its own column group
+        return total + (hasSubclasses * (isExpanded ? (hasUnderstudy ? 3 : 2) : 1))
       } else {
-        return total + subclassCount // Just AP column
+        // For classes without subclasses
+        return total + (isExpanded ? (hasUnderstudy ? 3 : 2) : 1)
       }
     }, 0) || 1
+
     return Math.max(1, colSpan)
   }, [expandedColumns, getColumnKey, shouldShowUnderstudy])
 
@@ -1338,7 +1345,6 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
     return submittingIds.has(allocationKey)
   }, [submittingIds, currentDepartment])
 
-  // Updated render functions for multiple columns
   const renderDocumentCheckboxes = useCallback((
     doc: DocumentType,
     subdept: Subdepartment,
@@ -1349,7 +1355,7 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
     const isExpanded = expandedColumns.has(columnKey)
     const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
     const isSubmitting = getSubmittingStatus(doc.id, subdept.id, clsIndex, subclsIndex)
-    
+
     if (!isExpanded) {
       // Just show AP column
       return (
@@ -1361,43 +1367,35 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
         />
       )
     }
-    
-    // Show expanded columns: AP, DP, and optionally understudy
-    return (
-      <div className="flex gap-1 justify-center">
-        {/* AP Column */}
-        <div className="flex justify-center" style={{ width: '40px' }}>
-          <OptimizedCheckbox
-            checked={getAllocationStatus(doc.id, subdept.id, clsIndex, subclsIndex, 'ap')}
-            onCheckedChange={(c) => handleDisplayToggle(doc.id, subdept.id, clsIndex, subclsIndex, 'ap', c)}
-            disabled={isSubmitting}
-            allocationKey={`ap-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`}
-          />
-        </div>
-        
-        {/* DP Column */}
-        <div className="flex justify-center" style={{ width: '40px' }}>
-          <OptimizedCheckbox
-            checked={getAllocationStatus(doc.id, subdept.id, clsIndex, subclsIndex, 'dp')}
-            onCheckedChange={(c) => handleDisplayToggle(doc.id, subdept.id, clsIndex, subclsIndex, 'dp', c)}
-            disabled={isSubmitting}
-            allocationKey={`dp-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`}
-          />
-        </div>
-        
-        {/* Understudy Column (only for Class D) */}
-        {hasUnderstudy && (
-          <div className="flex justify-center" style={{ width: '40px' }}>
-            <OptimizedCheckbox
-              checked={getAllocationStatus(doc.id, subdept.id, clsIndex, subclsIndex, 'understudy')}
-              onCheckedChange={(c) => handleDisplayToggle(doc.id, subdept.id, clsIndex, subclsIndex, 'understudy', c)}
-              disabled={isSubmitting}
-              allocationKey={`us-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`}
-            />
-          </div>
-        )}
-      </div>
-    )
+
+    // Return array of individual cells for expanded state
+    const columns = [
+      {
+        type: 'ap' as const,
+        key: `ap-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`
+      },
+      {
+        type: 'dp' as const,
+        key: `dp-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`
+      }
+    ]
+
+    if (hasUnderstudy) {
+      columns.push({
+        type: 'understudy' as const,
+        key: `us-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`
+      })
+    }
+
+    return columns.map(column => (
+      <OptimizedCheckbox
+        key={column.key}
+        checked={getAllocationStatus(doc.id, subdept.id, clsIndex, subclsIndex, column.type)}
+        onCheckedChange={(c) => handleDisplayToggle(doc.id, subdept.id, clsIndex, subclsIndex, column.type, c)}
+        disabled={isSubmitting}
+        allocationKey={column.key}
+      />
+    ))
   }, [expandedColumns, getColumnKey, shouldShowUnderstudy, getSubmittingStatus, getAllocationStatus, handleDisplayToggle])
 
   const renderFieldCheckboxes = useCallback((
@@ -1427,42 +1425,34 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
       )
     }
 
-    // Show expanded columns: AP, DP, and optionally understudy
-    return (
-      <div className="flex gap-1 justify-center">
-        {/* AP Column */}
-        <div className="flex justify-center" style={{ width: '40px' }}>
-          <OptimizedCheckbox
-            checked={getAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'ap')}
-            onCheckedChange={(c) => handleDisplayToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'ap', c)}
-            disabled={isSubmitting}
-            allocationKey={`ap-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
-          />
-        </div>
-        
-        {/* DP Column */}
-        <div className="flex justify-center" style={{ width: '40px' }}>
-          <OptimizedCheckbox
-            checked={getAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'dp')}
-            onCheckedChange={(c) => handleDisplayToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'dp', c)}
-            disabled={isSubmitting}
-            allocationKey={`dp-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
-          />
-        </div>
-        
-        {/* Understudy Column (only for Class D) */}
-        {hasUnderstudy && (
-          <div className="flex justify-center" style={{ width: '40px' }}>
-            <OptimizedCheckbox
-              checked={getAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'understudy')}
-              onCheckedChange={(c) => handleDisplayToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'understudy', c)}
-              disabled={isSubmitting}
-              allocationKey={`us-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
-            />
-          </div>
-        )}
-      </div>
-    )
+    // Return array of individual cells for expanded state
+    const columns = [
+      {
+        type: 'ap' as const,
+        key: `ap-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`
+      },
+      {
+        type: 'dp' as const,
+        key: `dp-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`
+      }
+    ]
+
+    if (hasUnderstudy) {
+      columns.push({
+        type: 'understudy' as const,
+        key: `us-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`
+      })
+    }
+
+    return columns.map(column => (
+      <OptimizedCheckbox
+        key={column.key}
+        checked={getAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, column.type)}
+        onCheckedChange={(c) => handleDisplayToggle(fieldId, subdept.id, clsIndex, subclsIndex, column.type, c)}
+        disabled={isSubmitting}
+        allocationKey={column.key}
+      />
+    ))
   }, [shouldShowCheckbox, expandedColumns, getColumnKey, shouldShowUnderstudy, getSubmittingStatus, getAllocationStatus, handleDisplayToggle])
 
   const renderClientFieldCheckboxes = useCallback((
@@ -1488,42 +1478,34 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
       )
     }
 
-    // Show expanded columns: AP, DP, and optionally understudy
-    return (
-      <div className="flex gap-1 justify-center">
-        {/* AP Column */}
-        <div className="flex justify-center" style={{ width: '40px' }}>
-          <OptimizedCheckbox
-            checked={getClientFieldAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'ap')}
-            onCheckedChange={(c) => handleClientFieldToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'ap', c)}
-            disabled={isSubmitting}
-            allocationKey={`ap-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
-          />
-        </div>
-        
-        {/* DP Column */}
-        <div className="flex justify-center" style={{ width: '40px' }}>
-          <OptimizedCheckbox
-            checked={getClientFieldAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'dp')}
-            onCheckedChange={(c) => handleClientFieldToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'dp', c)}
-            disabled={isSubmitting}
-            allocationKey={`dp-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
-          />
-        </div>
-        
-        {/* Understudy Column (only for Class D) */}
-        {hasUnderstudy && (
-          <div className="flex justify-center" style={{ width: '40px' }}>
-            <OptimizedCheckbox
-              checked={getClientFieldAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, 'understudy')}
-              onCheckedChange={(c) => handleClientFieldToggle(fieldId, subdept.id, clsIndex, subclsIndex, 'understudy', c)}
-              disabled={isSubmitting}
-              allocationKey={`us-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`}
-            />
-          </div>
-        )}
-      </div>
-    )
+    // Return array of individual cells for expanded state
+    const columns = [
+      {
+        type: 'ap' as const,
+        key: `ap-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`
+      },
+      {
+        type: 'dp' as const,
+        key: `dp-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`
+      }
+    ]
+
+    if (hasUnderstudy) {
+      columns.push({
+        type: 'understudy' as const,
+        key: `us-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}`
+      })
+    }
+
+    return columns.map(column => (
+      <OptimizedCheckbox
+        key={column.key}
+        checked={getClientFieldAllocationStatus(fieldId, subdept.id, clsIndex, subclsIndex, column.type)}
+        onCheckedChange={(c) => handleClientFieldToggle(fieldId, subdept.id, clsIndex, subclsIndex, column.type, c)}
+        disabled={isSubmitting}
+        allocationKey={column.key}
+      />
+    ))
   }, [expandedColumns, getColumnKey, shouldShowUnderstudy, getSubmittingStatus, getClientFieldAllocationStatus, handleClientFieldToggle])
 
   // Early returns with better error states
@@ -1649,12 +1631,16 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                     const columnKey = getColumnKey(subdept.id, clsIndex)
                                     const isExpanded = expandedColumns.has(columnKey)
                                     const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-                                    
-                                    let colSpan = hasSubclasses || 1
-                                    if (isExpanded) {
-                                      colSpan *= hasUnderstudy ? 3 : 2
+
+                                    let colSpan
+                                    if (hasSubclasses > 0) {
+                                      // Each subclass gets its own expanded columns
+                                      colSpan = hasSubclasses * (isExpanded ? (hasUnderstudy ? 3 : 2) : 1)
+                                    } else {
+                                      // Class without subclasses
+                                      colSpan = isExpanded ? (hasUnderstudy ? 3 : 2) : 1
                                     }
-                                    
+
                                     const width = colSpan * 120
                                     return (
                                       <TableHead
@@ -1675,7 +1661,8 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                   }) : (
                                     <TableHead
                                       key={`subdept-direct-${subdept.id}`}
-                                      style={{ width: `${getColumnWidth(subdept, null)}px` }}
+                                      colSpan={getTotalColSpan(subdept)}
+                                      style={{ width: `${getTotalColSpan(subdept) * 120}px` }}
                                       className={cn("border-r border-blue-400 text-center text-white text-sm", subIndex % 2 === 0 ? "bg-blue-600" : "bg-blue-500")}
                                     >
                                       Direct
@@ -1691,17 +1678,17 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                     const columnKey = getColumnKey(subdept.id, clsIndex)
                                     const isExpanded = expandedColumns.has(columnKey)
                                     const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-                                    
+
                                     return cls.subclasses?.length ? cls.subclasses.map((subcls, subclsIndex) => {
                                       const colSpan = isExpanded ? (hasUnderstudy ? 3 : 2) : 1
                                       const width = colSpan * 120
-                                      
+
                                       return (
                                         <TableHead
                                           key={`subclass-header-${subdept.id}-${clsIndex}-${subclsIndex}`}
                                           colSpan={colSpan}
                                           style={{ width: `${width}px` }}
-                                          className={cn("border-r border-blue-400 px-2 text-center text-white text-xs", subIndex % 2 === 0 ? "bg-blue-500" : "bg-blue-400")}
+                                          className={cn("border-r border-blue-400 border-l border-blue-300 px-2 text-center text-white text-xs", subIndex % 2 === 0 ? "bg-blue-500" : "bg-blue-400")}
                                         >
                                           <div className="flex items-center justify-center">
                                             <TruncatedText
@@ -1716,8 +1703,8 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                       <TableHead
                                         key={`class-direct-${subdept.id}-${clsIndex}`}
                                         colSpan={isExpanded ? (hasUnderstudy ? 3 : 2) : 1}
-                                        style={{ width: `${getColumnWidth(subdept, clsIndex)}px` }}
-                                        className={cn("border-r border-blue-400 text-center text-white text-xs", subIndex % 2 === 0 ? "bg-blue-500" : "bg-blue-400")}
+                                        style={{ width: `${(isExpanded ? (hasUnderstudy ? 3 : 2) : 1) * 120}px` }}
+                                        className={cn("border-r border-blue-400 border-l border-blue-300 text-center text-white text-xs", subIndex % 2 === 0 ? "bg-blue-500" : "bg-blue-400")}
                                       >
                                         -
                                       </TableHead>
@@ -1725,8 +1712,9 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                   }) : (
                                     <TableHead
                                       key={`subdept-main-${subdept.id}`}
-                                      style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                      className={cn("border-r border-blue-400 text-center text-white text-xs", subIndex % 2 === 0 ? "bg-blue-500" : "bg-blue-400")}
+                                      colSpan={getTotalColSpan(subdept)}
+                                      style={{ width: `${getTotalColSpan(subdept) * 120}px` }}
+                                      className={cn("border-r border-blue-400 border-l border-blue-300 text-center text-white text-xs", subIndex % 2 === 0 ? "bg-blue-500" : "bg-blue-400")}
                                     >
                                       -
                                     </TableHead>
@@ -1734,7 +1722,7 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                 )}
                               </TableRow>
 
-                              {/* Updated Column Header Row - AP with expandable DP and understudy */}
+                              {/* Updated Column Header Row - AP with expandable DP and understudy using individual headers */}
                               <TableRow>
                                 {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                   subdept.hasClasses ? subdept.classes?.flatMap((cls, clsIndex) =>
@@ -1742,105 +1730,15 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                       const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
                                       const isExpanded = expandedColumns.has(columnKey)
                                       const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-                                      const width = getColumnWidth(subdept, clsIndex, subclsIndex)
-                                      
-                                      return (
-                                        <TableHead
-                                          key={`col-header-${subdept.id}-${clsIndex}-${subclsIndex}`}
-                                          style={{ width: `${width}px` }}
-                                          className="border-r border-blue-400 px-1 text-center text-white text-xs bg-blue-300"
-                                        >
-                                          <div className="flex items-center justify-center gap-1">
-                                            {!isExpanded ? (
-                                              <>
-                                                <span className="truncate">AP</span>
-                                                <Button
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  className="h-4 w-4 p-0 text-white hover:bg-blue-400"
-                                                  onClick={() => toggleColumnExpansion(columnKey)}
-                                                >
-                                                  <Plus className="h-3 w-3" />
-                                                </Button>
-                                              </>
-                                            ) : (
-                                              <>
-                                                <div className="flex gap-1">
-                                                  <span className="text-xs">AP</span>
-                                                  <span className="text-xs">DP</span>
-                                                  {hasUnderstudy && <span className="text-xs">US</span>}
-                                                </div>
-                                                <Button
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  className="h-4 w-4 p-0 text-white hover:bg-blue-400"
-                                                  onClick={() => toggleColumnExpansion(columnKey)}
-                                                >
-                                                  <Minus className="h-3 w-3" />
-                                                </Button>
-                                              </>
-                                            )}
-                                          </div>
-                                        </TableHead>
-                                      )
-                                    }) : (
-                                      <TableHead
-                                        key={`col-header-${subdept.id}-${clsIndex}`}
-                                        style={{ width: `${getColumnWidth(subdept, clsIndex)}px` }}
-                                        className="border-r border-blue-400 px-1 text-center text-white text-xs bg-blue-300"
-                                      >
-                                        <div className="flex items-center justify-center gap-1">
-                                          {(() => {
-                                            const columnKey = getColumnKey(subdept.id, clsIndex)
-                                            const isExpanded = expandedColumns.has(columnKey)
-                                            const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-                                            
-                                            return !isExpanded ? (
-                                              <>
-                                                <span className="truncate">AP</span>
-                                                <Button
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  className="h-4 w-4 p-0 text-white hover:bg-blue-400"
-                                                  onClick={() => toggleColumnExpansion(columnKey)}
-                                                >
-                                                  <Plus className="h-3 w-3" />
-                                                </Button>
-                                              </>
-                                            ) : (
-                                              <>
-                                                <div className="flex gap-1">
-                                                  <span className="text-xs">AP</span>
-                                                  <span className="text-xs">DP</span>
-                                                  {hasUnderstudy && <span className="text-xs">US</span>}
-                                                </div>
-                                                <Button
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  className="h-4 w-4 p-0 text-white hover:bg-blue-400"
-                                                  onClick={() => toggleColumnExpansion(columnKey)}
-                                                >
-                                                  <Minus className="h-3 w-3" />
-                                                </Button>
-                                              </>
-                                            )
-                                          })()}
-                                        </div>
-                                      </TableHead>
-                                    )
-                                  ) : (
-                                    <TableHead
-                                      key={`col-header-${subdept.id}`}
-                                      style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                      className="border-r border-blue-400 px-1 text-center text-white text-xs bg-blue-300"
-                                    >
-                                      <div className="flex items-center justify-center gap-1">
-                                        {(() => {
-                                          const columnKey = getColumnKey(subdept.id, null)
-                                          const isExpanded = expandedColumns.has(columnKey)
-                                          
-                                          return !isExpanded ? (
-                                            <>
+
+                                      if (!isExpanded) {
+                                        return (
+                                          <TableHead
+                                            key={`col-header-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                            style={{ width: '120px' }}
+                                            className="border-r border-blue-400 border-l border-blue-300 px-1 text-center text-white text-xs bg-blue-300"
+                                          >
+                                            <div className="flex items-center justify-center gap-1">
                                               <span className="truncate">AP</span>
                                               <Button
                                                 variant="ghost"
@@ -1850,13 +1748,24 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                               >
                                                 <Plus className="h-3 w-3" />
                                               </Button>
-                                            </>
-                                          ) : (
-                                            <>
-                                              <div className="flex gap-1">
-                                                <span className="text-xs">AP</span>
-                                                <span className="text-xs">DP</span>
-                                              </div>
+                                            </div>
+                                          </TableHead>
+                                        )
+                                      }
+
+                                      // Expanded state - use individual cells for each column
+                                      const columns = ['AP', 'DP']
+                                      if (hasUnderstudy) columns.push('US')
+
+                                      return columns.map((columnName, colIdx) => (
+                                        <TableHead
+                                          key={`col-header-${subdept.id}-${clsIndex}-${subclsIndex}-${columnName}`}
+                                          style={{ width: '120px' }}
+                                          className="border-r border-blue-400 border-l border-blue-300 px-1 text-center text-white text-xs bg-blue-300"
+                                        >
+                                          <div className="flex items-center justify-center gap-1">
+                                            <span className="text-xs">{columnName}</span>
+                                            {colIdx === 0 && (
                                               <Button
                                                 variant="ghost"
                                                 size="sm"
@@ -1865,11 +1774,117 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                               >
                                                 <Minus className="h-3 w-3" />
                                               </Button>
-                                            </>
+                                            )}
+                                          </div>
+                                        </TableHead>
+                                      ))
+                                    }).flat() : (
+                                      (() => {
+                                        const columnKey = getColumnKey(subdept.id, clsIndex)
+                                        const isExpanded = expandedColumns.has(columnKey)
+                                        const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+
+                                        if (!isExpanded) {
+                                          return (
+                                            <TableHead
+                                              key={`col-header-${subdept.id}-${clsIndex}`}
+                                              style={{ width: '120px' }}
+                                              className="border-r border-blue-400 border-l border-blue-300 px-1 text-center text-white text-xs bg-blue-300"
+                                            >
+                                              <div className="flex items-center justify-center gap-1">
+                                                <span className="truncate">AP</span>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-4 w-4 p-0 text-white hover:bg-blue-400"
+                                                  onClick={() => toggleColumnExpansion(columnKey)}
+                                                >
+                                                  <Plus className="h-3 w-3" />
+                                                </Button>
+                                              </div>
+                                            </TableHead>
                                           )
-                                        })()}
-                                      </div>
-                                    </TableHead>
+                                        }
+
+                                        // Expanded state
+                                        const columns = ['AP', 'DP']
+                                        if (hasUnderstudy) columns.push('US')
+
+                                        return columns.map((columnName, colIdx) => (
+                                          <TableHead
+                                            key={`col-header-${subdept.id}-${clsIndex}-${columnName}`}
+                                            style={{ width: '120px' }}
+                                            className="border-r border-blue-400 border-l border-blue-300 px-1 text-center text-white text-xs bg-blue-300"
+                                          >
+                                            <div className="flex items-center justify-center gap-1">
+                                              <span className="text-xs">{columnName}</span>
+                                              {colIdx === 0 && (
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-4 w-4 p-0 text-white hover:bg-blue-400"
+                                                  onClick={() => toggleColumnExpansion(columnKey)}
+                                                >
+                                                  <Minus className="h-3 w-3" />
+                                                </Button>
+                                              )}
+                                            </div>
+                                          </TableHead>
+                                        ))
+                                      })()
+                                    )
+                                  ) : (
+                                    (() => {
+                                      const columnKey = getColumnKey(subdept.id, null)
+                                      const isExpanded = expandedColumns.has(columnKey)
+
+                                      if (!isExpanded) {
+                                        return (
+                                          <TableHead
+                                            key={`col-header-${subdept.id}`}
+                                            style={{ width: '120px' }}
+                                            className="border-r border-blue-400 border-l border-blue-300 px-1 text-center text-white text-xs bg-blue-300"
+                                          >
+                                            <div className="flex items-center justify-center gap-1">
+                                              <span className="truncate">AP</span>
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-4 w-4 p-0 text-white hover:bg-blue-400"
+                                                onClick={() => toggleColumnExpansion(columnKey)}
+                                              >
+                                                <Plus className="h-3 w-3" />
+                                              </Button>
+                                            </div>
+                                          </TableHead>
+                                        )
+                                      }
+
+                                      // Expanded state for subdepartment without classes
+                                      const columns = ['AP', 'DP']
+
+                                      return columns.map((columnName, colIdx) => (
+                                        <TableHead
+                                          key={`col-header-${subdept.id}-${columnName}`}
+                                          style={{ width: '120px' }}
+                                          className="border-r border-blue-400 border-l border-blue-300 px-1 text-center text-white text-xs bg-blue-300"
+                                        >
+                                          <div className="flex items-center justify-center gap-1">
+                                            <span className="text-xs">{columnName}</span>
+                                            {colIdx === 0 && (
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-4 w-4 p-0 text-white hover:bg-blue-400"
+                                                onClick={() => toggleColumnExpansion(columnKey)}
+                                              >
+                                                <Minus className="h-3 w-3" />
+                                              </Button>
+                                            )}
+                                          </div>
+                                        </TableHead>
+                                      ))
+                                    })()
                                   )
                                 )}
                               </TableRow>
@@ -1917,23 +1932,61 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                             </TableCell>
                                             {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                               subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                                (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                  <TableCell 
-                                                    key={`cat-cell-${categoryKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
-                                                    className="text-center border bg-blue-100"
-                                                    style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
-                                                  >
-                                                    -
-                                                  </TableCell>
-                                                ))
+                                                (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
+                                                  const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
+                                                  const isExpanded = expandedColumns.has(columnKey)
+                                                  const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                                  
+                                                  if (!isExpanded) {
+                                                    return (
+                                                      <TableCell
+                                                        key={`cat-cell-${categoryKey}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                        className="text-center border bg-blue-100"
+                                                        style={{ width: '120px' }}
+                                                      >
+                                                        -
+                                                      </TableCell>
+                                                    )
+                                                  }
+
+                                                  const columnCount = hasUnderstudy ? 3 : 2
+                                                  return Array.from({ length: columnCount }, (_, idx) => (
+                                                    <TableCell
+                                                      key={`cat-cell-${categoryKey}-${subdept.id}-${clsIndex}-${subclsIndex}-${idx}`}
+                                                      className="text-center border bg-blue-100"
+                                                      style={{ width: '120px' }}
+                                                    >
+                                                      -
+                                                    </TableCell>
+                                                  ))
+                                                })
                                               ) : (
-                                                <TableCell 
-                                                  key={`cat-cell-${categoryKey}-${subdept.id}`} 
-                                                  className="text-center border bg-blue-100"
-                                                  style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                                >
-                                                  -
-                                                </TableCell>
+                                                (() => {
+                                                  const columnKey = getColumnKey(subdept.id, null)
+                                                  const isExpanded = expandedColumns.has(columnKey)
+                                                  
+                                                  if (!isExpanded) {
+                                                    return (
+                                                      <TableCell
+                                                        key={`cat-cell-${categoryKey}-${subdept.id}`}
+                                                        className="text-center border bg-blue-100"
+                                                        style={{ width: '120px' }}
+                                                      >
+                                                        -
+                                                      </TableCell>
+                                                    )
+                                                  }
+
+                                                  return Array.from({ length: 2 }, (_, idx) => (
+                                                    <TableCell
+                                                      key={`cat-cell-${categoryKey}-${subdept.id}-${idx}`}
+                                                      className="text-center border bg-blue-100"
+                                                      style={{ width: '120px' }}
+                                                    >
+                                                      -
+                                                    </TableCell>
+                                                  ))
+                                                })()
                                               )
                                             )}
                                           </TableRow>
@@ -1975,23 +2028,79 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                                   </TableCell>
                                                   {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                     subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                                      (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                        <TableCell 
-                                                          key={`doc-cell-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
-                                                          className="text-center border bg-blue-50 group-hover:bg-blue-100"
-                                                          style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
-                                                        >
-                                                          {renderDocumentCheckboxes(doc, subdept, clsIndex, subcls ? subclsIndex : null)}
-                                                        </TableCell>
-                                                      ))
+                                                      (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
+                                                        const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
+                                                        const isExpanded = expandedColumns.has(columnKey)
+                                                        const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                                        const checkboxes = renderDocumentCheckboxes(doc, subdept, clsIndex, subcls ? subclsIndex : null)
+
+                                                        if (!isExpanded) {
+                                                          return (
+                                                            <TableCell
+                                                              key={`doc-cell-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                              className="text-center border-r border-l border-gray-200 bg-blue-50 group-hover:bg-blue-100"
+                                                              style={{ width: '120px' }}
+                                                            >
+                                                              {checkboxes}
+                                                            </TableCell>
+                                                          )
+                                                        }
+
+                                                        // Return individual cells for expanded state
+                                                        return Array.isArray(checkboxes) ? checkboxes.map((checkbox, idx) => (
+                                                          <TableCell
+                                                            key={`doc-cell-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}-${idx}`}
+                                                            className="text-center border-r border-l border-gray-200 bg-blue-50 group-hover:bg-blue-100"
+                                                            style={{ width: '120px' }}
+                                                          >
+                                                            {checkbox}
+                                                          </TableCell>
+                                                        )) : (
+                                                          <TableCell
+                                                            key={`doc-cell-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                            className="text-center border-r border-l border-gray-200 bg-blue-50 group-hover:bg-blue-100"
+                                                            style={{ width: '120px' }}
+                                                          >
+                                                            {checkboxes}
+                                                          </TableCell>
+                                                        )
+                                                      })
                                                     ) : (
-                                                      <TableCell 
-                                                        key={`doc-cell-${doc.id}-${subdept.id}`} 
-                                                        className="text-center border bg-blue-50 group-hover:bg-blue-100"
-                                                        style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                                      >
-                                                        {renderDocumentCheckboxes(doc, subdept, null, null)}
-                                                      </TableCell>
+                                                      (() => {
+                                                        const columnKey = getColumnKey(subdept.id, null)
+                                                        const isExpanded = expandedColumns.has(columnKey)
+                                                        const checkboxes = renderDocumentCheckboxes(doc, subdept, null, null)
+
+                                                        if (!isExpanded) {
+                                                          return (
+                                                            <TableCell
+                                                              key={`doc-cell-${doc.id}-${subdept.id}`}
+                                                              className="text-center border-r border-l border-gray-200 bg-blue-50 group-hover:bg-blue-100"
+                                                              style={{ width: '120px' }}
+                                                            >
+                                                              {checkboxes}
+                                                            </TableCell>
+                                                          )
+                                                        }
+
+                                                        return Array.isArray(checkboxes) ? checkboxes.map((checkbox, idx) => (
+                                                          <TableCell
+                                                            key={`doc-cell-${doc.id}-${subdept.id}-${idx}`}
+                                                            className="text-center border-r border-l border-gray-200 bg-blue-50 group-hover:bg-blue-100"
+                                                            style={{ width: '120px' }}
+                                                          >
+                                                            {checkbox}
+                                                          </TableCell>
+                                                        )) : (
+                                                          <TableCell
+                                                            key={`doc-cell-${doc.id}-${subdept.id}`}
+                                                            className="text-center border-r border-l border-gray-200 bg-blue-50 group-hover:bg-blue-100"
+                                                            style={{ width: '120px' }}
+                                                          >
+                                                            {checkboxes}
+                                                          </TableCell>
+                                                        )
+                                                      })()
                                                     )
                                                   )}
                                                 </TableRow>
@@ -2039,23 +2148,77 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                                         </TableCell>
                                                         {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                           subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                                            (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                              <TableCell 
-                                                                key={`field-cell-${field.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
-                                                                className="text-center border"
-                                                                style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
-                                                              >
-                                                                {renderFieldCheckboxes(field, doc, subdept, clsIndex, subcls ? subclsIndex : null)}
-                                                              </TableCell>
-                                                            ))
+                                                            (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
+                                                              const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
+                                                              const isExpanded = expandedColumns.has(columnKey)
+                                                              const checkboxes = renderFieldCheckboxes(field, doc, subdept, clsIndex, subcls ? subclsIndex : null)
+
+                                                              if (!isExpanded) {
+                                                                return (
+                                                                  <TableCell
+                                                                    key={`field-cell-${field.id}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                                    className="text-center border"
+                                                                    style={{ width: '120px' }}
+                                                                  >
+                                                                    {checkboxes}
+                                                                  </TableCell>
+                                                                )
+                                                              }
+
+                                                              return Array.isArray(checkboxes) ? checkboxes.map((checkbox, idx) => (
+                                                                <TableCell
+                                                                  key={`field-cell-${field.id}-${subdept.id}-${clsIndex}-${subclsIndex}-${idx}`}
+                                                                  className="text-center border"
+                                                                  style={{ width: '120px' }}
+                                                                >
+                                                                  {checkbox}
+                                                                </TableCell>
+                                                              )) : (
+                                                                <TableCell
+                                                                  key={`field-cell-${field.id}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                                  className="text-center border"
+                                                                  style={{ width: '120px' }}
+                                                                >
+                                                                  {checkboxes}
+                                                                </TableCell>
+                                                              )
+                                                            })
                                                           ) : (
-                                                            <TableCell 
-                                                              key={`field-cell-${field.id}-${subdept.id}`} 
-                                                              className="text-center border"
-                                                              style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                                            >
-                                                              {renderFieldCheckboxes(field, doc, subdept, null, null)}
-                                                            </TableCell>
+                                                            (() => {
+                                                              const columnKey = getColumnKey(subdept.id, null)
+                                                              const isExpanded = expandedColumns.has(columnKey)
+                                                              const checkboxes = renderFieldCheckboxes(field, doc, subdept, null, null)
+
+                                                              if (!isExpanded) {
+                                                                return (
+                                                                  <TableCell
+                                                                    key={`field-cell-${field.id}-${subdept.id}`}
+                                                                    className="text-center border"
+                                                                    style={{ width: '120px' }}
+                                                                  >
+                                                                    {checkboxes}
+                                                                  </TableCell>
+                                                                )
+                                                              }
+
+                                                              return Array.isArray(checkboxes) ? checkboxes.map((checkbox, idx) => (
+                                                                <TableCell
+                                                                  key={`field-cell-${field.id}-${subdept.id}-${idx}`}
+                                                                  className="text-center border"
+                                                                  style={{ width: '120px' }}
+                                                                >
+                                                                  {checkbox}
+                                                                </TableCell>
+                                                              )) : (
+                                                                <TableCell
+                                                                  key={`field-cell-${field.id}-${subdept.id}`}
+                                                                  className="text-center border"
+                                                                  style={{ width: '120px' }}
+                                                                >
+                                                                  {checkboxes}
+                                                                </TableCell>
+                                                              )
+                                                            })()
                                                           )
                                                         )}
                                                       </TableRow>
@@ -2109,23 +2272,61 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                       </TableCell>
                                       {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                         subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                          (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                            <TableCell 
-                                              key={`form-section-cell-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
-                                              className="text-center border bg-blue-100"
-                                              style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
-                                            >
-                                              -
-                                            </TableCell>
-                                          ))
+                                          (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
+                                            const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
+                                            const isExpanded = expandedColumns.has(columnKey)
+                                            const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                            
+                                            if (!isExpanded) {
+                                              return (
+                                                <TableCell
+                                                  key={`form-section-cell-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                  className="text-center border bg-blue-100"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  -
+                                                </TableCell>
+                                              )
+                                            }
+
+                                            const columnCount = hasUnderstudy ? 3 : 2
+                                            return Array.from({ length: columnCount }, (_, idx) => (
+                                              <TableCell
+                                                key={`form-section-cell-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}-${idx}`}
+                                                className="text-center border bg-blue-100"
+                                                style={{ width: '120px' }}
+                                              >
+                                                -
+                                              </TableCell>
+                                            ))
+                                          })
                                         ) : (
-                                          <TableCell 
-                                            key={`form-section-cell-${sectionKey}-${subdept.id}`} 
-                                            className="text-center border bg-blue-100"
-                                            style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                          >
-                                            -
-                                          </TableCell>
+                                          (() => {
+                                            const columnKey = getColumnKey(subdept.id, null)
+                                            const isExpanded = expandedColumns.has(columnKey)
+                                            
+                                            if (!isExpanded) {
+                                              return (
+                                                <TableCell
+                                                  key={`form-section-cell-${sectionKey}-${subdept.id}`}
+                                                  className="text-center border bg-blue-100"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  -
+                                                </TableCell>
+                                              )
+                                            }
+
+                                            return Array.from({ length: 2 }, (_, idx) => (
+                                              <TableCell
+                                                key={`form-section-cell-${sectionKey}-${subdept.id}-${idx}`}
+                                                className="text-center border bg-blue-100"
+                                                style={{ width: '120px' }}
+                                              >
+                                                -
+                                              </TableCell>
+                                            ))
+                                          })()
                                         )
                                       )}
                                     </TableRow>,
@@ -2163,23 +2364,78 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                         </TableCell>
                                         {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                           subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                            (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                              <TableCell 
-                                                key={`form-field-cell-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
-                                                className="text-center border bg-blue-25 group-hover:bg-blue-50"
-                                                style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
-                                              >
-                                                {renderClientFieldCheckboxes(`form-field-${field.name}`, subdept, clsIndex, subcls ? subclsIndex : null)}
-                                              </TableCell>
-                                            ))
+                                            (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
+                                              const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
+                                              const isExpanded = expandedColumns.has(columnKey)
+                                              const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                              const checkboxes = renderClientFieldCheckboxes(`form-field-${field.name}`, subdept, clsIndex, subcls ? subclsIndex : null)
+
+                                              if (!isExpanded) {
+                                                return (
+                                                  <TableCell
+                                                    key={`form-field-cell-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                    className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                    style={{ width: '120px' }}
+                                                  >
+                                                    {checkboxes}
+                                                  </TableCell>
+                                                )
+                                              }
+
+                                              return Array.isArray(checkboxes) ? checkboxes.map((checkbox, idx) => (
+                                                <TableCell
+                                                  key={`form-field-cell-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}-${idx}`}
+                                                  className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  {checkbox}
+                                                </TableCell>
+                                              )) : (
+                                                <TableCell
+                                                  key={`form-field-cell-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                  className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  {checkboxes}
+                                                </TableCell>
+                                              )
+                                            })
                                           ) : (
-                                            <TableCell 
-                                              key={`form-field-cell-${field.name}-${subdept.id}`} 
-                                              className="text-center border bg-blue-25 group-hover:bg-blue-50"
-                                              style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                            >
-                                              {renderClientFieldCheckboxes(`form-field-${field.name}`, subdept, null, null)}
-                                            </TableCell>
+                                            (() => {
+                                              const columnKey = getColumnKey(subdept.id, null)
+                                              const isExpanded = expandedColumns.has(columnKey)
+                                              const checkboxes = renderClientFieldCheckboxes(`form-field-${field.name}`, subdept, null, null)
+
+                                              if (!isExpanded) {
+                                                return (
+                                                  <TableCell
+                                                    key={`form-field-cell-${field.name}-${subdept.id}`}
+                                                    className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                    style={{ width: '120px' }}
+                                                  >
+                                                    {checkboxes}
+                                                  </TableCell>
+                                                )
+                                              }
+
+                                              return Array.isArray(checkboxes) ? checkboxes.map((checkbox, idx) => (
+                                                <TableCell
+                                                  key={`form-field-cell-${field.name}-${subdept.id}-${idx}`}
+                                                  className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  {checkbox}
+                                                </TableCell>
+                                              )) : (
+                                                <TableCell
+                                                  key={`form-field-cell-${field.name}-${subdept.id}`}
+                                                  className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  {checkboxes}
+                                                </TableCell>
+                                              )
+                                            })()
                                           )
                                         )}
                                       </TableRow>
@@ -2207,23 +2463,61 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                       </TableCell>
                                       {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                         subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                          (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                            <TableCell 
-                                              key={`platform-cell-${platformKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
-                                              className="text-center border bg-blue-100"
-                                              style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
-                                            >
-                                              -
-                                            </TableCell>
-                                          ))
+                                          (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
+                                            const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
+                                            const isExpanded = expandedColumns.has(columnKey)
+                                            const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                            
+                                            if (!isExpanded) {
+                                              return (
+                                                <TableCell
+                                                  key={`platform-cell-${platformKey}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                  className="text-center border bg-blue-100"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  -
+                                                </TableCell>
+                                              )
+                                            }
+
+                                            const columnCount = hasUnderstudy ? 3 : 2
+                                            return Array.from({ length: columnCount }, (_, idx) => (
+                                              <TableCell
+                                                key={`platform-cell-${platformKey}-${subdept.id}-${clsIndex}-${subclsIndex}-${idx}`}
+                                                className="text-center border bg-blue-100"
+                                                style={{ width: '120px' }}
+                                              >
+                                                -
+                                              </TableCell>
+                                            ))
+                                          })
                                         ) : (
-                                          <TableCell 
-                                            key={`platform-cell-${platformKey}-${subdept.id}`} 
-                                            className="text-center border bg-blue-100"
-                                            style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                          >
-                                            -
-                                          </TableCell>
+                                          (() => {
+                                            const columnKey = getColumnKey(subdept.id, null)
+                                            const isExpanded = expandedColumns.has(columnKey)
+                                            
+                                            if (!isExpanded) {
+                                              return (
+                                                <TableCell
+                                                  key={`platform-cell-${platformKey}-${subdept.id}`}
+                                                  className="text-center border bg-blue-100"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  -
+                                                </TableCell>
+                                              )
+                                            }
+
+                                            return Array.from({ length: 2 }, (_, idx) => (
+                                              <TableCell
+                                                key={`platform-cell-${platformKey}-${subdept.id}-${idx}`}
+                                                className="text-center border bg-blue-100"
+                                                style={{ width: '120px' }}
+                                              >
+                                                -
+                                              </TableCell>
+                                            ))
+                                          })()
                                         )
                                       )}
                                     </TableRow>,
@@ -2266,23 +2560,78 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                         </TableCell>
                                         {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                           subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                            (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                              <TableCell 
-                                                key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
-                                                className="text-center border bg-blue-25 group-hover:bg-blue-50"
-                                                style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
-                                              >
-                                                {renderClientFieldCheckboxes(`platform-${platformKey}-${field.name}`, subdept, clsIndex, subcls ? subclsIndex : null)}
-                                              </TableCell>
-                                            ))
+                                            (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
+                                              const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
+                                              const isExpanded = expandedColumns.has(columnKey)
+                                              const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                              const checkboxes = renderClientFieldCheckboxes(`platform-${platformKey}-${field.name}`, subdept, clsIndex, subcls ? subclsIndex : null)
+
+                                              if (!isExpanded) {
+                                                return (
+                                                  <TableCell
+                                                    key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                    className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                    style={{ width: '120px' }}
+                                                  >
+                                                    {checkboxes}
+                                                  </TableCell>
+                                                )
+                                              }
+
+                                              return Array.isArray(checkboxes) ? checkboxes.map((checkbox, idx) => (
+                                                <TableCell
+                                                  key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}-${idx}`}
+                                                  className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  {checkbox}
+                                                </TableCell>
+                                              )) : (
+                                                <TableCell
+                                                  key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                  className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  {checkboxes}
+                                                </TableCell>
+                                              )
+                                            })
                                           ) : (
-                                            <TableCell 
-                                              key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}`} 
-                                              className="text-center border bg-blue-25 group-hover:bg-blue-50"
-                                              style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                            >
-                                              {renderClientFieldCheckboxes(`platform-${platformKey}-${field.name}`, subdept, null, null)}
-                                            </TableCell>
+                                            (() => {
+                                              const columnKey = getColumnKey(subdept.id, null)
+                                              const isExpanded = expandedColumns.has(columnKey)
+                                              const checkboxes = renderClientFieldCheckboxes(`platform-${platformKey}-${field.name}`, subdept, null, null)
+
+                                              if (!isExpanded) {
+                                                return (
+                                                  <TableCell
+                                                    key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}`}
+                                                    className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                    style={{ width: '120px' }}
+                                                  >
+                                                    {checkboxes}
+                                                  </TableCell>
+                                                )
+                                              }
+
+                                              return Array.isArray(checkboxes) ? checkboxes.map((checkbox, idx) => (
+                                                <TableCell
+                                                  key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}-${idx}`}
+                                                  className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  {checkbox}
+                                                </TableCell>
+                                              )) : (
+                                                <TableCell
+                                                  key={`platform-field-cell-${platformKey}-${field.name}-${subdept.id}`}
+                                                  className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  {checkboxes}
+                                                </TableCell>
+                                              )
+                                            })()
                                           )
                                         )}
                                       </TableRow>
@@ -2368,37 +2717,89 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                         </TableCell>
                                         {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                           subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                            (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                              <TableCell 
-                                                key={`client-cell-${client.id}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
-                                                className="text-center border bg-green-50 group-hover:bg-green-100"
-                                                style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
-                                              >
-                                                <span className={cn(
-                                                  "text-xs px-2 py-1 rounded-full",
-                                                  client.status === 'Active' ? "bg-green-100 text-green-700" :
-                                                    client.status === 'Pending' ? "bg-yellow-100 text-yellow-700" :
-                                                      "bg-gray-100 text-gray-700"
-                                                )}>
-                                                  {client.status || '-'}
-                                                </span>
-                                              </TableCell>
-                                            ))
+                                            (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
+                                              const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
+                                              const isExpanded = expandedColumns.has(columnKey)
+                                              const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                              
+                                              if (!isExpanded) {
+                                                return (
+                                                  <TableCell
+                                                    key={`client-cell-${client.id}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                    className="text-center border bg-green-50 group-hover:bg-green-100"
+                                                    style={{ width: '120px' }}
+                                                  >
+                                                    <span className={cn(
+                                                      "text-xs px-2 py-1 rounded-full",
+                                                      client.status === 'Active' ? "bg-green-100 text-green-700" :
+                                                        client.status === 'Pending' ? "bg-yellow-100 text-yellow-700" :
+                                                          "bg-gray-100 text-gray-700"
+                                                    )}>
+                                                      {client.status || '-'}
+                                                    </span>
+                                                  </TableCell>
+                                                )
+                                              }
+
+                                              const columnCount = hasUnderstudy ? 3 : 2
+                                              return Array.from({ length: columnCount }, (_, idx) => (
+                                                <TableCell
+                                                  key={`client-cell-${client.id}-${subdept.id}-${clsIndex}-${subclsIndex}-${idx}`}
+                                                  className="text-center border bg-green-50 group-hover:bg-green-100"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  <span className={cn(
+                                                    "text-xs px-2 py-1 rounded-full",
+                                                    client.status === 'Active' ? "bg-green-100 text-green-700" :
+                                                      client.status === 'Pending' ? "bg-yellow-100 text-yellow-700" :
+                                                        "bg-gray-100 text-gray-700"
+                                                  )}>
+                                                    {client.status || '-'}
+                                                  </span>
+                                                </TableCell>
+                                              ))
+                                            })
                                           ) : (
-                                            <TableCell 
-                                              key={`client-cell-${client.id}-${subdept.id}`} 
-                                              className="text-center border bg-green-50 group-hover:bg-green-100"
-                                              style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                            >
-                                              <span className={cn(
-                                                "text-xs px-2 py-1 rounded-full",
-                                                client.status === 'Active' ? "bg-green-100 text-green-700" :
-                                                  client.status === 'Pending' ? "bg-yellow-100 text-yellow-700" :
-                                                    "bg-gray-100 text-gray-700"
-                                              )}>
-                                                {client.status || '-'}
-                                              </span>
-                                            </TableCell>
+                                            (() => {
+                                              const columnKey = getColumnKey(subdept.id, null)
+                                              const isExpanded = expandedColumns.has(columnKey)
+                                              
+                                              if (!isExpanded) {
+                                                return (
+                                                  <TableCell
+                                                    key={`client-cell-${client.id}-${subdept.id}`}
+                                                    className="text-center border bg-green-50 group-hover:bg-green-100"
+                                                    style={{ width: '120px' }}
+                                                  >
+                                                    <span className={cn(
+                                                      "text-xs px-2 py-1 rounded-full",
+                                                      client.status === 'Active' ? "bg-green-100 text-green-700" :
+                                                        client.status === 'Pending' ? "bg-yellow-100 text-yellow-700" :
+                                                          "bg-gray-100 text-gray-700"
+                                                    )}>
+                                                      {client.status || '-'}
+                                                    </span>
+                                                  </TableCell>
+                                                )
+                                              }
+
+                                              return Array.from({ length: 2 }, (_, idx) => (
+                                                <TableCell
+                                                  key={`client-cell-${client.id}-${subdept.id}-${idx}`}
+                                                  className="text-center border bg-green-50 group-hover:bg-green-100"
+                                                  style={{ width: '120px' }}
+                                                >
+                                                  <span className={cn(
+                                                    "text-xs px-2 py-1 rounded-full",
+                                                    client.status === 'Active' ? "bg-green-100 text-green-700" :
+                                                      client.status === 'Pending' ? "bg-yellow-100 text-yellow-700" :
+                                                        "bg-gray-100 text-gray-700"
+                                                  )}>
+                                                    {client.status || '-'}
+                                                  </span>
+                                                </TableCell>
+                                              ))
+                                            })()
                                           )
                                         )}
                                       </TableRow>,
@@ -2431,23 +2832,61 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                                 </TableCell>
                                                 {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                   subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                                    (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                      <TableCell 
-                                                        key={`client-section-cell-${client.id}-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
-                                                        className="text-center border bg-green-100"
-                                                        style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
-                                                      >
-                                                        <span className="text-xs text-green-600">-</span>
-                                                      </TableCell>
-                                                    ))
+                                                    (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
+                                                      const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
+                                                      const isExpanded = expandedColumns.has(columnKey)
+                                                      const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                                      
+                                                      if (!isExpanded) {
+                                                        return (
+                                                          <TableCell
+                                                            key={`client-section-cell-${client.id}-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                            className="text-center border bg-green-100"
+                                                            style={{ width: '120px' }}
+                                                          >
+                                                            <span className="text-xs text-green-600">-</span>
+                                                          </TableCell>
+                                                        )
+                                                      }
+
+                                                      const columnCount = hasUnderstudy ? 3 : 2
+                                                      return Array.from({ length: columnCount }, (_, idx) => (
+                                                        <TableCell
+                                                          key={`client-section-cell-${client.id}-${sectionKey}-${subdept.id}-${clsIndex}-${subclsIndex}-${idx}`}
+                                                          className="text-center border bg-green-100"
+                                                          style={{ width: '120px' }}
+                                                        >
+                                                          <span className="text-xs text-green-600">-</span>
+                                                        </TableCell>
+                                                      ))
+                                                    })
                                                   ) : (
-                                                    <TableCell 
-                                                      key={`client-section-cell-${client.id}-${sectionKey}-${subdept.id}`} 
-                                                      className="text-center border bg-green-100"
-                                                      style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                                    >
-                                                      <span className="text-xs text-green-600">-</span>
-                                                    </TableCell>
+                                                    (() => {
+                                                      const columnKey = getColumnKey(subdept.id, null)
+                                                      const isExpanded = expandedColumns.has(columnKey)
+                                                      
+                                                      if (!isExpanded) {
+                                                        return (
+                                                          <TableCell
+                                                            key={`client-section-cell-${client.id}-${sectionKey}-${subdept.id}`}
+                                                            className="text-center border bg-green-100"
+                                                            style={{ width: '120px' }}
+                                                          >
+                                                            <span className="text-xs text-green-600">-</span>
+                                                          </TableCell>
+                                                        )
+                                                      }
+
+                                                      return Array.from({ length: 2 }, (_, idx) => (
+                                                        <TableCell
+                                                          key={`client-section-cell-${client.id}-${sectionKey}-${subdept.id}-${idx}`}
+                                                          className="text-center border bg-green-100"
+                                                          style={{ width: '120px' }}
+                                                        >
+                                                          <span className="text-xs text-green-600">-</span>
+                                                        </TableCell>
+                                                      ))
+                                                    })()
                                                   )
                                                 )}
                                               </TableRow>
@@ -2487,23 +2926,61 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                                   </TableCell>
                                                   {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                     subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                                      (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                        <TableCell 
-                                                          key={`client-data-field-cell-${client.id}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
-                                                          className="text-center border bg-green-25 group-hover:bg-green-50"
-                                                          style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
-                                                        >
-                                                          <span className="text-xs text-gray-400">-</span>
-                                                        </TableCell>
-                                                      ))
+                                                      (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
+                                                        const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
+                                                        const isExpanded = expandedColumns.has(columnKey)
+                                                        const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                                        
+                                                        if (!isExpanded) {
+                                                          return (
+                                                            <TableCell
+                                                              key={`client-data-field-cell-${client.id}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                              className="text-center border bg-green-25 group-hover:bg-green-50"
+                                                              style={{ width: '120px' }}
+                                                            >
+                                                              <span className="text-xs text-gray-400">-</span>
+                                                            </TableCell>
+                                                          )
+                                                        }
+
+                                                        const columnCount = hasUnderstudy ? 3 : 2
+                                                        return Array.from({ length: columnCount }, (_, idx) => (
+                                                          <TableCell
+                                                            key={`client-data-field-cell-${client.id}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}-${idx}`}
+                                                            className="text-center border bg-green-25 group-hover:bg-green-50"
+                                                            style={{ width: '120px' }}
+                                                          >
+                                                            <span className="text-xs text-gray-400">-</span>
+                                                          </TableCell>
+                                                        ))
+                                                      })
                                                     ) : (
-                                                      <TableCell 
-                                                        key={`client-data-field-cell-${client.id}-${field.name}-${subdept.id}`} 
-                                                        className="text-center border bg-green-25 group-hover:bg-green-50"
-                                                        style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                                      >
-                                                        <span className="text-xs text-gray-400">-</span>
-                                                      </TableCell>
+                                                      (() => {
+                                                        const columnKey = getColumnKey(subdept.id, null)
+                                                        const isExpanded = expandedColumns.has(columnKey)
+                                                        
+                                                        if (!isExpanded) {
+                                                          return (
+                                                            <TableCell
+                                                              key={`client-data-field-cell-${client.id}-${field.name}-${subdept.id}`}
+                                                              className="text-center border bg-green-25 group-hover:bg-green-50"
+                                                              style={{ width: '120px' }}
+                                                            >
+                                                              <span className="text-xs text-gray-400">-</span>
+                                                            </TableCell>
+                                                          )
+                                                        }
+
+                                                        return Array.from({ length: 2 }, (_, idx) => (
+                                                          <TableCell
+                                                            key={`client-data-field-cell-${client.id}-${field.name}-${subdept.id}-${idx}`}
+                                                            className="text-center border bg-green-25 group-hover:bg-green-50"
+                                                            style={{ width: '120px' }}
+                                                          >
+                                                            <span className="text-xs text-gray-400">-</span>
+                                                          </TableCell>
+                                                        ))
+                                                      })()
                                                     )
                                                   )}
                                                 </TableRow>
@@ -2520,8 +2997,6 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                           })
 
                                           if (platformFields.length > 0) {
-                                            const sectionNumber = Object.keys(groupedClientFields.formSections).length + sectionIndex + 1
-
                                             // Platform Header
                                             sectionRows.push(
                                               <TableRow key={`client-platform-${client.id}-${platformKey}`} className="bg-blue-100">
@@ -2538,23 +3013,61 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                                 </TableCell>
                                                 {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                   subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                                    (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                      <TableCell 
-                                                        key={`client-platform-cell-${client.id}-${platformKey}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
-                                                        className="text-center border bg-blue-100"
-                                                        style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
-                                                      >
-                                                        <span className="text-xs text-blue-600">-</span>
-                                                      </TableCell>
-                                                    ))
+                                                    (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
+                                                      const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
+                                                      const isExpanded = expandedColumns.has(columnKey)
+                                                      const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                                      
+                                                      if (!isExpanded) {
+                                                        return (
+                                                          <TableCell
+                                                            key={`client-platform-cell-${client.id}-${platformKey}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                            className="text-center border bg-blue-100"
+                                                            style={{ width: '120px' }}
+                                                          >
+                                                            <span className="text-xs text-blue-600">-</span>
+                                                          </TableCell>
+                                                        )
+                                                      }
+
+                                                      const columnCount = hasUnderstudy ? 3 : 2
+                                                      return Array.from({ length: columnCount }, (_, idx) => (
+                                                        <TableCell
+                                                          key={`client-platform-cell-${client.id}-${platformKey}-${subdept.id}-${clsIndex}-${subclsIndex}-${idx}`}
+                                                          className="text-center border bg-blue-100"
+                                                          style={{ width: '120px' }}
+                                                        >
+                                                          <span className="text-xs text-blue-600">-</span>
+                                                        </TableCell>
+                                                      ))
+                                                    })
                                                   ) : (
-                                                    <TableCell 
-                                                      key={`client-platform-cell-${client.id}-${platformKey}-${subdept.id}`} 
-                                                      className="text-center border bg-blue-100"
-                                                      style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                                    >
-                                                      <span className="text-xs text-blue-600">-</span>
-                                                    </TableCell>
+                                                    (() => {
+                                                      const columnKey = getColumnKey(subdept.id, null)
+                                                      const isExpanded = expandedColumns.has(columnKey)
+                                                      
+                                                      if (!isExpanded) {
+                                                        return (
+                                                          <TableCell
+                                                            key={`client-platform-cell-${client.id}-${platformKey}-${subdept.id}`}
+                                                            className="text-center border bg-blue-100"
+                                                            style={{ width: '120px' }}
+                                                          >
+                                                            <span className="text-xs text-blue-600">-</span>
+                                                          </TableCell>
+                                                        )
+                                                      }
+
+                                                      return Array.from({ length: 2 }, (_, idx) => (
+                                                        <TableCell
+                                                          key={`client-platform-cell-${client.id}-${platformKey}-${subdept.id}-${idx}`}
+                                                          className="text-center border bg-blue-100"
+                                                          style={{ width: '120px' }}
+                                                        >
+                                                          <span className="text-xs text-blue-600">-</span>
+                                                        </TableCell>
+                                                      ))
+                                                    })()
                                                   )
                                                 )}
                                               </TableRow>
@@ -2599,23 +3112,61 @@ const formatFieldValue = useMemo(() => (value: any, type: string): string => {
                                                   </TableCell>
                                                   {normalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                     subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
-                                                      (cls.subclasses?.length ? cls.subclasses : [null]).map((subcls, subclsIndex) => (
-                                                        <TableCell 
-                                                          key={`client-platform-data-field-cell-${client.id}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`} 
-                                                          className="text-center border bg-blue-25 group-hover:bg-blue-50"
-                                                          style={{ width: `${getColumnWidth(subdept, clsIndex, subcls ? subclsIndex : null)}px` }}
-                                                        >
-                                                          <span className="text-xs text-gray-400">-</span>
-                                                        </TableCell>
-                                                      ))
+                                                      (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
+                                                        const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
+                                                        const isExpanded = expandedColumns.has(columnKey)
+                                                        const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                                        
+                                                        if (!isExpanded) {
+                                                          return (
+                                                            <TableCell
+                                                              key={`client-platform-data-field-cell-${client.id}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                              className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                              style={{ width: '120px' }}
+                                                            >
+                                                              <span className="text-xs text-gray-400">-</span>
+                                                            </TableCell>
+                                                          )
+                                                        }
+
+                                                        const columnCount = hasUnderstudy ? 3 : 2
+                                                        return Array.from({ length: columnCount }, (_, idx) => (
+                                                          <TableCell
+                                                            key={`client-platform-data-field-cell-${client.id}-${field.name}-${subdept.id}-${clsIndex}-${subclsIndex}-${idx}`}
+                                                            className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                            style={{ width: '120px' }}
+                                                          >
+                                                            <span className="text-xs text-gray-400">-</span>
+                                                          </TableCell>
+                                                        ))
+                                                      })
                                                     ) : (
-                                                      <TableCell 
-                                                        key={`client-platform-data-field-cell-${client.id}-${field.name}-${subdept.id}`} 
-                                                        className="text-center border bg-blue-25 group-hover:bg-blue-50"
-                                                        style={{ width: `${getColumnWidth(subdept, null)}px` }}
-                                                      >
-                                                        <span className="text-xs text-gray-400">-</span>
-                                                      </TableCell>
+                                                      (() => {
+                                                        const columnKey = getColumnKey(subdept.id, null)
+                                                        const isExpanded = expandedColumns.has(columnKey)
+                                                        
+                                                        if (!isExpanded) {
+                                                          return (
+                                                            <TableCell
+                                                              key={`client-platform-data-field-cell-${client.id}-${field.name}-${subdept.id}`}
+                                                              className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                              style={{ width: '120px' }}
+                                                            >
+                                                              <span className="text-xs text-gray-400">-</span>
+                                                            </TableCell>
+                                                          )
+                                                        }
+
+                                                        return Array.from({ length: 2 }, (_, idx) => (
+                                                          <TableCell
+                                                            key={`client-platform-data-field-cell-${client.id}-${field.name}-${subdept.id}-${idx}`}
+                                                            className="text-center border bg-blue-25 group-hover:bg-blue-50"
+                                                            style={{ width: '120px' }}
+                                                          >
+                                                            <span className="text-xs text-gray-400">-</span>
+                                                          </TableCell>
+                                                        ))
+                                                      })()
                                                     )
                                                   )}
                                                 </TableRow>
