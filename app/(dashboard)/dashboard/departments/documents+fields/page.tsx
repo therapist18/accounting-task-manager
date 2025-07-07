@@ -274,8 +274,6 @@ export default function DocumentsFields() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [expandedClientItems, setExpandedClientItems] = useState<Set<string>>(new Set())
   const [submittingIds, setSubmittingIds] = useState<Set<string>>(new Set())
-
-  // New state for column expansion
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set())
 
   // Refs for performance tracking
@@ -290,23 +288,21 @@ export default function DocumentsFields() {
     return keyParts.join('_')
   }, [])
 
-  // Helper function to check if understudy should be shown
   const shouldShowUnderstudy = useCallback((subdept: Subdepartment, clsIndex: number | null) => {
     if (!subdept.hasClasses || clsIndex === null) return false
     const cls = subdept.classes?.[clsIndex]
     return cls?.id === CLASS_D_ID
   }, [])
 
-  // Update the getColumnWidth function to handle colspan 3
   const getColumnWidth = useCallback((subdept: Subdepartment, clsIndex: number | null, subclsIndex: number | null = null) => {
     const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
     const isExpanded = expandedColumns.has(columnKey)
     const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-
+  
     if (isExpanded) {
-      return hasUnderstudy ? 360 : 240 // 3 columns (AP, DP, understudy) or 2 columns (AP, DP)
+      return hasUnderstudy ? 360 : 240 // 3 columns (AP, DP, US) for Class D, 2 columns (AP, DP) for others
     }
-    return 120 // Just AP column
+    return 120 // Just AP column when collapsed
   }, [expandedColumns, getColumnKey, shouldShowUnderstudy])
 
   // Toggle column expansion
