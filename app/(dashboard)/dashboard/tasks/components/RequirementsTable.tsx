@@ -305,7 +305,6 @@ export function RequirementsTable({
 
     return status;
   }, [documentTab, taskHasItem, getIndividualDocuments, getCompanyDocuments, documentStatuses, parseSelectionId]);
-  }, [documentTab, taskHasItem, parseSelectionId, fetchIndividualDocuments, fetchCompanyDocuments, documentStatuses]);
 
   // Load all document statuses for filtered tasks
   useEffect(() => {
