@@ -407,6 +407,7 @@ export default function DocumentsFields() {
         supabase
           .from('tm_departments')
           .select(`*, tm_subdepartments (*, classes)`)
+          .eq('default_display', true)
           .order('order', { ascending: true })
           .abortSignal(controller.signal),
         supabase

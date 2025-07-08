@@ -146,6 +146,9 @@ export default function JobFieldsManagement() {
   const [viewMode, setViewMode] = useState<'fields' | 'sections' | 'grouped'>('grouped');
   const [entityFilter, setEntityFilter] = useState<'all' | 'company' | 'individual'>('all');
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set());
+  const [openAddField, setOpenAddField] = useState(false);
+  const [openEditField, setOpenEditField] = useState(false);
+  const [editingField, setEditingField] = useState<JobField | null>(null);
 
   // Fetch sections and fields
   const fetchData = useCallback(async () => {
