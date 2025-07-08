@@ -1,18 +1,21 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useEffect, useMemo, useCallback, memo, useRef, startTransition } from "react"
+import React, { useState, useEffect, useMemo, useCallback, useRef, memo, startTransition } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { cn } from "@/lib/utils"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Plus, Minus, Expand, Minimize2, Info, FileText, Users } from "lucide-react"
+import { Plus, Minus, Expand, Minimize2, FileText, Info, Users } from "lucide-react"
+import ColumnVisibilityControl, { ColumnVisibilityOption } from "@/components/shared/column-visibility"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Checkbox } from "@/components/ui/checkbox"
+import { debounce } from "lodash"
+import supabase, { createClient } from "@/lib/supabase/client"
+import { getTableFields, getGroupedFields, CATEGORY_MAPPING, CLASS_D_ID } from "./config"
+import { useRouter, useSearchParams } from "next/navigation"
+import { DocumentType, Subdepartment, DocumentField, ClientData, Department, GroupedDocuments, SubdepartmentClass, TruncatedText, SectionHeader } from "./types"
+import { cn } from "@/lib/utils"
 import { Separator } from "@/components/ui/separator"
-import { supabase } from "@/lib/supabase/client"
-import { toast } from "@/hooks/use-toast"
-import { getTableFields, getGroupedFields, FormField } from "./formFields"
 
 // Constants moved outside component for better performance
 const CATEGORY_MAPPING = {
@@ -22,96 +25,15 @@ const CATEGORY_MAPPING = {
 
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes cache
 const DEBOUNCE_DELAY = 300
-
-// Class D ID for understudy column
+const cache = new Map<string, any>()
 const CLASS_D_ID = 1750687058159
-
-// Enhanced cache system
-const cache = new Map()
 const getCachedData = (key: string) => {
-  const item = cache.get(key)
-  if (item && Date.now() - item.timestamp < CACHE_DURATION) {
-    return item.data
-  }
-  cache.delete(key)
-  return null
+  return cache.get(key)
 }
 
 const setCachedData = (key: string, data: any) => {
-  cache.set(key, { data, timestamp: Date.now() })
+  cache.set(key, data)
 }
-
-// Debounce utility
-const debounce = (func: Function, delay: number) => {
-  let timeoutId: NodeJS.Timeout
-  return (...args: any[]) => {
-    clearTimeout(timeoutId)
-    timeoutId = setTimeout(() => func.apply(null, args), delay)
-  }
-}
-
-// Optimized TruncatedText with better memoization
-const TruncatedText = memo(({
-  text,
-  maxLength = 30,
-  className = ''
-}: {
-  text: string,
-  maxLength?: number,
-  className?: string
-}) => {
-  const truncatedText = useMemo(() => {
-    if (!text) return null
-    return text.length > maxLength ? `${text.substring(0, maxLength)}...` : text
-  }, [text, maxLength])
-
-  const shouldShowTooltip = useMemo(() => text && text.length > maxLength, [text, maxLength])
-
-  if (!text) return null
-
-  if (!shouldShowTooltip) {
-    return <span className={className}>{text}</span>
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className={cn('cursor-help', className)}>{truncatedText}</span>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-[300px] break-words">
-        {text}
-      </TooltipContent>
-    </Tooltip>
-  )
-})
-TruncatedText.displayName = 'TruncatedText'
-
-// Optimized SectionHeader with stable props
-const SectionHeader = memo(({
-  title,
-  icon: Icon,
-  count
-}: {
-  title: string,
-  icon: React.ElementType,
-  count: number
-}) => (
-  <TableRow className="bg-blue-500 border-y-2 border-slate-300">
-    <TableCell className="sticky left-0 bg-blue-500 border-r z-[5] text-center font-bold text-white w-16">
-      <Icon className="h-4 w-4 mx-auto" />
-    </TableCell>
-    <TableCell className="sticky left-16 bg-blue-500 border-r z-[5] w-[300px]">
-      <div className="flex items-center gap-2 px-4 py-2">
-        <span className="font-bold text-white text-lg">{title}</span>
-        <span className="text-sm bg-slate-200 text-white px-2 py-1 rounded-full ml-2">{count}</span>
-      </div>
-    </TableCell>
-    <TableCell colSpan={100} className="bg-blue-500 border-r">
-      <div className="h-px bg-slate-300 w-full"></div>
-    </TableCell>
-  </TableRow>
-))
-SectionHeader.displayName = 'SectionHeader'
 
 // Highly optimized checkbox component with stable props
 const OptimizedCheckbox = memo(({
@@ -141,131 +63,32 @@ const OptimizedCheckbox = memo(({
 })
 OptimizedCheckbox.displayName = 'OptimizedCheckbox'
 
-// Interfaces (unchanged)
-interface DocumentField {
-  id: string
-  name: string
-  type: string
-  required?: boolean
-  order?: number
-  level: number
-  parentId: string | null
-  isArrayItem: boolean
-  hasChildren: boolean
-  fields?: DocumentField[]
-  path?: string
-  index?: number
-  parentPath?: string | null
-  kycdocumentid?: string
-  arrayConfig?: {
-    maxItems?: number
-    fields?: any[]
-  }
-  mapping?: any
-}
-
-interface DocumentType {
-  id: string
-  name: string
-  display_name: string
-  department: string
-  category: string
-  main_category: string
-  main_category_number: string
-  document_number: number
-  custom_order: number | null
-  fields: DocumentField[]
-  last_extracted_details: any
-  requirements: any
-  validity_days: string
-  reminder_days: string
-  listed: boolean
-  subcategory: string
-  document_type: string
-  kycdocumentid?: string
-  hasFields?: boolean
-}
-
-interface GroupedDocuments {
-  [key: string]: {
-    mainCategory: string
-    mainCategoryNumber: string
-    documents: DocumentType[]
-  }
-}
-
-interface SubdepartmentClass {
-  id?: string | number
-  name: string
-  description: string | null
-  requirements: any[]
-  subclasses?: SubdepartmentClass[]
-}
-
-interface Subdepartment {
-  id: number
-  name: string
-  department_id: string
-  classes?: SubdepartmentClass[]
-  hasClasses: boolean
-}
-
-interface Department {
-  id: string
-  name: string
-  subdepartments?: Subdepartment[]
-}
-
-interface ClientData {
-  id: string
-  name: string
-  email: string
-  company?: string
-  status: string
-  created_at: string
-  company_name?: string
-  company_prefix?: string
-  company_type?: string
-  registration_number?: string
-  office_phone_number?: string
-  current_communication_email?: string
-  country?: string
-  city?: string
-  road_name?: string
-  website?: string
-  industry?: string
-  first_name?: string
-  middle_name?: string
-  last_name?: string
-  national_id?: string
-  phone_number?: string
-  occupation?: string
-  kra_pin?: string
-  nssf_id?: string
-  nhif_id?: string
-  [key: string]: any
-}
+// Re-export types for backward compatibility
+export type {
+  DocumentField,
+  DocumentType,
+  GroupedDocuments,
+  SubdepartmentClass,
+  Subdepartment,
+  Department,
+  ClientData
+} from './types'
 
 export default function DocumentsFields() {
-  // State management with better initial values
   const [departments, setDepartments] = useState<Department[]>([])
   const [documents, setDocuments] = useState<DocumentType[]>([])
   const [clientData, setClientData] = useState<ClientData[]>([])
-
-  // Updated allocation states for AP, DP, and understudy
   const [documentAllocations, setDocumentAllocations] = useState<Record<string, {
     ap: boolean
     dp: boolean
     understudy: boolean
     kycdocumentid: string | null
   }>>({})
-
   const [clientFieldAllocations, setClientFieldAllocations] = useState<Record<string, {
     ap: boolean
     dp: boolean
     understudy: boolean
   }>>({})
-
   const [activeTab, setActiveTab] = useState<string>("")
   const [documentTab, setDocumentTab] = useState<"company" | "individual">("company")
   const [loading, setLoading] = useState(true)
@@ -275,12 +98,10 @@ export default function DocumentsFields() {
   const [expandedClientItems, setExpandedClientItems] = useState<Set<string>>(new Set())
   const [submittingIds, setSubmittingIds] = useState<Set<string>>(new Set())
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set())
-
-  // Refs for performance tracking
+  const [availableColumns, setAvailableColumns] = useState<ColumnVisibilityOption[]>([])
+  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({})
   const renderCountRef = useRef(0)
   const lastFetchTimeRef = useRef(0)
-
-  // Helper function to get column key
   const getColumnKey = useCallback((subdeptId: number, clsIndex: number | null, subclsIndex: number | null = null) => {
     const keyParts = [subdeptId]
     if (clsIndex !== null) keyParts.push(clsIndex)
@@ -298,27 +119,13 @@ export default function DocumentsFields() {
     const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
     const isExpanded = expandedColumns.has(columnKey)
     const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-  
+
     if (isExpanded) {
       return hasUnderstudy ? 360 : 240 // 3 columns (AP, DP, US) for Class D, 2 columns (AP, DP) for others
     }
     return 120 // Just AP column when collapsed
   }, [expandedColumns, getColumnKey, shouldShowUnderstudy])
 
-  // Toggle column expansion
-  const toggleColumnExpansion = useCallback((columnKey: string) => {
-    setExpandedColumns(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(columnKey)) {
-        newSet.delete(columnKey)
-      } else {
-        newSet.add(columnKey)
-      }
-      return newSet
-    })
-  }, [])
-
-  // Helper function to format field values (memoized)
   const formatFieldValue = useMemo(() => (value: any, type: string): string => {
     if (!value && value !== 0) return '-'
 
@@ -428,7 +235,6 @@ export default function DocumentsFields() {
     return grouped
   }, [])
 
-  // Optimized filtered documents with deep memoization and caching
   const { filteredDocuments, groupedDocuments } = useMemo(() => {
     renderCountRef.current++
 
@@ -465,13 +271,11 @@ export default function DocumentsFields() {
     return result
   }, [documents, documentTab, processDocumentFields, groupDocumentsByCategory])
 
-  // Enhanced memoized selectors
   const currentDepartment = useMemo(() =>
     departments.find(d => d.id === activeTab) || null,
     [departments, activeTab]
   )
 
-  // Enhanced normalized subdepartments with support for subdepartments without classes
   const normalizedSubdepartments = useMemo(() => {
     if (!currentDepartment?.subdepartments?.length) {
       return [{
@@ -484,7 +288,6 @@ export default function DocumentsFields() {
     }
 
     return currentDepartment.subdepartments.map(dept => {
-      // If subdepartment has no classes, treat the subdepartment itself as a "class"
       if (!dept.classes || dept.classes.length === 0) {
         return {
           ...dept,
@@ -504,25 +307,91 @@ export default function DocumentsFields() {
       }
     })
   }, [currentDepartment])
+  // Initialize column visibility options
+  useEffect(() => {
+    if (normalizedSubdepartments.length > 0) {
+      const columns: ColumnVisibilityOption[] = []
 
+      normalizedSubdepartments.forEach((subdept) => {
+        if (subdept.hasClasses) {
+          subdept.classes?.forEach((cls, clsIndex) => {
+            if (cls.subclasses?.length) {
+              cls.subclasses.forEach((subcls, subclsIndex) => {
+                const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
+                columns.push({
+                  id: columnKey,
+                  label: `${subdept.name} > ${cls.name} > ${subcls.name}`,
+                  visible: expandedColumns.has(columnKey),
+                  group: subdept.name
+                })
+              })
+            } else {
+              const columnKey = getColumnKey(subdept.id, clsIndex)
+              columns.push({
+                id: columnKey,
+                label: `${subdept.name} > ${cls.name}`,
+                visible: expandedColumns.has(columnKey),
+                group: subdept.name
+              })
+            }
+          })
+        } else {
+          const columnKey = getColumnKey(subdept.id, null)
+          columns.push({
+            id: columnKey,
+            label: subdept.name,
+            visible: expandedColumns.has(columnKey),
+            group: 'General'
+          })
+        }
+      })
+
+      setAvailableColumns(columns)
+    }
+  }, [normalizedSubdepartments, expandedColumns, getColumnKey])
+
+  // Reset to default visibility
+  const resetToDefaultColumns = useCallback(() => {
+    const defaultColumns = new Set<string>()
+
+    // Only show columns that have default_display set to true
+    normalizedSubdepartments.forEach((subdept) => {
+      if (subdept.default_display) {
+        if (subdept.hasClasses) {
+          subdept.classes?.forEach((cls, clsIndex) => {
+            if (cls.default_display) {
+              if (cls.subclasses?.length) {
+                cls.subclasses.forEach((subcls, subclsIndex) => {
+                  if (subcls.default_display) {
+                    defaultColumns.add(getColumnKey(subdept.id, clsIndex, subclsIndex))
+                  }
+                })
+              } else {
+                defaultColumns.add(getColumnKey(subdept.id, clsIndex))
+              }
+            }
+          })
+        } else if (subdept.default_display) {
+          defaultColumns.add(getColumnKey(subdept.id, null))
+        }
+      }
+    })
+
+    setExpandedColumns(defaultColumns)
+  }, [normalizedSubdepartments, getColumnKey])
   const clientFormFields = useMemo(() => getTableFields(documentTab), [documentTab])
-  const groupedClientFields = useMemo(() => getGroupedFields(documentTab), [documentTab])
+  // Initialize with all required properties to prevent undefined errors
+  const groupedClientFields = useMemo(() => ({
+    formSections: {},
+    platformCredentials: {},
+    otherSections: {}
+  }), [])
 
   // Enhanced data fetching with better caching and error handling
   const fetchData = useCallback(async () => {
     const now = Date.now()
-    if (now - lastFetchTimeRef.current < 1000) return // Prevent rapid refetches
+    if (now - lastFetchTimeRef.current < 1000) return
     lastFetchTimeRef.current = now
-
-    const cacheKey = `fetch-data-${documentTab}`
-    const cached = getCachedData(cacheKey)
-    if (cached && !loading) {
-      setDepartments(cached.departments)
-      setDocuments(cached.documents)
-      setDocumentAllocations(cached.documentAllocations)
-      setClientFieldAllocations(cached.clientFieldAllocations)
-      return
-    }
 
     const controller = new AbortController()
 
@@ -546,10 +415,11 @@ export default function DocumentsFields() {
           .order('main_category_number', { ascending: true, nullsLast: true })
           .order('custom_order', { ascending: true, nullsLast: true })
           .abortSignal(controller.signal),
+
         supabase
           .from('tm_class_requirements')
           .select('documents_and_fields, client_fields, class_id')
-          .abortSignal(controller.signal),
+          .abortSignal(controller.signal)
       ]
 
       const [deptsResponse, documentsResponse, requirementsResponse] = await Promise.race([
@@ -561,15 +431,19 @@ export default function DocumentsFields() {
       if (documentsResponse.error) throw documentsResponse.error
       if (requirementsResponse.error) throw requirementsResponse.error
 
-      // Process data efficiently in batches
+      // Process departments and subdepartments with default display filtering
       const transformedDepartments = (deptsResponse.data || []).map((dept: any) => ({
         ...dept,
         subdepartments: (dept.tm_subdepartments || [])
-          .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
+          .filter((subdept: any) => subdept.default_display !== false)
           .map((subdept: any) => ({
             ...subdept,
-            classes: Array.isArray(subdept.classes) ? subdept.classes : [],
-            hasClasses: subdept.classes && Array.isArray(subdept.classes) && subdept.classes.length > 0
+            classes: (subdept.classes || [])
+              .filter((cls: any) => cls.default_display !== false)
+              .map((cls: any) => ({
+                ...cls,
+                subclasses: (cls.subclasses || []).filter((subcls: any) => subcls.default_display !== false)
+              }))
           }))
       }))
 
@@ -618,6 +492,7 @@ export default function DocumentsFields() {
       }
 
       // Cache the result
+      const cacheKey = `departments-data-${Date.now()}`
       setCachedData(cacheKey, result)
 
       // Batch state updates using startTransition for better performance
@@ -792,6 +667,34 @@ export default function DocumentsFields() {
       setExpandedColumns(new Set())
     })
   }, [])
+
+  // Toggle column expansion
+  const toggleColumnExpansion = useCallback((columnKey: string) => {
+    setExpandedColumns(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(columnKey)) {
+        newSet.delete(columnKey)
+      } else {
+        newSet.add(columnKey)
+      }
+      return newSet
+    })
+  }, [])
+
+  // Toggle column visibility
+  const handleColumnVisibilityChange = useCallback((columnId: string, visible: boolean) => {
+    toggleColumnExpansion(columnId)
+  }, [toggleColumnExpansion])
+
+  // Show all columns
+  const showAllColumns = useCallback(() => {
+    expandAll()
+  }, [expandAll])
+
+  // Hide all columns
+  const hideAllColumns = useCallback(() => {
+    collapseAll()
+  }, [collapseAll])
 
   // Enhanced display toggle with support for AP, DP, and understudy
   const handleDisplayToggle = useCallback(async (
@@ -1551,6 +1454,13 @@ export default function DocumentsFields() {
             <Button variant="outline" onClick={collapseAll}>
               <Minimize2 className="h-4 w-4 mr-2" />Collapse All
             </Button>
+            <ColumnVisibilityControl
+              columns={availableColumns}
+              onToggleColumn={handleColumnVisibilityChange}
+              onShowAll={showAllColumns}
+              onHideAll={hideAllColumns}
+              onReset={resetToDefaultColumns}
+            />
           </div>
         </div>
 
@@ -1932,7 +1842,7 @@ export default function DocumentsFields() {
                                                   const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
                                                   const isExpanded = expandedColumns.has(columnKey)
                                                   const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-                                                  
+
                                                   if (!isExpanded) {
                                                     return (
                                                       <TableCell
@@ -1960,7 +1870,7 @@ export default function DocumentsFields() {
                                                 (() => {
                                                   const columnKey = getColumnKey(subdept.id, null)
                                                   const isExpanded = expandedColumns.has(columnKey)
-                                                  
+
                                                   if (!isExpanded) {
                                                     return (
                                                       <TableCell
@@ -2272,7 +2182,7 @@ export default function DocumentsFields() {
                                             const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
                                             const isExpanded = expandedColumns.has(columnKey)
                                             const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-                                            
+
                                             if (!isExpanded) {
                                               return (
                                                 <TableCell
@@ -2300,7 +2210,7 @@ export default function DocumentsFields() {
                                           (() => {
                                             const columnKey = getColumnKey(subdept.id, null)
                                             const isExpanded = expandedColumns.has(columnKey)
-                                            
+
                                             if (!isExpanded) {
                                               return (
                                                 <TableCell
@@ -2463,7 +2373,7 @@ export default function DocumentsFields() {
                                             const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
                                             const isExpanded = expandedColumns.has(columnKey)
                                             const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-                                            
+
                                             if (!isExpanded) {
                                               return (
                                                 <TableCell
@@ -2491,7 +2401,7 @@ export default function DocumentsFields() {
                                           (() => {
                                             const columnKey = getColumnKey(subdept.id, null)
                                             const isExpanded = expandedColumns.has(columnKey)
-                                            
+
                                             if (!isExpanded) {
                                               return (
                                                 <TableCell
@@ -2717,7 +2627,7 @@ export default function DocumentsFields() {
                                               const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
                                               const isExpanded = expandedColumns.has(columnKey)
                                               const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-                                              
+
                                               if (!isExpanded) {
                                                 return (
                                                   <TableCell
@@ -2759,7 +2669,7 @@ export default function DocumentsFields() {
                                             (() => {
                                               const columnKey = getColumnKey(subdept.id, null)
                                               const isExpanded = expandedColumns.has(columnKey)
-                                              
+
                                               if (!isExpanded) {
                                                 return (
                                                   <TableCell
@@ -2832,7 +2742,7 @@ export default function DocumentsFields() {
                                                       const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
                                                       const isExpanded = expandedColumns.has(columnKey)
                                                       const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-                                                      
+
                                                       if (!isExpanded) {
                                                         return (
                                                           <TableCell
@@ -2860,7 +2770,7 @@ export default function DocumentsFields() {
                                                     (() => {
                                                       const columnKey = getColumnKey(subdept.id, null)
                                                       const isExpanded = expandedColumns.has(columnKey)
-                                                      
+
                                                       if (!isExpanded) {
                                                         return (
                                                           <TableCell
@@ -2926,7 +2836,7 @@ export default function DocumentsFields() {
                                                         const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
                                                         const isExpanded = expandedColumns.has(columnKey)
                                                         const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-                                                        
+
                                                         if (!isExpanded) {
                                                           return (
                                                             <TableCell
@@ -2954,7 +2864,7 @@ export default function DocumentsFields() {
                                                       (() => {
                                                         const columnKey = getColumnKey(subdept.id, null)
                                                         const isExpanded = expandedColumns.has(columnKey)
-                                                        
+
                                                         if (!isExpanded) {
                                                           return (
                                                             <TableCell
@@ -3013,7 +2923,7 @@ export default function DocumentsFields() {
                                                       const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
                                                       const isExpanded = expandedColumns.has(columnKey)
                                                       const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-                                                      
+
                                                       if (!isExpanded) {
                                                         return (
                                                           <TableCell
@@ -3041,7 +2951,7 @@ export default function DocumentsFields() {
                                                     (() => {
                                                       const columnKey = getColumnKey(subdept.id, null)
                                                       const isExpanded = expandedColumns.has(columnKey)
-                                                      
+
                                                       if (!isExpanded) {
                                                         return (
                                                           <TableCell
@@ -3112,7 +3022,7 @@ export default function DocumentsFields() {
                                                         const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
                                                         const isExpanded = expandedColumns.has(columnKey)
                                                         const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-                                                        
+
                                                         if (!isExpanded) {
                                                           return (
                                                             <TableCell
@@ -3140,7 +3050,7 @@ export default function DocumentsFields() {
                                                       (() => {
                                                         const columnKey = getColumnKey(subdept.id, null)
                                                         const isExpanded = expandedColumns.has(columnKey)
-                                                        
+
                                                         if (!isExpanded) {
                                                           return (
                                                             <TableCell
