@@ -41,26 +41,28 @@ export type SubClass = {
   order: number
   isVisible: boolean
   parentClassId: string
- requirements: Requirement[]
+  requirements: Requirement[]
+  default_display?: boolean
 }
 
 export type Class = {
- id: number
- name: string
- description?: string
- order: number
- isVisible: boolean
- subdepartmentId: string
- requirements: Requirement[]
- subClasses: SubClass[]
+  id: number
+  name: string
+  description?: string
+  order: number
+  isVisible: boolean
+  subdepartmentId: string
+  requirements: Requirement[]
+  subClasses: SubClass[]
+  default_display?: boolean
 }
 
 export type TaskAssignment = {
- id: string
- userId: string
- startDate: string
- endDate?: string
- isActive: boolean
+  id: string
+  userId: string
+  startDate: string
+  endDate?: string
+  isActive: boolean
 }
 
 export type DocumentExtraction = {
@@ -77,7 +79,7 @@ export type StageDocument = {
   description?: string;
   isRequired: boolean;
   documentType: 'upload' | 'extraction' | 'both';
-  inputType: 'file' | 'message' | 'both'; // New field
+  inputType: 'file' | 'message' | 'both';
   extractionSpecs?: DocumentExtraction[];
 }
 
@@ -104,75 +106,82 @@ export type Subdepartment = {
   classes: Class[]
   stages: StageAllocation[]
   upload_requirements?: Requirement[]
+  default_display?: boolean
+  order?: number
 }
 
 export type Department = {
- id: string
- name: string
- description?: string
- subdepartments: Subdepartment[]
- tm_subdepartments?: Subdepartment[]
+  id: string
+  name: string
+  description?: string
+  subdepartments: Subdepartment[]
+  tm_subdepartments?: Subdepartment[]
+  default_display?: boolean
+  order?: number
 }
 
 // Form types
 export type RequirementForm = {
- id: string
- name: string
- description: string
- isRequired: boolean
- order: number
- isVisible: boolean
- type?: string
+  id: string
+  name: string
+  description: string
+  isRequired: boolean
+  order: number
+  isVisible: boolean
+  type?: string
 }
 
 export type SubClassForm = {
- id: number
- name: string
- description: string
- order: number
- isVisible: boolean
- requirements: RequirementForm[]
+  id: number
+  name: string
+  description: string
+  order: number
+  isVisible: boolean
+  requirements: RequirementForm[]
+  default_display?: boolean
 }
 
 export type ClassForm = {
- id: number
- name: string
- description: string
- order: number
- isVisible: boolean
- requirements: RequirementForm[]
- subClasses: SubClassForm[]
+  id: number
+  name: string
+  description: string
+  order: number
+  isVisible: boolean
+  requirements: RequirementForm[]
+  subClasses: SubClassForm[]
+  default_display?: boolean
 }
 
 export type SubdepartmentForm = {
- id?: string
- name: string
- description: string
- classes: ClassForm[]
- taskManagerId: string
- taskAssistantIds: string[]
- stages: {
-   [key: string]: {
-     applies: boolean
-     estimatedTime: number
-     reminderDays: number
-   }
- }
+  id?: string
+  name: string
+  description: string
+  classes: ClassForm[]
+  taskManagerId: string
+  taskAssistantIds: string[]
+  default_display?: boolean
+  stages: {
+    [key: string]: {
+      applies: boolean
+      estimatedTime: number
+      reminderDays: number
+    }
+  }
 }
 
 export async function fetchUsers(): Promise<User[]> {
- try {
-   const { data, error } = await supabase
-     .from('tm_users')
-     .select('id, name, email, role')
-     .order('name')
+  try {
+    const { data, error } = await supabase
+      .from('tm_users')
+      .select('id, name, email, role')
+      .order('name')
 
-   if (error) throw error
-   return data || []
- } catch (error) {
-   console.error('Error fetching users:', error)
-   throw new Error('Failed to fetch users')
- }
+    if (error) throw error
+    return data || []
+  } catch (error) {
+    console.error('Error fetching users:', error)
+    throw new Error('Failed to fetch users')
+  }
 }
 
 export async function createDepartment(departmentData: any): Promise<Department> {
@@ -186,13 +195,14 @@ export async function createDepartment(departmentData: any): Promise<Department>
 
     const nextOrder = (maxOrderData?.[0]?.order || 0) + 1
 
-    // Create department with order
+    // Create department with order and default_display
     const { data: department, error: deptError } = await supabase
       .from('tm_departments')
       .insert({
         name: departmentData.name,
         description: departmentData.description,
-        order: nextOrder
+        order: nextOrder,
+        default_display: departmentData.default_display || true
       })
       .select()
       .single()
@@ -200,23 +210,25 @@ export async function createDepartment(departmentData: any): Promise<Department>
     if (deptError) throw deptError
     if (!department) throw new Error('Failed to create department')
 
-    // Process subdepartments with ordering
+    // Process subdepartments with ordering and default display
     for (const [index, subdept] of departmentData.subdepartments.entries()) {
       const subdeptOrder = index + 1
 
-      // Prepare classes for storage
+      // Prepare classes for storage with default_display
       const classesForStorage = subdept.classes.map((cls, clsIndex) => ({
         id: cls.id,
         name: cls.name,
         description: cls.description,
         order: clsIndex + 1,
         isVisible: cls.isVisible,
+        default_display: cls.default_display || true,
         subClasses: cls.subClasses.map((subCls, subClsIndex) => ({
           id: subCls.id,
           name: subCls.name,
           description: subCls.description,
           order: subClsIndex + 1,
-          isVisible: subCls.isVisible
+          isVisible: subCls.isVisible,
+          default_display: subCls.default_display || true
         }))
       }))
 
@@ -225,6 +237,7 @@ export async function createDepartment(departmentData: any): Promise<Department>
         description: subdept.description,
         department_id: department.id,
         order: subdeptOrder,
+        default_display: subdept.default_display || true,
         classes: classesForStorage,
         task_manager: subdept.task_manager,
         task_assistant: subdept.task_assistants
@@ -327,7 +340,7 @@ export async function createDepartment(departmentData: any): Promise<Department>
   }
 }
 
-// Enhanced fetchDepartments with proper ordering
+// Enhanced fetchDepartments with proper ordering and default display
 export async function fetchDepartments(): Promise<Department[]> {
   try {
     const { data: departmentsData, error: deptError } = await supabase
@@ -345,13 +358,19 @@ export async function fetchDepartments(): Promise<Department[]> {
       const subdepartments = (dept.tm_subdepartments || [])
         .sort((a, b) => (a.order || 0) - (b.order || 0))
         .map((subdept: any) => {
-          // Process classes with ordering
+          // Process classes with ordering and default display
           const classes = (subdept.classes || [])
             .sort((a, b) => (a.order || 0) - (b.order || 0))
             .map((cls: any) => ({
               ...cls,
               subdepartmentId: subdept.id,
-              subClasses: (cls.subClasses || []).sort((a, b) => (a.order || 0) - (b.order || 0))
+              default_display: cls.default_display || false,
+              subClasses: (cls.subClasses || [])
+                .sort((a, b) => (a.order || 0) - (b.order || 0))
+                .map((subCls: any) => ({
+                  ...subCls,
+                  default_display: subCls.default_display || false
+                }))
             }))
 
           // Process task assistants
@@ -364,6 +383,7 @@ export async function fetchDepartments(): Promise<Department[]> {
           return {
             ...subdept,
             classes,
+            default_display: subdept.default_display || false,
             taskAssistants: taskAssistants.map((ta: any) => ({
               id: ta.id || `ta_${Date.now()}`,
               userId: ta.userId || ta.id,
@@ -377,6 +397,7 @@ export async function fetchDepartments(): Promise<Department[]> {
 
       return {
         ...dept,
+        default_display: dept.default_display || false,
         subdepartments,
         tm_subdepartments: subdepartments
       }
@@ -386,6 +407,56 @@ export async function fetchDepartments(): Promise<Department[]> {
   } catch (error) {
     console.error('Error fetching departments:', error)
     throw new Error('Failed to fetch departments')
+  }
+}
+
+// Enhanced save order function that also saves default display settings
+export async function saveOrderAndDefaultDisplay(departments: Department[]): Promise<void> {
+  try {
+    // Prepare department updates with order and default_display
+    const deptUpdates = departments.map((dept, index) => ({
+      id: dept.id,
+      order: index + 1,
+      default_display: dept.default_display || false
+    }))
+
+    // Prepare subdepartment updates with order and default_display
+    const subdeptUpdates = departments.flatMap(dept => 
+      (dept.tm_subdepartments || []).map((subdept, index) => ({
+        id: subdept.id,
+        order: index + 1,
+        default_display: subdept.default_display || false,
+        // Update classes JSON with default_display
+        classes: (subdept.classes || []).map((cls, clsIndex) => ({
+          ...cls,
+          order: clsIndex + 1,
+          default_display: cls.default_display || false,
+          subClasses: (cls.subClasses || []).map((subCls, subClsIndex) => ({
+            ...subCls,
+            order: subClsIndex + 1,
+            default_display: subCls.default_display || false
+          }))
+        }))
+      }))
+    )
+
+    // Update departments
+    const { error: deptError } = await supabase
+      .from('tm_departments')
+      .upsert(deptUpdates)
+
+    if (deptError) throw deptError
+
+    // Update subdepartments
+    const { error: subdeptError } = await supabase
+      .from('tm_subdepartments')
+      .upsert(subdeptUpdates)
+
+    if (subdeptError) throw subdeptError
+
+  } catch (error) {
+    console.error('Error saving order and default display:', error)
+    throw error
   }
 }
 
@@ -547,4 +618,4 @@ export async function saveSubdepartmentRequirements(subdepartmentId: string, req
     console.error('Error saving subdepartment requirements:', error);
     throw error;
   }
-};
+}
