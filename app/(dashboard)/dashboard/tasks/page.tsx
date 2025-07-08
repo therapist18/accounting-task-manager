@@ -879,13 +879,13 @@ export default function TasksPage() {
               </p>
             </div>
             <div className="flex items-center space-x-2">
-              <Button
+              {/* <Button
                 onClick={() => setNewTaskDialogOpen(true)}
                 className="flex items-center gap-2"
               >
                 <Plus className="h-4 w-4" />
                 New Task
-              </Button>
+              </Button> */}
             </div>
           </div>
 
@@ -946,10 +946,10 @@ export default function TasksPage() {
                       <CheckCheckIcon className="h-4 w-4 mr-2" />
                      Requirements Checklist
                     </TabsTrigger>
-                    <TabsTrigger value="webdata">
+                    {/* <TabsTrigger value="webdata">
                       <Globe className="h-4 w-4 mr-2" />
                       Web Data
-                    </TabsTrigger>
+                    </TabsTrigger> */}
                   </TabsList>
 
                   <TabsContent value="stages" className="space-y-4">
@@ -1008,7 +1008,7 @@ export default function TasksPage() {
                     </Card>
                   </TabsContent>
 
-                  <TabsContent value="webdata" className="space-y-4">
+                  {/* <TabsContent value="webdata" className="space-y-4">
                     <Card>
                       <CardHeader>
                         <CardTitle>Web Data - {getDisplayTitle()}</CardTitle>
@@ -1031,7 +1031,7 @@ export default function TasksPage() {
                         />
                       </CardContent>
                     </Card>
-                  </TabsContent>
+                  </TabsContent> */}
                 </Tabs>
               </TabsContent>
 
