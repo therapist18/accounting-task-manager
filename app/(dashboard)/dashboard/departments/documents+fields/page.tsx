@@ -97,13 +97,13 @@ const SectionHeader = memo(({
   count: number
 }) => (
   <TableRow className="bg-blue-500 border-y-2 border-slate-300">
-    <TableCell className="sticky left-0 bg-blue-500 border-r z-[5] text-center font-bold text-slate-700 w-16">
+    <TableCell className="sticky left-0 bg-blue-500 border-r z-[5] text-center font-bold text-white w-16">
       <Icon className="h-4 w-4 mx-auto" />
     </TableCell>
     <TableCell className="sticky left-16 bg-blue-500 border-r z-[5] w-[300px]">
       <div className="flex items-center gap-2 px-4 py-2">
-        <span className="font-bold text-slate-700 text-lg">{title}</span>
-        <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">{count}</span>
+        <span className="font-bold text-white text-lg">{title}</span>
+        <span className="text-sm bg-slate-200 text-white px-2 py-1 rounded-full ml-2">{count}</span>
       </div>
     </TableCell>
     <TableCell colSpan={100} className="bg-blue-500 border-r">

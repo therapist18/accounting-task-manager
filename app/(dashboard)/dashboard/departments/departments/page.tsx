@@ -173,7 +173,7 @@ function SubClassComponent({
         <CardContent className="pt-0 p-4 space-y-4">
           <div className="space-y-3 pl-12">
             <Textarea placeholder="Sub-class description" value={subClass.description} onChange={(e) => onUpdate([...path, 'description'], e.target.value)} />
-            <div className="flex items-center justify-between pt-2">
+            <div className="flex items-center justify-between mb-4">
               <Label className="font-semibold text-gray-700">Requirements</Label>
               <Button variant="outline" size="sm" onClick={addRequirement}><Plus className="h-4 w-4 mr-1" /> Add Requirement</Button>
             </div>
@@ -239,8 +239,37 @@ export default function Departments() {
   const [searchTerm, setSearchTerm] = useState("")
   const [users, setUsers] = useState<User[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
+  // State for managing expanded/collapsed state
   const [expanded, setExpanded] = useState<{ [key: string]: boolean }>({});
   const [expandedClasses, setExpandedClasses] = useState<{ [key: string]: boolean }>({});
+  const [expandedSubClasses, setExpandedSubClasses] = useState<{ [key: string]: boolean }>({});
+
+  // Expand/collapse all departments and their children
+  const toggleAllDepartments = (expand: boolean) => {
+    const updates = {};
+    filteredDepartments.forEach((dept) => {
+      updates[dept.id] = expand;
+
+      // Also expand/collapse all subdepartments
+      (dept.tm_subdepartments || []).forEach((subdept) => {
+        const subdeptKey = `subdept-${subdept.id}`;
+        updates[subdeptKey] = expand;
+
+        // Also expand/collapse all classes in subdepartments
+        (subdept.classes || []).forEach((cls, clsIndex) => {
+          const classId = `class-${subdept.id}-${cls.id || clsIndex}`;
+          setExpandedClasses(prev => ({ ...prev, [classId]: expand }));
+
+          // Also expand/collapse all subclasses
+          (cls.subClasses || []).forEach((subClass, subClassIndex) => {
+            const subClassId = `subclass-${subClass.id || subClassIndex}`;
+            setExpandedSubClasses(prev => ({ ...prev, [subClassId]: expand }));
+          });
+        });
+      });
+    });
+    setExpanded(updates);
+  };
   const [isOrderChanged, setIsOrderChanged] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
   const [departmentForm, setDepartmentForm] = useState({ name: '', description: '', subdepartments: [] as SubdepartmentForm[] })
@@ -327,38 +356,46 @@ export default function Departments() {
       setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
     } else if (type === 'class') {
       setExpandedClasses(prev => ({ ...prev, [id]: !prev[id] }));
+    } else if (type === 'subclass') {
+      setExpandedSubClasses(prev => ({ ...prev, [id]: !prev[id] }));
     }
   };
 
   const expandAll = () => {
     const allExpanded = {};
-    departments.forEach(dept => { 
+    departments.forEach(dept => {
       allExpanded[dept.id] = true;
       (dept.tm_subdepartments || []).forEach(subdept => {
         allExpanded[`class-${subdept.id}`] = true;
+        (subdept.classes || []).forEach(cls => {
+          allExpanded[`subclass-${cls.id}`] = true;
+        });
       });
     });
     setExpanded(allExpanded);
     setExpandedClasses(allExpanded);
+    setExpandedSubClasses(allExpanded);
   };
 
   const collapseAll = () => {
     setExpanded({});
     setExpandedClasses({});
+    setExpandedSubClasses({});
   };
-
-  const areAllExpanded = departments.length > 0 && 
-    departments.every(dept => expanded[dept.id]) &&
-    departments.every(dept => 
-      (dept.tm_subdepartments || []).every(subdept => 
-        expandedClasses[`class-${subdept.id}`]
-      )
-    );
 
   const filteredDepartments = departments.filter(dept =>
     dept.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (dept.tm_subdepartments || []).some(subdept => subdept.name.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+
+  // Check if all departments are expanded
+  const areAllExpanded = filteredDepartments.length > 0 &&
+    filteredDepartments.every(dept => expanded[dept.id]) &&
+    filteredDepartments.every(dept =>
+      (dept.tm_subdepartments || []).every(subdept =>
+        expanded[`subdept-${subdept.id}`]
+      )
+    );
 
   const updateFormState = (path: string[], value: any) => setDepartmentForm(prevState => updateNestedState(prevState, path, value));
 
@@ -426,7 +463,24 @@ export default function Departments() {
 
   const getUserName = (userId: string) => users.find(u => u.id === userId)?.name || 'Unassigned';
   const handleAddClass = (subdeptIndex: number) => {
-    updateFormState(['subdepartments', subdeptIndex, 'classes'], [...departmentForm.subdepartments[subdeptIndex].classes, { id: Date.now(), name: '', description: '', order: departmentForm.subdepartments[subdeptIndex].classes.length + 1, isVisible: true, requirements: [], subClasses: [] }]);
+    const newClass = {
+      id: Date.now(),
+      name: '',
+      description: '',
+      order: departmentForm.subdepartments[subdeptIndex].classes.length + 1,
+      isVisible: true,
+      requirements: [],
+      subClasses: []
+    };
+    updateFormState(
+      ['subdepartments', subdeptIndex, 'classes'],
+      [...departmentForm.subdepartments[subdeptIndex].classes, newClass]
+    );
+    // Auto-expand the new class
+    setExpandedClasses(prev => ({
+      ...prev,
+      [`class-${newClass.id}`]: true
+    }));
   };
   const handleRemoveClass = (subdeptIndex: number, classIndex: number) => {
     updateFormState(['subdepartments', subdeptIndex, 'classes'], departmentForm.subdepartments[subdeptIndex].classes.filter((_, i) => i !== classIndex));
@@ -477,7 +531,26 @@ export default function Departments() {
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div className="relative w-full sm:w-72"><Input placeholder="Search departments..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" /><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /></div>
-            <div className="flex items-center gap-2"><Button variant="outline" onClick={areAllExpanded ? collapseAll : expandAll} size="sm"><ChevronsUpDown className="mr-2 h-4 w-4" /> {areAllExpanded ? 'Collapse All' : 'Expand All'}</Button></div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => toggleAllDepartments(!areAllExpanded)}
+                size="sm"
+                className="flex items-center gap-1.5"
+              >
+                {areAllExpanded ? (
+                  <>
+                    <ChevronUp className="h-4 w-4" />
+                    <span>Collapse All</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-4 w-4" />
+                    <span>Expand All</span>
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -501,63 +574,209 @@ export default function Departments() {
               filteredDepartments.map((dept, deptIndex) => (
                 <React.Fragment key={dept.id}>
                   <TableRow className="bg-blue-50 font-semibold border-b-2 border-gray-200">
-                    <TableCell className="text-center">
+                    <TableCell className="text-center border-r">
                       {deptIndex + 1}
                     </TableCell>
-                    <TableCell className="text-base text-gray-800 flex items-center gap-3">
-                      <div className="flex gap-2">
+                    <TableCell className="text-base text-gray-800 flex justify-between gap-3 border-r">
+                      <div className="flex gap-3">
                         {dept.name}
-                        <Badge variant="secondary">{(dept.tm_subdepartments || []).length} subs</Badge>
                       </div>
-                      <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      onClick={() => toggleExpansion('dept', dept.id)} 
-                      className="h-8 w-8"
-                    >
-                      {expanded[dept.id] ? (
-                        <Minus className="h-5 w-5" />
-                      ) : (
-                        <Plus className="h-5 w-5" />
-                      )}
-                    </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => toggleExpansion('dept', dept.id)}
+                        className="h-8 w-8"
+                      >
+                        {expanded[dept.id] ? (
+                          <Minus className="h-5 w-5" />
+                        ) : (
+                          <Plus className="h-5 w-5" />
+                        )}
+                      </Button>
                     </TableCell>
-                    <TableCell colSpan={3}></TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="border-r"></TableCell>
+                    <TableCell className="border-r"></TableCell>
+                    <TableCell className="text-base text-gray-800 border-r">
+                      {(dept.tm_subdepartments || []).length} Sub Dept
+                    </TableCell>
+                    <TableCell className="text-right border-r">
                       <div className="flex items-center justify-end gap-2">
                         <OrderButtons onReorder={handleDepartmentReorder} index={deptIndex} listLength={filteredDepartments.length} disabled={savingOrder} />
-                        <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white" onClick={() => handleAddSubdepartment(dept.id, dept.name)}><Plus className="h-4 w-4 mr-1" /> Add Sub</Button>
+                        <Button
+                          size="sm"
+                          className="bg-blue-600 hover:bg-blue-700 text-white"
+                          onClick={() => handleAddSubdepartment(dept.id, dept.name)}
+                        >
+                          <Plus className="h-4 w-4 mr-1" /> Add Sub
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
 
-                  {expanded[dept.id] && (dept.tm_subdepartments || []).map((subdept, subdeptIndex) => (
-                    <TableRow key={subdept.id} className="hover:bg-gray-50/50">
-                      <TableCell></TableCell>
-                      <TableCell className="pl-12">
-                        <div className="flex items-center gap-3 font-medium text-gray-700"><Workflow className="h-5 w-5 text-blue-500" />{subdept.name}</div>
-                        {subdept.description && <div className="pl-8 text-sm text-gray-500 mt-1">{subdept.description}</div>}
-                      </TableCell>
-                      <TableCell>
-                        <UserDetailsPopover userId={subdept.taskManagerId} users={users} role="manager">{getUserName(subdept.taskManagerId)}</UserDetailsPopover>
-                      </TableCell>
-                      <TableCell>
-                        {(subdept.taskAssistants || []).length > 0 ? (
-                          <div className="flex flex-col space-y-1">{(subdept.taskAssistants || []).map((ta, i) => <UserDetailsPopover key={i} userId={ta.userId} users={users} role="assistant">{getUserName(ta.userId)}</UserDetailsPopover>)}</div>
-                        ) : <span className="text-gray-400">None</span>}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{subdept.classes?.length || 0} Classes</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-end gap-2">
-                          <OrderButtons onReorder={(idx, dir) => handleSubdepartmentReorder(deptIndex, idx, dir)} index={subdeptIndex} listLength={(dept.tm_subdepartments || []).length} disabled={savingOrder} />
-                          <Button variant="outline" size="icon" onClick={() => handleEditSubdepartment(dept.id, subdept)} title="Edit" className="h-8 w-8"><Edit className="h-4 w-4" /></Button>
-                          <Button variant="outline" size="icon" onClick={() => handleDeleteSubdepartment(subdept.id)} title="Delete" className="h-8 w-8 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {expanded[dept.id] && (dept.tm_subdepartments || []).map((subdept, subdeptIndex) => {
+                    const hasClasses = subdept.classes && subdept.classes.length > 0;
+                    const subdeptKey = `subdept-${subdept.id}`;
+                    const isExpanded = expanded[subdeptKey];
+
+                    return (
+                      <React.Fragment key={subdept.id}>
+                        <TableRow className="hover:bg-gray-50/50 border-b-2 border-gray-200">
+                          <TableCell className="text-center border-r text-gray-500 text-xs">
+                            {deptIndex + 1}.{subdeptIndex + 1}
+                          </TableCell>
+                          <TableCell className="pl-12 border-r">
+                            <div className="flex justify-between gap-3 font-medium text-gray-700">
+                              <div className="flex items-center gap-2">
+                                <Workflow className="h-5 w-5 text-blue-500 flex-shrink-0" />
+                                <span>{subdept.name}</span>
+                              </div>
+                              {hasClasses && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => toggleExpansion('dept', subdeptKey)}
+                                  className="h-6 w-6 -ml-2"
+                                >
+                                  {isExpanded ? (
+                                    <Minus className="h-4 w-4" />
+                                  ) : (
+                                    <Plus className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              )}
+                            </div>
+                            {subdept.description && <div className="pl-8 text-xs text-gray-500 mt-1">{subdept.description}</div>}
+                          </TableCell>
+                          <TableCell className="border-r">
+                            <UserDetailsPopover userId={subdept.taskManagerId} users={users} role="manager">
+                              {getUserName(subdept.taskManagerId)}
+                            </UserDetailsPopover>
+                          </TableCell>
+                          <TableCell className="border-r">
+                            {(subdept.taskAssistants || []).length > 0 ? (
+                              <div className="flex flex-col space-y-1">
+                                {(subdept.taskAssistants || []).map((ta, i) => (
+                                  <UserDetailsPopover key={i} userId={ta.userId} users={users} role="assistant">
+                                    {getUserName(ta.userId)}
+                                  </UserDetailsPopover>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-gray-400">None</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="border-r">
+                            {hasClasses && (
+                              <div className="flex items-center">
+                                <span className="text-sm text-gray-600">
+                                  {subdept.classes.length} {subdept.classes.length === 1 ? 'Class' : 'Classes'}
+                                </span>
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="border-r">
+                            <div className="flex items-center justify-end gap-2">
+                              <OrderButtons
+                                onReorder={(idx, dir) => handleSubdepartmentReorder(deptIndex, idx, dir)}
+                                index={subdeptIndex}
+                                listLength={(dept.tm_subdepartments || []).length}
+                                disabled={savingOrder}
+                              />
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => handleEditSubdepartment(dept.id, subdept)}
+                                title="Edit"
+                                className="h-8 w-8"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => handleDeleteSubdepartment(subdept.id)}
+                                title="Delete"
+                                className="h-8 w-8 text-red-600 hover:bg-red-50"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+
+                        {/* Classes for this subdepartment */}
+                        {isExpanded && hasClasses && subdept.classes.map((cls, clsIndex) => {
+                          const classId = `class-${subdept.id}-${cls.id || clsIndex}`;
+                          const hasSubClasses = cls.subClasses && cls.subClasses.length > 0;
+                          const isClassExpanded = expandedClasses[classId];
+
+                          return (
+                            <React.Fragment key={`${subdept.id}-${cls.id || clsIndex}`}>
+                              <TableRow className="bg-gray-50 hover:bg-gray-100/50">
+                                <TableCell className="text-center border-r text-gray-500 text-xs">
+                                  {deptIndex + 1}.{subdeptIndex + 1}.{clsIndex + 1}
+                                </TableCell>
+                                <TableCell className="pl-24 border-r flex justify-between">
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <Layers className="h-4 w-4 text-blue-400 flex-shrink-0" />
+                                    <span className="font-medium text-gray-700">{cls.name}</span>
+                                    {cls.description && (
+                                      <span className="text-gray-500 truncate max-w-xs">- {cls.description}</span>
+                                    )}
+                                  </div>
+                                  {hasSubClasses ? (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleExpansion('class', classId);
+                                      }}
+                                      className="h-6 w-6 -ml-2"
+                                    >
+                                      {isClassExpanded ? (
+                                        <Minus className="h-4 w-4" />
+                                      ) : (
+                                        <Plus className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                  ) : (
+                                    <span className="w-6 h-6 flex-shrink-0"></span>
+                                  )}
+                                </TableCell>
+                                <TableCell colSpan={4}></TableCell>
+                              </TableRow>
+
+                              {/* Subclasses */}
+                              {isClassExpanded && hasSubClasses && cls.subClasses.map((subClass, subClassIndex) => (
+                                <TableRow key={`${cls.id}-${subClass.id || subClassIndex}`} className="hover:bg-gray-100/70">
+                                   <TableCell className="text-center border-r text-gray-500 text-xs">
+                                  {deptIndex + 1}.{subdeptIndex + 1}.{clsIndex + 1}.{subClassIndex + 1}
+                                </TableCell>
+                                  <TableCell className="pl-32">
+                                    <div className="flex items-center gap-2 text-sm">
+                                      <span className="w-6 h-6 flex-shrink-0"></span>
+                                      <Target className="h-3.5 w-3.5 text-blue-300 flex-shrink-0" />
+                                      <span className="font-medium text-gray-700">{subClass.name}</span>
+                                      {subClass.description && (
+                                        <span className="text-gray-500 truncate max-w-xs">- {subClass.description}</span>
+                                      )}
+                                      {subClass.requirements?.length > 0 && (
+                                        <Badge variant="outline" className="ml-2">
+                                          {subClass.requirements.length} {subClass.requirements.length === 1 ? 'Requirement' : 'Requirements'}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell colSpan={4}></TableCell>
+                                </TableRow>
+                              ))}
+                            </React.Fragment>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
                 </React.Fragment>
               ))
             )}
@@ -616,43 +835,163 @@ export default function Departments() {
                     <TabsContent value="workflow" className="pt-6 space-y-4">
                       <div className="flex items-center justify-between"><h4 className="font-semibold text-gray-800">Classes & Requirements</h4><Button variant="outline" size="sm" onClick={() => handleAddClass(subdeptIndex)}><Plus className="h-4 w-4 mr-1" /> Add Class</Button></div>
                       <div className="space-y-4 bg-gray-50 p-4 rounded-md border">
-                        {subdept.classes.map((classItem, classIndex) => {
-                          const classId = `class-${subdept.id}-${classItem.id}`;
-                          const isExpanded = expandedClasses[classId] !== false; // Default to expanded
-                          
-                          return (
-                            <div key={classItem.id} className="border rounded-md overflow-hidden">
-                              <div 
-                                className="flex items-center bg-white p-3 border-b cursor-pointer hover:bg-gray-50"
-                                onClick={() => toggleExpansion('class', classId)}
-                              >
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  className="h-6 w-6 mr-2 text-gray-500 hover:bg-transparent"
-                                >
-                                  {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                </Button>
-                                <span className="font-medium">{classItem.name || `Class ${classIndex + 1}`}</span>
-                              </div>
-                              
-                              {isExpanded && (
-                                <div className="p-4 bg-gray-50">
-                                  <ClassComponent 
-                                    classItem={classItem} 
-                                    onUpdate={updateFormState} 
-                                    onRemove={() => handleRemoveClass(subdeptIndex, classIndex)} 
-                                    path={['subdepartments', subdeptIndex, 'classes', classIndex]} 
-                                    index={`${subdeptIndex + 1}.${classIndex + 1}`} 
-                                  />
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-medium text-gray-700">Classes</h4>
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs text-gray-600 hover:bg-gray-100"
+                              onClick={() => {
+                                const updates = {};
+                                subdept.classes?.forEach((cls, idx) => {
+                                  const classId = `class-${subdept.id}-${cls.id || idx}`;
+                                  updates[classId] = true;
+                                });
+                                setExpandedClasses(prev => ({ ...prev, ...updates }));
+                              }}
+                            >
+                              <ChevronDown className="h-3 w-3 mr-1" /> Expand All
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs text-gray-600 hover:bg-gray-100"
+                              onClick={() => {
+                                const updates = {};
+                                subdept.classes?.forEach((cls, idx) => {
+                                  const classId = `class-${subdept.id}-${cls.id || idx}`;
+                                  updates[classId] = false;
+                                });
+                                setExpandedClasses(prev => ({ ...prev, ...updates }));
+                              }}
+                            >
+                              <ChevronUp className="h-3 w-3 mr-1" /> Collapse All
+                            </Button>
+                          </div>
+                        </div>
+
+                        {subdept.classes?.length > 0 ? (
+                          <div className="space-y-3">
+                            {subdept.classes.map((classItem, classIndex) => {
+                              const classId = `class-${subdept.id}-${classItem.id || classIndex}`;
+                              const isExpanded = expandedClasses[classId] !== false; // Default to expanded
+
+                              return (
+                                <div key={classItem.id || classIndex} className="border rounded-md overflow-hidden bg-white shadow-sm">
+                                  <div
+                                    className="flex items-center justify-between p-3 border-b cursor-pointer hover:bg-gray-50"
+                                    onClick={() => toggleExpansion('class', classId)}
+                                  >
+                                    <div className="flex items-center">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 mr-2 text-gray-500 hover:bg-transparent"
+                                      >
+                                        {isExpanded ? (
+                                          <Minus className="h-4 w-4" />
+                                        ) : (
+                                          <Plus className="h-4 w-4" />
+                                        )}
+                                      </Button>
+                                      <div>
+                                        <div className="font-medium">
+                                          {classItem.name || `Class ${classIndex + 1}`}
+                                        </div>
+                                        {classItem.description && (
+                                          <div className="text-xs text-gray-500 mt-1">
+                                            {classItem.description}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center space-x-1">
+                                      <span className="text-xs text-gray-500">
+                                        {classItem.subClasses?.length || 0} subclasses • {classItem.requirements?.length || 0} requirements
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {isExpanded && (
+                                    <div className="p-4 bg-gray-50 border-t">
+                                      <ClassComponent
+                                        classItem={classItem}
+                                        onUpdate={updateFormState}
+                                        onRemove={() => handleRemoveClass(subdeptIndex, classIndex)}
+                                        path={['subdepartments', subdeptIndex, 'classes', classIndex]}
+                                        index={`${subdeptIndex + 1}.${classIndex + 1}`}
+                                      />
+
+                                      {/* Subclasses section */}
+                                      {classItem.subClasses?.length > 0 && (
+                                        <div className="mt-4 pl-6 border-l-2 border-gray-200">
+                                          <div className="flex items-center justify-between mb-2">
+                                            <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wider">
+                                              Subclasses
+                                            </h5>
+                                          </div>
+                                          <div className="space-y-2">
+                                            {classItem.subClasses.map((subClass, subClassIndex) => {
+                                              const subClassId = `subclass-${subClass.id || subClassIndex}`;
+                                              const isSubClassExpanded = expandedSubClasses[subClassId] !== false; // Default to expanded
+
+                                              return (
+                                                <div key={subClass.id || subClassIndex} className="border rounded bg-white p-3">
+                                                  <div
+                                                    className="flex items-center justify-between cursor-pointer"
+                                                    onClick={() => toggleExpansion('subclass', subClassId)}
+                                                  >
+                                                    <div className="flex items-center">
+                                                      <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-5 w-5 mr-2 text-gray-400 hover:bg-transparent"
+                                                      >
+                                                        {isSubClassExpanded ? (
+                                                          <Minus className="h-3 w-3" />
+                                                        ) : (
+                                                          <Plus className="h-3 w-3" />
+                                                        )}
+                                                      </Button>
+                                                      <span className="text-sm font-medium">
+                                                        {subClass.name || `Subclass ${subClassIndex + 1}`}
+                                                      </span>
+                                                    </div>
+                                                    <span className="text-xs text-gray-500">
+                                                      {subClass.requirements?.length || 0} requirements
+                                                    </span>
+                                                  </div>
+
+                                                  {isSubClassExpanded && subClass.requirements?.length > 0 && (
+                                                    <div className="mt-2 pl-7 space-y-2">
+                                                      <div className="text-xs font-medium text-gray-600 mt-2 mb-1">
+                                                        Requirements:
+                                                      </div>
+                                                      {subClass.requirements.map((req, reqIndex) => (
+                                                        <div key={reqIndex} className="text-xs text-gray-600 bg-gray-50 p-2 rounded border">
+                                                          {req.name || `Requirement ${reqIndex + 1}`}
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                        {subdept.classes.length === 0 && (
-                          <div className="text-center py-8 text-gray-500 border-2 border-dashed rounded-lg">
-                            No classes created yet. Click "Add Class" to begin.
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="text-center py-8 text-gray-500 border-2 border-dashed rounded-lg bg-white">
+                            <FolderOpen className="h-8 w-8 mx-auto text-gray-300 mb-2" />
+                            <p className="text-sm">No classes created yet.</p>
+                            <p className="text-xs text-gray-400 mt-1">Click "Add Class" to get started</p>
                           </div>
                         )}
                       </div>

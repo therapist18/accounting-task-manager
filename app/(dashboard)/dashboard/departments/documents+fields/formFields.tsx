@@ -159,7 +159,7 @@ export const companyFields = {
 
     formSections: {
         generalInformation: {
-            title: "3.1. General Information",
+            title: "General Information",
             fields: [
                 { name: "company_name", label: "Company Name", type: "text", placeholder: "Enter company name", showInTable: true, showInDialog: true, tableHeader: "Company Name" },
                 { name: "company_prefix", label: "Company Prefix", type: "text", placeholder: "Enter Company Prefix", showInTable: true, showInDialog: true, tableHeader: "Company Prefix" },
@@ -171,7 +171,7 @@ export const companyFields = {
             ]
         },
         contactInformation: {
-            title: "3.2. Contact Information",
+            title: "Contact Information",
             fields: [
                 { name: "office_phone_number", label: "Office Phone Number", type: "text", placeholder: "Enter Phone", showInTable: true, showInDialog: true, tableHeader: "Office Phone Number" },
                 { name: "broadcast_whatsapp_number", label: "Broadcast WhatsApp Number", type: "text", placeholder: "Enter WhatsApp Number", showInTable: true, showInDialog: true, tableHeader: "Broadcast WhatsApp Number" },
@@ -180,7 +180,7 @@ export const companyFields = {
             ]
         },
         addressDetails: {
-            title: "3.3. Physical Address Details",
+            title: "Physical Address Details",
             fields: [
                 { name: "country", label: "Country", type: "select", placeholder: "Select country", dataSource: { application: "BCL", category: "Countries" }, showInTable: true, showInDialog: true, tableHeader: "Country" },
                 { name: "city", label: "City", type: "select", placeholder: "Select city", dataSource: { application: "BCL", category: "Cities" }, showInTable: true, showInDialog: true, tableHeader: "City" },
@@ -193,7 +193,7 @@ export const companyFields = {
             ]
         },
                postalAddress: {
-            title: "3.5. Postal Address",
+            title: "Postal Address",
             fields: [
                 { name: "postal_address", label: "P.O. Box", type: "text", placeholder: "Enter P.O. Box number", callback: "updateFullPostalAddress", showInTable: true, showInDialog: true, tableHeader: "P.O. Box" },
                 { name: "postal_code", label: "Postal Code", type: "text", placeholder: "Enter postal code", callback: "updateFullPostalAddress", showInTable: true, showInDialog: true, tableHeader: "Postal Code" },
@@ -202,7 +202,7 @@ export const companyFields = {
             ]
         },
         additionalInformation: {
-            title: "3.6. Additional Information",
+            title: "Additional Information",
             fields: [
                 { name: "website", label: "Website", type: "text", placeholder: "Enter Website", showInTable: true, showInDialog: true, tableHeader: "Website" },
                 { name: "industry", label: "Industry", type: "text", placeholder: "Enter Industry", showInTable: true, showInDialog: true, tableHeader: "Industry" },
@@ -221,7 +221,7 @@ export const individualFields = {
 
     formSections: {
         personalInformation: {
-            title: "2.1. Personal Information",
+            title: "Personal Information",
             fields: [
                 { name: "first_name", label: "First Name", type: "text", placeholder: "Enter first name", showInTable: true, showInDialog: true, tableHeader: "First Name" },
                 { name: "middle_name", label: "Middle Name", type: "text", placeholder: "Enter middle name", showInTable: true, showInDialog: true, tableHeader: "Middle Name" },
@@ -239,16 +239,19 @@ export const individualFields = {
             ]
         },
         contactInformation: {
-            title: "2.2. Contact Information",
+            title: "Contact Information",
             fields: [
-                { name: "phone_number", label: "Phone Number", type: "text", placeholder: "Enter Phone", showInTable: true, showInDialog: true, tableHeader: "Phone Number" },
+                { name: "kenyan_mobile_number_1", label: "Kenyan Mobile Number 1", type: "text", placeholder: "Enter Kenyan Mobile Number 1", showInTable: true, showInDialog: true, tableHeader: "Kenyan Mobile Number 1" },
+                { name: "kenyan_mobile_number_2", label: "Kenyan Mobile Number 2", type: "text", placeholder: "Enter Kenyan Mobile Number 2", showInTable: true, showInDialog: true, tableHeader: "Kenyan Mobile Number 2" },
+                { name: "abroad_mobile_number_1", label: "Abroad Mobile Number 1", type: "text", placeholder: "Enter Abroad Mobile Number 1", showInTable: true, showInDialog: true, tableHeader: "Abroad Mobile Number 1" },
+                { name: "abroad_mobile_number_2", label: "Abroad Mobile Number 2", type: "text", placeholder: "Enter Abroad Mobile Number 2", showInTable: true, showInDialog: true, tableHeader: "Abroad Mobile Number 2" },
                 { name: "whatsapp_number", label: "WhatsApp Number", type: "text", placeholder: "Enter WhatsApp Number", showInTable: true, showInDialog: true, tableHeader: "WhatsApp Number" },
-                { name: "email_address", label: "Email Address", type: "email", placeholder: "Enter Email", showInTable: true, showInDialog: true, tableHeader: "Email Address" },
+                { name: "email_address", label: "Current Communication Email", type: "email", placeholder: "Enter Email", showInTable: true, showInDialog: true, tableHeader: "Current Communication Email" },
                 { name: "alternative_email", label: "Alternative Email", type: "email", placeholder: "Enter Alt Email", showInTable: true, showInDialog: true, tableHeader: "Alternative Email" },
             ]
         },
         addressDetails: {
-            title: "2.3. Address Details",
+            title: "Address Details",
             fields: [
                 { name: "country", label: "Country", type: "select", placeholder: "Select country", dataSource: { application: "BCL", category: "Countries" }, showInTable: true, showInDialog: true, tableHeader: "Country" },
                 { name: "city", label: "City", type: "select", placeholder: "Select city", dataSource: { application: "BCL", category: "Cities" }, showInTable: true, showInDialog: true, tableHeader: "City" },
@@ -261,7 +264,7 @@ export const individualFields = {
             ]
         },
         postalAddress: {
-            title: "2.5. Postal Address",
+            title: "Postal Address",
             fields: [
                 { name: "postal_address", label: "P.O. Box", type: "text", placeholder: "Enter P.O. Box number", callback: "updateFullPostalAddress", showInTable: true, showInDialog: true, tableHeader: "P.O. Box" },
                 { name: "postal_code", label: "Postal Code", type: "text", placeholder: "Enter postal code", callback: "updateFullPostalAddress", showInTable: true, showInDialog: true, tableHeader: "Postal Code" },
