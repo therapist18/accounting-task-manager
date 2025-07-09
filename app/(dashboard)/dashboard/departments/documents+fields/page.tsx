@@ -1,78 +1,38 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useEffect, useMemo, useCallback, useRef, memo, startTransition } from "react"
+import React, { useState, useEffect, useMemo, useCallback, memo, useRef, startTransition } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Plus, Minus, Expand, Minimize2, FileText, Info, Users } from "lucide-react"
-import ColumnVisibilityControl, { ColumnVisibilityOption } from "@/components/shared/column-visibility"
+import { Plus, Minus, Expand, Minimize2, Info, FileText, Users } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Checkbox } from "@/components/ui/checkbox"
-import { debounce } from "lodash"
-import supabase, { createClient } from "@/lib/supabase/client"
-import { getTableFields, getGroupedFields, CATEGORY_MAPPING, CLASS_D_ID } from "./config"
-import { useRouter, useSearchParams } from "next/navigation"
-import { DocumentType, Subdepartment, DocumentField, ClientData, Department, GroupedDocuments, SubdepartmentClass, TruncatedText, SectionHeader } from "./types"
-import { cn } from "@/lib/utils"
 import { Separator } from "@/components/ui/separator"
-
-// Constants moved outside component for better performance
-const CATEGORY_MAPPING = {
-  company: "company-docs",
-  individual: "directors-docs"
-} as const
-
-const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes cache
-const DEBOUNCE_DELAY = 300
-const cache = new Map<string, any>()
-const CLASS_D_ID = 1750687058159
-const getCachedData = (key: string) => {
-  return cache.get(key)
-}
-
-const setCachedData = (key: string, data: any) => {
-  cache.set(key, data)
-}
-
-// Highly optimized checkbox component with stable props
-const OptimizedCheckbox = memo(({
-  checked,
-  onCheckedChange,
-  disabled,
-  allocationKey
-}: {
-  checked: boolean
-  onCheckedChange: (checked: boolean) => void
-  disabled: boolean
-  allocationKey: string
-}) => {
-  const handleChange = useCallback((value: boolean) => {
-    onCheckedChange(value)
-  }, [onCheckedChange])
-
-  return (
-    <Checkbox
-      checked={checked}
-      onCheckedChange={handleChange}
-      disabled={disabled}
-      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-      data-allocation-key={allocationKey}
-    />
-  )
-})
-OptimizedCheckbox.displayName = 'OptimizedCheckbox'
-
-// Re-export types for backward compatibility
-export type {
-  DocumentField,
-  DocumentType,
-  GroupedDocuments,
-  SubdepartmentClass,
-  Subdepartment,
-  Department,
-  ClientData
-} from './types'
+import { supabase } from "@/lib/supabase/client"
+import { toast } from "@/hooks/use-toast"
+import { getTableFields, getGroupedFields, FormField } from "./formFields"
+import ColumnVisibilityControl, { ColumnVisibilityOption } from "@/app/(dashboard)/dashboard/departments/main-shared-components/column-visibility"
+import { DocumentType, Subdepartment, DocumentField, ClientData, Department, GroupedDocuments, SubdepartmentClass, TruncatedText, SectionHeader, OptimizedCheckbox } from "./types"
+import { CATEGORY_MAPPING, CLASS_D_ID, CACHE_DURATION, DEBOUNCE_DELAY, cache, getCachedData, setCachedData, debounce } from "./config"
+import { 
+  formatFieldValue as formatFieldValueUtil, 
+  processDocumentFields, 
+  groupDocumentsByCategory, 
+  filterAndSortDocuments, 
+  hasVisibleColumns, 
+  getAllocationStatus as getAllocationStatusUtil,
+  getColumnKey as getColumnKeyUtil,
+  shouldShowUnderstudy as shouldShowUnderstudyUtil,
+  getColumnWidth as getColumnWidthUtil,
+  toggleSetItem,
+  processDocumentFieldsWithCache,
+  groupDocumentsByCategoryWithCache,
+  getClientFieldAllocationStatus as getClientFieldAllocationStatusUtil,
+  getTotalColSpan as getTotalColSpanUtil,
+  initializeColumnVisibility
+} from "./utils"
 
 export default function DocumentsFields() {
   const [departments, setDepartments] = useState<Department[]>([])
@@ -99,142 +59,72 @@ export default function DocumentsFields() {
   const [submittingIds, setSubmittingIds] = useState<Set<string>>(new Set())
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set())
   const [availableColumns, setAvailableColumns] = useState<ColumnVisibilityOption[]>([])
-  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({})
+  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>(() => initializeColumnVisibility(availableColumns))
   const renderCountRef = useRef(0)
   const lastFetchTimeRef = useRef(0)
+
   const getColumnKey = useCallback((subdeptId: number, clsIndex: number | null, subclsIndex: number | null = null) => {
-    const keyParts = [subdeptId]
-    if (clsIndex !== null) keyParts.push(clsIndex)
-    if (subclsIndex !== null) keyParts.push(subclsIndex)
-    return keyParts.join('_')
+    return getColumnKeyUtil(subdeptId, clsIndex, subclsIndex)
   }, [])
 
   const shouldShowUnderstudy = useCallback((subdept: Subdepartment, clsIndex: number | null) => {
-    if (!subdept.hasClasses || clsIndex === null) return false
-    const cls = subdept.classes?.[clsIndex]
-    return cls?.id === CLASS_D_ID
+    return shouldShowUnderstudyUtil(subdept, clsIndex)
   }, [])
 
   const getColumnWidth = useCallback((subdept: Subdepartment, clsIndex: number | null, subclsIndex: number | null = null) => {
-    const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
-    const isExpanded = expandedColumns.has(columnKey)
-    const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
-
-    if (isExpanded) {
-      return hasUnderstudy ? 360 : 240 // 3 columns (AP, DP, US) for Class D, 2 columns (AP, DP) for others
-    }
-    return 120 // Just AP column when collapsed
+    return getColumnWidthUtil(
+      subdept, 
+      clsIndex, 
+      subclsIndex, 
+      expandedColumns, 
+      getColumnKey, 
+      shouldShowUnderstudy
+    )
   }, [expandedColumns, getColumnKey, shouldShowUnderstudy])
 
-  const formatFieldValue = useMemo(() => (value: any, type: string): string => {
-    if (!value && value !== 0) return '-'
-
-    switch (type) {
-      case 'date':
-        return new Date(value).toLocaleDateString()
-      case 'email':
-        return value
-      case 'number':
-        return typeof value === 'number' ? value.toLocaleString() : value
-      case 'password':
-        return '••••••••'
-      default:
-        return String(value)
-    }
+  // Toggle column expansion
+  const toggleColumnExpansion = useCallback((columnKey: string) => {
+    setExpandedColumns(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(columnKey)) {
+        newSet.delete(columnKey)
+      } else {
+        newSet.add(columnKey)
+      }
+      return newSet
+    })
   }, [])
 
-  // Enhanced memoized data processing with caching
-  const processDocumentFields = useCallback((docs: DocumentType[]) => {
+  // Format field values using the utility function
+  const formatFieldValue = useMemo(() => formatFieldValueUtil, [])
+
+  // Process document fields with caching
+  const processDocumentFieldsWithCache = useCallback((docs: DocumentType[]) => {
     const cacheKey = `processed-fields-${docs.length}-${docs.map(d => d.id).join('-')}`
     const cached = getCachedData(cacheKey)
     if (cached) return cached
 
-    const processedDocs = docs.map((doc, docIndex) => {
-      const processField = (
-        field: any,
-        level = 0,
-        parentId: string | null = null,
-        parentPath: string | null = null,
-        index = 0,
-        baseIndex = ""
-      ): DocumentField[] => {
-        const currentIndex = baseIndex ? `${baseIndex}.${index + 1}` : `${docIndex + 1}.${index + 1}`
-        const subFields = field.arrayConfig?.fields || field.fields || []
-        const hasChildren = (field.type === 'array' || field.isArray) && subFields.length > 0
-
-        const currentField: DocumentField = {
-          ...field,
-          id: field.id || `${doc.id}-${field.name}-${currentIndex}`,
-          kycdocumentid: field.kycdocumentid || doc.kycdocumentid || doc.id,
-          level,
-          parentId,
-          hasChildren,
-          isArrayItem: false,
-          path: currentIndex,
-          index: index + 1,
-          parentPath,
-          required: field.required || false,
-          order: field.order || index
-        }
-
-        const result: DocumentField[] = [currentField]
-
-        if (hasChildren) {
-          subFields.forEach((subField: any, subIndex: number) => {
-            const subFieldResults = processField(
-              subField,
-              level + 1,
-              currentField.id,
-              currentIndex,
-              subIndex,
-              `${currentIndex}`
-            )
-            result.push(...subFieldResults)
-          })
-        }
-
-        return result
-      }
-
-      const processedFields: DocumentField[] = []
-        ; (doc.fields || []).forEach((field, index) => {
-          const fieldResults = processField(field, 0, doc.id, null, index)
-          processedFields.push(...fieldResults)
-        })
-
-      return {
-        ...doc,
-        hasFields: processedFields.length > 0,
-        fields: processedFields
-      }
-    })
+    const processedDocs = processDocumentFields(docs.map(doc => ({
+      ...doc,
+      fields: doc.fields || []
+    })))
 
     setCachedData(cacheKey, processedDocs)
     return processedDocs
   }, [])
 
-  const groupDocumentsByCategory = useCallback((docs: DocumentType[]): GroupedDocuments => {
+  // Group documents by category with caching
+  const groupDocumentsByCategoryWithCache = useCallback((docs: DocumentType[]): GroupedDocuments => {
     const cacheKey = `grouped-docs-${docs.length}-${docs.map(d => d.main_category_number).join('-')}`
     const cached = getCachedData(cacheKey)
     if (cached) return cached
 
-    const grouped = docs.reduce<GroupedDocuments>((acc, doc) => {
-      const key = doc.main_category_number || 'other'
-      if (!acc[key]) {
-        acc[key] = {
-          mainCategory: doc.main_category || 'Other',
-          mainCategoryNumber: doc.main_category_number || '',
-          documents: []
-        }
-      }
-      acc[key].documents.push(doc)
-      return acc
-    }, {})
-
+    const grouped = groupDocumentsByCategory(docs)
     setCachedData(cacheKey, grouped)
     return grouped
   }, [])
 
+  // Optimized filtered documents with deep memoization and caching
   const { filteredDocuments, groupedDocuments } = useMemo(() => {
     renderCountRef.current++
 
@@ -244,38 +134,18 @@ export default function DocumentsFields() {
     const cached = getCachedData(cacheKey)
     if (cached) return cached
 
-    const categoryFilter = CATEGORY_MAPPING[documentTab]
-    const filtered = documents.filter(doc => doc.category === categoryFilter)
-
-    const sorted = filtered.sort((a, b) => {
-      const aCatNum = parseInt(a.main_category_number || '999', 10)
-      const bCatNum = parseInt(b.main_category_number || '999', 10)
-      if (aCatNum !== bCatNum) return aCatNum - bCatNum
-      if (a.custom_order !== null && b.custom_order !== null) {
-        return a.custom_order - b.custom_order
-      }
-      if (a.custom_order !== null) return -1
-      if (b.custom_order !== null) return 1
-      return a.document_number - b.document_number
-    })
-
-    const processed = processDocumentFields(sorted)
-    const grouped = groupDocumentsByCategory(processed)
-
-    const result = {
-      filteredDocuments: processed,
-      groupedDocuments: grouped
-    }
-
+    const result = filterAndSortDocuments(documents, documentTab)
     setCachedData(cacheKey, result)
     return result
-  }, [documents, documentTab, processDocumentFields, groupDocumentsByCategory])
+  }, [documents, documentTab])
 
+  // Enhanced memoized selectors
   const currentDepartment = useMemo(() =>
     departments.find(d => d.id === activeTab) || null,
     [departments, activeTab]
   )
 
+  // Enhanced normalized subdepartments with support for subdepartments without classes
   const normalizedSubdepartments = useMemo(() => {
     if (!currentDepartment?.subdepartments?.length) {
       return [{
@@ -288,6 +158,7 @@ export default function DocumentsFields() {
     }
 
     return currentDepartment.subdepartments.map(dept => {
+      // If subdepartment has no classes, treat the subdepartment itself as a "class"
       if (!dept.classes || dept.classes.length === 0) {
         return {
           ...dept,
@@ -307,92 +178,23 @@ export default function DocumentsFields() {
       }
     })
   }, [currentDepartment])
-  // Initialize column visibility options
-  useEffect(() => {
-    if (normalizedSubdepartments.length > 0) {
-      const columns: ColumnVisibilityOption[] = []
 
-      normalizedSubdepartments.forEach((subdept) => {
-        if (subdept.hasClasses) {
-          subdept.classes?.forEach((cls, clsIndex) => {
-            if (cls.subclasses?.length) {
-              cls.subclasses.forEach((subcls, subclsIndex) => {
-                const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
-                columns.push({
-                  id: columnKey,
-                  label: `${subdept.name} > ${cls.name} > ${subcls.name}`,
-                  visible: expandedColumns.has(columnKey),
-                  group: subdept.name
-                })
-              })
-            } else {
-              const columnKey = getColumnKey(subdept.id, clsIndex)
-              columns.push({
-                id: columnKey,
-                label: `${subdept.name} > ${cls.name}`,
-                visible: expandedColumns.has(columnKey),
-                group: subdept.name
-              })
-            }
-          })
-        } else {
-          const columnKey = getColumnKey(subdept.id, null)
-          columns.push({
-            id: columnKey,
-            label: subdept.name,
-            visible: expandedColumns.has(columnKey),
-            group: 'General'
-          })
-        }
-      })
-
-      setAvailableColumns(columns)
-    }
-  }, [normalizedSubdepartments, expandedColumns, getColumnKey])
-
-  // Reset to default visibility
-  const resetToDefaultColumns = useCallback(() => {
-    const defaultColumns = new Set<string>()
-
-    // Only show columns that have default_display set to true
-    normalizedSubdepartments.forEach((subdept) => {
-      if (subdept.default_display) {
-        if (subdept.hasClasses) {
-          subdept.classes?.forEach((cls, clsIndex) => {
-            if (cls.default_display) {
-              if (cls.subclasses?.length) {
-                cls.subclasses.forEach((subcls, subclsIndex) => {
-                  if (subcls.default_display) {
-                    defaultColumns.add(getColumnKey(subdept.id, clsIndex, subclsIndex))
-                  }
-                })
-              } else {
-                defaultColumns.add(getColumnKey(subdept.id, clsIndex))
-              }
-            }
-          })
-        } else if (subdept.default_display) {
-          defaultColumns.add(getColumnKey(subdept.id, null))
-        }
-      }
-    })
-
-    setExpandedColumns(defaultColumns)
-  }, [normalizedSubdepartments, getColumnKey])
   const clientFormFields = useMemo(() => getTableFields(documentTab), [documentTab])
-  // Initialize with all required properties to prevent undefined errors
-  const groupedClientFields = useMemo(() => ({
-    formSections: {},
-    platformCredentials: {},
-    otherSections: {}
-  }), [])
+  const groupedClientFields = useMemo(() => getGroupedFields(documentTab), [documentTab])
 
-  // Enhanced data fetching with better caching and error handling
+  // Enhanced data fetching with default display filtering
   const fetchData = useCallback(async () => {
     const now = Date.now()
     if (now - lastFetchTimeRef.current < 1000) return
     lastFetchTimeRef.current = now
 
+    const cacheKey = `documents-fields-${documentTab}`
+    const cachedData = getCachedData(cacheKey)
+    if (cachedData) {
+      setDepartments(cachedData.departments)
+      setDocuments(cachedData.documents)
+      return
+    }
     const controller = new AbortController()
 
     try {
@@ -404,12 +206,16 @@ export default function DocumentsFields() {
       )
 
       const fetchPromises = [
+        // Fetch departments with default display filtering
         supabase
           .from('tm_departments')
-          .select(`*, tm_subdepartments (*, classes)`)
-          .eq('default_display', true)
+          .select(`
+          *, 
+          tm_subdepartments (*, classes)
+        `)
           .order('order', { ascending: true })
           .abortSignal(controller.signal),
+
         supabase
           .from('acc_portal_kyc')
           .select('*')
@@ -432,21 +238,26 @@ export default function DocumentsFields() {
       if (documentsResponse.error) throw documentsResponse.error
       if (requirementsResponse.error) throw requirementsResponse.error
 
-      // Process departments and subdepartments with default display filtering
       const transformedDepartments = (deptsResponse.data || []).map((dept: any) => ({
-        ...dept,
-        subdepartments: (dept.tm_subdepartments || [])
-          .filter((subdept: any) => subdept.default_display !== false)
-          .map((subdept: any) => ({
-            ...subdept,
-            classes: (subdept.classes || [])
-              .filter((cls: any) => cls.default_display !== false)
-              .map((cls: any) => ({
-                ...cls,
-                subclasses: (cls.subclasses || []).filter((subcls: any) => subcls.default_display !== false)
-              }))
+  ...dept,
+  subdepartments: (dept.tm_subdepartments || [])
+    .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
+    .map((subdept: any) => ({
+      ...subdept,
+      classes: Array.isArray(subdept.classes)
+        ? subdept.classes.map((cls: any) => ({
+            ...cls,
+            // Keep track of default status but don't filter
+            isDefault: cls.default_display === true,
+            subClasses: (cls.subClasses || []).map((subCls: any) => ({
+              ...subCls,
+              isDefault: subCls.default_display === true
+            }))
           }))
-      }))
+        : [],
+      hasClasses: subdept.classes && Array.isArray(subdept.classes) && subdept.classes.length > 0
+    }))
+}))
 
       const processedDocuments = (documentsResponse.data || []).map((doc: any) => ({
         ...doc,
@@ -485,15 +296,57 @@ export default function DocumentsFields() {
         }
       })
 
+      // Generate available columns for visibility control
+      const columns: ColumnVisibilityOption[] = []
+
+      transformedDepartments.forEach((dept: any) => {
+        dept.subdepartments?.forEach((subdept: any) => {
+          if (subdept.hasClasses) {
+            subdept.classes?.forEach((cls: any, clsIndex: number) => {
+              if (cls.subClasses?.length) {
+                cls.subClasses.forEach((subcls: any, subclsIndex: number) => {
+                  const subclsKey = `subdept_${subdept.id}_cls_${clsIndex}_subcls_${subclsIndex}`
+                  columns.push({
+                    id: subclsKey,
+                    label: `${subdept.name} > ${cls.name} > ${subcls.name}`,
+                    visible: true, // Show all columns by default
+                    isDefault: subcls.isDefault, // Track if this was a default column
+                    group: subdept.name
+                  })
+                })
+              } else {
+                const clsKey = `subdept_${subdept.id}_cls_${clsIndex}`
+                columns.push({
+                  id: clsKey,
+                  label: `${subdept.name} > ${cls.name}`,
+                  visible: true, // Show all columns by default
+                  isDefault: cls.isDefault, // Track if this was a default column
+                  group: subdept.name
+                })
+              }
+            })
+          } else {
+            const subdeptKey = `subdept_${subdept.id}`
+            columns.push({
+              id: subdeptKey,
+              label: subdept.name,
+              visible: true, // Show all columns by default
+              isDefault: subdept.default_display === true, // Track if this was a default column
+              group: dept.name
+            })
+          }
+        })
+      })
+
       const result = {
         departments: transformedDepartments,
         documents: processedDocuments,
         documentAllocations: documentSettings,
-        clientFieldAllocations: clientFieldSettings
+        clientFieldAllocations: clientFieldSettings,
+        availableColumns: columns
       }
 
       // Cache the result
-      const cacheKey = `departments-data-${Date.now()}`
       setCachedData(cacheKey, result)
 
       // Batch state updates using startTransition for better performance
@@ -502,6 +355,7 @@ export default function DocumentsFields() {
         setDocuments(processedDocuments)
         setDocumentAllocations(documentSettings)
         setClientFieldAllocations(clientFieldSettings)
+        setAvailableColumns(columns)
 
         if (transformedDepartments.length > 0) {
           setActiveTab(transformedDepartments[0].id)
@@ -524,7 +378,7 @@ export default function DocumentsFields() {
     }
 
     return () => controller.abort()
-  }, [documentTab, groupDocumentsByCategory, loading])
+  }, [documentTab, groupDocumentsByCategory, loading, columnVisibility])
 
   // Debounced refresh function
   const refreshData = useMemo(
@@ -581,41 +435,75 @@ export default function DocumentsFields() {
     fetchData()
   }, [fetchData])
 
+  // Filter subdepartments based on column visibility
+  const visibleNormalizedSubdepartments = useMemo(() => {
+    if (!currentDepartment?.subdepartments?.length) {
+      return [{
+        id: -1,
+        name: 'No Subdepartments',
+        department_id: currentDepartment?.id || '',
+        hasClasses: false,
+        classes: []
+      }]
+    }
+
+    return currentDepartment.subdepartments
+      .filter((subdept) => hasVisibleColumns(subdept, columnVisibility, getColumnKey))
+      .map(dept => {
+        // First pass: filter classes based on visibility
+        const filteredClasses = dept.classes?.filter((cls, clsIndex) => {
+          if (cls.subClasses?.length) {
+            return cls.subClasses.some((_, subclsIndex) => {
+              const subclsKey = getColumnKey(dept.id, clsIndex, subclsIndex)
+              return columnVisibility[subclsKey] !== false
+            })
+          } else {
+            const clsKey = getColumnKey(dept.id, clsIndex)
+            return columnVisibility[clsKey] !== false
+          }
+        }) || []
+
+        // Second pass: map over filtered classes and process subclasses
+        const processedClasses = filteredClasses.map((cls, clsIndex) => {
+          const filteredSubClasses = cls.subClasses?.filter((_, subclsIndex) => {
+            const subclsKey = getColumnKey(dept.id, clsIndex, subclsIndex)
+            return columnVisibility[subclsKey] !== false
+          }) || []
+
+          return {
+            ...cls,
+            id: cls.id || `class-${cls.name}`,
+            subClasses: filteredSubClasses
+          }
+        })
+
+        return {
+          ...dept,
+          hasClasses: dept.hasClasses,
+          classes: processedClasses
+        }
+      })
+  }, [currentDepartment, columnVisibility])
+
+  // Column visibility control handlers
+  const handleColumnVisibilityChange = useCallback((columnId: string, visible: boolean) => {
+    setColumnVisibility(prev => ({
+      ...prev,
+      [columnId]: visible
+    }))
+  }, [])
+
   // Optimized toggle functions with stable references
   const toggleItemExpansion = useCallback((itemId: string) => {
-    setExpandedItems(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(itemId)) {
-        newSet.delete(itemId)
-      } else {
-        newSet.add(itemId)
-      }
-      return newSet
-    })
+    setExpandedItems(prev => toggleSetItem(prev, itemId))
   }, [])
 
   const toggleCategoryExpansion = useCallback((categoryKey: string) => {
-    setExpandedCategories(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(categoryKey)) {
-        newSet.delete(categoryKey)
-      } else {
-        newSet.add(categoryKey)
-      }
-      return newSet
-    })
+    setExpandedCategories(prev => toggleSetItem(prev, categoryKey))
   }, [])
 
   const toggleClientItemExpansion = useCallback((clientId: string) => {
-    setExpandedClientItems(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(clientId)) {
-        newSet.delete(clientId)
-      } else {
-        newSet.add(clientId)
-      }
-      return newSet
-    })
+    setExpandedClientItems(prev => toggleSetItem(prev, clientId))
   }, [])
 
   const expandAll = useCallback(() => {
@@ -669,33 +557,36 @@ export default function DocumentsFields() {
     })
   }, [])
 
-  // Toggle column expansion
-  const toggleColumnExpansion = useCallback((columnKey: string) => {
-    setExpandedColumns(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(columnKey)) {
-        newSet.delete(columnKey)
-      } else {
-        newSet.add(columnKey)
-      }
-      return newSet
+  const handleShowAllColumns = useCallback(() => {
+    const newVisibility = {}
+    availableColumns.forEach(col => {
+      newVisibility[col.id] = true
     })
-  }, [])
+    setColumnVisibility(newVisibility)
+  }, [availableColumns])
 
-  // Toggle column visibility
-  const handleColumnVisibilityChange = useCallback((columnId: string, visible: boolean) => {
-    toggleColumnExpansion(columnId)
-  }, [toggleColumnExpansion])
+  const handleHideAllColumns = useCallback(() => {
+    const newVisibility = {}
+    availableColumns.forEach(col => {
+      newVisibility[col.id] = false
+    })
+    setColumnVisibility(newVisibility)
+  }, [availableColumns])
 
-  // Show all columns
-  const showAllColumns = useCallback(() => {
-    expandAll()
-  }, [expandAll])
+  const handleResetToDefault = useCallback(() => {
+    const newVisibility = initializeColumnVisibility(availableColumns, columnVisibility)
+    setColumnVisibility(newVisibility)
+  }, [availableColumns, columnVisibility])
 
-  // Hide all columns
-  const hideAllColumns = useCallback(() => {
-    collapseAll()
-  }, [collapseAll])
+  // Initialize column visibility based on default display
+  useEffect(() => {
+    if (availableColumns.length > 0) {
+      const newVisibility = initializeColumnVisibility(availableColumns, columnVisibility)
+      if (newVisibility !== columnVisibility) {
+        setColumnVisibility(newVisibility)
+      }
+    }
+  }, [availableColumns, columnVisibility])
 
   // Enhanced display toggle with support for AP, DP, and understudy
   const handleDisplayToggle = useCallback(async (
@@ -1140,33 +1031,15 @@ export default function DocumentsFields() {
     subclassIndex: number | null = null,
     columnType: 'ap' | 'dp' | 'understudy'
   ) => {
-    const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId)
-
-    // Handle subdepartments without classes
-    if (!subdept?.hasClasses && classIndex === null) {
-      const directKey = [allocationId, subdeptId, 'direct'].join('_')
-      return documentAllocations[directKey]?.[columnType] || false
-    }
-
-    // Handle specific allocation
-    const keyParts = [allocationId, subdeptId]
-    if (classIndex !== null) keyParts.push(String(classIndex))
-    if (subclassIndex !== null) keyParts.push(String(subclassIndex))
-    const allocationKey = keyParts.join('_')
-
-    if (documentAllocations[allocationKey] !== undefined) {
-      return documentAllocations[allocationKey][columnType] || false
-    }
-
-    // Handle subdepartment level checking for subdepartments with classes
-    if (classIndex === null && subdept?.hasClasses) {
-      return subdept.classes?.some((_, clsIdx) => {
-        const classKey = [allocationId, subdeptId, clsIdx].join('_')
-        return documentAllocations[classKey]?.[columnType] === true
-      }) || false
-    }
-
-    return false
+    return getAllocationStatusUtil(
+      allocationId,
+      subdeptId,
+      classIndex,
+      subclassIndex,
+      columnType,
+      documentAllocations,
+      currentDepartment
+    )
   }, [documentAllocations, currentDepartment])
 
   const getClientFieldAllocationStatus = useCallback((
@@ -1408,7 +1281,6 @@ export default function DocumentsFields() {
     ))
   }, [expandedColumns, getColumnKey, shouldShowUnderstudy, getSubmittingStatus, getClientFieldAllocationStatus, handleClientFieldToggle])
 
-  // Early returns with better error states
   if (loading) {
     return (
       <div className="p-12 text-center">
@@ -1449,19 +1321,38 @@ export default function DocumentsFields() {
             )}
           </div>
           <div className="flex gap-3">
+          <ColumnVisibilityControl
+  columns={availableColumns}
+  onVisibilityChange={(columnId, visible) => {
+    setColumnVisibility(prev => ({
+      ...prev,
+      [columnId]: visible
+    }))
+  }}
+  onShowAll={() => {
+    const allVisible = availableColumns.reduce((acc, col) => ({
+      ...acc,
+      [col.id]: true
+    }), {})
+    setColumnVisibility(allVisible)
+  }}
+  onHideAll={() => {
+    const allHidden = availableColumns.reduce((acc, col) => ({
+      ...acc,
+      [col.id]: false
+    }), {})
+    setColumnVisibility(allHidden)
+  }}
+  onResetToDefault={() => {
+    setColumnVisibility(initializeColumnVisibility(availableColumns))
+  }}
+/>
             <Button variant="outline" onClick={expandAll}>
               <Expand className="h-4 w-4 mr-2" />Expand All
             </Button>
             <Button variant="outline" onClick={collapseAll}>
               <Minimize2 className="h-4 w-4 mr-2" />Collapse All
             </Button>
-            <ColumnVisibilityControl
-              columns={availableColumns}
-              onToggleColumn={handleColumnVisibilityChange}
-              onShowAll={showAllColumns}
-              onHideAll={hideAllColumns}
-              onReset={resetToDefaultColumns}
-            />
           </div>
         </div>
 
@@ -1485,6 +1376,9 @@ export default function DocumentsFields() {
                     <div className="text-center py-12 bg-white rounded-lg border">
                       <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600">No data found for this category.</p>
+                      <p className="text-sm text-gray-500 mt-2">
+                        Make sure departments are marked as "Default Display" in the Departments management page.
+                      </p>
                     </div>
                   ) : (
                     <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
@@ -1508,7 +1402,7 @@ export default function DocumentsFields() {
                                     </Tooltip>
                                   </div>
                                 </TableHead>
-                                {normalizedSubdepartments.map((subdept, subIndex) => {
+                                {visibleNormalizedSubdepartments.map((subdept, subIndex) => {
                                   const colSpan = getTotalColSpan(subdept)
                                   const width = Math.max(colSpan * 120, 120)
                                   return (
@@ -1532,7 +1426,7 @@ export default function DocumentsFields() {
 
                               {/* Class Header Row */}
                               <TableRow>
-                                {normalizedSubdepartments.map((subdept, subIndex) =>
+                                {visibleNormalizedSubdepartments.map((subdept, subIndex) =>
                                   subdept.hasClasses ? subdept.classes?.map((cls, clsIndex) => {
                                     const hasSubclasses = cls.subclasses?.length || 0
                                     const columnKey = getColumnKey(subdept.id, clsIndex)
@@ -1580,7 +1474,7 @@ export default function DocumentsFields() {
 
                               {/* Subclass Header Row */}
                               <TableRow>
-                                {normalizedSubdepartments.map((subdept, subIndex) =>
+                                {visibleNormalizedSubdepartments.map((subdept, subIndex) =>
                                   subdept.hasClasses ? subdept.classes?.flatMap((cls, clsIndex) => {
                                     const columnKey = getColumnKey(subdept.id, clsIndex)
                                     const isExpanded = expandedColumns.has(columnKey)
@@ -1629,9 +1523,9 @@ export default function DocumentsFields() {
                                 )}
                               </TableRow>
 
-                              {/* Updated Column Header Row - AP with expandable DP and understudy using individual headers */}
+                              {/* Column Header Row - AP with expandable DP and understudy */}
                               <TableRow>
-                                {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                {visibleNormalizedSubdepartments.flatMap((subdept, subIndex) =>
                                   subdept.hasClasses ? subdept.classes?.flatMap((cls, clsIndex) =>
                                     cls.subclasses?.length ? cls.subclasses.map((_, subclsIndex) => {
                                       const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
@@ -1837,7 +1731,7 @@ export default function DocumentsFields() {
                                                 {isCategoryExpanded ? <Minus className="h-4 w-4 text-gray-600" /> : <Plus className="h-4 w-4 text-gray-600" />}
                                               </div>
                                             </TableCell>
-                                            {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                            {visibleNormalizedSubdepartments.flatMap((subdept, subIndex) =>
                                               subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                 (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
                                                   const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
@@ -1933,7 +1827,7 @@ export default function DocumentsFields() {
                                                       </div>
                                                     </div>
                                                   </TableCell>
-                                                  {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                                  {visibleNormalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                     subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                       (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
                                                         const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
@@ -2053,7 +1947,7 @@ export default function DocumentsFields() {
                                                             )}
                                                           </div>
                                                         </TableCell>
-                                                        {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                                        {visibleNormalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                           subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                             (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
                                                               const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
@@ -2177,7 +2071,7 @@ export default function DocumentsFields() {
                                           </span>
                                         </div>
                                       </TableCell>
-                                      {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                      {visibleNormalizedSubdepartments.flatMap((subdept, subIndex) =>
                                         subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                           (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
                                             const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
@@ -2269,7 +2163,7 @@ export default function DocumentsFields() {
                                             </div>
                                           </div>
                                         </TableCell>
-                                        {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                        {visibleNormalizedSubdepartments.flatMap((subdept, subIndex) =>
                                           subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                             (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
                                               const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
@@ -2368,7 +2262,7 @@ export default function DocumentsFields() {
                                           </span>
                                         </div>
                                       </TableCell>
-                                      {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                      {visibleNormalizedSubdepartments.flatMap((subdept, subIndex) =>
                                         subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                           (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
                                             const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
@@ -2465,7 +2359,7 @@ export default function DocumentsFields() {
                                             </div>
                                           </div>
                                         </TableCell>
-                                        {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                        {visibleNormalizedSubdepartments.flatMap((subdept, subIndex) =>
                                           subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                             (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
                                               const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
@@ -2622,7 +2516,7 @@ export default function DocumentsFields() {
                                             </div>
                                           </div>
                                         </TableCell>
-                                        {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                        {visibleNormalizedSubdepartments.flatMap((subdept, subIndex) =>
                                           subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                             (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
                                               const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
@@ -2737,7 +2631,7 @@ export default function DocumentsFields() {
                                                     </span>
                                                   </div>
                                                 </TableCell>
-                                                {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                                {visibleNormalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                   subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                     (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
                                                       const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
@@ -2831,7 +2725,7 @@ export default function DocumentsFields() {
                                                       </div>
                                                     </div>
                                                   </TableCell>
-                                                  {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                                  {visibleNormalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                     subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                       (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
                                                         const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
@@ -2918,7 +2812,7 @@ export default function DocumentsFields() {
                                                     </span>
                                                   </div>
                                                 </TableCell>
-                                                {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                                {visibleNormalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                   subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                     (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
                                                       const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
@@ -3017,7 +2911,7 @@ export default function DocumentsFields() {
                                                       </div>
                                                     </div>
                                                   </TableCell>
-                                                  {normalizedSubdepartments.flatMap((subdept, subIndex) =>
+                                                  {visibleNormalizedSubdepartments.flatMap((subdept, subIndex) =>
                                                     subdept.hasClasses ? subdept.classes.flatMap((cls, clsIndex) =>
                                                       (cls.subclasses?.length ? cls.subclasses : [null]).flatMap((subcls, subclsIndex) => {
                                                         const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
@@ -3090,7 +2984,24 @@ export default function DocumentsFields() {
                               )}
 
                               {/* Empty state */}
-                              {Object.keys(groupedDocuments).length === 0 && clientFormFields.length === 0 && clientData.length === 0 && (
+                              {visibleNormalizedSubdepartments.length === 0 && (
+                                <TableRow>
+                                  <TableCell colSpan={100} className="text-center py-12 text-gray-500">
+                                    <div className="flex flex-col items-center gap-4">
+                                      <FileText className="h-12 w-12 text-gray-300" />
+                                      <div>
+                                        <h3 className="font-medium text-gray-900">No visible columns</h3>
+                                        <p className="text-sm text-gray-500 mt-1">
+                                          Use the "Column Visibility" button to show columns or check the "Default Display" settings in Departments management.
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              )}
+
+                              {/* Empty state for no data */}
+                              {Object.keys(groupedDocuments).length === 0 && clientFormFields.length === 0 && clientData.length === 0 && visibleNormalizedSubdepartments.length > 0 && (
                                 <TableRow>
                                   <TableCell colSpan={100} className="text-center py-12 text-gray-500">
                                     <div className="flex flex-col items-center gap-4">

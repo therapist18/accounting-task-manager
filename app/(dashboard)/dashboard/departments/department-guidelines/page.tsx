@@ -1046,7 +1046,7 @@ if (!departments || departments.length === 0) {
 }
 
   return (
-    <div className="container mx-auto py-6">
+    <div className="mx-auto py-6">
       <div className="flex flex-col space-y-6">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold">Department Guidelines</h1>
@@ -1143,22 +1143,6 @@ if (!departments || departments.length === 0) {
                   {/* Type and Category Row */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor={`type-${idx}`}>
-                        Type
-                      </Label>
-                      <select
-                        id={`type-${idx}`}
-                        value={guideline.type}
-                        onChange={(e) => handleNewGuidelineChange(idx, 'type', e.target.value)}
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
-                      >
-                        <option value="general">📋 General</option>
-                        <option value="process">⚙️ Process</option>
-                        <option value="warning">⚠️ Warning</option>
-                        <option value="tip">💡 Tip</option>
-                      </select>
-                    </div>
-                    <div className="space-y-2">
                       <Label htmlFor={`category-${idx}`}>
                         Category
                       </Label>
@@ -1169,30 +1153,6 @@ if (!departments || departments.length === 0) {
                         placeholder="e.g., Documentation, Process, Safety"
                       />
                     </div>
-                  </div>
-                  
-                  {/* Checkboxes for properties */}
-                  <div className="flex items-center space-x-6">
-                    <label className="flex items-center space-x-2">
-                      <Checkbox
-                        checked={guideline.isImportant}
-                        onCheckedChange={(checked) => handleNewGuidelineChange(idx, 'isImportant', Boolean(checked))}
-                      />
-                      <span className="text-sm flex items-center">
-                        <AlertTriangle className="h-3 w-3 mr-1 text-red-500" />
-                        Mark as Important
-                      </span>
-                    </label>
-                    <label className="flex items-center space-x-2">
-                      <Checkbox
-                        checked={guideline.isVisible}
-                        onCheckedChange={(checked) => handleNewGuidelineChange(idx, 'isVisible', Boolean(checked))}
-                      />
-                      <span className="text-sm flex items-center">
-                        <Eye className="h-3 w-3 mr-1 text-green-500" />
-                        Visible to Users
-                      </span>
-                    </label>
                   </div>
                 </div>
               </Card>

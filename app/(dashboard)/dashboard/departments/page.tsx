@@ -12,6 +12,7 @@ import DepartmentGuidelines from "./department-guidelines/page"
 import UploadRequirements from "./upload-requirements/page"
 import Webdata from "./webdata/page"
 import DocumentsFields from "./documents+fields/page"
+import JobSpecificQuestions from "./job-specific-questions/page"
 
 type Department = {
   id: string
@@ -97,6 +98,7 @@ export default function DepartmentsPage() {
         <TabsTrigger value="requirements">GOVT Upload Req</TabsTrigger>
         <TabsTrigger value="webdata">Web Data</TabsTrigger>  
         <TabsTrigger value="guidelines">Guidelines</TabsTrigger>
+        <TabsTrigger value="job-specific-questions">Job Specific Questions</TabsTrigger>
         <TabsTrigger value="documents+fields">Documents + Fields</TabsTrigger>
       </TabsList>
       <TabsContent value="departments" className="h-screen">
@@ -116,6 +118,9 @@ export default function DepartmentsPage() {
       </TabsContent>
       <TabsContent value="guidelines" className="h-screen">
         <DepartmentGuidelines departments={departments} />
+      </TabsContent>
+      <TabsContent value="job-specific-questions" className="h-screen">
+        <JobSpecificQuestions departments={departments} />
       </TabsContent>
       <TabsContent value="documents+fields" className="h-screen">
         <DocumentsFields departments={departments} />

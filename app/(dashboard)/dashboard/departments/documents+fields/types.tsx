@@ -2,8 +2,9 @@
 "use client"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { memo, ReactNode } from "react"
+import { memo, ReactNode, useCallback } from "react"
 import { TableCell, TableRow } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 
 
 export interface DocumentField {
@@ -162,3 +163,30 @@ export const TruncatedText = memo(({ text, maxLength = 30, className = '' }: Tru
   )
 })
 TruncatedText.displayName = 'TruncatedText'
+
+export const OptimizedCheckbox = memo(({
+  checked,
+  onCheckedChange,
+  disabled,
+  allocationKey
+}: {
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+  disabled: boolean
+  allocationKey: string
+}) => {
+  const handleChange = useCallback((value: boolean) => {
+    onCheckedChange(value)
+  }, [onCheckedChange])
+
+  return (
+    <Checkbox
+      checked={checked}
+      onCheckedChange={handleChange}
+      disabled={disabled}
+      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+      data-allocation-key={allocationKey}
+    />
+  )
+})
+OptimizedCheckbox.displayName = 'OptimizedCheckbox'

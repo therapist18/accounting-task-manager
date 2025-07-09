@@ -5,51 +5,28 @@ export const CATEGORY_MAPPING = {
 
 // Class D ID for understudy column
 export const CLASS_D_ID = 1750687058159
+export const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes cache
+export const DEBOUNCE_DELAY = 300
 
-// Helper function to get table fields
-export const getTableFields = (): any[] => {
-  // Return default table fields structure
-  return [
-    {
-      accessorKey: "name",
-      header: "Name",
-      cell: (info: any) => info.getValue(),
-    },
-    {
-      accessorKey: "type",
-      header: "Type",
-      cell: (info: any) => info.getValue(),
-    },
-    // Add more fields as needed
-  ]
+export const cache = new Map()
+export const getCachedData = (key: string) => {
+  const item = cache.get(key)
+  if (item && Date.now() - item.timestamp < CACHE_DURATION) {
+    return item.data
+  }
+  cache.delete(key)
+  return null
 }
 
-// Helper function to group fields
-export const getGroupedFields = (fields: any[] = []) => {
-  const grouped: Record<string, any[]> = {}
-  
-  // Ensure fields is an array before calling forEach
-  if (!Array.isArray(fields)) {
-    console.warn('getGroupedFields expected an array but received:', fields)
-    return { 
-      formSections: {},
-      other: [] 
-    }
-  }
-  
-  fields.forEach((field) => {
-    if (field && typeof field === 'object') {
-      const group = field.group || 'other'
-      if (!grouped[group]) {
-        grouped[group] = []
-      }
-      grouped[group].push(field)
-    }
-  })
-  
-  return {
-    formSections: grouped,
-    ...grouped
+export const setCachedData = (key: string, data: any) => {
+  cache.set(key, { data, timestamp: Date.now() })
+}
+
+export const debounce = (func: Function, delay: number) => {
+  let timeoutId: NodeJS.Timeout
+  return (...args: any[]) => {
+    clearTimeout(timeoutId)
+    timeoutId = setTimeout(() => func.apply(null, args), delay)
   }
 }
 
@@ -57,6 +34,10 @@ export const getGroupedFields = (fields: any[] = []) => {
 export default {
   CATEGORY_MAPPING,
   CLASS_D_ID,
-  getTableFields,
-  getGroupedFields,
+  CACHE_DURATION,
+  DEBOUNCE_DELAY,
+  cache,
+  getCachedData,
+  setCachedData,
+  debounce
 }
