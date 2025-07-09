@@ -1,7 +1,6 @@
-// components/ui/column-visibility.tsx
 "use client"
 
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
@@ -30,7 +29,7 @@ interface ColumnVisibilityControlProps {
   description?: string
 }
 
-export const ColumnVisibilityControl: React.FC<ColumnVisibilityControlProps> = ({
+export const ColumnVisibilityControl: React.FC<ColumnVisibilityControlProps> = React.memo(({
   columns,
   onVisibilityChange,
   onShowAll,
@@ -42,25 +41,27 @@ export const ColumnVisibilityControl: React.FC<ColumnVisibilityControlProps> = (
 }) => {
   const [isOpen, setIsOpen] = useState(false)
 
-  // Group columns by their group property
-  const groupedColumns = columns.reduce((acc, column) => {
-    const group = column.group || 'General'
-    if (!acc[group]) {
-      acc[group] = []
-    }
-    acc[group].push(column)
-    return acc
-  }, {} as Record<string, ColumnVisibilityOption[]>)
+  // Group columns by their group property - memoized to prevent recalculation
+  const groupedColumns = useMemo(() => {
+    return columns.reduce((acc, column) => {
+      const group = column.group || 'General'
+      if (!acc[group]) {
+        acc[group] = []
+      }
+      acc[group].push(column)
+      return acc
+    }, {} as Record<string, ColumnVisibilityOption[]>)
+  }, [columns])
 
-  const visibleCount = columns.filter(col => col.visible).length
+  const visibleCount = useMemo(() => columns.filter(col => col.visible).length, [columns])
   const totalCount = columns.length
 
-  const defaultTrigger = (
+  const defaultTrigger = useMemo(() => (
     <Button variant="outline" size="sm" className="flex items-center gap-2">
       <Settings className="h-4 w-4" />
       Columns ({visibleCount}/{totalCount})
     </Button>
-  )
+  ), [visibleCount, totalCount])
 
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
@@ -70,7 +71,7 @@ export const ColumnVisibilityControl: React.FC<ColumnVisibilityControlProps> = (
       <PopoverContent className="w-80" align="end">
         <div className="space-y-4">
           <div>
-            <h4 className="font-medium text-sm">{title}</h4>
+          <h4 className="font-medium text-sm">{title}</h4>
             {description && (
               <p className="text-sm text-muted-foreground">{description}</p>
             )}
@@ -168,6 +169,8 @@ export const ColumnVisibilityControl: React.FC<ColumnVisibilityControlProps> = (
       </PopoverContent>
     </Popover>
   )
-}
+})
+
+ColumnVisibilityControl.displayName = 'ColumnVisibilityControl'
 
 export default ColumnVisibilityControl

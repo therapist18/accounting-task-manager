@@ -873,26 +873,155 @@ export default function DocumentsFields() {
     })
   }, [])
 
-  // Save and discard functions
   const handleSaveAllChanges = useCallback(async () => {
     if (!hasUnsavedChanges) return
-
+  
     setIsSaving(true)
-
+  
     try {
-      // Your existing save logic here
-      // ... (keep your existing save logic)
-      
+      // Group changes by class_id for batch processing
+      const changesByClassId: Record<string, {
+        documents: Record<string, any>;
+        clientFields: Record<string, any>;
+      }> = {}
+  
+      // Process document changes
+      Object.entries(pendingChanges.documents).forEach(([allocationKey, changes]) => {
+        const [allocationId, subdeptId, ...rest] = allocationKey.split('_')
+        
+        const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === parseInt(subdeptId))
+        
+        let classId: string
+        if (!subdept?.hasClasses) {
+          classId = subdeptId
+        } else {
+          const [classIndex, subclassIndex] = rest.map(r => r === 'direct' ? null : parseInt(r))
+          const classItem = classIndex !== null ? subdept?.classes?.[classIndex] : null
+          
+          const idParts = [subdeptId]
+          if (classItem?.id) {
+            idParts.push(String(classItem.id))
+          } else if (classIndex !== null && classIndex !== undefined) {
+            // Fallback to using the index if id is not available
+            idParts.push(String(classIndex))
+          }
+          
+          // Only add subclassIndex if it's defined and not null
+          if (subclassIndex !== null && subclassIndex !== undefined) {
+            idParts.push(String(subclassIndex))
+          }
+          
+          classId = idParts.join('_')
+        }
+  
+        if (!changesByClassId[classId]) {
+          changesByClassId[classId] = { documents: {}, clientFields: {} }
+        }
+  
+        changesByClassId[classId].documents[allocationKey] = {
+          id: allocationKey,
+          ...changes,
+          updated_at: new Date().toISOString()
+        }
+      })
+  
+      // Process client field changes
+      Object.entries(pendingChanges.clientFields).forEach(([allocationKey, changes]) => {
+        const [fieldId, subdeptId, ...rest] = allocationKey.split('_')
+  
+        const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === parseInt(subdeptId))
+  
+        let classId: string
+        if (!subdept?.hasClasses) {
+          classId = subdeptId
+        } else {
+          const [classIndex, subclassIndex] = rest.map(r => r === 'direct' ? null : parseInt(r))
+          const classItem = classIndex !== null ? subdept?.classes?.[classIndex] : null
+          const idParts = [subdeptId]
+          if (classItem?.id) idParts.push(String(classItem.id))
+          if (subclassIndex !== null && subclassIndex !== undefined) idParts.push(String(subclassIndex))
+          classId = idParts.join('_')
+        }
+  
+        if (!changesByClassId[classId]) {
+          changesByClassId[classId] = { documents: {}, clientFields: {} }
+        }
+  
+        changesByClassId[classId].clientFields[allocationKey] = {
+          id: allocationKey,
+          ...changes,
+          updated_at: new Date().toISOString()
+        }
+      })
+  
+      // Save each class_id's changes
+      const savePromises = Object.entries(changesByClassId).map(async ([classId, classChanges]) => {
+        // Get existing data
+        const { data: existingData, error: fetchError } = await supabase
+          .from('tm_class_requirements')
+          .select('documents_and_fields, client_fields')
+          .eq('class_id', classId)
+          .maybeSingle()
+  
+        if (fetchError && fetchError.code !== 'PGRST116') {
+          throw fetchError
+        }
+  
+        // Merge with existing data
+        const existingDocuments = Array.isArray(existingData?.documents_and_fields) ? existingData.documents_and_fields : []
+        const existingClientFields = Array.isArray(existingData?.client_fields) ? existingData.client_fields : []
+  
+        // Update documents
+        const updatedDocuments = [...existingDocuments]
+        Object.values(classChanges.documents).forEach(newDoc => {
+          const existingIndex = updatedDocuments.findIndex(doc => doc.id === newDoc.id)
+          if (existingIndex >= 0) {
+            updatedDocuments[existingIndex] = { ...updatedDocuments[existingIndex], ...newDoc }
+          } else {
+            updatedDocuments.push(newDoc)
+          }
+        })
+  
+        // Update client fields
+        const updatedClientFields = [...existingClientFields]
+        Object.values(classChanges.clientFields).forEach(newField => {
+          const existingIndex = updatedClientFields.findIndex(field => field.id === newField.id)
+          if (existingIndex >= 0) {
+            updatedClientFields[existingIndex] = { ...updatedClientFields[existingIndex], ...newField }
+          } else {
+            updatedClientFields.push(newField)
+          }
+        })
+  
+        // Save to database
+        const recordData = {
+          class_id: classId,
+          documents_and_fields: updatedDocuments,
+          client_fields: updatedClientFields,
+          updated_at: new Date().toISOString(),
+          ...((!existingData) && { created_at: new Date().toISOString() })
+        }
+  
+        const { error: upsertError } = await supabase
+          .from('tm_class_requirements')
+          .upsert(recordData, { onConflict: 'class_id' })
+  
+        if (upsertError) throw upsertError
+      })
+  
+      await Promise.all(savePromises)
+  
+      // Clear pending changes and refresh data
       setPendingChanges({ documents: {}, clientFields: {} })
       setHasUnsavedChanges(false)
       await refreshData()
-
+  
       toast({
         title: "Success",
         description: `Saved ${Object.keys(pendingChanges.documents).length + Object.keys(pendingChanges.clientFields).length} changes successfully`,
         variant: "default",
       })
-
+  
     } catch (error) {
       console.error('Error saving changes:', error)
       toast({
@@ -903,7 +1032,7 @@ export default function DocumentsFields() {
     } finally {
       setIsSaving(false)
     }
-  }, [pendingChanges, hasUnsavedChanges, refreshData])
+  }, [pendingChanges, hasUnsavedChanges, currentDepartment, refreshData])
 
   const handleDiscardChanges = useCallback(() => {
     setPendingChanges({ documents: {}, clientFields: {} })
@@ -989,11 +1118,11 @@ export default function DocumentsFields() {
             />
             <Button variant="outline" onClick={expandAll}>
               <Expand className="h-4 w-4 mr-2" />
-              Expand All
+              Fields
             </Button>
             <Button variant="outline" onClick={collapseAll}>
               <Minimize2 className="h-4 w-4 mr-2" />
-              Collapse All
+              Docs
             </Button>
           </div>
         </div>
@@ -1191,7 +1320,7 @@ export default function DocumentsFields() {
                                               </div>
                                             </TableCell>
                                             {visibleColumns.map(col => (
-                                              <TableCell key={col.columnKey} className="border-r border-blue-400 border-l border-blue-300 text-center">
+                                              <TableCell key={col.columnKey} className="border-r border-l  text-center">
                                                 -
                                               </TableCell>
                                             ))}
