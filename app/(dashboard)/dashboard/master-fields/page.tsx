@@ -211,7 +211,6 @@ export default function JobFieldsManagement() {
     options: [],
     sources: []
   });
-  const [editingField, setEditingField] = useState<JobField | null>(null);
   const [deletingField, setDeleteingField] = useState<JobField | null>(null);
   const [sourcesField, setSourcesField] = useState<JobField | null>(null);
   const [newOption, setNewOption] = useState('');
