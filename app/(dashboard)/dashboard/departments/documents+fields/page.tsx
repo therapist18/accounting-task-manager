@@ -62,6 +62,16 @@ export default function DocumentsFields() {
   const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({})
   const renderCountRef = useRef(0)
   const lastFetchTimeRef = useRef(0)
+  // Add these new state variables
+  const [pendingChanges, setPendingChanges] = useState<{
+    documents: Record<string, { ap: boolean; dp: boolean; understudy: boolean }>;
+    clientFields: Record<string, { ap: boolean; dp: boolean; understudy: boolean }>;
+  }>({
+    documents: {},
+    clientFields: {}
+  })
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
 
   const getColumnKey = useCallback((subdeptId: number, clsIndex: number | null, subclsIndex: number | null = null) => {
     return getColumnKeyUtil(subdeptId, clsIndex, subclsIndex)
@@ -126,9 +136,9 @@ export default function DocumentsFields() {
 
   const { filteredDocuments, groupedDocuments } = useMemo(() => {
     renderCountRef.current++
-  
+
     if (!documents.length) return { filteredDocuments: [], groupedDocuments: {} }
-  
+
     // Remove caching here to prevent loops
     const result = filterAndSortDocuments(documents, documentTab)
     return result
@@ -422,68 +432,68 @@ export default function DocumentsFields() {
   useEffect(() => {
     fetchData()
   }, [documentTab])
- // Fix the visibleNormalizedSubdepartments to prevent loops:
-const visibleNormalizedSubdepartments = useMemo(() => {
-  if (!currentDepartment?.subdepartments?.length) {
-    return [{
-      id: -1,
-      name: 'No Subdepartments',
-      department_id: currentDepartment?.id || '',
-      hasClasses: false,
-      classes: []
-    }]
-  }
+  // Fix the visibleNormalizedSubdepartments to prevent loops:
+  const visibleNormalizedSubdepartments = useMemo(() => {
+    if (!currentDepartment?.subdepartments?.length) {
+      return [{
+        id: -1,
+        name: 'No Subdepartments',
+        department_id: currentDepartment?.id || '',
+        hasClasses: false,
+        classes: []
+      }]
+    }
 
-  // If no column visibility set yet, show only defaults
-  if (Object.keys(columnVisibility).length === 0) {
-    return normalizedSubdepartments.filter(subdept => {
-      if (!subdept.hasClasses) {
-        return subdept.default_display === true
-      }
-      return subdept.classes?.some(cls => cls.isDefault === true) || false
-    })
-  }
-
-  // Filter based on column visibility
-  return normalizedSubdepartments
-    .filter((subdept) => hasVisibleColumns(subdept, columnVisibility, getColumnKey))
-    .map(dept => {
-      if (!dept.hasClasses) return dept
-
-      const filteredClasses = dept.classes?.filter((cls, clsIndex) => {
-        if (cls.subclasses?.length) {
-          return cls.subclasses.some((_, subclsIndex) => {
-            const subclsKey = getColumnKey(dept.id, clsIndex, subclsIndex)
-            return columnVisibility[subclsKey] === true
-          })
-        } else {
-          const clsKey = getColumnKey(dept.id, clsIndex)
-          return columnVisibility[clsKey] === true
+    // If no column visibility set yet, show only defaults
+    if (Object.keys(columnVisibility).length === 0) {
+      return normalizedSubdepartments.filter(subdept => {
+        if (!subdept.hasClasses) {
+          return subdept.default_display === true
         }
-      }) || []
+        return subdept.classes?.some(cls => cls.isDefault === true) || false
+      })
+    }
 
-      return {
-        ...dept,
-        classes: filteredClasses.map((cls, clsIndex) => ({
-          ...cls,
-          id: cls.id || `class-${cls.name}`,
-          subclasses: cls.subclasses?.filter((_, subclsIndex) => {
-            const subclsKey = getColumnKey(dept.id, clsIndex, subclsIndex)
-            return columnVisibility[subclsKey] === true
-          }) || []
-        }))
-      }
+    // Filter based on column visibility
+    return normalizedSubdepartments
+      .filter((subdept) => hasVisibleColumns(subdept, columnVisibility, getColumnKey))
+      .map(dept => {
+        if (!dept.hasClasses) return dept
+
+        const filteredClasses = dept.classes?.filter((cls, clsIndex) => {
+          if (cls.subclasses?.length) {
+            return cls.subclasses.some((_, subclsIndex) => {
+              const subclsKey = getColumnKey(dept.id, clsIndex, subclsIndex)
+              return columnVisibility[subclsKey] === true
+            })
+          } else {
+            const clsKey = getColumnKey(dept.id, clsIndex)
+            return columnVisibility[clsKey] === true
+          }
+        }) || []
+
+        return {
+          ...dept,
+          classes: filteredClasses.map((cls, clsIndex) => ({
+            ...cls,
+            id: cls.id || `class-${cls.name}`,
+            subclasses: cls.subclasses?.filter((_, subclsIndex) => {
+              const subclsKey = getColumnKey(dept.id, clsIndex, subclsIndex)
+              return columnVisibility[subclsKey] === true
+            }) || []
+          }))
+        }
+      })
+  }, [currentDepartment, normalizedSubdepartments, columnVisibility]) // Remove getColumnKey dependency
+
+  const handleColumnVisibilityChange = useCallback((columnId: string, visible: boolean) => {
+    console.log('Toggling column:', columnId, 'to', visible)
+    setColumnVisibility(prev => {
+      const newVisibility = { ...prev, [columnId]: visible }
+      console.log('New visibility state:', Object.values(newVisibility).filter(Boolean).length, 'visible')
+      return newVisibility
     })
-}, [currentDepartment, normalizedSubdepartments, columnVisibility]) // Remove getColumnKey dependency
-
-const handleColumnVisibilityChange = useCallback((columnId: string, visible: boolean) => {
-  console.log('Toggling column:', columnId, 'to', visible)
-  setColumnVisibility(prev => {
-    const newVisibility = { ...prev, [columnId]: visible }
-    console.log('New visibility state:', Object.values(newVisibility).filter(Boolean).length, 'visible')
-    return newVisibility
-  })
-}, [])
+  }, [])
 
   // Optimized toggle functions with stable references
   const toggleItemExpansion = useCallback((itemId: string) => {
@@ -573,23 +583,23 @@ const handleColumnVisibilityChange = useCallback((columnId: string, visible: boo
     }), {})
     setColumnVisibility(defaultVisibility)
   }, [availableColumns])
-// Replace the useEffect for column visibility:
-useEffect(() => {
-  if (availableColumns.length > 0 && Object.keys(columnVisibility).length === 0) {
-    console.log('Initializing column visibility:', availableColumns.length, 'columns')
-    
-    const initialVisibility = availableColumns.reduce((acc, col) => {
-      acc[col.id] = col.visible // Use the visible property from fetchData
-      return acc
-    }, {} as Record<string, boolean>)
-    
-    console.log('Initial visibility:', Object.values(initialVisibility).filter(Boolean).length, 'visible columns')
-    setColumnVisibility(initialVisibility)
-  }
-}, [availableColumns.length]) // Only depend on length to prevent loops
+  // Replace the useEffect for column visibility:
+  useEffect(() => {
+    if (availableColumns.length > 0 && Object.keys(columnVisibility).length === 0) {
+      console.log('Initializing column visibility:', availableColumns.length, 'columns')
 
-  // Enhanced display toggle with support for AP, DP, and understudy
-  const handleDisplayToggle = useCallback(async (
+      const initialVisibility = availableColumns.reduce((acc, col) => {
+        acc[col.id] = col.visible // Use the visible property from fetchData
+        return acc
+      }, {} as Record<string, boolean>)
+
+      console.log('Initial visibility:', Object.values(initialVisibility).filter(Boolean).length, 'visible columns')
+      setColumnVisibility(initialVisibility)
+    }
+  }, [availableColumns.length]) // Only depend on length to prevent loops
+
+  // Replace handleDisplayToggle with this version that tracks changes
+  const handleDisplayToggle = useCallback((
     allocationId: string,
     subdeptId: number,
     classIndex: number | null,
@@ -599,227 +609,28 @@ useEffect(() => {
   ) => {
     const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId)
 
-    // Handle subdepartments without classes
-    if (!subdept?.hasClasses && classIndex === null) {
-      const allocationKey = [allocationId, subdeptId, 'direct'].join('_')
+    // Create allocation key
+    const allocationKey = !subdept?.hasClasses && classIndex === null
+      ? [allocationId, subdeptId, 'direct'].join('_')
+      : [allocationId, subdeptId, classIndex, ...(subclassIndex !== null ? [subclassIndex] : [])].join('_')
 
-      setSubmittingIds(prev => new Set(prev).add(allocationKey))
-
-      const documentOrField = filteredDocuments
-        .flatMap(doc => [doc, ...(doc.fields || [])])
-        .find(item => item.id === allocationId)
-
-      // For subdepartments without classes, use the subdepartment ID directly
-      const classId = String(subdeptId)
-
-      // Optimistic update
-      setDocumentAllocations(prev => ({
-        ...prev,
-        [allocationKey]: {
-          ...prev[allocationKey],
-          [columnType]: checked,
-          kycdocumentid: documentOrField?.kycdocumentid || null
-        }
-      }))
-
-      try {
-        const { data: existingData, error: fetchError } = await supabase
-          .from('tm_class_requirements')
-          .select('documents_and_fields, client_fields')
-          .eq('class_id', classId)
-          .single()
-
-        if (fetchError && fetchError.code !== 'PGRST116') {
-          throw fetchError
-        }
-
-        const currentFields = Array.isArray(existingData?.documents_and_fields)
-          ? existingData.documents_and_fields
-          : []
-
-        const existingField = currentFields.find((item: any) => item.id === allocationKey)
-        const filteredFields = currentFields.filter((item: any) => item.id !== allocationKey)
-
-        const updatedFields = [
-          ...filteredFields,
-          {
-            id: allocationKey,
-            ...(existingField || {}),
-            [columnType]: checked,
-            updated_at: new Date().toISOString()
-          }
-        ]
-
-        const recordData = {
-          class_id: classId,
-          documents_and_fields: updatedFields,
-          client_fields: existingData?.client_fields || [],
-          type: 'subdepartment',
-          updated_at: new Date().toISOString(),
-          ...((!existingData) && { created_at: new Date().toISOString() })
-        }
-
-        const { error: upsertError } = await supabase
-          .from('tm_class_requirements')
-          .upsert(recordData, { onConflict: 'class_id' })
-
-        if (upsertError) throw upsertError
-
-        await refreshData()
-
-        toast({
-          title: "Success",
-          description: `${columnType.toUpperCase()} setting updated successfully`,
-          variant: "default",
-        })
-      } catch (error) {
-        console.error('Error updating display setting:', error)
-
-        // Revert on error
-        setDocumentAllocations(prev => ({
-          ...prev,
-          [allocationKey]: {
-            ...prev[allocationKey],
-            [columnType]: !checked
-          }
-        }))
-
-        toast({
-          title: "Error",
-          description: `Failed to update ${columnType.toUpperCase()} setting`,
-          variant: "destructive",
-        })
-      } finally {
-        setSubmittingIds(prev => {
-          const newSet = new Set(prev)
-          newSet.delete(allocationKey)
-          return newSet
-        })
-      }
-      return
-    }
-
-    // Handle toggling at subdepartment level for subdepartments with classes
-    if (classIndex === null && subdept?.hasClasses) {
-      const togglePromises = subdept.classes?.map((_, idx) =>
-        handleDisplayToggle(allocationId, subdeptId, idx, null, columnType, checked)
-      ) || []
-      await Promise.all(togglePromises)
-      return
-    }
-
-    // Handle regular class/subclass toggling
-    const allocationKey = [
-      allocationId,
-      subdeptId,
-      classIndex,
-      ...(subclassIndex !== null ? [subclassIndex] : [])
-    ].join('_')
-
-    setSubmittingIds(prev => new Set(prev).add(allocationKey))
-
-    const documentOrField = filteredDocuments
-      .flatMap(doc => [doc, ...(doc.fields || [])])
-      .find(item => item.id === allocationId)
-
-    const classItem = classIndex !== null ? subdept?.classes?.[classIndex] : null
-
-    const classId = subdept && classItem
-      ? [
-        subdeptId,
-        classItem.id,
-        ...(subclassIndex !== null ? [subclassIndex] : [])
-      ].join('_')
-      : String(subdeptId)
-
-    // Optimistic update
-    setDocumentAllocations(prev => ({
+    // Update pending changes instead of immediate save
+    setPendingChanges(prev => ({
       ...prev,
-      [allocationKey]: {
-        ...prev[allocationKey],
-        [columnType]: checked,
-        kycdocumentid: documentOrField?.kycdocumentid || null
+      documents: {
+        ...prev.documents,
+        [allocationKey]: {
+          ...prev.documents[allocationKey],
+          [columnType]: checked
+        }
       }
     }))
 
-    try {
-      const { data: existingData, error: fetchError } = await supabase
-        .from('tm_class_requirements')
-        .select('documents_and_fields, client_fields')
-        .eq('class_id', classId)
-        .single()
+    setHasUnsavedChanges(true)
+  }, [currentDepartment])
 
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        throw fetchError
-      }
-
-      const currentFields = Array.isArray(existingData?.documents_and_fields)
-        ? existingData.documents_and_fields
-        : []
-
-      const existingField = currentFields.find((item: any) => item.id === allocationKey)
-      const filteredFields = currentFields.filter((item: any) => item.id !== allocationKey)
-
-      const updatedFields = [
-        ...filteredFields,
-        {
-          id: allocationKey,
-          ...(existingField || {}),
-          [columnType]: checked,
-          updated_at: new Date().toISOString()
-        }
-      ]
-
-      const recordData = {
-        class_id: classId,
-        documents_and_fields: updatedFields,
-        client_fields: existingData?.client_fields || [],
-        type: 'class',
-        updated_at: new Date().toISOString(),
-        ...((!existingData) && { created_at: new Date().toISOString() })
-      }
-
-      const { error: upsertError } = await supabase
-        .from('tm_class_requirements')
-        .upsert(recordData, { onConflict: 'class_id' })
-
-      if (upsertError) throw upsertError
-
-      await refreshData()
-
-      toast({
-        title: "Success",
-        description: `${columnType.toUpperCase()} setting updated successfully`,
-        variant: "default",
-      })
-    } catch (error) {
-      console.error('Error updating display setting:', error)
-
-      // Revert on error
-      setDocumentAllocations(prev => ({
-        ...prev,
-        [allocationKey]: {
-          ...prev[allocationKey],
-          [columnType]: !checked
-        }
-      }))
-
-      toast({
-        title: "Error",
-        description: `Failed to update ${columnType.toUpperCase()} setting`,
-        variant: "destructive",
-      })
-    } finally {
-      setSubmittingIds(prev => {
-        const newSet = new Set(prev)
-        newSet.delete(allocationKey)
-        return newSet
-      })
-    }
-  }, [currentDepartment, refreshData, filteredDocuments])
-
-  // Enhanced client field toggle with support for AP, DP, and understudy
-  const handleClientFieldToggle = useCallback(async (
+  // Similar update for handleClientFieldToggle
+  const handleClientFieldToggle = useCallback((
     fieldId: string,
     subdeptId: number,
     classIndex: number | null,
@@ -829,201 +640,24 @@ useEffect(() => {
   ) => {
     const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId)
 
-    // Handle subdepartments without classes
-    if (!subdept?.hasClasses && classIndex === null) {
-      const allocationKey = [fieldId, subdeptId, 'direct'].join('_')
+    const allocationKey = !subdept?.hasClasses && classIndex === null
+      ? [fieldId, subdeptId, 'direct'].join('_')
+      : [fieldId, subdeptId, classIndex, ...(subclassIndex !== null ? [subclassIndex] : [])].join('_')
 
-      setSubmittingIds(prev => new Set(prev).add(allocationKey))
-      const classId = String(subdeptId)
-
-      setClientFieldAllocations(prev => ({
-        ...prev,
+    setPendingChanges(prev => ({
+      ...prev,
+      clientFields: {
+        ...prev.clientFields,
         [allocationKey]: {
-          ...prev[allocationKey],
+          ...prev.clientFields[allocationKey],
           [columnType]: checked
         }
-      }))
-
-      try {
-        const { data: existingData, error: fetchError } = await supabase
-          .from('tm_class_requirements')
-          .select('documents_and_fields, client_fields')
-          .eq('class_id', classId)
-          .single()
-
-        if (fetchError && fetchError.code !== 'PGRST116') {
-          throw fetchError
-        }
-
-        const currentClientFields = Array.isArray(existingData?.client_fields)
-          ? existingData.client_fields
-          : []
-
-        const existingField = currentClientFields.find((item: any) => item.id === allocationKey)
-        const filteredClientFields = currentClientFields.filter((item: any) => item.id !== allocationKey)
-
-        const updatedClientFields = [
-          ...filteredClientFields,
-          {
-            id: allocationKey,
-            ...(existingField || {}),
-            [columnType]: checked,
-            updated_at: new Date().toISOString()
-          }
-        ]
-
-        const recordData = {
-          class_id: classId,
-          documents_and_fields: existingData?.documents_and_fields || [],
-          client_fields: updatedClientFields,
-          type: 'subdepartment',
-          updated_at: new Date().toISOString(),
-          ...((!existingData) && { created_at: new Date().toISOString() })
-        }
-
-        const { error: upsertError } = await supabase
-          .from('tm_class_requirements')
-          .upsert(recordData, { onConflict: 'class_id' })
-
-        if (upsertError) throw upsertError
-
-        await refreshData()
-
-        toast({
-          title: "Success",
-          description: `${columnType.toUpperCase()} client field setting updated successfully`,
-          variant: "default",
-        })
-      } catch (error) {
-        console.error('Error updating client field setting:', error)
-
-        setClientFieldAllocations(prev => ({
-          ...prev,
-          [allocationKey]: {
-            ...prev[allocationKey],
-            [columnType]: !checked
-          }
-        }))
-
-        toast({
-          title: "Error",
-          description: `Failed to update ${columnType.toUpperCase()} client field setting`,
-          variant: "destructive",
-        })
-      } finally {
-        setSubmittingIds(prev => {
-          const newSet = new Set(prev)
-          newSet.delete(allocationKey)
-          return newSet
-        })
-      }
-      return
-    }
-
-    // Handle regular class/subclass toggling
-    const allocationKey = [
-      fieldId,
-      subdeptId,
-      classIndex,
-      ...(subclassIndex !== null ? [subclassIndex] : [])
-    ].join('_')
-
-    setSubmittingIds(prev => new Set(prev).add(allocationKey))
-
-    const classItem = classIndex !== null ? subdept?.classes?.[classIndex] : null
-
-    const classId = subdept && classItem
-      ? [
-        subdeptId,
-        classItem.id,
-        ...(subclassIndex !== null ? [subclassIndex] : [])
-      ].join('_')
-      : String(subdeptId)
-
-    setClientFieldAllocations(prev => ({
-      ...prev,
-      [allocationKey]: {
-        ...prev[allocationKey],
-        [columnType]: checked
       }
     }))
 
-    try {
-      const { data: existingData, error: fetchError } = await supabase
-        .from('tm_class_requirements')
-        .select('documents_and_fields, client_fields')
-        .eq('class_id', classId)
-        .single()
+    setHasUnsavedChanges(true)
+  }, [currentDepartment])
 
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        throw fetchError
-      }
-
-      const currentClientFields = Array.isArray(existingData?.client_fields)
-        ? existingData.client_fields
-        : []
-
-      const existingField = currentClientFields.find((item: any) => item.id === allocationKey)
-      const filteredClientFields = currentClientFields.filter((item: any) => item.id !== allocationKey)
-
-      const updatedClientFields = [
-        ...filteredClientFields,
-        {
-          id: allocationKey,
-          ...(existingField || {}),
-          [columnType]: checked,
-          updated_at: new Date().toISOString()
-        }
-      ]
-
-      const recordData = {
-        class_id: classId,
-        documents_and_fields: existingData?.documents_and_fields || [],
-        client_fields: updatedClientFields,
-        type: 'class',
-        updated_at: new Date().toISOString(),
-        ...((!existingData) && { created_at: new Date().toISOString() })
-      }
-
-      const { error: upsertError } = await supabase
-        .from('tm_class_requirements')
-        .upsert(recordData, { onConflict: 'class_id' })
-
-      if (upsertError) throw upsertError
-
-      await refreshData()
-
-      toast({
-        title: "Success",
-        description: `${columnType.toUpperCase()} client field setting updated successfully`,
-        variant: "default",
-      })
-    } catch (error) {
-      console.error('Error updating client field setting:', error)
-
-      setClientFieldAllocations(prev => ({
-        ...prev,
-        [allocationKey]: {
-          ...prev[allocationKey],
-          [columnType]: !checked
-        }
-      }))
-
-      toast({
-        title: "Error",
-        description: `Failed to update ${columnType.toUpperCase()} client field setting`,
-        variant: "destructive",
-      })
-    } finally {
-      setSubmittingIds(prev => {
-        const newSet = new Set(prev)
-        newSet.delete(allocationKey)
-        return newSet
-      })
-    }
-  }, [currentDepartment, refreshData])
-
-  // Enhanced helper functions with better caching and support for AP, DP, and understudy
   const getAllocationStatus = useCallback((
     allocationId: string,
     subdeptId: number,
@@ -1031,6 +665,18 @@ useEffect(() => {
     subclassIndex: number | null = null,
     columnType: 'ap' | 'dp' | 'understudy'
   ) => {
+    const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId)
+
+    const allocationKey = !subdept?.hasClasses && classIndex === null
+      ? [allocationId, subdeptId, 'direct'].join('_')
+      : [allocationId, subdeptId, classIndex, ...(subclassIndex !== null ? [subclassIndex] : [])].join('_')
+
+    // Check pending changes first
+    if (pendingChanges.documents[allocationKey]?.[columnType] !== undefined) {
+      return pendingChanges.documents[allocationKey][columnType]
+    }
+
+    // Fall back to saved state
     return getAllocationStatusUtil(
       allocationId,
       subdeptId,
@@ -1040,7 +686,7 @@ useEffect(() => {
       documentAllocations,
       currentDepartment
     )
-  }, [documentAllocations, currentDepartment])
+  }, [pendingChanges.documents, documentAllocations, currentDepartment])
 
   const getClientFieldAllocationStatus = useCallback((
     fieldId: string,
@@ -1051,18 +697,26 @@ useEffect(() => {
   ) => {
     const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId)
 
-    // Handle subdepartments without classes
-    if (!subdept?.hasClasses && classIndex === null) {
-      const directKey = [fieldId, subdeptId, 'direct'].join('_')
-      return clientFieldAllocations[directKey]?.[columnType] || false
+    const allocationKey = !subdept?.hasClasses && classIndex === null
+      ? [fieldId, subdeptId, 'direct'].join('_')
+      : [fieldId, subdeptId, classIndex, ...(subclassIndex !== null ? [subclassIndex] : [])].join('_')
+
+    // Check pending changes first
+    if (pendingChanges.clientFields[allocationKey]?.[columnType] !== undefined) {
+      return pendingChanges.clientFields[allocationKey][columnType]
     }
 
-    const keyParts = [fieldId, subdeptId]
-    if (classIndex !== null) keyParts.push(String(classIndex))
-    if (subclassIndex !== null) keyParts.push(String(subclassIndex))
-    const allocationKey = keyParts.join('_')
-    return clientFieldAllocations[allocationKey]?.[columnType] || false
-  }, [clientFieldAllocations, currentDepartment])
+    // Fall back to saved state
+    return getClientFieldAllocationStatusUtil(
+      fieldId,
+      subdeptId,
+      classIndex,
+      subclassIndex,
+      columnType,
+      clientFieldAllocations,
+      currentDepartment
+    )
+  }, [pendingChanges.clientFields, clientFieldAllocations, currentDepartment])
 
   // Update the getTotalColSpan function to handle colspan 3
   const getTotalColSpan = useCallback((subdept: Subdepartment) => {
@@ -1117,6 +771,159 @@ useEffect(() => {
     const allocationKey = keyParts.join('_')
     return submittingIds.has(allocationKey)
   }, [submittingIds, currentDepartment])
+
+  const handleSaveAllChanges = useCallback(async () => {
+    if (!hasUnsavedChanges) return
+
+    setIsSaving(true)
+
+    try {
+      // Group changes by class_id for batch processing
+      const changesByClassId: Record<string, {
+        documents: Record<string, any>;
+        clientFields: Record<string, any>;
+      }> = {}
+
+      // Process document changes
+      Object.entries(pendingChanges.documents).forEach(([allocationKey, changes]) => {
+        const [allocationId, subdeptId, ...rest] = allocationKey.split('_')
+
+        const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === parseInt(subdeptId))
+
+        let classId: string
+        if (!subdept?.hasClasses) {
+          classId = subdeptId
+        } else {
+          const [classIndex, subclassIndex] = rest.map(r => r === 'direct' ? null : parseInt(r))
+          const classItem = classIndex !== null ? subdept?.classes?.[classIndex] : null
+          classId = subdept && classItem
+            ? [subdeptId, classItem.id, ...(subclassIndex !== null ? [subclassIndex] : [])].join('_')
+            : subdeptId
+        }
+
+        if (!changesByClassId[classId]) {
+          changesByClassId[classId] = { documents: {}, clientFields: {} }
+        }
+
+        changesByClassId[classId].documents[allocationKey] = {
+          id: allocationKey,
+          ...changes,
+          updated_at: new Date().toISOString()
+        }
+      })
+
+      // Process client field changes
+      Object.entries(pendingChanges.clientFields).forEach(([allocationKey, changes]) => {
+        const [fieldId, subdeptId, ...rest] = allocationKey.split('_')
+
+        const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === parseInt(subdeptId))
+
+        let classId: string
+        if (!subdept?.hasClasses) {
+          classId = subdeptId
+        } else {
+          const [classIndex, subclassIndex] = rest.map(r => r === 'direct' ? null : parseInt(r))
+          const classItem = classIndex !== null ? subdept?.classes?.[classIndex] : null
+          classId = subdept && classItem
+            ? [subdeptId, classItem.id, ...(subclassIndex !== null ? [subclassIndex] : [])].join('_')
+            : subdeptId
+        }
+
+        if (!changesByClassId[classId]) {
+          changesByClassId[classId] = { documents: {}, clientFields: {} }
+        }
+
+        changesByClassId[classId].clientFields[allocationKey] = {
+          id: allocationKey,
+          ...changes,
+          updated_at: new Date().toISOString()
+        }
+      })
+
+      // Save each class_id's changes
+      const savePromises = Object.entries(changesByClassId).map(async ([classId, classChanges]) => {
+        // Get existing data
+        const { data: existingData, error: fetchError } = await supabase
+          .from('tm_class_requirements')
+          .select('documents_and_fields, client_fields')
+          .eq('class_id', classId)
+          .single()
+
+        if (fetchError && fetchError.code !== 'PGRST116') {
+          throw fetchError
+        }
+
+        // Merge with existing data
+        const existingDocuments = Array.isArray(existingData?.documents_and_fields) ? existingData.documents_and_fields : []
+        const existingClientFields = Array.isArray(existingData?.client_fields) ? existingData.client_fields : []
+
+        // Update documents
+        const updatedDocuments = [...existingDocuments]
+        Object.values(classChanges.documents).forEach(newDoc => {
+          const existingIndex = updatedDocuments.findIndex(doc => doc.id === newDoc.id)
+          if (existingIndex >= 0) {
+            updatedDocuments[existingIndex] = { ...updatedDocuments[existingIndex], ...newDoc }
+          } else {
+            updatedDocuments.push(newDoc)
+          }
+        })
+
+        // Update client fields
+        const updatedClientFields = [...existingClientFields]
+        Object.values(classChanges.clientFields).forEach(newField => {
+          const existingIndex = updatedClientFields.findIndex(field => field.id === newField.id)
+          if (existingIndex >= 0) {
+            updatedClientFields[existingIndex] = { ...updatedClientFields[existingIndex], ...newField }
+          } else {
+            updatedClientFields.push(newField)
+          }
+        })
+
+        // Save to database
+        const recordData = {
+          class_id: classId,
+          documents_and_fields: updatedDocuments,
+          client_fields: updatedClientFields,
+          updated_at: new Date().toISOString(),
+          ...((!existingData) && { created_at: new Date().toISOString() })
+        }
+
+        const { error: upsertError } = await supabase
+          .from('tm_class_requirements')
+          .upsert(recordData, { onConflict: 'class_id' })
+
+        if (upsertError) throw upsertError
+      })
+
+      await Promise.all(savePromises)
+
+      // Clear pending changes and refresh data
+      setPendingChanges({ documents: {}, clientFields: {} })
+      setHasUnsavedChanges(false)
+      await refreshData()
+
+      toast({
+        title: "Success",
+        description: `Saved ${Object.keys(pendingChanges.documents).length + Object.keys(pendingChanges.clientFields).length} changes successfully`,
+        variant: "default",
+      })
+
+    } catch (error) {
+      console.error('Error saving changes:', error)
+      toast({
+        title: "Error",
+        description: "Failed to save changes. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }, [pendingChanges, hasUnsavedChanges, currentDepartment, refreshData])
+
+  const handleDiscardChanges = useCallback(() => {
+    setPendingChanges({ documents: {}, clientFields: {} })
+    setHasUnsavedChanges(false)
+  }, [])
 
   const renderDocumentCheckboxes = useCallback((
     doc: DocumentType,
@@ -1282,20 +1089,26 @@ useEffect(() => {
   }, [expandedColumns, getColumnKey, shouldShowUnderstudy, getSubmittingStatus, getClientFieldAllocationStatus, handleClientFieldToggle])
 
   // Add this useEffect for debugging:
-useEffect(() => {
-  if (process.env.NODE_ENV === 'development') {
-    console.log('Component state:', {
-      renderCount: renderCountRef.current,
-      availableColumnsCount: availableColumns.length,
-      visibleColumnsCount: Object.values(columnVisibility).filter(Boolean).length,
-      totalColumnsVisibility: Object.keys(columnVisibility).length,
-      departmentsCount: departments.length,
-      sampleColumnKeys: availableColumns.slice(0, 3).map(col => col.id),
-      sampleVisibilityKeys: Object.keys(columnVisibility).slice(0, 3)
-    })
-  }
-}, [availableColumns.length, Object.keys(columnVisibility).length, departments.length])
-
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Component state:', {
+        renderCount: renderCountRef.current,
+        availableColumnsCount: availableColumns.length,
+        visibleColumnsCount: Object.values(columnVisibility).filter(Boolean).length,
+        totalColumnsVisibility: Object.keys(columnVisibility).length,
+        departmentsCount: departments.length,
+        sampleColumnKeys: availableColumns.slice(0, 3).map(col => col.id),
+        sampleVisibilityKeys: Object.keys(columnVisibility).slice(0, 3)
+      })
+    }
+  }, [availableColumns.length, Object.keys(columnVisibility).length, departments.length])
+  // Update the availableColumns when columnVisibility changes
+  const updatedAvailableColumns = useMemo(() => {
+    return availableColumns.map(col => ({
+      ...col,
+      visible: columnVisibility[col.id] || false
+    }))
+  }, [availableColumns, columnVisibility])
   if (loading) {
     return (
       <div className="p-12 text-center">
@@ -1333,21 +1146,40 @@ useEffect(() => {
           <div>
             <h1 className="text-3xl font-semibold text-gray-900">Document Management</h1>
             <p className="text-gray-600 mt-1">Manage document types and allocations</p>
-            {process.env.NODE_ENV === 'development' && (
-              <p className="text-xs text-gray-400 mt-1">Renders: {renderCountRef.current}</p>
+            {hasUnsavedChanges && (
+              <p className="text-orange-600 text-sm mt-1">
+                You have {Object.keys(pendingChanges.documents).length + Object.keys(pendingChanges.clientFields).length} unsaved changes
+              </p>
             )}
-
           </div>
           <div className="flex gap-3">
-          <ColumnVisibilityControl
-  columns={availableColumns}
-  onVisibilityChange={handleColumnVisibilityChange}
-  onShowAll={handleShowAllColumns}
-  onHideAll={handleHideAllColumns}
-  onResetToDefault={handleResetToDefault}
-  title="Column Visibility"
-  description="Show/hide department columns"
-/>
+            {hasUnsavedChanges && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={handleDiscardChanges}
+                  disabled={isSaving}
+                >
+                  Discard Changes
+                </Button>
+                <Button
+                  onClick={handleSaveAllChanges}
+                  disabled={isSaving}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  {isSaving ? 'Saving...' : 'Save All Changes'}
+                </Button>
+              </>
+            )}
+            <ColumnVisibilityControl
+              columns={updatedAvailableColumns}
+              onVisibilityChange={handleColumnVisibilityChange}
+              onShowAll={handleShowAllColumns}
+              onHideAll={handleHideAllColumns}
+              onResetToDefault={handleResetToDefault}
+              title="Column Visibility"
+              description="Show/hide department columns"
+            />
             <Button variant="outline" onClick={expandAll}>
               <Expand className="h-4 w-4 mr-2" />Expand All
             </Button>
