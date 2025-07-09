@@ -74,6 +74,139 @@ export function RequirementsTable({
 
   // State for principal member data for dependants
   const [principalMemberData, setPrincipalMemberData] = useState<Record<string, any>>({})
+  // State to store individual names for display in table headers
+  const [individualNames, setIndividualNames] = useState<Record<number, string>>({})
+
+  // State to store all individual documents
+  const [allIndividualDocuments, setAllIndividualDocuments] = useState<Record<string, any[]>>({});
+  const [allCompanyDocuments, setAllCompanyDocuments] = useState<Record<string, any[]>>({});
+  const [documentsLoaded, setDocumentsLoaded] = useState(false);
+
+  // Fetch all individual names and documents
+  const fetchAllIndividualData = useCallback(async (tasks: any[]) => {
+    const uniqueIds = new Set<number>();
+
+    // Collect all individual IDs from tasks
+    tasks.forEach(task => {
+      if (task.principal_member) {
+        uniqueIds.add(task.principal_member);
+      }
+      if (task.understudy_member) {
+        uniqueIds.add(task.understudy_member);
+      }
+      if (task.dependant) {
+        uniqueIds.add(task.dependant);
+      }
+      if (task.individual_id) {
+        uniqueIds.add(task.individual_id);
+      }
+    });
+
+    // Get individual names
+    try {
+      const { data: individuals, error } = await supabase
+        .from('registry_individuals')
+        .select('id, full_name')
+        .in('id', Array.from(uniqueIds));
+
+      if (error) throw error;
+
+      const namesMap = individuals?.reduce((acc, individual) => {
+        acc[individual.id] = individual.full_name;
+        return acc;
+      }, {} as Record<string, string>);
+
+      setIndividualNames(namesMap || {});
+    } catch (error) {
+      console.error('Error fetching individual names:', error);
+    }
+
+    // Fetch documents
+    try {
+      const { data: documents, error } = await supabase
+        .from('acc_portal_directors_documents')
+        .select(`
+          *,
+          acc_portal_kyc (
+            id,
+            name,
+            display_name
+          )
+        `)
+        .in('director_id', Array.from(uniqueIds))
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const documentsByDirector = documents?.reduce((acc, doc) => {
+        const directorId = doc.director_id;
+        if (!acc[directorId]) {
+          acc[directorId] = [];
+        }
+        acc[directorId].push(doc);
+        return acc;
+      }, {} as Record<string, any[]>);
+
+      setAllIndividualDocuments(documentsByDirector || {});
+    } catch (error) {
+      console.error('Error fetching all individual documents:', error);
+    }
+  }, [principalMemberData]);
+
+  // Fetch all company documents for the current user
+  const fetchAllCompanyDocuments = useCallback(async (tasks: any[]) => {
+    const companyIds = [...new Set(tasks.map(t => t.company_id).filter(Boolean))];
+    if (companyIds.length === 0) return;
+
+    try {
+      const { data: documents, error } = await supabase
+        .from('acc_portal_kyc_uploads')
+        .select(`
+          *,
+          acc_portal_kyc (
+            id,
+            name,
+            display_name
+          )
+        `)
+        .in('company_id', companyIds)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const documentsByCompany = documents?.reduce((acc, doc) => {
+        const companyId = doc.company_id;
+        if (!acc[companyId]) {
+          acc[companyId] = [];
+        }
+        acc[companyId].push(doc);
+        return acc;
+      }, {} as Record<string, any[]>);
+
+      setAllCompanyDocuments(documentsByCompany || {});
+    } catch (error) {
+      console.error('Error fetching all company documents:', error);
+    }
+  }, []);
+
+  // Get individual documents from cached data
+  const getIndividualDocuments = useCallback((task: any, documentId: string) => {
+    const cleanDocumentId = documentId.split('-').slice(0, 5).join('-');
+    let searchId = task.individual_id;
+
+    // For dependants, use the principal member ID
+    if (task.applicant_type === 'dependant') {
+      const principalData = principalMemberData[task.id];
+      if (principalData) {
+        searchId = principalData.individual_id;
+      }
+    }
+
+    const documents = allIndividualDocuments[searchId] || [];
+    const document = documents.find(doc => doc.id === cleanDocumentId);
+
+    return document;
+  }, [allIndividualDocuments, principalMemberData]);
 
   // Get client form fields based on document tab
   const clientFormFields = useMemo(() => {
@@ -158,133 +291,7 @@ export function RequirementsTable({
     };
   }, []);
 
-  // State to store all individual documents
-  const [allIndividualDocuments, setAllIndividualDocuments] = useState<Record<string, any[]>>({});
-  const [allCompanyDocuments, setAllCompanyDocuments] = useState<Record<string, any[]>>({});
-  const [documentsLoaded, setDocumentsLoaded] = useState(false);
-
-  // Fetch principal member data for dependants
-  const fetchPrincipalMemberData = useCallback(async (tasks: any[]) => {
-    const principalData: Record<string, any> = {};
-
-    for (const task of tasks) {
-      if (task.applicant_type === 'dependant' && task.individual_id) {
-        try {
-          // Get the dependant's data to find principal relationship
-          const { data: dependantData, error: dependantError } = await supabase
-            .from('registry_individuals')
-            .select('relationships')
-            .single();
-
-          if (error) throw error;
-          if (principalMember) {
-            principalData[task.id] = principalMember;
-          }
-        } catch (error) {
-          console.error(`Error fetching principal data for task ${task.id}:`, error);
-        }
-      }
-    }
-
-    setPrincipalMemberData(prev => {
-      const hasChanges = JSON.stringify(prev) !== JSON.stringify(principalData);
-      return hasChanges ? principalData : prev;
-    });
-  }, [supabase]);
-
-  // Fetch all individual documents for the current user
-  const fetchAllIndividualDocuments = useCallback(async (tasks: any[]) => {
-    const individualIds = new Set<number>();
-
-    tasks.forEach(task => {
-      if (task.individual_id) {
-        individualIds.add(task.individual_id);
-      }
-      if (task.applicant_type === 'dependant' && principalMemberData[task.id]) {
-        individualIds.add(principalMemberData[task.id].id);
-      }
-    });
-
-    if (individualIds.size === 0) return;
-
-    try {
-      const { data: documents, error } = await supabase
-        .from('acc_portal_directors_documents')
-        .select(`
-          *,
-          acc_portal_kyc (
-            id,
-            name,
-            display_name
-          )
-        `)
-        .in('director_id', Array.from(individualIds))
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      const documentsByDirector = documents?.reduce((acc, doc) => {
-        const directorId = doc.director_id;
-        if (!acc[directorId]) {
-          acc[directorId] = [];
-        }
-        acc[directorId].push(doc);
-        return acc;
-      }, {} as Record<string, any[]>);
-
-      setAllIndividualDocuments(documentsByDirector || {});
-    } catch (error) {
-      console.error('Error fetching all individual documents:', error);
-    }
-  }, [principalMemberData]);
-
-  // Fetch all company documents for the current user
-  const fetchAllCompanyDocuments = useCallback(async (tasks: any[]) => {
-    const companyIds = [...new Set(tasks.map(t => t.company_id).filter(Boolean))];
-    if (companyIds.length === 0) return;
-
-    try {
-      const { data: documents, error } = await supabase
-        .from('acc_portal_kyc_uploads')
-        .select(`
-          *,
-          acc_portal_kyc (
-            id,
-            name,
-            display_name
-          )
-        `)
-        .in('company_id', companyIds)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      const documentsByCompany = documents?.reduce((acc, doc) => {
-        const companyId = doc.company_id;
-        if (!acc[companyId]) {
-          acc[companyId] = [];
-        }
-        acc[companyId].push(doc);
-        return acc;
-      }, {} as Record<string, any[]>);
-
-      setAllCompanyDocuments(documentsByCompany || {});
-    } catch (error) {
-      console.error('Error fetching all company documents:', error);
-    }
-  }, []);
-
-  // Get individual documents from cached data
-  const getIndividualDocuments = useCallback((task: any, documentId: string) => {
-    const cleanDocumentId = documentId.split('-').slice(0, 5).join('-');
-
-    if (!task.individual_id || !allIndividualDocuments[task.individual_id]) return [];
-
-    return allIndividualDocuments[task.individual_id].filter(doc =>
-      doc.document_id === cleanDocumentId
-    );
-  }, [allIndividualDocuments]);
-
+  
   // Get company documents from cached data
   const getCompanyDocuments = useCallback((task: any, documentId: string) => {
     if (!task.company_id || !allCompanyDocuments[task.company_id]) return [];
@@ -304,9 +311,8 @@ export function RequirementsTable({
     const loadDocuments = async () => {
       setDocumentsLoaded(false);
       try {
-        await fetchPrincipalMemberData(filteredTasks);
         await Promise.all([
-          fetchAllIndividualDocuments(filteredTasks),
+          fetchAllIndividualData(filteredTasks),
           fetchAllCompanyDocuments(filteredTasks)
         ]);
       } catch (error) {
@@ -323,7 +329,7 @@ export function RequirementsTable({
     return () => {
       isMounted = false;
     };
-  }, [filteredTasks]);
+  }, [filteredTasks, fetchAllIndividualData, fetchAllCompanyDocuments]);
 
   // Check if a task has a specific document/field item
   const taskHasItem = useCallback((taskId: string, itemId: string) => {
@@ -333,119 +339,84 @@ export function RequirementsTable({
     return classRequirements.documents_and_fields?.some((item: any) => item.id === itemId) || false;
   }, [taskClassRequirements]);
 
-  // Function to get document applicability across all columns
-  const getDocumentApplicability = useCallback((item: any) => {
-    if (!item) {
-      return {
-        principal: false,
-        dependant: false,
-        understudy: false
-      };
+  // Updated: Function to get document applicability for specific applicant type
+  const getDocumentApplicability = useCallback((item: any, applicantType: ApplicantType) => {
+    if (!item) return false;
+
+    // Check if display is explicitly false
+    if (item.display === false) return false;
+
+    // Check specific applicant type settings
+    switch (applicantType) {
+      case 'principal':
+        return item.ap === true || item.display === true;
+      case 'dependant':
+        return item.dp === true;
+      case 'understudy':
+        return item.understudy === true;
+      default:
+        return false;
     }
-
-    // Check display setting first - if display is false, it's not applicable to any type
-    if (item.display === false) {
-      return {
-        principal: false,
-        dependant: false,
-        understudy: false
-      };
-    }
-
-    // Check specific applicant type settings from the item itself
-    const appliesToPrincipal = item.ap === true;
-    const appliesToDependant = item.dp === true;
-    const appliesToUnderstudy = item.understudy === true;
-
-    // If all are explicitly false, return all false
-    if (item.ap === false && item.dp === false && item.understudy === false) {
-      return {
-        principal: false,
-        dependant: false,
-        understudy: false
-      };
-    }
-
-    // If no specific type is set (all undefined), default to principal only
-    if (item.ap === undefined && item.dp === undefined && item.understudy === undefined) {
-      return {
-        principal: true,
-        dependant: false,
-        understudy: false
-      };
-    }
-
-    // Use the explicit settings
-    return {
-      principal: appliesToPrincipal,
-      dependant: appliesToDependant,
-      understudy: appliesToUnderstudy
-    };
   }, []);
+
+  // Updated: Get document status for specific column/applicant type
   const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: ApplicantType): DocumentStatus => {
     const itemId = item.selectionId || item.id;
     const statusKey = `${task.id}-${itemId}-${columnType}`;
   
-    // Check cache
+    // Check cache first
     if (documentStatuses[statusKey]) {
       return documentStatuses[statusKey];
     }
   
-    // Get document applicability
-    const applicability = getDocumentApplicability(item);
-  
-    // Determine if this document should be shown in this column
-    let showInThisColumn = false;
+    // Check if this document/field is applicable to this column type
+    const isApplicable = getDocumentApplicability(item, columnType);
     
-    switch (columnType) {
-      case 'principal':
-        showInThisColumn = applicability.principal !== false;
-        break;
-      case 'dependant':
-        showInThisColumn = applicability.dependant === true;
-        break;
-      case 'understudy':
-        showInThisColumn = applicability.understudy === true;
-        break;
-    }
-  
     // If not applicable to this column, return N/A status
-    if (!showInThisColumn) {
+    if (!isApplicable) {
       const naStatus: DocumentStatus = {
         type: 'na',
         documents: [],
         count: 0,
-        applicantTypes: applicability
+        applicantTypes: {
+          principal: getDocumentApplicability(item, 'principal'),
+          dependant: getDocumentApplicability(item, 'dependant'),
+          understudy: getDocumentApplicability(item, 'understudy')
+        }
       };
       setDocumentStatuses(prev => ({ ...prev, [statusKey]: naStatus }));
       return naStatus;
     }
-  
-    // For applicable columns, always return 'missing' to show upload button
-    // We'll check for existing documents if needed
-    const status: DocumentStatus = {
+
+    // For applicable columns, check for existing documents
+    let status: DocumentStatus = {
       type: 'missing',
       documents: [],
       count: 0,
-      applicantTypes: applicability
+      applicantTypes: {
+        principal: getDocumentApplicability(item, 'principal'),
+        dependant: getDocumentApplicability(item, 'dependant'),
+        understudy: getDocumentApplicability(item, 'understudy')
+      }
     };
-  
+
     // Try to get existing documents if possible
     try {
       let documentId = item.kycdocumentid || item.id;
       if (documentId) {
+        // Clean the document ID
         if (documentId.includes('_')) {
           const parts = documentId.split('_');
           documentId = parts[0];
         }
-  
+
         let documents: any[] = [];
         if (documentTab === 'individual') {
           documents = getIndividualDocuments(task, documentId);
         } else if (documentTab === 'company') {
           documents = getCompanyDocuments(task, documentId);
         }
-  
+
         if (documents && documents.length > 0) {
           status.type = 'view';
           status.documents = documents;
@@ -456,11 +427,11 @@ export function RequirementsTable({
       console.error('Error checking documents:', error);
       // If there's an error, we'll still show the upload button
     }
-  
+
     // Cache the status
     setDocumentStatuses(prev => ({ ...prev, [statusKey]: status }));
     return status;
-  }, [documentTab, getDocumentApplicability, getIndividualDocuments, getCompanyDocuments, documentStatuses, parseSelectionId]);
+  }, [documentTab, getDocumentApplicability, getIndividualDocuments, getCompanyDocuments, documentStatuses]);
 
   // Calculate statistics
   const calculateStats = useMemo(() => {
@@ -490,7 +461,7 @@ export function RequirementsTable({
     return stats;
   }, [documentStatuses]);
 
-  // Fetch all required data (keeping existing logic)
+  // Updated: Fetch all required data with proper class requirements filtering
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -517,7 +488,7 @@ export function RequirementsTable({
 
         setDocuments(processedDocuments);
 
-        // 2. Fetch task class requirements and individual data for all filtered tasks
+        // 2. Fetch task class requirements for all filtered tasks
         const taskDataPromises = filteredTasks.map(async (task) => {
           let constructedClassId = null;
           if (task.subclass_id && task.class_id) {
@@ -545,14 +516,22 @@ export function RequirementsTable({
             if (!requirementsResponse.error && requirementsResponse.data) {
               classRequirements = requirementsResponse.data;
 
+              // Filter documents_and_fields to only include items that are applicable to any applicant type
               if (classRequirements.documents_and_fields && Array.isArray(classRequirements.documents_and_fields)) {
-                documentsAndFieldsCount = classRequirements.documents_and_fields.filter((item: any) =>
-                  item.display === true || item.ap === true || item.dp === true || item.understudy === true
-                ).length;
+                const applicableDocuments = classRequirements.documents_and_fields.filter((item: any) => {
+                  return item.ap === true || item.dp === true || item.understudy === true || item.display === true;
+                });
+                classRequirements.documents_and_fields = applicableDocuments;
+                documentsAndFieldsCount = applicableDocuments.length;
               }
 
+              // Filter client_fields to only include items that are applicable
               if (classRequirements.client_fields && Array.isArray(classRequirements.client_fields)) {
-                clientFieldsCount = classRequirements.client_fields.filter((item: any) => item.display === true).length;
+                const applicableClientFields = classRequirements.client_fields.filter((item: any) => {
+                  return item.ap === true || item.dp === true || item.understudy === true || item.display === true;
+                });
+                classRequirements.client_fields = applicableClientFields;
+                clientFieldsCount = applicableClientFields.length;
               }
             }
           }
@@ -668,47 +647,13 @@ export function RequirementsTable({
     }
   }, [documentStatuses, onViewDocument, documentTab]);
 
-  // Render applicant type indicator
-  const renderApplicantTypeIndicator = (status: DocumentStatus) => {
-    const indicators = [];
-
-    if (status.applicantTypes.principal) {
-      indicators.push(
-        <span key="principal" className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 mr-1">
-          P
-        </span>
-      );
-    }
-
-    if (status.applicantTypes.dependant) {
-      indicators.push(
-        <span key="dependant" className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 mr-1">
-          D
-        </span>
-      );
-    }
-
-    if (status.applicantTypes.understudy) {
-      indicators.push(
-        <span key="understudy" className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
-          U
-        </span>
-      );
-    }
-
-    return (
-      <div className="flex items-center justify-center space-x-1 mt-1">
-        {indicators}
-      </div>
-    );
-  };
-
+  // Updated: Render document status for each column
   const renderDocumentStatus = useCallback((task: any, item: any, columnType: ApplicantType) => {
     const status = getDocumentStatusForColumn(task, item, columnType);
     const itemId = item.selectionId || item.id;
     const statusKey = `${task.id}-${itemId}-${columnType}`;
     const isLoading = loadingDocuments.has(statusKey);
-  
+
     // Show loading state
     if (isLoading) {
       return (
@@ -717,7 +662,7 @@ export function RequirementsTable({
         </div>
       );
     }
-  
+
     // If not applicable to this column's applicant type, show N/A
     if (status.type === 'na') {
       return (
@@ -726,7 +671,7 @@ export function RequirementsTable({
         </div>
       );
     }
-  
+
     // Show status based on document availability
     switch (status.type) {
       case 'view':
@@ -750,7 +695,7 @@ export function RequirementsTable({
             </div>
           </div>
         );
-  
+
       case 'missing':
         return (
           <div className="flex flex-col items-center justify-center">
@@ -767,7 +712,7 @@ export function RequirementsTable({
             </div>
           </div>
         );
-  
+
       default:
         return (
           <div className="flex flex-col items-center justify-center">
@@ -777,7 +722,7 @@ export function RequirementsTable({
     }
   }, [getDocumentStatusForColumn, loadingDocuments, handleViewAction, handleUploadAction]);
 
-  // Render client field data (keeping existing logic)
+  // Render client field data
   const renderClientFieldData = useCallback((task: any, item: any) => {
     const individualData = taskIndividualData[task.id];
     if (!individualData) {
@@ -807,13 +752,13 @@ export function RequirementsTable({
     );
   }, [taskIndividualData]);
 
-  // Rest of the existing code remains the same, but update the organized requirements logic
+  // Updated: Organize requirements with proper filtering
   const organizedRequirements = useMemo(() => {
     const documentsMap = new Map<string, {
       document: any,
       fields: any[],
       category: 'company' | 'individual',
-      applicabilitySettings?: any // Add this to store the ap/dp/understudy settings
+      applicabilitySettings?: any
     }>();
     const clientFieldsMap = new Map<string, {
       field: any,
@@ -824,10 +769,12 @@ export function RequirementsTable({
       const classRequirements = taskClassRequirements[task.id];
       if (!classRequirements) return;
 
-      // Process documents_and_fields
+      // Process documents_and_fields - only include items that are applicable to at least one applicant type
       if (Array.isArray(classRequirements.documents_and_fields)) {
         classRequirements.documents_and_fields
-          .filter((item: any) => item.display === true || item.ap === true || item.dp === true || item.understudy === true)
+          .filter((item: any) => {
+            return item.ap === true || item.dp === true || item.understudy === true || item.display === true;
+          })
           .forEach((item: any) => {
             const parsed = parseSelectionId(item.id);
 
@@ -838,12 +785,12 @@ export function RequirementsTable({
                 documentsMap.set(parsed.documentId, {
                   document: {
                     ...document,
-                    // Attach the applicability settings to the document
                     selectionId: item.id,
                     ap: item.ap,
                     dp: item.dp,
                     understudy: item.understudy,
-                    display: item.display
+                    display: item.display,
+                    kycdocumentid: item.kycdocumentid || document.id
                   },
                   fields: [],
                   category: category,
@@ -876,11 +823,11 @@ export function RequirementsTable({
                     docEntry.fields.push({
                       ...field,
                       selectionId: item.id,
-                      // Attach applicability settings to the field
                       ap: item.ap,
                       dp: item.dp,
                       understudy: item.understudy,
-                      display: item.display
+                      display: item.display,
+                      kycdocumentid: item.kycdocumentid || `${document.id}-${field.id}`
                     });
                   }
                 }
@@ -889,10 +836,12 @@ export function RequirementsTable({
           });
       }
 
-      // Process client_fields (keep existing logic)
+      // Process client_fields - only include items that are applicable
       if (Array.isArray(classRequirements.client_fields)) {
         classRequirements.client_fields
-          .filter((item: any) => item.display === true)
+          .filter((item: any) => {
+            return item.ap === true || item.dp === true || item.understudy === true || item.display === true;
+          })
           .forEach((item: any) => {
             let fieldName = '';
             const itemId = item.id;
@@ -916,7 +865,11 @@ export function RequirementsTable({
               clientFieldsMap.set(item.id, {
                 field: {
                   ...field,
-                  selectionId: item.id
+                  selectionId: item.id,
+                  ap: item.ap,
+                  dp: item.dp,
+                  understudy: item.understudy,
+                  display: item.display
                 },
                 category: category
               });
@@ -942,7 +895,7 @@ export function RequirementsTable({
     };
   }, [filteredTasks, taskClassRequirements, documents, clientFormFields, documentTab, parseSelectionId]);
 
-  // Format task data helper (keeping existing)
+  // Format task data helper
   const formatTaskData = useCallback((task: any) => {
     const formatDate = (dateString?: string | null) => {
       if (!dateString) return '';
@@ -1028,7 +981,7 @@ export function RequirementsTable({
       <div className="overflow-auto flex-1 relative">
         <Table className="min-w-full w-full border-collapse">
           <TableHeader className="sticky top-0 z-10">
-            {/* Main header row - Applicant Names with enhanced display for dependants */}
+            {/* Main header row - Applicant Names */}
             <TableRow className="h-12">
               <TableHead
                 rowSpan={3}
@@ -1071,21 +1024,29 @@ export function RequirementsTable({
               })}
             </TableRow>
 
-            {/* Applicant Type row */}
+         
+            {/* Enhanced Applicant Type row with actual names */}
             <TableRow className="h-10">
               {groupedTasks.map((group, groupIndex) => {
                 const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                const principalTask = group.tasks.find(t => t.applicant_type === 'principal');
+                const dependantTask = group.tasks.find(t => t.applicant_type === 'dependant');
+                const understudyTask = group.tasks.find(t => t.applicant_type === 'understudy');
+
                 const columns = [
                   <TableHead
                     key={`${groupIndex}-principal`}
                     colSpan={1}
                     className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
                   >
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-col items-center gap-1">
                       <span className="text-xs font-bold">Principal</span>
-                      {group.tasks.find(task => task.applicant_type === 'principal') && (
-                        <Pin className="h-4 w-4 mx-auto" />
+                      {principalTask && (
+                        <span className="text-xs truncate max-w-[100px]">
+                          {individualNames[principalTask.principal_member] || principalTask.applicant_name}
+                        </span>
                       )}
+                      {principalTask && <Pin className="h-3 w-3" />}
                     </div>
                   </TableHead>,
                   <TableHead
@@ -1093,11 +1054,14 @@ export function RequirementsTable({
                     colSpan={1}
                     className="bg-blue-500 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
                   >
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-col items-center gap-1">
                       <span className="text-xs font-bold">Dependant</span>
-                      {group.tasks.find(task => task.applicant_type === 'dependant') && (
-                        <Pin className="h-4 w-4 mx-auto" />
+                      {dependantTask && (
+                        <span className="text-xs truncate max-w-[100px]">
+                          {individualNames[dependantTask.dependant] || dependantTask.applicant_name}
+                        </span>
                       )}
+                      {dependantTask && <Pin className="h-3 w-3" />}
                     </div>
                   </TableHead>
                 ];
@@ -1111,14 +1075,12 @@ export function RequirementsTable({
                     >
                       <div className="flex flex-col items-center gap-1">
                         <span className="text-xs font-bold">Understudy</span>
-                        {group.tasks.find(task => task.applicant_type === 'understudy') && (
-                          <Badge
-                            variant="secondary"
-                            className="text-xs px-1 py-0 bg-white/20"
-                          >
-                            Assigned
-                          </Badge>
+                        {understudyTask && (
+                          <span className="text-xs truncate max-w-[100px]">
+                            {individualNames[understudyTask.understudy_member] || understudyTask.applicant_name}
+                          </span>
                         )}
+                        {understudyTask && <Pin className="h-3 w-3" />}
                       </div>
                     </TableHead>
                   );
@@ -1128,13 +1090,92 @@ export function RequirementsTable({
               })}
             </TableRow>
 
-            {/* Status row */}
+            {/* Status row with plus/minus icons */}
             <TableRow className="h-8">
               {groupedTasks.map((group, groupIndex) => {
                 const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
                 const principalTask = group.tasks.find(task => task.applicant_type === 'principal');
                 const dependantTask = group.tasks.find(task => task.applicant_type === 'dependant');
                 const understudyTask = group.tasks.find(task => task.applicant_type === 'understudy');
+
+                const columns = [
+                  <TableHead
+                    key={`${groupIndex}-principal-status`}
+                    colSpan={1}
+                    className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
+                  >
+                    <div className="flex flex-col items-center gap-1">
+                      {principalTask && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => toggleDocumentExpansion(principalTask.id)}
+                          title="Toggle document fields"
+                        >
+                          {expandedDocuments.has(principalTask.id) ? (
+                            <Minus className="h-4 w-4" />
+                          ) : (
+                            <Plus className="h-4 w-4" />
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </TableHead>,
+                  <TableHead
+                    key={`${groupIndex}-dependant-status`}
+                    colSpan={1}
+                    className="bg-blue-500 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
+                  >
+                    <div className="flex flex-col items-center gap-1">
+                      {dependantTask && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => toggleDocumentExpansion(dependantTask.id)}
+                          title="Toggle document fields"
+                        >
+                          {expandedDocuments.has(dependantTask.id) ? (
+                            <Minus className="h-4 w-4" />
+                          ) : (
+                            <Plus className="h-4 w-4" />
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </TableHead>
+                ];
+
+                if (hasClassD) {
+                  columns.push(
+                    <TableHead
+                      key={`${groupIndex}-understudy-status`}
+                      colSpan={1}
+                      className="bg-blue-400 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        {understudyTask && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => toggleDocumentExpansion(understudyTask.id)}
+                            title="Toggle document fields"
+                          >
+                            {expandedDocuments.has(understudyTask.id) ? (
+                              <Minus className="h-4 w-4" />
+                            ) : (
+                              <Plus className="h-4 w-4" />
+                            )}
+                          </Button>
+                        )}
+                      </div>
+                    </TableHead>
+                  );
+                }
+
+                return columns;
 
                 const statusColumns = [
                   <TableHead
@@ -1263,7 +1304,7 @@ export function RequirementsTable({
               </TableRow>
             ) : (
               <>
-                {/* Documents & Fields Section with enhanced column-specific status rendering */}
+                {/* Documents & Fields Section */}
                 {(organizedRequirements.documents.company.length > 0 || organizedRequirements.documents.individual.length > 0) && (
                   <>
                     {/* Main Documents & Fields Header */}
@@ -1320,7 +1361,7 @@ export function RequirementsTable({
                           })}
                         </TableRow>
 
-                        {/* Company Document Items with proper column mapping */}
+                        {/* Company Document Items */}
                         {organizedRequirements.documents.company.map((docItem, docIndex) => {
                           const isExpanded = expandedDocuments.has(docItem.document.id);
 
@@ -1433,7 +1474,7 @@ export function RequirementsTable({
                       </>
                     )}
 
-                    {/* Individual Documents Subsection with same column mapping pattern */}
+                    {/* Individual Documents Subsection */}
                     {organizedRequirements.documents.individual.length > 0 && (
                       <>
                         <TableRow className="bg-blue-100">
@@ -1574,7 +1615,7 @@ export function RequirementsTable({
                   </>
                 )}
 
-                {/* Client Form Fields Section - keeping existing implementation */}
+                {/* Client Form Fields Section */}
                 {(organizedRequirements.clientFields.company.length > 0 || organizedRequirements.clientFields.individual.length > 0) && (
                   <>
                     {/* Main Client Form Fields Header */}
