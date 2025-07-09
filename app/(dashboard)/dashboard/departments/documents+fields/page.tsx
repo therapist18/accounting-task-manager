@@ -847,7 +847,7 @@ export default function DocumentsFields() {
           .from('tm_class_requirements')
           .select('documents_and_fields, client_fields')
           .eq('class_id', classId)
-          .single()
+          .maybeSingle()
 
         if (fetchError && fetchError.code !== 'PGRST116') {
           throw fetchError
@@ -1181,10 +1181,10 @@ export default function DocumentsFields() {
               description="Show/hide department columns"
             />
             <Button variant="outline" onClick={expandAll}>
-              <Expand className="h-4 w-4 mr-2" />Expand All
+              <Expand className="h-4 w-4 mr-2" />Fields
             </Button>
             <Button variant="outline" onClick={collapseAll}>
-              <Minimize2 className="h-4 w-4 mr-2" />Collapse All
+              <Minimize2 className="h-4 w-4 mr-2" />Docs
             </Button>
           </div>
         </div>
