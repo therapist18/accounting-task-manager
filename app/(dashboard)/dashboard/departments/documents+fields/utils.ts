@@ -151,29 +151,29 @@ export const filterAndSortDocuments = (documents: DocumentType[], documentTab: s
   }
 }
 
-// Check if a subdepartment has any visible columns
+// In utils.js - Fix visibility checking
 export const hasVisibleColumns = (
-  subdept: any,
-  columnVisibility: Record<string, boolean>,
-  getColumnKey: (subdeptId: number, clsIndex: number | null, subclsIndex?: number | null) => string
-): boolean => {
-  if (!subdept.hasClasses) {
-    const subdeptKey = getColumnKey(subdept.id, null)
-    return columnVisibility[subdeptKey] !== false
-  }
-
-  return subdept.classes?.some((cls: any, clsIndex: number) => {
-    if (cls.subClasses?.length) {
-      return cls.subClasses.some((_: any, subclsIndex: number) => {
-        const subclsKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
-        return columnVisibility[subclsKey] !== false
-      })
-    } else {
-      const clsKey = getColumnKey(subdept.id, clsIndex)
-      return columnVisibility[clsKey] !== false
+    subdept: any,
+    columnVisibility: Record<string, boolean>,
+    getColumnKey: (subdeptId: number, clsIndex: number | null, subclsIndex?: number | null) => string
+  ): boolean => {
+    if (!subdept.hasClasses) {
+      const subdeptKey = getColumnKey(subdept.id, null)
+      return columnVisibility[subdeptKey] === true // Explicitly check for true
     }
-  }) || false
-}
+  
+    return subdept.classes?.some((cls: any, clsIndex: number) => {
+      if (cls.subClasses?.length) {
+        return cls.subClasses.some((_: any, subclsIndex: number) => {
+          const subclsKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
+          return columnVisibility[subclsKey] === true // Explicitly check for true
+        })
+      } else {
+        const clsKey = getColumnKey(subdept.id, clsIndex)
+        return columnVisibility[clsKey] === true // Explicitly check for true
+      }
+    }) || false
+  }
 
 // Get the allocation status for a document or field
 export const getAllocationStatus = (
@@ -216,12 +216,11 @@ export const getAllocationStatus = (
 
 // Get column key for a subdepartment/class/subclass combination
 export const getColumnKey = (subdeptId: number | string, clsIndex: number | string | null, subclsIndex: number | string | null = null): string => {
-  const keyParts = [subdeptId]
-  if (clsIndex !== null) keyParts.push(String(clsIndex))
-  if (subclsIndex !== null) keyParts.push(String(subclsIndex))
-  return keyParts.join('_')
-}
-
+    const keyParts = [`subdept_${subdeptId}`]
+    if (clsIndex !== null) keyParts.push(`cls_${clsIndex}`)
+    if (subclsIndex !== null) keyParts.push(`subcls_${subclsIndex}`)
+    return keyParts.join('_')
+  }
 // Check if understudy should be shown for a class
 export const shouldShowUnderstudy = (subdept: Subdepartment, clsIndex: number | null): boolean => {
   if (!subdept.hasClasses || clsIndex === null) return false
@@ -326,11 +325,10 @@ export const getTotalColSpan = (
   }, 0) || 0
 }
 
-// Initialize column visibility
 export const initializeColumnVisibility = (columns: ColumnVisibilityOption[]) => {
-  const visibility: Record<string, boolean> = {}
-  columns.forEach(col => {
-    visibility[col.id] = col.isDefault !== false // Show all columns by default
-  })
-  return visibility
-}
+    const visibility: Record<string, boolean> = {}
+    columns.forEach(col => {
+      visibility[col.id] = col.visible // Use the visible property directly
+    })
+    return visibility
+  }

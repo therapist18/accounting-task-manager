@@ -16,12 +16,12 @@ import { getTableFields, getGroupedFields, FormField } from "./formFields"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "@/app/(dashboard)/dashboard/departments/main-shared-components/column-visibility"
 import { DocumentType, Subdepartment, DocumentField, ClientData, Department, GroupedDocuments, SubdepartmentClass, TruncatedText, SectionHeader, OptimizedCheckbox } from "./types"
 import { CATEGORY_MAPPING, CLASS_D_ID, CACHE_DURATION, DEBOUNCE_DELAY, cache, getCachedData, setCachedData, debounce } from "./config"
-import { 
-  formatFieldValue as formatFieldValueUtil, 
-  processDocumentFields, 
-  groupDocumentsByCategory, 
-  filterAndSortDocuments, 
-  hasVisibleColumns, 
+import {
+  formatFieldValue as formatFieldValueUtil,
+  processDocumentFields,
+  groupDocumentsByCategory,
+  filterAndSortDocuments,
+  hasVisibleColumns,
   getAllocationStatus as getAllocationStatusUtil,
   getColumnKey as getColumnKeyUtil,
   shouldShowUnderstudy as shouldShowUnderstudyUtil,
@@ -59,7 +59,7 @@ export default function DocumentsFields() {
   const [submittingIds, setSubmittingIds] = useState<Set<string>>(new Set())
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set())
   const [availableColumns, setAvailableColumns] = useState<ColumnVisibilityOption[]>([])
-const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({})
+  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({})
   const renderCountRef = useRef(0)
   const lastFetchTimeRef = useRef(0)
 
@@ -73,11 +73,11 @@ const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>
 
   const getColumnWidth = useCallback((subdept: Subdepartment, clsIndex: number | null, subclsIndex: number | null = null) => {
     return getColumnWidthUtil(
-      subdept, 
-      clsIndex, 
-      subclsIndex, 
-      expandedColumns, 
-      getColumnKey, 
+      subdept,
+      clsIndex,
+      subclsIndex,
+      expandedColumns,
+      getColumnKey,
       shouldShowUnderstudy
     )
   }, [expandedColumns, getColumnKey, shouldShowUnderstudy])
@@ -124,18 +124,13 @@ const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>
     return grouped
   }, [])
 
-  // Optimized filtered documents with deep memoization and caching
   const { filteredDocuments, groupedDocuments } = useMemo(() => {
     renderCountRef.current++
-
+  
     if (!documents.length) return { filteredDocuments: [], groupedDocuments: {} }
-
-    const cacheKey = `filtered-docs-${documentTab}-${documents.length}`
-    const cached = getCachedData(cacheKey)
-    if (cached) return cached
-
+  
+    // Remove caching here to prevent loops
     const result = filterAndSortDocuments(documents, documentTab)
-    setCachedData(cacheKey, result)
     return result
   }, [documents, documentTab])
 
@@ -189,12 +184,6 @@ const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>
     lastFetchTimeRef.current = now
 
     const cacheKey = `documents-fields-${documentTab}`
-    const cachedData = getCachedData(cacheKey)
-    if (cachedData) {
-      setDepartments(cachedData.departments)
-      setDocuments(cachedData.documents)
-      return
-    }
     const controller = new AbortController()
 
     try {
@@ -239,25 +228,25 @@ const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>
       if (requirementsResponse.error) throw requirementsResponse.error
 
       const transformedDepartments = (deptsResponse.data || []).map((dept: any) => ({
-  ...dept,
-  subdepartments: (dept.tm_subdepartments || [])
-    .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
-    .map((subdept: any) => ({
-      ...subdept,
-      classes: Array.isArray(subdept.classes)
-        ? subdept.classes.map((cls: any) => ({
-            ...cls,
-            // Keep track of default status but don't filter
-            isDefault: cls.default_display === true,
-            subClasses: (cls.subClasses || []).map((subCls: any) => ({
-              ...subCls,
-              isDefault: subCls.default_display === true
-            }))
+        ...dept,
+        subdepartments: (dept.tm_subdepartments || [])
+          .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
+          .map((subdept: any) => ({
+            ...subdept,
+            classes: Array.isArray(subdept.classes)
+              ? subdept.classes.map((cls: any) => ({
+                ...cls,
+                // Keep track of default status but don't filter
+                isDefault: cls.default_display === true,
+                subClasses: (cls.subClasses || []).map((subCls: any) => ({
+                  ...subCls,
+                  isDefault: subCls.default_display === true
+                }))
+              }))
+              : [],
+            hasClasses: subdept.classes && Array.isArray(subdept.classes) && subdept.classes.length > 0
           }))
-        : [],
-      hasClasses: subdept.classes && Array.isArray(subdept.classes) && subdept.classes.length > 0
-    }))
-}))
+      }))
 
       const processedDocuments = (documentsResponse.data || []).map((doc: any) => ({
         ...doc,
@@ -309,8 +298,8 @@ const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>
                   columns.push({
                     id: subclsKey,
                     label: `${subdept.name} > ${cls.name} > ${subcls.name}`,
-                    visible: true, // Show all columns by default
-                    isDefault: subcls.isDefault, // Track if this was a default column
+                    visible: subcls.isDefault === true, // Only defaults visible initially
+                    isDefault: subcls.isDefault === true,
                     group: subdept.name
                   })
                 })
@@ -319,8 +308,8 @@ const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>
                 columns.push({
                   id: clsKey,
                   label: `${subdept.name} > ${cls.name}`,
-                  visible: true, // Show all columns by default
-                  isDefault: cls.isDefault, // Track if this was a default column
+                  visible: cls.isDefault === true, // Only defaults visible initially
+                  isDefault: cls.isDefault === true,
                   group: subdept.name
                 })
               }
@@ -330,8 +319,8 @@ const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>
             columns.push({
               id: subdeptKey,
               label: subdept.name,
-              visible: true, // Show all columns by default
-              isDefault: subdept.default_display === true, // Track if this was a default column
+              visible: subdept.default_display === true, // Only defaults visible initially
+              isDefault: subdept.default_display === true,
               group: dept.name
             })
           }
@@ -432,64 +421,69 @@ const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>
   )
   useEffect(() => {
     fetchData()
-  }, [documentTab]) 
-  // Filter subdepartments based on column visibility
-  const visibleNormalizedSubdepartments = useMemo(() => {
-    if (!currentDepartment?.subdepartments?.length) {
-      return [{
-        id: -1,
-        name: 'No Subdepartments',
-        department_id: currentDepartment?.id || '',
-        hasClasses: false,
-        classes: []
-      }]
-    }
+  }, [documentTab])
+ // Fix the visibleNormalizedSubdepartments to prevent loops:
+const visibleNormalizedSubdepartments = useMemo(() => {
+  if (!currentDepartment?.subdepartments?.length) {
+    return [{
+      id: -1,
+      name: 'No Subdepartments',
+      department_id: currentDepartment?.id || '',
+      hasClasses: false,
+      classes: []
+    }]
+  }
 
-    return currentDepartment.subdepartments
-      .filter((subdept) => hasVisibleColumns(subdept, columnVisibility, getColumnKey))
-      .map(dept => {
-        // First pass: filter classes based on visibility
-        const filteredClasses = dept.classes?.filter((cls, clsIndex) => {
-          if (cls.subClasses?.length) {
-            return cls.subClasses.some((_, subclsIndex) => {
-              const subclsKey = getColumnKey(dept.id, clsIndex, subclsIndex)
-              return columnVisibility[subclsKey] !== false
-            })
-          } else {
-            const clsKey = getColumnKey(dept.id, clsIndex)
-            return columnVisibility[clsKey] !== false
-          }
-        }) || []
+  // If no column visibility set yet, show only defaults
+  if (Object.keys(columnVisibility).length === 0) {
+    return normalizedSubdepartments.filter(subdept => {
+      if (!subdept.hasClasses) {
+        return subdept.default_display === true
+      }
+      return subdept.classes?.some(cls => cls.isDefault === true) || false
+    })
+  }
 
-        // Second pass: map over filtered classes and process subclasses
-        const processedClasses = filteredClasses.map((cls, clsIndex) => {
-          const filteredSubClasses = cls.subClasses?.filter((_, subclsIndex) => {
+  // Filter based on column visibility
+  return normalizedSubdepartments
+    .filter((subdept) => hasVisibleColumns(subdept, columnVisibility, getColumnKey))
+    .map(dept => {
+      if (!dept.hasClasses) return dept
+
+      const filteredClasses = dept.classes?.filter((cls, clsIndex) => {
+        if (cls.subclasses?.length) {
+          return cls.subclasses.some((_, subclsIndex) => {
             const subclsKey = getColumnKey(dept.id, clsIndex, subclsIndex)
-            return columnVisibility[subclsKey] !== false
-          }) || []
-
-          return {
-            ...cls,
-            id: cls.id || `class-${cls.name}`,
-            subClasses: filteredSubClasses
-          }
-        })
-
-        return {
-          ...dept,
-          hasClasses: dept.hasClasses,
-          classes: processedClasses
+            return columnVisibility[subclsKey] === true
+          })
+        } else {
+          const clsKey = getColumnKey(dept.id, clsIndex)
+          return columnVisibility[clsKey] === true
         }
-      })
-  }, [currentDepartment, columnVisibility])
+      }) || []
 
-  // Column visibility control handlers
-  const handleColumnVisibilityChange = useCallback((columnId: string, visible: boolean) => {
-    setColumnVisibility(prev => ({
-      ...prev,
-      [columnId]: visible
-    }))
-  }, [])
+      return {
+        ...dept,
+        classes: filteredClasses.map((cls, clsIndex) => ({
+          ...cls,
+          id: cls.id || `class-${cls.name}`,
+          subclasses: cls.subclasses?.filter((_, subclsIndex) => {
+            const subclsKey = getColumnKey(dept.id, clsIndex, subclsIndex)
+            return columnVisibility[subclsKey] === true
+          }) || []
+        }))
+      }
+    })
+}, [currentDepartment, normalizedSubdepartments, columnVisibility]) // Remove getColumnKey dependency
+
+const handleColumnVisibilityChange = useCallback((columnId: string, visible: boolean) => {
+  console.log('Toggling column:', columnId, 'to', visible)
+  setColumnVisibility(prev => {
+    const newVisibility = { ...prev, [columnId]: visible }
+    console.log('New visibility state:', Object.values(newVisibility).filter(Boolean).length, 'visible')
+    return newVisibility
+  })
+}, [])
 
   // Optimized toggle functions with stable references
   const toggleItemExpansion = useCallback((itemId: string) => {
@@ -555,33 +549,44 @@ const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>
     })
   }, [])
 
+  // Update the column visibility handlers:
   const handleShowAllColumns = useCallback(() => {
-    const newVisibility = {}
-    availableColumns.forEach(col => {
-      newVisibility[col.id] = true
-    })
+    const newVisibility = availableColumns.reduce((acc, col) => ({
+      ...acc,
+      [col.id]: true
+    }), {})
     setColumnVisibility(newVisibility)
   }, [availableColumns])
 
   const handleHideAllColumns = useCallback(() => {
-    const newVisibility = {}
-    availableColumns.forEach(col => {
-      newVisibility[col.id] = false
-    })
+    const newVisibility = availableColumns.reduce((acc, col) => ({
+      ...acc,
+      [col.id]: false
+    }), {})
     setColumnVisibility(newVisibility)
   }, [availableColumns])
 
   const handleResetToDefault = useCallback(() => {
-    const newVisibility = initializeColumnVisibility(availableColumns, columnVisibility)
-    setColumnVisibility(newVisibility)
-  }, [availableColumns, columnVisibility])
-
-  useEffect(() => {
-    if (availableColumns.length > 0) {
-      const newVisibility = initializeColumnVisibility(availableColumns)
-      setColumnVisibility(newVisibility)
-    }
+    const defaultVisibility = availableColumns.reduce((acc, col) => ({
+      ...acc,
+      [col.id]: col.isDefault
+    }), {})
+    setColumnVisibility(defaultVisibility)
   }, [availableColumns])
+// Replace the useEffect for column visibility:
+useEffect(() => {
+  if (availableColumns.length > 0 && Object.keys(columnVisibility).length === 0) {
+    console.log('Initializing column visibility:', availableColumns.length, 'columns')
+    
+    const initialVisibility = availableColumns.reduce((acc, col) => {
+      acc[col.id] = col.visible // Use the visible property from fetchData
+      return acc
+    }, {} as Record<string, boolean>)
+    
+    console.log('Initial visibility:', Object.values(initialVisibility).filter(Boolean).length, 'visible columns')
+    setColumnVisibility(initialVisibility)
+  }
+}, [availableColumns.length]) // Only depend on length to prevent loops
 
   // Enhanced display toggle with support for AP, DP, and understudy
   const handleDisplayToggle = useCallback(async (
@@ -1276,6 +1281,21 @@ const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>
     ))
   }, [expandedColumns, getColumnKey, shouldShowUnderstudy, getSubmittingStatus, getClientFieldAllocationStatus, handleClientFieldToggle])
 
+  // Add this useEffect for debugging:
+useEffect(() => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Component state:', {
+      renderCount: renderCountRef.current,
+      availableColumnsCount: availableColumns.length,
+      visibleColumnsCount: Object.values(columnVisibility).filter(Boolean).length,
+      totalColumnsVisibility: Object.keys(columnVisibility).length,
+      departmentsCount: departments.length,
+      sampleColumnKeys: availableColumns.slice(0, 3).map(col => col.id),
+      sampleVisibilityKeys: Object.keys(columnVisibility).slice(0, 3)
+    })
+  }
+}, [availableColumns.length, Object.keys(columnVisibility).length, departments.length])
+
   if (loading) {
     return (
       <div className="p-12 text-center">
@@ -1316,34 +1336,17 @@ const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>
             {process.env.NODE_ENV === 'development' && (
               <p className="text-xs text-gray-400 mt-1">Renders: {renderCountRef.current}</p>
             )}
-            
+
           </div>
           <div className="flex gap-3">
           <ColumnVisibilityControl
   columns={availableColumns}
-  onVisibilityChange={(columnId, visible) => {
-    setColumnVisibility(prev => ({
-      ...prev,
-      [columnId]: visible
-    }))
-  }}
-  onShowAll={() => {
-    const allVisible = availableColumns.reduce((acc, col) => ({
-      ...acc,
-      [col.id]: true
-    }), {})
-    setColumnVisibility(allVisible)
-  }}
-  onHideAll={() => {
-    const allHidden = availableColumns.reduce((acc, col) => ({
-      ...acc,
-      [col.id]: false
-    }), {})
-    setColumnVisibility(allHidden)
-  }}
-  onResetToDefault={() => {
-    setColumnVisibility(initializeColumnVisibility(availableColumns))
-  }}
+  onVisibilityChange={handleColumnVisibilityChange}
+  onShowAll={handleShowAllColumns}
+  onHideAll={handleHideAllColumns}
+  onResetToDefault={handleResetToDefault}
+  title="Column Visibility"
+  description="Show/hide department columns"
 />
             <Button variant="outline" onClick={expandAll}>
               <Expand className="h-4 w-4 mr-2" />Expand All
