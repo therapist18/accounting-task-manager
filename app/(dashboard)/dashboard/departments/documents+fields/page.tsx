@@ -16,23 +16,7 @@ import { getTableFields, getGroupedFields, FormField } from "./formFields"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "@/app/(dashboard)/dashboard/departments/main-shared-components/column-visibility"
 import { DocumentType, Subdepartment, DocumentField, ClientData, Department, GroupedDocuments, SubdepartmentClass, TruncatedText, SectionHeader, OptimizedCheckbox } from "./types"
 import { CATEGORY_MAPPING, CLASS_D_ID, CACHE_DURATION, DEBOUNCE_DELAY, cache, getCachedData, setCachedData, debounce } from "./config"
-import {
-  formatFieldValue as formatFieldValueUtil,
-  processDocumentFields,
-  groupDocumentsByCategory,
-  filterAndSortDocuments,
-  hasVisibleColumns,
-  getAllocationStatus as getAllocationStatusUtil,
-  getColumnKey as getColumnKeyUtil,
-  shouldShowUnderstudy as shouldShowUnderstudyUtil,
-  getColumnWidth as getColumnWidthUtil,
-  toggleSetItem,
-  processDocumentFieldsWithCache,
-  groupDocumentsByCategoryWithCache,
-  getClientFieldAllocationStatus as getClientFieldAllocationStatusUtil,
-  getTotalColSpan as getTotalColSpanUtil,
-  initializeColumnVisibility
-} from "./utils"
+import { formatFieldValue as formatFieldValueUtil, processDocumentFields, groupDocumentsByCategory, filterAndSortDocuments, hasVisibleColumns, getAllocationStatus as getAllocationStatusUtil, getColumnKey as getColumnKeyUtil, shouldShowUnderstudy as shouldShowUnderstudyUtil, getColumnWidth as getColumnWidthUtil, toggleSetItem, processDocumentFieldsWithCache, groupDocumentsByCategoryWithCache, getClientFieldAllocationStatus as getClientFieldAllocationStatusUtil, getTotalColSpan as getTotalColSpanUtil, initializeColumnVisibility } from "./utils"
 
 export default function DocumentsFields() {
   const [departments, setDepartments] = useState<Department[]>([])
@@ -60,9 +44,16 @@ export default function DocumentsFields() {
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set())
   const [availableColumns, setAvailableColumns] = useState<ColumnVisibilityOption[]>([])
   const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({})
+
+  // Memoized function to determine if a column should be visible based on both visibility and expansion state
+  const isColumnVisible = useCallback((columnKey: string, isExpanded: boolean) => {
+    // If column is expanded, always show it
+    if (isExpanded) return true
+    // Otherwise check visibility state
+    return columnVisibility[columnKey] ?? true
+  }, [columnVisibility])
   const renderCountRef = useRef(0)
   const lastFetchTimeRef = useRef(0)
-  // Add these new state variables
   const [pendingChanges, setPendingChanges] = useState<{
     documents: Record<string, { ap: boolean; dp: boolean; understudy: boolean }>;
     clientFields: Record<string, { ap: boolean; dp: boolean; understudy: boolean }>;
@@ -92,23 +83,30 @@ export default function DocumentsFields() {
     )
   }, [expandedColumns, getColumnKey, shouldShowUnderstudy])
 
-  // Toggle column expansion
   const toggleColumnExpansion = useCallback((columnKey: string) => {
+    // Get current expanded state
+    const isCurrentlyExpanded = expandedColumns.has(columnKey)
+    
+    // Update expanded state
     setExpandedColumns(prev => {
       const newSet = new Set(prev)
-      if (newSet.has(columnKey)) {
+      if (isCurrentlyExpanded) {
         newSet.delete(columnKey)
       } else {
         newSet.add(columnKey)
       }
       return newSet
     })
-  }, [])
 
-  // Format field values using the utility function
+    // Update visibility state based on current expanded state
+    setColumnVisibility(prev => ({
+      ...prev,
+      [columnKey]: isCurrentlyExpanded // When collapsed, show the column
+    }))
+  }, [expandedColumns])
+
   const formatFieldValue = useMemo(() => formatFieldValueUtil, [])
 
-  // Process document fields with caching
   const processDocumentFieldsWithCache = useCallback((docs: DocumentType[]) => {
     const cacheKey = `processed-fields-${docs.length}-${docs.map(d => d.id).join('-')}`
     const cached = getCachedData(cacheKey)
@@ -123,7 +121,6 @@ export default function DocumentsFields() {
     return processedDocs
   }, [])
 
-  // Group documents by category with caching
   const groupDocumentsByCategoryWithCache = useCallback((docs: DocumentType[]): GroupedDocuments => {
     const cacheKey = `grouped-docs-${docs.length}-${docs.map(d => d.main_category_number).join('-')}`
     const cached = getCachedData(cacheKey)
@@ -139,18 +136,14 @@ export default function DocumentsFields() {
 
     if (!documents.length) return { filteredDocuments: [], groupedDocuments: {} }
 
-    // Remove caching here to prevent loops
     const result = filterAndSortDocuments(documents, documentTab)
     return result
   }, [documents, documentTab])
-
-  // Enhanced memoized selectors
   const currentDepartment = useMemo(() =>
     departments.find(d => d.id === activeTab) || null,
     [departments, activeTab]
   )
 
-  // Enhanced normalized subdepartments with support for subdepartments without classes
   const normalizedSubdepartments = useMemo(() => {
     if (!currentDepartment?.subdepartments?.length) {
       return [{
@@ -163,7 +156,6 @@ export default function DocumentsFields() {
     }
 
     return currentDepartment.subdepartments.map(dept => {
-      // If subdepartment has no classes, treat the subdepartment itself as a "class"
       if (!dept.classes || dept.classes.length === 0) {
         return {
           ...dept,
@@ -187,7 +179,6 @@ export default function DocumentsFields() {
   const clientFormFields = useMemo(() => getTableFields(documentTab), [documentTab])
   const groupedClientFields = useMemo(() => getGroupedFields(documentTab), [documentTab])
 
-  // Enhanced data fetching with default display filtering
   const fetchData = useCallback(async () => {
     const now = Date.now()
     if (now - lastFetchTimeRef.current < 1000) return
@@ -205,7 +196,6 @@ export default function DocumentsFields() {
       )
 
       const fetchPromises = [
-        // Fetch departments with default display filtering
         supabase
           .from('tm_departments')
           .select(`
@@ -246,7 +236,6 @@ export default function DocumentsFields() {
             classes: Array.isArray(subdept.classes)
               ? subdept.classes.map((cls: any) => ({
                 ...cls,
-                // Keep track of default status but don't filter
                 isDefault: cls.default_display === true,
                 subClasses: (cls.subClasses || []).map((subCls: any) => ({
                   ...subCls,
@@ -264,7 +253,6 @@ export default function DocumentsFields() {
         display_name: doc.display_name || doc.name
       }))
 
-      // Updated allocation processing with AP, DP, and understudy
       const documentSettings: Record<string, { ap: boolean, dp: boolean, understudy: boolean, kycdocumentid: string | null }> = {}
       const clientFieldSettings: Record<string, { ap: boolean, dp: boolean, understudy: boolean }> = {}
 
@@ -1382,9 +1370,10 @@ export default function DocumentsFields() {
                                       const columnKey = getColumnKey(subdept.id, clsIndex, subclsIndex)
                                       const isExpanded = expandedColumns.has(columnKey)
                                       const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                      const isVisible = isColumnVisible(columnKey, isExpanded)
 
                                       if (!isExpanded) {
-                                        return (
+                                        return isVisible && (
                                           <TableHead
                                             key={`col-header-${subdept.id}-${clsIndex}-${subclsIndex}`}
                                             style={{ width: '120px' }}
@@ -1435,9 +1424,10 @@ export default function DocumentsFields() {
                                         const columnKey = getColumnKey(subdept.id, clsIndex)
                                         const isExpanded = expandedColumns.has(columnKey)
                                         const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                        const isVisible = isColumnVisible(columnKey, isExpanded)
 
                                         if (!isExpanded) {
-                                          return (
+                                          return isVisible && (
                                             <TableHead
                                               key={`col-header-${subdept.id}-${clsIndex}`}
                                               style={{ width: '120px' }}
@@ -1489,9 +1479,10 @@ export default function DocumentsFields() {
                                     (() => {
                                       const columnKey = getColumnKey(subdept.id, null)
                                       const isExpanded = expandedColumns.has(columnKey)
+                                      const isVisible = isColumnVisible(columnKey, isExpanded)
 
                                       if (!isExpanded) {
-                                        return (
+                                        return isVisible && (
                                           <TableHead
                                             key={`col-header-${subdept.id}`}
                                             style={{ width: '120px' }}
@@ -1588,56 +1579,76 @@ export default function DocumentsFields() {
                                                   const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
                                                   const isExpanded = expandedColumns.has(columnKey)
                                                   const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                                  const isVisible = isColumnVisible(columnKey, isExpanded)
+                                                  const checkboxes = renderDocumentCheckboxes(group.documents[0], subdept, clsIndex, subcls ? subclsIndex : null)
 
                                                   if (!isExpanded) {
-                                                    return (
+                                                    return isVisible && (
                                                       <TableCell
                                                         key={`cat-cell-${categoryKey}-${subdept.id}-${clsIndex}-${subclsIndex}`}
                                                         className="text-center border bg-blue-100"
                                                         style={{ width: '120px' }}
                                                       >
-                                                        -
+                                                        {checkboxes}
                                                       </TableCell>
                                                     )
                                                   }
 
-                                                  const columnCount = hasUnderstudy ? 3 : 2
-                                                  return Array.from({ length: columnCount }, (_, idx) => (
+                                                  // Return individual cells for expanded state
+                                                  return Array.isArray(checkboxes) ? checkboxes.map((checkbox, idx) => (
                                                     <TableCell
                                                       key={`cat-cell-${categoryKey}-${subdept.id}-${clsIndex}-${subclsIndex}-${idx}`}
                                                       className="text-center border bg-blue-100"
                                                       style={{ width: '120px' }}
                                                     >
-                                                      -
+                                                      {checkbox}
                                                     </TableCell>
-                                                  ))
+                                                  )) : (
+                                                    <TableCell
+                                                      key={`cat-cell-${categoryKey}-${subdept.id}-${clsIndex}-${subclsIndex}`}
+                                                      className="text-center border bg-blue-100"
+                                                      style={{ width: '120px' }}
+                                                    >
+                                                      {checkboxes}
+                                                    </TableCell>
+                                                  )
                                                 })
                                               ) : (
                                                 (() => {
                                                   const columnKey = getColumnKey(subdept.id, null)
                                                   const isExpanded = expandedColumns.has(columnKey)
+                                                  const isVisible = isColumnVisible(columnKey, isExpanded)
+                                                  const checkboxes = renderDocumentCheckboxes(group.documents[0], subdept, null, null)
 
                                                   if (!isExpanded) {
-                                                    return (
+                                                    return isVisible && (
                                                       <TableCell
                                                         key={`cat-cell-${categoryKey}-${subdept.id}`}
                                                         className="text-center border bg-blue-100"
                                                         style={{ width: '120px' }}
                                                       >
-                                                        -
+                                                        {checkboxes}
                                                       </TableCell>
                                                     )
                                                   }
 
-                                                  return Array.from({ length: 2 }, (_, idx) => (
+                                                  return Array.isArray(checkboxes) ? checkboxes.map((checkbox, idx) => (
                                                     <TableCell
                                                       key={`cat-cell-${categoryKey}-${subdept.id}-${idx}`}
                                                       className="text-center border bg-blue-100"
                                                       style={{ width: '120px' }}
                                                     >
-                                                      -
+                                                      {checkbox}
                                                     </TableCell>
-                                                  ))
+                                                  )) : (
+                                                    <TableCell
+                                                      key={`cat-cell-${categoryKey}-${subdept.id}`}
+                                                      className="text-center border bg-blue-100"
+                                                      style={{ width: '120px' }}
+                                                    >
+                                                      {checkboxes}
+                                                    </TableCell>
+                                                  )
                                                 })()
                                               )
                                             )}
@@ -1684,10 +1695,11 @@ export default function DocumentsFields() {
                                                         const columnKey = getColumnKey(subdept.id, clsIndex, subcls ? subclsIndex : null)
                                                         const isExpanded = expandedColumns.has(columnKey)
                                                         const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                                                        const isVisible = isColumnVisible(columnKey, isExpanded)
                                                         const checkboxes = renderDocumentCheckboxes(doc, subdept, clsIndex, subcls ? subclsIndex : null)
 
                                                         if (!isExpanded) {
-                                                          return (
+                                                          return isVisible && (
                                                             <TableCell
                                                               key={`doc-cell-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}`}
                                                               className="text-center border-r border-l border-gray-200 bg-blue-50 group-hover:bg-blue-100"
