@@ -451,7 +451,8 @@ export default function DocumentsFields() {
       }, {} as Record<string, boolean>)
       setColumnVisibility(initialVisibility)
     }
-  }, [availableColumns.length])
+  }, [availableColumns, columnVisibility])
+
 
   useEffect(() => {
     fetchData()
@@ -681,16 +682,18 @@ export default function DocumentsFields() {
     doc: DocumentType,
     columnInfo: typeof visibleColumns[0]
   ) => {
+    const getEffectiveCols = (colInfo) => colInfo.isExpanded ? (colInfo.hasUnderstudy ? 3 : 2) : 1;
+    
     if (field.type === 'array' || field.type === 'array-container' || field.isArrayItem || field.type === 'object') {
-      return visibleColumns.map(col => (
+      return (
         <TableCell
-          key={`${field.id}-${col.columnKey}`}
+          colSpan={getEffectiveCols(columnInfo)}
+          key={`${field.id}-${columnInfo.columnKey}`}
           className="text-center border"
-          style={{ width: '120px' }}
         >
           -
         </TableCell>
-      ))
+      )
     }
 
     const { subdept, clsIndex, subclsIndex, columnKey, isExpanded, hasUnderstudy } = columnInfo
@@ -744,7 +747,8 @@ export default function DocumentsFields() {
         />
       </TableCell>
     ))
-  }, [getAllocationStatus, handleDisplayToggle, submittingIds, visibleColumns])
+  }, [getAllocationStatus, handleDisplayToggle, submittingIds])
+
 
   const renderClientFieldCheckboxes = useCallback((
     fieldId: string,
@@ -1179,10 +1183,12 @@ export default function DocumentsFields() {
                                   if (!prevCol || prevCol.subdept.id !== col.subdept.id) {
                                     const subdeptColumns = visibleColumns.filter(c => c.subdept.id === col.subdept.id)
                                     const totalWidth = subdeptColumns.reduce((sum, c) => sum + c.width, 0)
+                                    // CORRECTED: Calculate colSpan based on expansion
+                                    const colSpan = subdeptColumns.reduce((sum, c) => sum + (c.isExpanded ? (c.hasUnderstudy ? 3 : 2) : 1), 0)
                                     acc.push(
                                       <TableHead
                                         key={`subdept-${col.subdept.id}`}
-                                        colSpan={subdeptColumns.length}
+                                        colSpan={colSpan}
                                         style={{ width: `${totalWidth}px` }}
                                         className="border-r border-blue-400 px-2 text-center font-semibold text-white bg-blue-700"
                                       >
@@ -1208,10 +1214,12 @@ export default function DocumentsFields() {
                                   
                                   if (needsClassHeader) {
                                     if (col.clsIndex === null) {
+                                      // CORRECTED: Calculate colSpan for direct columns
+                                      const colSpan = col.isExpanded ? 2 : 1 // Direct has no understudy
                                       acc.push(
                                         <TableHead
                                           key={`class-direct-${col.subdept.id}`}
-                                          colSpan={1}
+                                          colSpan={colSpan}
                                           className="border-r border-blue-400 px-2 text-center text-white text-sm bg-blue-600"
                                         >
                                           Direct
@@ -1221,11 +1229,13 @@ export default function DocumentsFields() {
                                       const classColumns = visibleColumns.filter(c => 
                                         c.subdept.id === col.subdept.id && c.clsIndex === col.clsIndex
                                       )
+                                      // CORRECTED: Calculate colSpan based on expansion
+                                      const colSpan = classColumns.reduce((sum, c) => sum + (c.isExpanded ? (c.hasUnderstudy ? 3 : 2) : 1), 0)
                                       const className = col.subdept.classes?.[col.clsIndex]?.name || ''
                                       acc.push(
                                         <TableHead
                                           key={`class-${col.subdept.id}-${col.clsIndex}`}
-                                          colSpan={classColumns.length}
+                                          colSpan={colSpan}
                                           className="border-r border-blue-400 px-2 text-center text-white text-sm bg-blue-600"
                                         >
                                           <MemoizedTruncatedText
@@ -1244,12 +1254,15 @@ export default function DocumentsFields() {
                               {/* Subclass Header Row */}
                               <TableRow>
                                 {visibleColumns.map(col => {
+                                  // CORRECTED: Calculate colSpan for each subclass header to span over AP/DP/US
+                                  const colSpan = col.isExpanded ? (col.hasUnderstudy ? 3 : 2) : 1;
+                                  
                                   if (col.subclsIndex !== null) {
                                     const subclassName = col.subdept.classes?.[col.clsIndex!]?.subclasses?.[col.subclsIndex]?.name || ''
                                     return (
                                       <TableHead
                                         key={`subclass-${col.columnKey}`}
-                                        colSpan={1}
+                                        colSpan={colSpan}
                                         className="border-r border-blue-400 border-l border-blue-300 px-2 text-center text-white text-xs bg-blue-500"
                                       >
                                         <MemoizedTruncatedText
@@ -1260,10 +1273,11 @@ export default function DocumentsFields() {
                                       </TableHead>
                                     )
                                   } else {
+                                    // This applies to classes without subclasses, or subdepts without any classes.
                                     return (
                                       <TableHead
                                         key={`subclass-direct-${col.columnKey}`}
-                                        colSpan={1}
+                                        colSpan={colSpan}
                                         className="border-r border-blue-400 border-l border-blue-300 text-center text-white text-xs bg-blue-500"
                                       >
                                         -
@@ -1319,11 +1333,14 @@ export default function DocumentsFields() {
                                                 {isCategoryExpanded ? <Minus className="h-4 w-4 text-gray-600" /> : <Plus className="h-4 w-4 text-gray-600" />}
                                               </div>
                                             </TableCell>
-                                            {visibleColumns.map(col => (
-                                              <TableCell key={col.columnKey} className="border-r border-l  text-center">
-                                                -
-                                              </TableCell>
-                                            ))}
+                                            {visibleColumns.map(col => {
+                                               const colSpan = col.isExpanded ? (col.hasUnderstudy ? 3 : 2) : 1
+                                               return (
+                                                <TableCell key={col.columnKey} colSpan={colSpan} className="border-r border-l text-center">
+                                                  -
+                                                </TableCell>
+                                               )
+                                            })}
                                           </TableRow>
 
                                           {/* Document Rows */}
@@ -1361,7 +1378,7 @@ export default function DocumentsFields() {
                                                       </div>
                                                     </div>
                                                   </TableCell>
-                                                  {visibleColumns.map(col => renderDocumentCheckboxes(doc, col))}
+                                                  {visibleColumns.map(col => renderDocumentCheckboxes(doc, col)).flat()}
                                                 </TableRow>
 
                                                 {/* Field Rows */}
@@ -1405,7 +1422,7 @@ export default function DocumentsFields() {
                                                             )}
                                                           </div>
                                                         </TableCell>
-                                                        {visibleColumns.map(col => renderFieldCheckboxes(field, doc, col))}
+                                                        {visibleColumns.map(col => renderFieldCheckboxes(field, doc, col)).flat()}
                                                       </TableRow>
                                                     )
                                                   })}
@@ -1419,7 +1436,7 @@ export default function DocumentsFields() {
                               )}
 
                               {/* Separator */}
-                              {(Object.keys(groupedDocuments).length > 0 || clientFormFields.length > 0) && (
+                              {(Object.keys(groupedDocuments).length > 0 && clientFormFields.length > 0) && (
                                 <TableRow>
                                   <TableCell colSpan={100} className="p-0">
                                     <Separator className="my-4" />
@@ -1454,15 +1471,18 @@ export default function DocumentsFields() {
                                           </span>
                                         </div>
                                       </TableCell>
-                                      {visibleColumns.map(col => (
-                                        <TableCell
-                                          key={`form-section-cell-${sectionKey}-${col.columnKey}`}
-                                          className="text-center border bg-blue-100"
-                                          style={{ width: '120px' }}
-                                        >
-                                          -
-                                        </TableCell>
-                                      ))}
+                                      {visibleColumns.map(col => {
+                                        const colSpan = col.isExpanded ? (col.hasUnderstudy ? 3 : 2) : 1
+                                        return (
+                                            <TableCell
+                                            key={`form-section-cell-${sectionKey}-${col.columnKey}`}
+                                            colSpan={colSpan}
+                                            className="text-center border bg-blue-100"
+                                            >
+                                            -
+                                            </TableCell>
+                                        )
+                                      })}
                                     </TableRow>,
 
                                     // Field Rows
@@ -1496,7 +1516,7 @@ export default function DocumentsFields() {
                                             </div>
                                           </div>
                                         </TableCell>
-                                        {visibleColumns.map(col => renderClientFieldCheckboxes(`form-field-${field.name}`, col))}
+                                        {visibleColumns.map(col => renderClientFieldCheckboxes(`form-field-${field.name}`, col)).flat()}
                                       </TableRow>
                                     ))
                                   ])}
@@ -1520,15 +1540,18 @@ export default function DocumentsFields() {
                                           </span>
                                         </div>
                                       </TableCell>
-                                      {visibleColumns.map(col => (
-                                        <TableCell
-                                          key={`platform-cell-${platformKey}-${col.columnKey}`}
-                                          className="text-center border bg-blue-100"
-                                          style={{ width: '120px' }}
-                                        >
-                                          -
-                                        </TableCell>
-                                      ))}
+                                      {visibleColumns.map(col => {
+                                        const colSpan = col.isExpanded ? (col.hasUnderstudy ? 3 : 2) : 1
+                                        return (
+                                            <TableCell
+                                            key={`platform-cell-${platformKey}-${col.columnKey}`}
+                                            colSpan={colSpan}
+                                            className="text-center border bg-blue-100"
+                                            >
+                                            -
+                                            </TableCell>
+                                        )
+                                    })}
                                     </TableRow>,
 
                                     // Platform Field Rows
@@ -1567,194 +1590,10 @@ export default function DocumentsFields() {
                                             </div>
                                           </div>
                                         </TableCell>
-                                        {visibleColumns.map(col => renderClientFieldCheckboxes(`platform-${platformKey}-${field.name}`, col))}
+                                        {visibleColumns.map(col => renderClientFieldCheckboxes(`platform-${platformKey}-${field.name}`, col)).flat()}
                                       </TableRow>
                                     ))
                                   ])}
-                                </React.Fragment>
-                              )}
-
-                              {/* Client Data Section */}
-                              {clientData.length > 0 && (
-                                <React.Fragment>
-                                  {clientFormFields.length > 0 && (
-                                    <TableRow>
-                                      <TableCell colSpan={100} className="p-0">
-                                        <Separator className="my-4" />
-                                      </TableCell>
-                                    </TableRow>
-                                  )}
-
-                                  <SectionHeader
-                                    title="Data from Clients"
-                                    icon={Users}
-                                    count={clientData.length}
-                                  />
-
-                                  {clientData.map((client, clientIndex) => {
-                                    const isClientExpanded = expandedClientItems.has(client.id)
-
-                                    return [
-                                      // Client Header Row
-                                      <TableRow
-                                        key={`client-${client.id}`}
-                                        className="group bg-green-50 hover:bg-green-100 cursor-pointer"
-                                        onClick={() => toggleClientItemExpansion(client.id)}
-                                      >
-                                        <TableCell className="sticky left-0 bg-green-50 group-hover:bg-green-100 border-r z-[5] text-center font-semibold w-16">
-                                          C{clientIndex + 1}
-                                        </TableCell>
-                                        <TableCell className="sticky left-16 bg-green-50 group-hover:bg-green-100 border-r z-[5] w-[300px]">
-                                          <div className="flex items-center gap-2 px-4">
-                                            <div className="flex items-center justify-between flex-1">
-                                              <div className="flex flex-col">
-                                                <MemoizedTruncatedText
-                                                  text={client.name || `${client.first_name || ''} ${client.last_name || ''}`.trim()}
-                                                  className="font-semibold text-gray-800"
-                                                  maxLength={25}
-                                                />
-                                                <MemoizedTruncatedText
-                                                  text={client.email || client.current_communication_email || client.email_address || ''}
-                                                  className="text-sm text-gray-600"
-                                                  maxLength={30}
-                                                />
-                                                {(client.company || client.company_name) && (
-                                                  <MemoizedTruncatedText
-                                                    text={client.company || client.company_name || ''}
-                                                    className="text-xs text-gray-500"
-                                                    maxLength={25}
-                                                  />
-                                                )}
-                                                <span className={cn(
-                                                  "text-xs px-2 py-1 rounded-full mt-1 w-fit",
-                                                  client.status === 'Active' ? "bg-green-100 text-green-700" :
-                                                    client.status === 'Pending' ? "bg-yellow-100 text-yellow-700" :
-                                                      "bg-gray-100 text-gray-700"
-                                                )}>
-                                                  {client.status}
-                                                </span>
-                                              </div>
-                                              <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-6 w-6 p-0 flex-shrink-0 text-green-600 hover:bg-green-200"
-                                                onClick={(e) => {
-                                                  e.stopPropagation()
-                                                  toggleClientItemExpansion(client.id)
-                                                }}
-                                              >
-                                                {isClientExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                              </Button>
-                                            </div>
-                                          </div>
-                                        </TableCell>
-                                        {visibleColumns.map(col => (
-                                          <TableCell
-                                            key={`client-cell-${client.id}-${col.columnKey}`}
-                                            className="text-center border bg-green-50 group-hover:bg-green-100"
-                                            style={{ width: '120px' }}
-                                          >
-                                            <span className={cn(
-                                              "text-xs px-2 py-1 rounded-full",
-                                              client.status === 'Active' ? "bg-green-100 text-green-700" :
-                                                client.status === 'Pending' ? "bg-yellow-100 text-yellow-700" :
-                                                  "bg-gray-100 text-gray-700"
-                                            )}>
-                                              {client.status || '-'}
-                                            </span>
-                                          </TableCell>
-                                        ))}
-                                      </TableRow>,
-
-                                      // Client Detail Rows (only if expanded)
-                                      ...(isClientExpanded ? (() => {
-                                        const sectionRows: React.ReactNode[] = []
-
-                                        // Add Form Sections
-                                        Object.entries(groupedClientFields.formSections).forEach(([sectionKey, section], sectionIndex) => {
-                                          const sectionFields = section.fields.filter(field => {
-                                            const fieldValue = client[field.name]
-                                            return fieldValue && fieldValue !== '' && fieldValue !== null && fieldValue !== undefined
-                                          })
-
-                                          if (sectionFields.length > 0) {
-                                            // Section Header
-                                            sectionRows.push(
-                                              <TableRow key={`client-section-${client.id}-${sectionKey}`} className="bg-green-100">
-                                                <TableCell className="sticky left-0 bg-green-100 border-r z-[5] w-16 text-center text-sm font-semibold text-green-800">
-                                                  C{clientIndex + 1}.{sectionIndex + 1}
-                                                </TableCell>
-                                                <TableCell className="sticky left-16 bg-green-100 border-r z-[5] w-[300px]">
-                                                  <div className="flex items-center px-4 py-2">
-                                                    <span className="font-semibold text-green-800 text-sm">{section.title}</span>
-                                                    <span className="text-xs bg-green-200 text-green-700 px-2 py-1 rounded-full ml-2">
-                                                      {sectionFields.length}
-                                                    </span>
-                                                  </div>
-                                                </TableCell>
-                                                {visibleColumns.map(col => (
-                                                  <TableCell
-                                                    key={`client-section-cell-${client.id}-${sectionKey}-${col.columnKey}`}
-                                                    className="text-center border bg-green-100"
-                                                    style={{ width: '120px' }}
-                                                  >
-                                                    <span className="text-xs text-green-600">-</span>
-                                                  </TableCell>
-                                                ))}
-                                              </TableRow>
-                                            )
-
-                                            // Section Fields
-                                            sectionFields.forEach((field, fieldIndex) => {
-                                              const fieldValue = client[field.name]
-
-                                              sectionRows.push(
-                                                <TableRow key={`client-data-field-${client.id}-${field.name}`} className="group bg-green-25 hover:bg-green-50">
-                                                  <TableCell className="sticky left-0 bg-green-25 group-hover:bg-green-50 border-r z-[5] w-16 text-center text-sm text-gray-500">
-                                                    C{clientIndex + 1}.{sectionIndex + 1}.{fieldIndex + 1}
-                                                  </TableCell>
-                                                  <TableCell className="sticky left-16 bg-green-25 group-hover:bg-green-50 border-r z-[5] w-[300px]">
-                                                    <div className="flex items-center px-4 pl-8">
-                                                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                                                        <div className="flex flex-col flex-1 min-w-0">
-                                                          <div className="flex items-center gap-2">
-                                                            <span className="text-sm text-gray-700 font-medium">
-                                                              {field.tableHeader || field.label}:
-                                                            </span>
-                                                            {field.type && (
-                                                              <span className="text-xs text-gray-400 bg-gray-100 px-1 py-0.5 rounded">
-                                                                {field.type}
-                                                              </span>
-                                                            )}
-                                                          </div>
-                                                          <MemoizedTruncatedText
-                                                            text={formatFieldValue(fieldValue, field.type)}
-                                                            className="text-sm text-gray-800 mt-1"
-                                                            maxLength={35}
-                                                          />
-                                                        </div>
-                                                      </div>
-                                                    </div>
-                                                  </TableCell>
-                                                  {visibleColumns.map(col => (
-                                                    <TableCell
-                                                      key={`client-data-field-cell-${client.id}-${field.name}-${col.columnKey}`}
-                                                      className="text-center border bg-green-25 group-hover:bg-green-50"
-                                                      style={{ width: '120px' }}
-                                                    >
-                                                      <span className="text-xs text-gray-400">-</span>
-                                                    </TableCell>
-                                                  ))}
-                                                </TableRow>
-                                              )
-                                            })
-                                          }
-                                        })
-
-                                        return sectionRows
-                                      })() : [])
-                                    ].flat()
-                                  })}
                                 </React.Fragment>
                               )}
 
