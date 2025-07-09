@@ -787,18 +787,35 @@ export default function DocumentsFields() {
       // Process document changes
       Object.entries(pendingChanges.documents).forEach(([allocationKey, changes]) => {
         const [allocationId, subdeptId, ...rest] = allocationKey.split('_')
+        console.log('Processing allocation key:', { allocationKey, allocationId, subdeptId, rest })
 
         const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === parseInt(subdeptId))
+        console.log('Found subdept:', subdept?.id, 'hasClasses:', subdept?.hasClasses)
 
         let classId: string
         if (!subdept?.hasClasses) {
           classId = subdeptId
+          console.log('No classes, using subdeptId as classId:', classId)
         } else {
           const [classIndex, subclassIndex] = rest.map(r => r === 'direct' ? null : parseInt(r))
           const classItem = classIndex !== null ? subdept?.classes?.[classIndex] : null
-          classId = subdept && classItem
-            ? [subdeptId, classItem.id, ...(subclassIndex !== null ? [subclassIndex] : [])].join('_')
-            : subdeptId
+          console.log('Class item:', { classIndex, classItem, subclassIndex })
+          
+          const idParts = [subdeptId]
+          if (classItem?.id) {
+            idParts.push(String(classItem.id))
+          } else if (classIndex !== null && classIndex !== undefined) {
+            // Fallback to using the index if id is not available
+            idParts.push(String(classIndex))
+          }
+          
+          // Only add subclassIndex if it's defined and not null
+          if (subclassIndex !== null && subclassIndex !== undefined) {
+            idParts.push(String(subclassIndex))
+          }
+          
+          classId = idParts.join('_')
+          console.log('Constructed classId:', classId, 'from parts:', idParts)
         }
 
         if (!changesByClassId[classId]) {
@@ -824,9 +841,10 @@ export default function DocumentsFields() {
         } else {
           const [classIndex, subclassIndex] = rest.map(r => r === 'direct' ? null : parseInt(r))
           const classItem = classIndex !== null ? subdept?.classes?.[classIndex] : null
-          classId = subdept && classItem
-            ? [subdeptId, classItem.id, ...(subclassIndex !== null ? [subclassIndex] : [])].join('_')
-            : subdeptId
+          const idParts = [subdeptId]
+          if (classItem?.id) idParts.push(String(classItem.id))
+          if (subclassIndex !== null) idParts.push(String(subclassIndex))
+          classId = idParts.join('_')
         }
 
         if (!changesByClassId[classId]) {

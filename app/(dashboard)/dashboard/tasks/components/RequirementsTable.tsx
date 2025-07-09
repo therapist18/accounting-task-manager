@@ -174,27 +174,11 @@ export function RequirementsTable({
           const { data: dependantData, error: dependantError } = await supabase
             .from('registry_individuals')
             .select('relationships')
-            .eq('id', task.individual_id)
             .single();
 
-          if (!dependantError && dependantData?.relationships) {
-            // Find the principal relationship
-            const principalRelation = dependantData.relationships.find(
-              (rel: any) => rel.isPrincipal === "Yes" || rel.isPrincipal === true
-            );
-
-            if (principalRelation?.individual_id) {
-              // Fetch principal member's data
-              const { data: principalMember, error: principalError } = await supabase
-                .from('registry_individuals')
-                .select('*')
-                .eq('id', principalRelation.individual_id)
-                .single();
-
-              if (!principalError && principalMember) {
-                principalData[task.id] = principalMember;
-              }
-            }
+          if (error) throw error;
+          if (principalMember) {
+            principalData[task.id] = principalMember;
           }
         } catch (error) {
           console.error(`Error fetching principal data for task ${task.id}:`, error);
@@ -202,19 +186,20 @@ export function RequirementsTable({
       }
     }
 
-    setPrincipalMemberData(principalData);
-  }, []);
+    setPrincipalMemberData(prev => {
+      const hasChanges = JSON.stringify(prev) !== JSON.stringify(principalData);
+      return hasChanges ? principalData : prev;
+    });
+  }, [supabase]);
 
   // Fetch all individual documents for the current user
   const fetchAllIndividualDocuments = useCallback(async (tasks: any[]) => {
-    // Collect individual IDs from both direct tasks and their principal members
     const individualIds = new Set<number>();
 
     tasks.forEach(task => {
       if (task.individual_id) {
         individualIds.add(task.individual_id);
       }
-      // Add principal member IDs for dependants
       if (task.applicant_type === 'dependant' && principalMemberData[task.id]) {
         individualIds.add(principalMemberData[task.id].id);
       }
@@ -238,7 +223,6 @@ export function RequirementsTable({
 
       if (error) throw error;
 
-      // Group documents by director_id for faster lookup
       const documentsByDirector = documents?.reduce((acc, doc) => {
         const directorId = doc.director_id;
         if (!acc[directorId]) {
@@ -275,7 +259,6 @@ export function RequirementsTable({
 
       if (error) throw error;
 
-      // Group documents by company_id for faster lookup
       const documentsByCompany = documents?.reduce((acc, doc) => {
         const companyId = doc.company_id;
         if (!acc[companyId]) {
@@ -295,7 +278,6 @@ export function RequirementsTable({
   const getIndividualDocuments = useCallback((task: any, documentId: string) => {
     const cleanDocumentId = documentId.split('-').slice(0, 5).join('-');
 
-    // Use task's individual_id directly
     if (!task.individual_id || !allIndividualDocuments[task.individual_id]) return [];
 
     return allIndividualDocuments[task.individual_id].filter(doc =>
@@ -315,18 +297,33 @@ export function RequirementsTable({
 
   // Load all documents when tasks change
   useEffect(() => {
-    if (filteredTasks.length > 0) {
+    if (filteredTasks.length === 0) return;
+    
+    let isMounted = true;
+    
+    const loadDocuments = async () => {
       setDocumentsLoaded(false);
-      // First fetch principal member data for dependants
-      fetchPrincipalMemberData(filteredTasks).then(() => {
-        // Then fetch documents with the updated principal member data
-        Promise.all([
+      try {
+        await fetchPrincipalMemberData(filteredTasks);
+        await Promise.all([
           fetchAllIndividualDocuments(filteredTasks),
           fetchAllCompanyDocuments(filteredTasks)
-        ]).finally(() => setDocumentsLoaded(true));
-      });
-    }
-  }, [filteredTasks, fetchPrincipalMemberData, fetchAllIndividualDocuments, fetchAllCompanyDocuments]);
+        ]);
+      } catch (error) {
+        console.error('Error loading documents:', error);
+      } finally {
+        if (isMounted) {
+          setDocumentsLoaded(true);
+        }
+      }
+    };
+    
+    loadDocuments();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [filteredTasks]);
 
   // Check if a task has a specific document/field item
   const taskHasItem = useCallback((taskId: string, itemId: string) => {
