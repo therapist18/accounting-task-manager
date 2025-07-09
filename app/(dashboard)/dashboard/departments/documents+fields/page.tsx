@@ -59,7 +59,7 @@ export default function DocumentsFields() {
   const [submittingIds, setSubmittingIds] = useState<Set<string>>(new Set())
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set())
   const [availableColumns, setAvailableColumns] = useState<ColumnVisibilityOption[]>([])
-  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>(() => initializeColumnVisibility(availableColumns))
+const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({})
   const renderCountRef = useRef(0)
   const lastFetchTimeRef = useRef(0)
 
@@ -378,7 +378,7 @@ export default function DocumentsFields() {
     }
 
     return () => controller.abort()
-  }, [documentTab, groupDocumentsByCategory, loading, columnVisibility])
+  }, [documentTab])
 
   // Debounced refresh function
   const refreshData = useMemo(
@@ -430,11 +430,9 @@ export default function DocumentsFields() {
     }, DEBOUNCE_DELAY),
     []
   )
-
   useEffect(() => {
     fetchData()
-  }, [fetchData])
-
+  }, [documentTab]) 
   // Filter subdepartments based on column visibility
   const visibleNormalizedSubdepartments = useMemo(() => {
     if (!currentDepartment?.subdepartments?.length) {
@@ -578,15 +576,12 @@ export default function DocumentsFields() {
     setColumnVisibility(newVisibility)
   }, [availableColumns, columnVisibility])
 
-  // Initialize column visibility based on default display
   useEffect(() => {
     if (availableColumns.length > 0) {
-      const newVisibility = initializeColumnVisibility(availableColumns, columnVisibility)
-      if (newVisibility !== columnVisibility) {
-        setColumnVisibility(newVisibility)
-      }
+      const newVisibility = initializeColumnVisibility(availableColumns)
+      setColumnVisibility(newVisibility)
     }
-  }, [availableColumns, columnVisibility])
+  }, [availableColumns])
 
   // Enhanced display toggle with support for AP, DP, and understudy
   const handleDisplayToggle = useCallback(async (
@@ -1308,7 +1303,9 @@ export default function DocumentsFields() {
       </div>
     )
   }
-
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Render count:', renderCountRef.current)
+  }
   return (
     <div className="w-full min-h-screen">
       <div className="mx-auto p-4">
@@ -1319,6 +1316,7 @@ export default function DocumentsFields() {
             {process.env.NODE_ENV === 'development' && (
               <p className="text-xs text-gray-400 mt-1">Renders: {renderCountRef.current}</p>
             )}
+            
           </div>
           <div className="flex gap-3">
           <ColumnVisibilityControl
