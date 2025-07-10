@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { BarChart3, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, EyeOff, FileText, HelpCircle, Info, Loader2, Menu, Minus, Pin, Plus, Sidebar, Upload, UserCheck, X, Users , } from "lucide-react"
+import { AlertTriangle, BarChart3, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, Eye, EyeOff, FileText, HelpCircle, Info, Loader2, Menu, Minus, Pin, Plus, Sidebar, Upload, UserCheck, X, Users , } from "lucide-react"
 import { format, parseISO } from "date-fns"
 import { supabase } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
@@ -72,91 +72,157 @@ export function RequirementsTable({
   const [selectedApplicant, setSelectedApplicant] = useState<string | null>(null);
   const searchParams = useSearchParams();
   const router = useRouter();
-  // New state for document uploads
   const [taskDocuments, setTaskDocuments] = useState<Record<string, Record<string, any[]>>>({})
   const [documentStatuses, setDocumentStatuses] = useState<Record<string, DocumentStatus>>({})
   const [loadingDocuments, setLoadingDocuments] = useState<Set<string>>(new Set())
-
-  // State for principal member data for dependants
   const [principalMemberData, setPrincipalMemberData] = useState<Record<string, any>>({})
-  // State to store individual names for display in table headers
   const [individualNames, setIndividualNames] = useState<Record<number, string>>({})
-
-  // State to store all individual documents
   const [allIndividualDocuments, setAllIndividualDocuments] = useState<Record<string, any[]>>({});
   const [allCompanyDocuments, setAllCompanyDocuments] = useState<Record<string, any[]>>({});
   const [documentsLoaded, setDocumentsLoaded] = useState(false);
 
-  // Fetch all individual names and documents
-  const fetchAllIndividualData = useCallback(async (tasks: any[]) => {
-    const uniqueIds = new Set<number>();
+  // Updated function to properly fetch all individual names
+const fetchAllIndividualData = useCallback(async (tasks: any[]) => {
+  const uniqueIds = new Set<number>();
 
-    // Collect all individual IDs from tasks
-    tasks.forEach(task => {
-      if (task.principal_member) {
-        uniqueIds.add(task.principal_member);
-      }
-      if (task.understudy_member) {
-        uniqueIds.add(task.understudy_member);
-      }
-      if (task.dependant) {
-        uniqueIds.add(task.dependant);
-      }
-      if (task.individual_id) {
-        uniqueIds.add(task.individual_id);
-      }
+  // Collect all individual IDs from tasks
+  tasks.forEach(task => {
+    if (task.principal_member) {
+      uniqueIds.add(task.principal_member);
+    }
+    if (task.understudy_member) {
+      uniqueIds.add(task.understudy_member);
+    }
+    if (task.dependant_member) {
+      uniqueIds.add(task.dependant_member);
+    }
+    if (task.individual_id) {
+      uniqueIds.add(task.individual_id);
+    }
+  });
+
+  // Remove any undefined or null values
+  const validIds = Array.from(uniqueIds).filter(id => id != null);
+
+  if (validIds.length === 0) return;
+
+  // Get individual names
+  try {
+    const { data: individuals, error } = await supabase
+      .from('registry_individuals')
+      .select('id, full_name')
+      .in('id', validIds);
+
+    if (error) throw error;
+
+    const namesMap = individuals?.reduce((acc, individual) => {
+      acc[individual.id] = individual.full_name;
+      return acc;
+    }, {} as Record<number, string>);
+
+    // Update the individualNames state with the new names
+    setIndividualNames(prevNames => {
+      const updated = {
+        ...prevNames,
+        ...namesMap
+      };
+      return updated;
     });
+    
+  } catch (error) {
+    console.error('Error fetching individual names:', error);
+  }
 
-    // Get individual names
+  // Fetch documents for individuals
+  try {
+    const { data: documents, error } = await supabase
+      .from('acc_portal_directors_documents')
+      .select(`
+        *,
+        acc_portal_kyc (
+          id,
+          name,
+          display_name
+        )
+      `)
+      .in('director_id', validIds)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const documentsByDirector = documents?.reduce((acc, doc) => {
+      const directorId = doc.director_id;
+      if (!acc[directorId]) {
+        acc[directorId] = [];
+      }
+      acc[directorId].push(doc);
+      return acc;
+    }, {} as Record<string, any[]>);
+
+    setAllIndividualDocuments(documentsByDirector || {});
+  } catch (error) {
+    console.error('Error fetching all individual documents:', error);
+  }
+}, []);
+
+  // Update individual names when tasks change
+  useEffect(() => {
+    if (!tasks?.length) {
+      return;
+    }
+    
+    // Fetch all individual data including names from the database
+    fetchAllIndividualData(tasks);
+    
+  }, [tasks, fetchAllIndividualData]);
+
+// Filter tasks based on active tab
+const filteredTasks = useMemo(() => {
+  return tasks.filter(task => {
+    if (activeTab === "completed") {
+      return task.status === "completed" || task.status === "approved";
+    } else {
+      return task.status !== "completed" && task.status !== "approved";
+    }
+  });
+}, [tasks, activeTab]);
+
+// Fetch principal member data for dependants
+useEffect(() => {
+  const fetchPrincipalData = async () => {
+    const dependantTasks = filteredTasks.filter(task => task.applicant_type === 'dependant' && task.principal_member);
+    
+    if (dependantTasks.length === 0) return;
+
+    const principalIds = [...new Set(dependantTasks.map(task => task.principal_member).filter(Boolean))];
+    
     try {
-      const { data: individuals, error } = await supabase
+      const { data: principals, error } = await supabase
         .from('registry_individuals')
         .select('id, full_name')
-        .in('id', Array.from(uniqueIds));
+        .in('id', principalIds);
 
       if (error) throw error;
 
-      const namesMap = individuals?.reduce((acc, individual) => {
-        acc[individual.id] = individual.full_name;
-        return acc;
-      }, {} as Record<string, string>);
-
-      setIndividualNames(namesMap || {});
-    } catch (error) {
-      console.error('Error fetching individual names:', error);
-    }
-
-    // Fetch documents
-    try {
-      const { data: documents, error } = await supabase
-        .from('acc_portal_directors_documents')
-        .select(`
-          *,
-          acc_portal_kyc (
-            id,
-            name,
-            display_name
-          )
-        `)
-        .in('director_id', Array.from(uniqueIds))
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      const documentsByDirector = documents?.reduce((acc, doc) => {
-        const directorId = doc.director_id;
-        if (!acc[directorId]) {
-          acc[directorId] = [];
+      const principalDataMap = dependantTasks.reduce((acc, task) => {
+        const principal = principals?.find(p => p.id === task.principal_member);
+        if (principal) {
+          acc[task.id] = {
+            full_name: principal.full_name,
+            individual_id: principal.individual_id || principal.id
+          };
         }
-        acc[directorId].push(doc);
         return acc;
-      }, {} as Record<string, any[]>);
+      }, {} as Record<string, any>);
 
-      setAllIndividualDocuments(documentsByDirector || {});
+      setPrincipalMemberData(principalDataMap);
     } catch (error) {
-      console.error('Error fetching all individual documents:', error);
+      console.error('Error fetching principal member data:', error);
     }
-  }, [principalMemberData]);
+  };
+
+  fetchPrincipalData();
+}, [filteredTasks]);
 
   // Fetch all company documents for the current user
   const fetchAllCompanyDocuments = useCallback(async (tasks: any[]) => {
@@ -218,18 +284,6 @@ export function RequirementsTable({
     return getTableFields(documentTab);
   }, [documentTab]);
 
-  // Filter tasks based on active tab
-  const filteredTasks = useMemo(() => {
-    return tasks.filter(task => {
-      if (activeTab === "completed") {
-        return task.status === "completed" || task.status === "approved";
-      } else {
-        return task.status !== "completed" && task.status !== "approved";
-      }
-    });
-  }, [tasks, activeTab]);
-
-  
   const groupedTasks = useMemo(() => {
     const groups = new Map<string, any[]>();
 
@@ -387,64 +441,33 @@ export function RequirementsTable({
 
   // Get document status for specific column (principal/dependant/understudy)
   const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy'): DocumentStatus => {
-    console.group(`getDocumentStatusForColumn - ${item.name || item.id} (${columnType})`);
-    console.log('Task:', { id: task.id, applicant_type: task.applicant_type });
-    console.log('Item:', { 
-      id: item.id, 
-      name: item.name, 
-      ap: item.ap, 
-      dp: item.dp, 
-      understudy: item.understudy, 
-      display: item.display 
-    });
-
     const itemId = item.selectionId || item.id;
     // Create a status key that includes the column type
     const statusKey = `${task.id}-${itemId}-${columnType}`;
-    console.log('Status Key:', statusKey);
     
     // Determine which columns this document should appear in
     const applicableColumns = [];
     
-    // Check each flag and add to appropriate columns
     if (item.ap === true) applicableColumns.push('principal');
     if (item.dp === true) applicableColumns.push('dependant');
     if (item.understudy === true) applicableColumns.push('understudy');
     
-    // If display is true, add to all columns unless explicitly excluded
     if (item.display === true) {
       if (!applicableColumns.includes('principal')) applicableColumns.push('principal');
       if (!applicableColumns.includes('dependant')) applicableColumns.push('dependant');
-      // Understudy column is special - only add if explicitly set
     }
     
-    console.log('Document is applicable for columns:', applicableColumns, 'based on flags:', {
-      ap: item.ap,
-      dp: item.dp,
-      understudy: item.understudy,
-      display: item.display
-    });
-    
-    // If this document shouldn't be in the current column, return 'na' status
     if (!applicableColumns.includes(columnType)) {
-      console.log(`Document is not applicable for column type: ${columnType}. It's only applicable for:`, applicableColumns);
-      console.groupEnd();
-      return { status: 'na', documents: [] };
+      return { type: 'na', documents: [] };
     }
     
-    // Check cache
     if (documentStatuses[statusKey]) {
-      console.log('Returning cached status');
-      console.groupEnd();
       return documentStatuses[statusKey];
     }
-
     
-    // Check if document is applicable to this column type
     const isDocumentApplicable = applicableColumns.includes(columnType);
     
     if (!isDocumentApplicable) {
-      console.log('Document not applicable to this column type:', columnType);
       const naStatus: DocumentStatus = {
         type: 'na',
         documents: [],
@@ -455,14 +478,10 @@ export function RequirementsTable({
           understudy: item.understudy === true || item.display === true
         }
       };
-      console.log('NA Status:', naStatus);
-      console.log('NA Status:', naStatus);
       setDocumentStatuses(prev => ({ ...prev, [statusKey]: naStatus }));
-      console.groupEnd();
       return naStatus;
     }
 
-    // Initialize status
     const status: DocumentStatus = {
       type: 'missing',
       documents: [],
@@ -474,28 +493,19 @@ export function RequirementsTable({
       }
     };
 
-    console.log('Initial Status:', status);
-
-    // Try to get existing documents if possible
     try {
       let documentId = item.kycdocumentid || item.id;
-      console.log('Document ID:', documentId);
       
       if (!documentId) {
-        console.log('No document ID, returning missing status');
         setDocumentStatuses(prev => ({ ...prev, [statusKey]: status }));
-        console.groupEnd();
         return status;
       }
 
-      // Clean the document ID
       if (documentId.includes('_')) {
         const parts = documentId.split('_');
         documentId = parts[0];
-        console.log('Cleaned Document ID:', documentId);
       }
 
-      // Get all documents for this item
       let allDocuments: any[] = [];
       if (documentTab === 'individual') {
         allDocuments = getIndividualDocuments(task, documentId) || [];
@@ -503,43 +513,21 @@ export function RequirementsTable({
         allDocuments = getCompanyDocuments(task, documentId) || [];
       }
 
-      console.log('All Documents:', allDocuments);
-
-      // Filter documents based on column type and task's applicant type
       const filteredDocuments = allDocuments.filter(doc => {
-        const docInfo = { 
-          id: doc.id, 
-          document_applicant_type: doc.applicant_type,
-          columnType,
-          taskApplicantType: task.applicant_type,
-          matches: !doc.applicant_type || doc.applicant_type === columnType
-        };
-        console.log('Checking document:', docInfo);
-        
-        // If document has applicant_type, it must match the column type
-        // If no applicant_type, include it for backward compatibility
         return !doc.applicant_type || doc.applicant_type === columnType;
       });
-
-      console.log('Filtered Documents:', filteredDocuments);
 
       if (filteredDocuments.length > 0) {
         status.type = 'view';
         status.documents = filteredDocuments;
         status.count = filteredDocuments.length;
-        console.log('Updated status to view:', status);
-      } else {
-        console.log('No matching documents found for column type');
       }
     } catch (error) {
       console.error('Error checking documents:', error);
     } finally {
-      console.log('Final Status:', status);
       setDocumentStatuses(prev => ({ ...prev, [statusKey]: status }));
-      console.groupEnd();
     }
 
-    // Cache the status
     setDocumentStatuses(prev => ({ ...prev, [statusKey]: status }));
     return status;
   }, [documentTab, getDocumentApplicability, getIndividualDocuments, getCompanyDocuments, documentStatuses]);
@@ -574,9 +562,7 @@ export function RequirementsTable({
 
   // Clear document statuses
   const clearDocumentStatuses = useCallback(() => {
-    console.log('Clearing document statuses');
     setDocumentStatuses(prevStatuses => {
-      // Only update if there are statuses to clear
       if (Object.keys(prevStatuses).length > 0) {
         return {};
       }
@@ -591,13 +577,11 @@ export function RequirementsTable({
     const fetchData = async () => {
       if (!isMounted || !filteredTasks.length) return;
       
-      // Clear statuses when document tab changes
       clearDocumentStatuses();
       setDocumentsLoading(true);
       setDocuments([]);
       
       try {
-        // 1. Fetch all documents from KYC table
         const documentsResponse = await supabase
           .from('acc_portal_kyc')
           .select('*')
@@ -620,7 +604,6 @@ export function RequirementsTable({
 
         setDocuments(processedDocuments);
 
-        // 2. Fetch task class requirements for all filtered tasks
         const taskDataPromises = filteredTasks.map(async (task) => {
           let constructedClassId = null;
           if (task.subclass_id && task.class_id) {
@@ -648,7 +631,6 @@ export function RequirementsTable({
             if (!requirementsResponse.error && requirementsResponse.data) {
               classRequirements = requirementsResponse.data;
 
-              // Filter documents_and_fields to only include items that are applicable to any applicant type
               if (classRequirements.documents_and_fields && Array.isArray(classRequirements.documents_and_fields)) {
                 const applicableDocuments = classRequirements.documents_and_fields.filter((item: any) => {
                   return item.ap === true || item.dp === true || item.understudy === true || item.display === true;
@@ -657,7 +639,6 @@ export function RequirementsTable({
                 documentsAndFieldsCount = applicableDocuments.length;
               }
 
-              // Filter client_fields to only include items that are applicable
               if (classRequirements.client_fields && Array.isArray(classRequirements.client_fields)) {
                 const applicableClientFields = classRequirements.client_fields.filter((item: any) => {
                   return item.ap === true || item.dp === true || item.understudy === true || item.display === true;
@@ -668,7 +649,6 @@ export function RequirementsTable({
             }
           }
 
-          // Fetch individual data if task has individual_id
           let individualData = null;
           if (task.individual_id) {
             const individualResponse = await supabase
@@ -745,7 +725,6 @@ export function RequirementsTable({
   // Handle upload action
   const handleUploadAction = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy') => {
     if (onShowUploadDialog) {
-      // Clear statuses for this item to force a refresh after upload
       const itemId = item.selectionId || item.id;
       const newStatuses = { ...documentStatuses };
       Object.keys(newStatuses).forEach(key => {
@@ -755,7 +734,6 @@ export function RequirementsTable({
       });
       setDocumentStatuses(newStatuses);
       
-      // Pass the column type to the upload dialog
       onShowUploadDialog({ ...task, currentColumnType: columnType }, item);
     }
   }, [documentStatuses, onShowUploadDialog]);
@@ -763,7 +741,6 @@ export function RequirementsTable({
   // Handle view action
   const handleViewAction = useCallback(async (task: any, item: any) => {
     const itemId = item.selectionId || item.id;
-    // Use the first available status for this item (since we're not filtering by column type here)
     const statusKey = Object.keys(documentStatuses).find(key => 
       key.startsWith(`${task.id}-${itemId}-`)
     );
@@ -773,7 +750,6 @@ export function RequirementsTable({
       if (onViewDocument) {
         onViewDocument(task, { ...item, documents: status.documents });
       } else {
-        // Default view behavior - open first document
         const firstDoc = status.documents[0];
         if (firstDoc.file_path) {
           try {
@@ -806,7 +782,6 @@ export function RequirementsTable({
     const statusKey = `${task.id}-${itemId}-${columnType}`;
     const isLoading = loadingDocuments.has(statusKey);
 
-    // Show loading state
     if (isLoading) {
       return (
         <div className="flex flex-col items-center justify-center h-full">
@@ -815,7 +790,6 @@ export function RequirementsTable({
       );
     }
 
-    // If not applicable to this column, show N/A
     if (status.type === 'na') {
       return (
         <div className="flex flex-col items-center justify-center h-full">
@@ -824,7 +798,6 @@ export function RequirementsTable({
       );
     }
 
-    // Show status based on document availability
     switch (status.type) {
       case 'view':
         return (
@@ -921,7 +894,6 @@ export function RequirementsTable({
       const classRequirements = taskClassRequirements[task.id];
       if (!classRequirements) return;
 
-      // Process documents_and_fields - only include items that are applicable to at least one applicant type
       if (Array.isArray(classRequirements.documents_and_fields)) {
         classRequirements.documents_and_fields
           .filter((item: any) => {
@@ -988,7 +960,6 @@ export function RequirementsTable({
           });
       }
 
-      // Process client_fields - only include items that are applicable
       if (Array.isArray(classRequirements.client_fields)) {
         classRequirements.client_fields
           .filter((item: any) => {
@@ -1259,62 +1230,106 @@ return (
               })}
             </TableRow>
 
-            {/* Enhanced Applicant Type row with actual names */}
-            <TableRow className="h-10">
+            {/* ====== CORRECTED APPLICANT NAME ROW ====== */}
+            <TableRow className="h-14">
               {filteredGroupedTasks.map((group, groupIndex) => {
                 const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                const principalTask = group.tasks.find(t => t.applicant_type === 'principal');
+
+                // Robustly find IDs for each role by checking all tasks in the group
+                const { principalId, dependantId, understudyId } = group.tasks.reduce(
+                  (acc, task) => {
+                    // The primary ID is from the task for that specific applicant type
+                    if (task.applicant_type === 'principal') acc.principalId = task.individual_id;
+                    if (task.applicant_type === 'dependant') acc.dependantId = task.individual_id;
+                    if (task.applicant_type === 'understudy') acc.understudyId = task.individual_id;
+
+                    // Use the relationship fields as fallbacks or to link across tasks
+                    // The '||' operator ensures we don't overwrite an ID if it's already found
+                    if (task.principal_member) acc.principalId = acc.principalId || task.principal_member;
+                    if (task.dependant_member) acc.dependantId = acc.dependantId || task.dependant_member;
+                    if (task.understudy_member) acc.understudyId = acc.understudyId || task.understudy_member;
+                    
+                    return acc;
+                  },
+                  { principalId: null, dependantId: null, understudyId: null }
+                );
+
+                // Look up names using the IDs from the central `individualNames` map.
+                const principalName = (principalId && individualNames[principalId]);
+                const dependantName = (dependantId && individualNames[dependantId]);
+                const understudyName = (understudyId && individualNames[understudyId]);
+
                 const dependantTask = group.tasks.find(t => t.applicant_type === 'dependant');
-                const understudyTask = group.tasks.find(t => t.applicant_type === 'understudy');
 
                 const columns = [
+                  // Principal Column
                   <TableHead
                     key={`${groupIndex}-principal`}
                     colSpan={1}
-                    className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
+                    className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2"
                   >
                     <div className="flex flex-col items-center gap-1">
                       <span className="text-xs font-bold">Principal</span>
-                      {principalTask && (
-                        <span className="text-xs truncate max-w-[100px]">
-                          {individualNames[principalTask.principal_member] || principalTask.applicant_name}
-                        </span>
+                      {principalName ? (
+                        <div className="flex items-center gap-1">
+                          <UserCheck className="h-3 w-3 text-blue-200" />
+                          <span className="text-xs truncate max-w-[100px]" title={principalName}>
+                            {principalName}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">-</span>
                       )}
-                      {principalTask && <Pin className="h-3 w-3" />}
                     </div>
                   </TableHead>,
+                  
+                  // Dependant Column
                   <TableHead
                     key={`${groupIndex}-dependant`}
                     colSpan={1}
-                    className="bg-blue-500 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
+                    className="bg-blue-500 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2"
                   >
                     <div className="flex flex-col items-center gap-1">
                       <span className="text-xs font-bold">Dependant</span>
-                      {dependantTask && (
-                        <span className="text-xs truncate max-w-[100px]">
-                          {individualNames[dependantTask.dependant] || dependantTask.applicant_name}
-                        </span>
+                      {dependantName ? (
+                        <div className="flex items-center gap-1">
+                          <Users className="h-3 w-3 text-blue-200" />
+                          <span className="text-xs truncate max-w-[100px]" title={dependantName}>
+                            {dependantName}
+                          </span>
+                          {dependantTask && dependantTask.applications_count > 0 && (
+                            <span className="text-xs bg-blue-100 text-blue-800 rounded-full px-1.5">
+                              {dependantTask.applications_count}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">-</span>
                       )}
-                      {dependantTask && <Pin className="h-3 w-3" />}
                     </div>
                   </TableHead>
                 ];
 
+                // Add Understudy Column if needed
                 if (hasClassD) {
                   columns.push(
                     <TableHead
                       key={`${groupIndex}-understudy`}
                       colSpan={1}
-                      className="bg-blue-400 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
+                      className="bg-blue-400 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2"
                     >
                       <div className="flex flex-col items-center gap-1">
                         <span className="text-xs font-bold">Understudy</span>
-                        {understudyTask && (
-                          <span className="text-xs truncate max-w-[100px]">
-                            {individualNames[understudyTask.understudy_member] || understudyTask.applicant_name}
-                          </span>
+                        {understudyName ? (
+                          <div className="flex items-center gap-1">
+                            <UserCheck className="h-3 w-3 text-blue-200" />
+                            <span className="text-xs truncate max-w-[100px]" title={understudyName}>
+                              {understudyName}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
                         )}
-                        {understudyTask && <Pin className="h-3 w-3" />}
                       </div>
                     </TableHead>
                   );
@@ -1323,7 +1338,8 @@ return (
                 return columns;
               })}
             </TableRow>
-
+            {/* ====== END OF CORRECTION ====== */}
+            
             {/* Status row with plus/minus icons */}
             <TableRow className="h-8">
               {filteredGroupedTasks.map((group, groupIndex) => {
