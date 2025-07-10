@@ -15,7 +15,6 @@ import type { Stage, Department } from "@/lib/supabase/departments"
 import { StageUploadDialog } from "./components/StageUploadDialog"
 import { UploadRequirementsDialog } from "./components/UploadRequirementsDialog"
 import { StagesTable } from "./components/StagesTable"
-import { RequirementsTable } from "./components/RequirementsTable"
 import { WebDataTable } from "./components/WebDataTable"
 import { StageTransitionDialog } from "@/components/stage-transition-dialog"
 import { NewTaskDialog } from "@/app/(dashboard)/dashboard/tasks/components/new-task-dialog"
@@ -27,6 +26,7 @@ import DocumentPreviewDialog from "../applications/components/document-preview-d
 import { EditableStageCell } from "./components/EditableStageCell"
 import { EnquiryDialog } from "./components/EnquiryDialog"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
+import { RequirementsTable } from "./components/RequirementsTable"
 
 const fuzzyMatch = (str1: string, str2: string, threshold = 0.8): boolean => {
   if (!str1 || !str2) return false;
