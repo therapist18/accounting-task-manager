@@ -61,6 +61,10 @@ export function FileUploadComponent({
         URL.revokeObjectURL(fileUrl)
         setFileUrl(null)
       }
+      // Clean up global function
+      if (window.refreshExtraction) {
+        delete window.refreshExtraction
+      }
     }
   }, [open, fileUrl])
 
@@ -132,12 +136,20 @@ export function FileUploadComponent({
       setFileUrl(objectUrl)
       
       // Set up immediate preview with empty data
-      setPreviewData({
+      const previewData = {
         fileUrl: objectUrl,
         fileName: file.name,
         fileType: file.type,
         extractedData: {}
-      })
+      }
+      setPreviewData(previewData)
+      
+      // Make refreshExtraction available globally
+      window.refreshExtraction = async () => {
+        if (file) {
+          await performDataExtraction(file, objectUrl, true)
+        }
+      }
       
       // Start extraction in the background
       performDataExtraction(file, objectUrl)
@@ -147,7 +159,7 @@ export function FileUploadComponent({
 
 
 // Update the FileUploadComponent to use fields from the document
-  const performDataExtraction = async (file: File, fileUrl: string) => {
+  const performDataExtraction = async (file: File, fileUrl: string, isRefresh = false) => {
     if (!file || !document) return
 
     setUploading(true)

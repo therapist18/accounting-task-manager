@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Clock, Eye, Save, Trash2, FileText } from 'lucide-react'
+import { Clock, Eye, Save, Trash2, FileText, RefreshCw, Loader2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import Image from 'next/image'
 import { toast } from 'sonner'
@@ -105,6 +105,7 @@ const ExtractionPreview = ({
   });
 
   const [isOpen, setIsOpen] = useState(expanded)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   // Helper function to get nested value from object using dot notation
   const getNestedValue = (obj: any, path: string, defaultValue: any = '') => {
@@ -189,7 +190,39 @@ const ExtractionPreview = ({
 
       {/* Extracted Data */}
       <div className="w-[400px] space-y-6">
-        <h3 className="text-lg font-semibold">Document Details</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold">Document Details</h3>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              if (typeof window.refreshExtraction === 'function') {
+                setIsRefreshing(true);
+                try {
+                  await window.refreshExtraction();
+                  toast.success('Extraction refreshed successfully');
+                } catch (error) {
+                  toast.error('Failed to refresh extraction');
+                } finally {
+                  setIsRefreshing(false);
+                }
+              }
+            }}
+            disabled={isRefreshing || !fileUrl}
+          >
+            {isRefreshing ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Refreshing...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Refresh Extraction
+              </>
+            )}
+          </Button>
+        </div>
         <div className={`rounded-lg p-4 ${getStylesByType?.(type || 'principal')?.getBgColor() || 'bg-white'} ${getStylesByType?.(type || 'principal')?.getBorderColor() || 'border-gray-200'}`}>
           <div className="space-y-4">
             {fields.length > 0 ? (

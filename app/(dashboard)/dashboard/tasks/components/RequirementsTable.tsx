@@ -1186,65 +1186,88 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
     )
   }
 
-    const handleUploadClick = () => {
-      setSelectedUploadData({
-        task,
-        document: item,
-        columnType
-      })
-      setUploadDialogOpen(true)
-    }
+  const handleUploadClick = () => {
+    setSelectedUploadData({
+      task,
+      document: item,
+      columnType
+    });
+    setUploadDialogOpen(true);
+  };
 
-    const handleViewClick = async () => {
-      if (status.documents.length > 0) {
-        // Get the file URL and set up preview data
-        const document = status.documents[0]; // Show first document, we can add navigation later
+  const handleViewClick = async () => {
+    if (status.documents.length > 0) {
+      // Get the file URL and set up preview data
+      const document = status.documents[0]; // Show first document, we can add navigation later
 
-        try {
-          const { data: signedUrl, error } = await supabase.storage
-            .from('kyc-documents')
-            .createSignedUrl(document.file_path, 3600)
+      try {
+        const { data: signedUrl, error } = await supabase.storage
+          .from('kyc-documents')
+          .createSignedUrl(document.file_path, 3600);
 
-          if (error) throw error
+        if (error) throw error;
 
-          // Get the document definition from your documents array
-          const documentDefinition = documents.find(doc => doc.id === document.document_id);
+        // Get the document definition from your documents array
+        const documentDefinition = documents.find(doc => doc.id === document.document_id);
 
-          // Prepare extraction fields from document definition
-          const extractionFields = documentDefinition?.fields?.map((field: any) => ({
-            id: field.id,
-            name: field.name,
-            type: field.type || 'text',
-            required: field.required || false
-          })) || [];
+        // Prepare extraction fields from document definition
+        const extractionFields = (documentDefinition?.fields || []).map((field: any) => ({
+          id: field.id,
+          name: field.name,
+          type: field.type || 'text',
+          required: field.required || false
+        }));
 
-          // Set up preview data
-          setSelectedDocumentForPreview({
-            documentName: documentDefinition?.display_name || documentDefinition?.name || document.acc_portal_kyc?.display_name || 'Document',
-            extractedData: document.extracted_details || {},
-            fields: extractionFields,
-            fileUrl: signedUrl.signedUrl,
-            fileName: document.file_path?.split('/').pop() || '',
-            allDocuments: status.documents,
-            currentIndex: 0,
-            task,
-            item,
-            columnType,
-            uploadDate: document.created_at,
-            documentStatus: document.status
-          })
-          setDocumentPreviewOpen(true)
-        } catch (error) {
-          console.error('Error getting file URL:', error)
-          toast({
-            title: 'Error',
-            description: 'Failed to load document preview',
-            variant: 'destructive'
-          })
+        // Map the extracted data to match the field names in the form
+        const mappedExtractedData: Record<string, any> = {};
+        if (document.extracted_details) {
+          Object.entries(document.extracted_details).forEach(([key, value]) => {
+            // Convert keys to lowercase for case-insensitive matching
+            const lowerKey = key.toLowerCase();
+            // Find the matching field in the extraction fields
+            const matchingField = extractionFields.find((field: any) => 
+              field.name.toLowerCase() === lowerKey || 
+              field.id.toLowerCase() === lowerKey
+            );
+            
+            if (matchingField) {
+              // Use the field's name as the key to ensure consistency
+              mappedExtractedData[matchingField.name] = value;
+            } else {
+              // If no matching field found, include it as is
+              mappedExtractedData[key] = value;
+            }
+          });
         }
+
+        // Set up the document preview with the mapped data
+        setSelectedDocumentForPreview({
+          documentName: document.acc_portal_kyc?.display_name || document.acc_portal_kyc?.name || 'Document',
+          extractedData: mappedExtractedData,
+          fields: extractionFields,
+          fileUrl: signedUrl.signedUrl,
+          fileName: document.file_path?.split('/').pop() || '',
+          allDocuments: status.documents,
+          currentIndex: 0,
+          task,
+          item,
+          columnType,
+          uploadDate: document.created_at,
+          documentStatus: document.status
+        });
+        setDocumentPreviewOpen(true);
+      } catch (error) {
+        console.error('Error getting file URL:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to load document preview',
+          variant: 'destructive'
+        });
       }
     }
-    switch (status.type) {
+  };
+
+  switch (status.type) {
       case 'view':
         return (
           <div className="flex flex-col items-center justify-center h-full">
@@ -2429,7 +2452,7 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
       {/* Document Preview Dialog */}
       {selectedDocumentForPreview && (
         <Dialog open={documentPreviewOpen} onOpenChange={setDocumentPreviewOpen}>
-          <DialogContent className="max-w-[98vw] max-h-[98vh] p-0">
+          <DialogContent className="max-w-6xl max-h-[98vh] p-0">
             <div className="h-[98vh] flex flex-col">
               {/* Header with document info and navigation */}
               <div className="p-4 border-b flex items-center justify-between">
