@@ -1218,56 +1218,33 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
           required: field.required || false
         }));
 
-        // Map the extracted data to match the field names in the form
-        const mappedExtractedData: Record<string, any> = {};
-        if (document.extracted_details) {
-          Object.entries(document.extracted_details).forEach(([key, value]) => {
-            // Convert keys to lowercase for case-insensitive matching
-            const lowerKey = key.toLowerCase();
-            // Find the matching field in the extraction fields
-            const matchingField = extractionFields.find((field: any) => 
-              field.name.toLowerCase() === lowerKey || 
-              field.id.toLowerCase() === lowerKey
-            );
-            
-            if (matchingField) {
-              // Use the field's name as the key to ensure consistency
-              mappedExtractedData[matchingField.name] = value;
-            } else {
-              // If no matching field found, include it as is
-              mappedExtractedData[key] = value;
-            }
-          });
+          // Set up preview data
+          setSelectedDocumentForPreview({
+            documentName: documentDefinition?.display_name || documentDefinition?.name || document.acc_portal_kyc?.display_name || 'Document',
+            extractedData: document.extracted_details || {},
+            fields: extractionFields,
+            fileUrl: signedUrl.signedUrl,
+            fileName: document.file_path?.split('/').pop() || '',
+            allDocuments: status.documents,
+            currentIndex: 0,
+            task,
+            item,
+            columnType,
+            uploadDate: document.created_at,
+            documentStatus: document.status
+          })
+          setDocumentPreviewOpen(true)
+        } catch (error) {
+          console.error('Error getting file URL:', error)
+          toast({
+            title: 'Error',
+            description: 'Failed to load document preview',
+            variant: 'destructive'
+          })
         }
-
-        // Set up the document preview with the mapped data
-        setSelectedDocumentForPreview({
-          documentName: document.acc_portal_kyc?.display_name || document.acc_portal_kyc?.name || 'Document',
-          extractedData: mappedExtractedData,
-          fields: extractionFields,
-          fileUrl: signedUrl.signedUrl,
-          fileName: document.file_path?.split('/').pop() || '',
-          allDocuments: status.documents,
-          currentIndex: 0,
-          task,
-          item,
-          columnType,
-          uploadDate: document.created_at,
-          documentStatus: document.status
-        });
-        setDocumentPreviewOpen(true);
-      } catch (error) {
-        console.error('Error getting file URL:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load document preview',
-          variant: 'destructive'
-        });
       }
     }
-  };
-
-  switch (status.type) {
+    switch (status.type) {
       case 'view':
         return (
           <div className="flex flex-col items-center justify-center h-full">
@@ -2571,7 +2548,8 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
                   expanded={true}
                   showSaveButton={false}
                   type={selectedDocumentForPreview.columnType}
-                  onDataChange={() => {}} // Read-only for preview
+                  viewMode={true} // Set to true for view-only mode
+                  onDataChange={() => {}} // Empty callback since we're in view mode
                 />
               </div>
             </div>
