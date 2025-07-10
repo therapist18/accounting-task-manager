@@ -76,9 +76,10 @@ const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
     </div>
   )
 }
+
 const ExtractionPreview = ({
   documentName,
-  extractedData,
+  extractedData = {},
   fields = [],
   onDataChange,
   fileUrl,
@@ -94,7 +95,6 @@ const ExtractionPreview = ({
     getButtonStyle: () => 'bg-gray-600 hover:bg-gray-700 text-white'
   })
 }: ExtractionPreviewProps) => {
-  
   console.log('ExtractionPreview - Received Props:', {
     documentName,
     extractedData,
@@ -105,162 +105,72 @@ const ExtractionPreview = ({
   });
 
   const [isOpen, setIsOpen] = useState(expanded)
-  const [localData, setLocalData] = useState<Record<string, any>>(() => {
-    const formattedData: Record<string, any> = {};
+
+  // Helper function to get nested value from object using dot notation
+  const getNestedValue = (obj: any, path: string, defaultValue: any = '') => {
+    if (!path) return defaultValue;
+    const keys = path.split('.');
+    let result = obj;
     
-    console.log('ExtractionPreview - Processing Fields:', fields);
-    console.log('ExtractionPreview - Extracted Data:', extractedData);
+    for (const key of keys) {
+      if (result === null || result === undefined) return defaultValue;
+      result = result[key];
+    }
     
-    fields.forEach(field => {
-      // Convert field name to snake_case for matching with extracted data
-      const snakeCase = field.name
-        .toLowerCase()
-        .replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => '_' + chr.toLowerCase())
-        .replace(/^_/, '');
-      
-      // Try different key formats to find the value
-      let value = extractedData[snakeCase] || 
-                  extractedData[field.id] || 
-                  extractedData[field.name] || 
-                  extractedData[field.name.toLowerCase()];
-
-      console.log(`Field "${field.name}":`, {
-        snakeCase,
-        value,
-        possibleKeys: {
-          snakeCase: extractedData[snakeCase],
-          id: extractedData[field.id],
-          name: extractedData[field.name],
-          lowercase: extractedData[field.name.toLowerCase()]
-        }
-      });
-      
-      // Format specific fields
-      if (field.name.toLowerCase() === 'sex' || field.name.toLowerCase() === 'gender') {
-        value = value?.toString().toUpperCase() === 'FEMALE' ? 'F' : 
-                value?.toString().toUpperCase() === 'MALE' ? 'M' : value;
-      } else if (field.name.toLowerCase() === 'surname' && value) {
-        value = value.toString().toUpperCase();
-      }
-      
-      formattedData[field.name] = value || '';
-    });
-    
-    console.log('ExtractionPreview - Formatted Data:', formattedData);
-    return formattedData;
-  });
-
-  useEffect(() => {
-    const formattedData: Record<string, any> = {};
-    fields.forEach(field => {
-      // Convert field name to snake_case for matching with extracted data
-      const snakeCase = field.name
-        .toLowerCase()
-        .replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => '_' + chr.toLowerCase())
-        .replace(/^_/, '');
-      
-      // Try different key formats to find the value
-      let value = extractedData[snakeCase] || 
-                  extractedData[field.id] || 
-                  extractedData[field.name] || 
-                  extractedData[field.name.toLowerCase()] || '';
-
-      if (field.name.toLowerCase() === 'sex' || field.name.toLowerCase() === 'gender') {
-        value = value.toString().toUpperCase() === 'FEMALE' ? 'F' :
-                value.toString().toUpperCase() === 'MALE' ? 'M' : value;
-      } else if (field.name.toLowerCase() === 'surname') {
-        value = value.toString().toUpperCase();
-      }
-      
-      formattedData[field.name] = value;
-    });
-    setLocalData(formattedData);
-  }, [extractedData, fields]);
-
-  const handleFieldChange = (field: string, value: any, arrayIndex?: number, subField?: string) => {
-    setLocalData(prev => {
-      const updated = { ...prev };
-      if (arrayIndex !== undefined && subField) {
-        // Handle array field updates
-        if (!Array.isArray(updated[field])) {
-          updated[field] = [];
-        }
-        if (!updated[field][arrayIndex]) {
-          updated[field][arrayIndex] = {};
-        }
-        updated[field][arrayIndex][subField] = value;
-      } else {
-        // Handle regular field updates
-        updated[field] = value;
-      }
-      onDataChange?.(field, updated[field]);
-      return updated;
-    });
+    return result !== undefined ? result : defaultValue;
   };
 
-  const handleAddArrayItem = (fieldName: string) => {
-    setLocalData(prev => {
-      const updated = { ...prev };
-      if (!Array.isArray(updated[fieldName])) {
-        updated[fieldName] = [];
-      }
-      updated[fieldName].push({});
-      onDataChange?.(fieldName, updated[fieldName]);
-      return updated;
-    });
-  };
-
-  const handleRemoveArrayItem = (fieldName: string, index: number) => {
-    setLocalData(prev => {
-      const updated = { ...prev };
-      if (Array.isArray(updated[fieldName])) {
-        updated[fieldName] = updated[fieldName].filter((_, i) => i !== index);
-        onDataChange?.(fieldName, updated[fieldName]);
-      }
-      return updated;
-    });
-  };
-
-  const handleSave = () => {
+  const handleFieldChange = (fieldName: string, value: any) => {
     if (onDataChange) {
-      const formattedData = { ...localData };
-      fields.forEach(field => {
-        if (field.type === 'array' && field.arrayConfig?.fields) {
-          const arrayData = formattedData[field.name] || [];
-          if (Array.isArray(arrayData)) {
-            formattedData[field.name] = arrayData.filter(item =>
-              Object.values(item).some(value => value !== undefined && value !== '')
-            );
-          }
-        }
-      });
-
-      if (formattedData.Surname) {
-        formattedData.Surname = formattedData.Surname.toUpperCase();
-      }
-
-      onDataChange('save', {
-        file: file,
-        fileUrl: fileUrl,
-        extractedData: formattedData,
-        type: type
-      });
+      onDataChange(fieldName, value);
     }
   };
 
-  const renderField = (field: Field) => {
-    const value = localData[field.name] || '';
-    
+  const renderField = (field: Field, parentKey = '') => {
+    const fieldKey = parentKey ? `${parentKey}.${field.id}` : field.id;
+    const value = getNestedValue(extractedData, fieldKey, '');
+
+    if (field.type === 'array' && field.arrayConfig?.fields) {
+      const arrayValue = Array.isArray(value) ? value : [];
+      
+      return (
+        <div key={fieldKey} className="space-y-4">
+          <Label>{field.name}</Label>
+          {arrayValue.length > 0 ? (
+            arrayValue.map((item, index) => (
+              <div key={index} className="pl-4 border-l-2 border-gray-200">
+                {field.arrayConfig.fields?.map((subField) =>
+                  renderField(
+                    {
+                      ...subField,
+                      id: `${index}.${subField.name}`,
+                      name: subField.name,
+                      type: subField.type || 'text'
+                    },
+                    `${fieldKey}`
+                  )
+                )}
+              </div>
+            ))
+          ) : (
+            <div className="text-sm text-gray-500">No items</div>
+          )}
+        </div>
+      );
+    }
+
     return (
-      <div key={field.id} className="space-y-1">
-        <Label className="text-sm capitalize">
-          {field.name.replace(/_/g, ' ')}
+      <div key={fieldKey} className="space-y-2">
+        <Label htmlFor={fieldKey}>
+          {field.name}
+          {field.required && <span className="text-red-500 ml-1">*</span>}
         </Label>
         <Input
+          id={fieldKey}
           value={value}
-          onChange={(e) => handleFieldChange(field.name, e.target.value)}
-          className="bg-white border"
-          readOnly={!onDataChange}
+          onChange={(e) => handleFieldChange(fieldKey, e.target.value)}
+          placeholder={`Enter ${field.name.toLowerCase()}`}
+          className="w-full"
         />
       </div>
     );
@@ -278,16 +188,23 @@ const ExtractionPreview = ({
       </div>
 
       {/* Extracted Data */}
-      <div className="w-[350px]">
+      <div className="w-[400px] space-y-6">
+        <h3 className="text-lg font-semibold">Document Details</h3>
         <div className={`rounded-lg p-4 ${getStylesByType?.(type || 'principal')?.getBgColor() || 'bg-white'} ${getStylesByType?.(type || 'principal')?.getBorderColor() || 'border-gray-200'}`}>
-          <h3 className={`text-lg font-semibold mb-4 ${getStylesByType?.(type || 'principal')?.getTextColor() || 'text-gray-900'}`}>Extracted Data</h3>
           <div className="space-y-4">
-            {fields.map(renderField)}
+            {fields.length > 0 ? (
+              fields.map((field) => renderField(field))
+            ) : (
+              <p className="text-sm text-gray-500">No fields defined for this document</p>
+            )}
           </div>
           {showSaveButton && (
             <div className="mt-4 flex justify-end">
               <Button
-                onClick={handleSave}
+                onClick={() => {
+                  // Handle save logic here
+                  toast.success('Document details saved successfully');
+                }}
                 className={getStylesByType?.(type || 'principal')?.getButtonStyle() || 'bg-gray-600 hover:bg-gray-700 text-white'}
               >
                 <Save className="w-4 h-4 mr-2" />

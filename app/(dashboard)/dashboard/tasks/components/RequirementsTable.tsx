@@ -13,6 +13,9 @@ import { cn } from "@/lib/utils"
 import { getTableFields, getGroupedFields } from "../../departments/documents+fields/formFields"
 import { toast } from "@/hooks/use-toast"
 import { useSearchParams, useRouter } from "next/navigation"
+import { FileUploadComponent } from "./FileUploadComponent"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import ExtractionPreview from "@/components/ExtractionPreview"
 
 interface RequirementsTableProps {
   tasks: any[]
@@ -80,13 +83,43 @@ export function RequirementsTable({
   const [allIndividualDocuments, setAllIndividualDocuments] = useState<Record<string, any[]>>({});
   const [allCompanyDocuments, setAllCompanyDocuments] = useState<Record<string, any[]>>({});
   const [documentsLoaded, setDocumentsLoaded] = useState(false);
+  const [fetchingDocuments, setFetchingDocuments] = useState<Set<string>>(new Set())
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const [selectedUploadData, setSelectedUploadData] = useState<{
+    task: any,
+    document: any,
+    columnType: 'principal' | 'dependant' | 'understudy'
+  } | null>(null)
+  // Document preview state
+  const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
+  const [selectedDocumentForPreview, setSelectedDocumentForPreview] = useState<{
+    documentName: string;
+    extractedData: any;
+    fields: any[];
+    fileUrl: string;
+    fileName: string;
+    currentIndex: number;
+    allDocuments: any[];
+    uploadDate?: string;
+    documentStatus?: string;
+    columnType?: 'principal' | 'dependant' | 'understudy';
+  } | null>(null);
+  
+  // Document status tracking
+  const [documentStatusesMap, setDocumentStatusesMap] = useState<Record<string, {
+    status: DocumentStatus;
+    loading: boolean;
+  }>>({});
 
-  // Updated function to properly fetch all individual names
   const fetchAllIndividualData = useCallback(async (tasks: any[]) => {
+    console.log('=== fetchAllIndividualData called ===');
+    console.log('tasks:', tasks);
+    
     const uniqueIds = new Set<number>();
-
+  
     // Collect all individual IDs from tasks
     tasks.forEach(task => {
+      console.log('Processing task:', task);
       if (task.principal_member) {
         uniqueIds.add(task.principal_member);
       }
@@ -100,6 +133,8 @@ export function RequirementsTable({
         uniqueIds.add(task.individual_id);
       }
     });
+  
+    console.log('uniqueIds:', Array.from(uniqueIds));  
 
     // Remove any undefined or null values
     const validIds = Array.from(uniqueIds).filter(id => id != null);
@@ -150,18 +185,27 @@ export function RequirementsTable({
 
       if (error) throw error;
 
-      const documentsByDirector = documents?.reduce((acc, doc) => {
-        const directorId = doc.director_id;
-        if (!acc[directorId]) {
-          acc[directorId] = [];
-        }
-        acc[directorId].push(doc);
-        return acc;
-      }, {} as Record<string, any[]>);
+      // Process documents only if they exist
+      if (documents?.length > 0) {
+        const documentsByDirector = documents.reduce((acc, doc) => {
+          const directorId = doc.director_id;
+          if (!acc[directorId]) {
+            acc[directorId] = [];
+          }
+          acc[directorId].push(doc);
+          return acc;
+        }, {} as Record<string, any[]>);
 
-      setAllIndividualDocuments(documentsByDirector || {});
+        setAllIndividualDocuments(documentsByDirector);
+        console.log('Fetched documents response:', documents);
+        console.log('Final documentsByDirector:', documentsByDirector);
+      } else {
+        setAllIndividualDocuments({});
+        console.log('No documents found for the given IDs');
+      }
     } catch (error) {
       console.error('Error fetching all individual documents:', error);
+      setAllIndividualDocuments({});
     }
   }, []);
 
@@ -371,8 +415,6 @@ export function RequirementsTable({
     };
   }, []);
 
-
-  // Get company documents from cached data
   const getCompanyDocuments = useCallback((task: any, documentId: string) => {
     if (!task.company_id || !allCompanyDocuments[task.company_id]) return [];
 
@@ -439,41 +481,63 @@ export function RequirementsTable({
     }
   }, []);
 
-  // Get document status for specific column (principal/dependant/understudy)
+
+  const fetchDocumentsFromDatabase = useCallback(async (individualId: number, documentId: string, columnType: string) => {
+    const cacheKey = `${individualId}-${documentId}-${columnType}`
+
+    if (fetchingDocuments.has(cacheKey)) {
+      return [] // Already fetching
+    }
+
+    try {
+      setFetchingDocuments(prev => new Set([...prev, cacheKey]))
+
+      const { data: documents, error } = await supabase
+        .from('acc_portal_directors_documents')
+        .select(`
+          *,
+          acc_portal_kyc (
+            id,
+            name,
+            display_name
+          )
+        `)
+        .eq('director_id', individualId)
+        .eq('document_id', documentId)
+        .eq('applicant_type', columnType)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Error fetching documents:', error)
+        return []
+      }
+
+      return documents || []
+    } catch (error) {
+      console.error('Error in fetchDocumentsFromDatabase:', error)
+      return []
+    } finally {
+      setFetchingDocuments(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(cacheKey)
+        return newSet
+      })
+    }
+  }, [fetchingDocuments])
+
+  // Remove the async from getDocumentStatusForColumn and make it synchronous
   const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy'): DocumentStatus => {
     const itemId = item.selectionId || item.id;
     const statusKey = `${task.id}-${itemId}-${columnType}`;
 
-    console.log(`\n=== getDocumentStatusForColumn - ${item.name || itemId} (${columnType}) ===`);
-    console.log('Task:', { id: task.id, applicant_type: task.applicant_type });
-    console.log('Item:', {
-      id: item.id,
-      name: item.name,
-      ap: item.ap,
-      dp: item.dp,
-      understudy: item.understudy,
-      display: item.display,
-      selectionId: item.selectionId
-    });
-    console.log('Status Key:', statusKey);
-
-    // Check if we already have a cached status for this specific column
-    if (documentStatuses[statusKey]) {
-      console.log('Returning cached status:', documentStatuses[statusKey]);
-      return documentStatuses[statusKey];
-    }
-
-    // ========== FIXED LOGIC: Check document applicability for the column type ==========
-    // Determine if this document is applicable for the current column type
-    // This is independent of the task's applicant_type - it's based on the document's flags
+    // Check if document is applicable for this column
     const isApplicableForColumn =
       (columnType === 'principal' && (item.ap === true || item.display === true)) ||
       (columnType === 'dependant' && (item.dp === true || item.display === true)) ||
       (columnType === 'understudy' && (item.understudy === true || item.display === true));
 
     if (!isApplicableForColumn) {
-      console.log(`Document is not applicable for column type: ${columnType}`);
-      const naStatus: DocumentStatus = {
+      return {
         type: 'na',
         documents: [],
         count: 0,
@@ -483,115 +547,74 @@ export function RequirementsTable({
           understudy: item.understudy === true || item.display === true
         }
       };
-      setDocumentStatuses(prev => ({ ...prev, [statusKey]: naStatus }));
-      return naStatus;
     }
 
-    console.log(`Document is applicable for column type: ${columnType}`);
+    // Get the individual ID based on the column type
+    let individualId: number | null = null;
+    
+    if (columnType === 'principal') {
+      individualId = task.principal_member || task.individual_id;
+    } else if (columnType === 'dependant') {
+      individualId = task.dependant_member || task.individual_id;
+    } else if (columnType === 'understudy') {
+      individualId = task.understudy_member || task.individual_id;
+    }
 
-    // Create status object
-    const status: DocumentStatus = {
-      type: 'missing', // Will be updated based on document existence
-      documents: [],
-      count: 0,
+    // Get documents from allIndividualDocuments
+    let documents: any[] = [];
+    if (individualId) {
+      const individualDocs = allIndividualDocuments[individualId] || [];
+      
+      // Extract the base document ID (remove any suffixes)
+      const baseItemId = itemId.split('_')[0];
+      
+      // Find matching documents by document_id or acc_portal_kyc.id
+      documents = individualDocs.filter(doc => {
+        // Get both possible ID fields from the document
+        const docId = doc.document_id || '';
+        const kycId = (doc.acc_portal_kyc?.id || '');
+        
+        // Check if either ID matches the base item ID or full item ID
+        return docId === baseItemId || 
+               docId === itemId ||
+               kycId === baseItemId ||
+               kycId === itemId;
+      });
+
+      console.log('Matching documents:', {
+        individualId,
+        itemId,
+        baseItemId,
+        allDocs: individualDocs,
+        matched: documents,
+        documentIds: documents.map(d => ({
+          docId: d.document_id,
+          kycId: d.acc_portal_kyc?.id,
+          name: d.acc_portal_kyc?.display_name || d.acc_portal_kyc?.name,
+          extractedDetails: d.extracted_details ? 'exists' : 'none'
+        }))
+      });
+    }
+
+    // Check if we have cached data for this status
+    const cachedStatus = documentStatusesMap[statusKey];
+    if (cachedStatus && !cachedStatus.loading) {
+      return cachedStatus.status;
+    }
+
+    // If we have documents, return 'view' status regardless of extracted details
+    // The actual document viewing will handle the matching logic
+    return {
+      type: documents.length > 0 ? 'view' : 'upload',
+      documents: documents,
+      count: documents.length,
       applicantTypes: {
         principal: item.ap === true || item.display === true,
         dependant: item.dp === true || item.display === true,
         understudy: item.understudy === true || item.display === true
       }
     };
-
-    try {
-      let documentId = item.kycdocumentid || item.id;
-
-      if (!documentId) {
-        setDocumentStatuses(prev => ({ ...prev, [statusKey]: status }));
-        return status;
-      }
-
-      // Clean up document ID if it contains additional parts
-      if (documentId.includes('_')) {
-        const parts = documentId.split('_');
-        documentId = parts[0];
-      }
-
-      // ========== FIXED LOGIC: Get documents based on the column type, not task type ==========
-      let allDocuments: any[] = [];
-      let searchId = null;
-
-      // Determine which individual's documents to search based on column type
-      if (documentTab === 'individual') {
-        // Find the appropriate task for this column type to get the right individual_id
-        const group = filteredGroupedTasks.find(g =>
-          g.tasks.some(t => t.id === task.id)
-        );
-
-        if (group) {
-          let targetTask = null;
-
-          // Get the task that corresponds to this column type
-          if (columnType === 'principal') {
-            targetTask = group.tasks.find(t => t.applicant_type === 'principal');
-            searchId = targetTask?.individual_id || targetTask?.principal_member;
-          } else if (columnType === 'dependant') {
-            targetTask = group.tasks.find(t => t.applicant_type === 'dependant');
-            searchId = targetTask?.individual_id || targetTask?.dependant_member;
-          } else if (columnType === 'understudy') {
-            targetTask = group.tasks.find(t => t.applicant_type === 'understudy');
-            searchId = targetTask?.individual_id || targetTask?.understudy_member;
-          }
-
-          console.log(`Column ${columnType}: Using searchId ${searchId} from task ${targetTask?.id}`);
-        }
-
-        if (searchId) {
-          const documents = allIndividualDocuments[searchId] || [];
-          allDocuments = documents.filter(doc => doc.id === documentId);
-          console.log(`Found ${allDocuments.length} individual documents for ${documentId} (searchId: ${searchId})`);
-        }
-      } else if (documentTab === 'company') {
-        allDocuments = getCompanyDocuments(task, documentId) || [];
-        console.log(`Found ${allDocuments.length} company documents for ${documentId}`);
-      }
-
-      // Filter documents for the current column type
-      const filteredDocuments = allDocuments.filter(doc => {
-        // If document has no applicant_type, it's applicable to all columns that the item supports
-        if (!doc.applicant_type) {
-          console.log(`Document ${doc.id} has no applicant_type - applicable for ${columnType} based on item flags`);
-          return true; // Since we already checked isApplicableForColumn above
-        }
-
-        // If document has applicant_type, check if it matches the current column type
-        const matches =
-          doc.applicant_type === columnType ||
-          doc.applicant_type === 'all';
-
-        console.log(`Document ${doc.id} applicant_type: ${doc.applicant_type}, matches ${columnType}: ${matches}`);
-        return matches;
-      });
-
-      console.log(`Filtered to ${filteredDocuments.length} documents for ${columnType} column`);
-
-      // Update status based on found documents
-      if (filteredDocuments.length > 0) {
-        console.log(`Setting status to 'view' with ${filteredDocuments.length} documents`);
-        status.type = 'view';
-        status.documents = filteredDocuments;
-        status.count = filteredDocuments.length;
-      } else {
-        // If no documents found, set to 'upload' (since the document is applicable to this column)
-        console.log('No documents found, setting status to upload');
-        status.type = 'upload';
-      }
-    } catch (error) {
-      console.error('Error checking documents:', error);
-    } finally {
-      setDocumentStatuses(prev => ({ ...prev, [statusKey]: status }));
-    }
-
-    return status;
-  }, [documentTab, allIndividualDocuments, getCompanyDocuments, documentStatuses, filteredGroupedTasks]);
+  }, [documentStatusesMap, allIndividualDocuments]);
 
   // Calculate statistics
   const calculateStats = useMemo(() => {
@@ -808,57 +831,419 @@ export function RequirementsTable({
     const status = statusKey ? documentStatuses[statusKey] : null;
 
     if (status && status.documents.length > 0) {
-      if (onViewDocument) {
-        onViewDocument(task, { ...item, documents: status.documents });
-      } else {
-        const firstDoc = status.documents[0];
-        if (firstDoc.file_path) {
-          try {
-            const { data: fileUrl, error } = await supabase.storage
-              .from(documentTab === 'company' ? 'kyc-documents' : 'kyc-documents')
-              .createSignedUrl(firstDoc.file_path, 3600);
+      // Check if we have matching documents
+      const matchingDocs = status.documents.filter(doc => {
+        // Check if document has matching extracted details
+        const extractedDetails = doc.extracted_details || {};
+        const hasMatchingDetails = Object.keys(extractedDetails).length > 0;
+        return hasMatchingDetails;
+      });
 
-            if (error) throw error;
+      if (matchingDocs.length > 0) {
+        if (onViewDocument) {
+          onViewDocument(task, { ...item, documents: matchingDocs });
+        } else {
+          const firstDoc = matchingDocs[0];
+          if (firstDoc.file_path) {
+            try {
+              const { data: fileUrl, error } = await supabase.storage
+                .from(documentTab === 'company' ? 'kyc-documents' : 'kyc-documents')
+                .createSignedUrl(firstDoc.file_path, 3600);
 
-            if (fileUrl?.signedUrl) {
-              window.open(fileUrl.signedUrl, '_blank');
+              if (error) throw error;
+
+              if (fileUrl?.signedUrl) {
+                window.open(fileUrl.signedUrl, '_blank');
+              }
+            } catch (error) {
+              console.error('Error viewing document:', error);
+              toast({
+                title: "Error",
+                description: "Failed to open document",
+                variant: "destructive"
+              });
             }
-          } catch (error) {
-            console.error('Error viewing document:', error);
-            toast({
-              title: "Error",
-              description: "Failed to open document",
-              variant: "destructive"
-            });
           }
         }
+      } else {
+        toast({
+          title: "No Matching Documents",
+          description: "No documents with matching extracted details found",
+          variant: "default"
+        });
       }
     }
   }, [documentStatuses, onViewDocument, documentTab]);
 
-  // Render document status for each column (principal/dependant/understudy)
-  const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy') => {
-    const status = getDocumentStatusForColumn(task, item, columnType);
-    const itemId = item.selectionId || item.id;
-    const statusKey = `${task.id}-${itemId}-${columnType}`;
-    const isLoading = loadingDocuments.has(statusKey);
+  // Effect to update document status when tasks or items change
+  useEffect(() => {
+    const updateDocumentStatuses = async () => {
+      const updates: Record<string, {
+        status: DocumentStatus;
+        loading: boolean;
+      }> = {};
 
-    if (isLoading) {
-      return (
-        <div className="flex items-center justify-center h-full" title="Loading document status...">
-          <div className="h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-        </div>
-      );
+      // Process all tasks and their requirements
+      for (const task of filteredTasks) {
+        const classRequirements = taskClassRequirements[task.id];
+        if (!classRequirements?.documents_and_fields) continue;
+
+        for (const item of classRequirements.documents_and_fields) {
+          const itemId = item.selectionId || item.id;
+          const baseItemId = itemId.split('_')[0];
+
+          // Only process items that are applicable to any applicant type
+          if (item.ap || item.dp || item.understudy || item.display) {
+            const columnTypes: ('principal' | 'dependant' | 'understudy')[] = [];
+            if (item.ap || item.display) columnTypes.push('principal');
+            if (item.dp || item.display) columnTypes.push('dependant');
+            if (item.understudy || item.display) columnTypes.push('understudy');
+
+            for (const columnType of columnTypes) {
+              const key = `${task.id}-${itemId}-${columnType}`;
+              
+              // Get the individual ID for this column type
+              let individualId: number | null = null;
+              if (columnType === 'principal') {
+                individualId = task.principal_member || task.individual_id;
+              } else if (columnType === 'dependant') {
+                individualId = task.dependant_member || task.individual_id;
+              } else if (columnType === 'understudy') {
+                individualId = task.understudy_member || task.individual_id;
+              }
+
+              // Get documents from allIndividualDocuments
+              let documents: any[] = [];
+              if (individualId && allIndividualDocuments[individualId]) {
+                documents = allIndividualDocuments[individualId].filter(doc => {
+                  const docId = doc.document_id || '';
+                  const kycId = (doc.acc_portal_kyc?.id || '');
+                  return docId === baseItemId || 
+                         docId === itemId ||
+                         kycId === baseItemId ||
+                         kycId === itemId;
+                });
+              }
+
+              // Only update if we don't have a status or if the documents have changed
+              const currentStatus = documentStatusesMap[key];
+              const documentCount = documents.length;
+              const currentCount = currentStatus?.status.count || 0;
+              
+              if (!currentStatus || documentCount !== currentCount) {
+                updates[key] = {
+                  status: {
+                    type: documentCount > 0 ? 'view' : 'upload',
+                    documents: documents,
+                    count: documentCount,
+                    applicantTypes: {
+                      principal: item.ap || item.display || false,
+                      dependant: item.dp || item.display || false,
+                      understudy: item.understudy || item.display || false
+                    }
+                  },
+                  loading: false
+                };
+              }
+            }
+          }
+        }
+      }
+
+      // Apply all updates
+      if (Object.keys(updates).length > 0) {
+        setDocumentStatusesMap(prev => ({
+          ...prev,
+          ...updates
+        }));
+      }
+    };
+
+    updateDocumentStatuses();
+  }, [filteredTasks, taskClassRequirements, allIndividualDocuments, documentStatusesMap]);
+
+// Add this at the beginning of the fetchDocumentStatuses function
+useEffect(() => {
+  const fetchDocumentStatuses = async () => {
+    console.log('allIndividualDocuments:', allIndividualDocuments);
+    console.log('filteredTasks:', filteredTasks);
+    
+    const pendingKeys = Object.entries(documentStatusesMap)
+      .filter(([key, value]) => value.loading)
+      .map(([key]) => key);
+
+
+    if (pendingKeys.length === 0) return;
+
+    const statusUpdates: Record<string, { status: DocumentStatus; loading: boolean }> = {};
+
+    // Process in batches to avoid overwhelming the system
+    const batchSize = 5;
+    for (let i = 0; i < pendingKeys.length; i += batchSize) {
+      const batch = pendingKeys.slice(i, i + batchSize);
+
+      await Promise.all(batch.map(async (key) => {
+        try {
+          const [taskId, itemId, columnType] = key.split('-');
+          const task = filteredTasks.find(t => t.id.toString() === taskId);
+          const classRequirements = taskClassRequirements[taskId];
+          const item = classRequirements?.documents_and_fields?.find(
+            (i: any) => (i.selectionId || i.id) === itemId
+          );
+
+          if (task && item) {
+            // Get individual ID for this column type
+            let individualId = null;
+            const group = filteredGroupedTasks.find(g => g.tasks.some(t => t.id.toString() === taskId));
+
+            if (group) {
+              if (columnType === 'principal') {
+                const principalTask = group.tasks.find(t => t.applicant_type === 'principal');
+                individualId = principalTask?.principal_member || principalTask?.individual_id;
+              } else if (columnType === 'dependant') {
+                const dependantTask = group.tasks.find(t => t.applicant_type === 'dependant');
+                individualId = dependantTask?.dependant_member || dependantTask?.individual_id;
+              } else if (columnType === 'understudy') {
+                const understudyTask = group.tasks.find(t => t.applicant_type === 'understudy');
+                individualId = understudyTask?.understudy_member || understudyTask?.individual_id;
+              }
+            }
+
+            let status: DocumentStatus;
+
+            if (!individualId) {
+              status = {
+                type: 'upload',
+                documents: [],
+                count: 0,
+                applicantTypes: {
+                  principal: item.ap === true || item.display === true,
+                  dependant: item.dp === true || item.display === true,
+                  understudy: item.understudy === true || item.display === true
+                }
+              };
+            } else {
+              // Extract the document ID from the item
+              const extractDocumentId = (id: string): string => {
+                // If it's a simple UUID, return as is
+                if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+                  return id;
+                }
+                // If it's in the format "taskId-docId_...", extract the docId part
+                const match = id.match(/-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+                return match ? match[1] : id;
+              };
+
+              const documentId = extractDocumentId(item.id);
+              console.log('Extracted documentId:', documentId);
+              console.log('Full item.id:', item.id);
+
+              // Find documents from cached data
+              const individualDocuments = allIndividualDocuments[individualId] || [];
+              console.log(`Documents for individual ${individualId}:`, individualDocuments);
+
+              const matchingDocuments = individualDocuments.filter(doc => {
+                // Normalize all IDs for comparison
+                const normalizeId = (id: string) => (id || '').toLowerCase().trim();
+                
+                // Get the document ID from the document - handle both direct ID and document_id
+                const docId = doc.id || doc.document_id || '';
+                
+                // Check if the document ID matches either the direct ID or the document_id
+                const idMatch = normalizeId(docId) === normalizeId(documentId) || 
+                              (doc.acc_portal_kyc && normalizeId(doc.acc_portal_kyc.id) === normalizeId(documentId));
+                
+                // For applicant_type, if it's null, treat it as 'principal' (default)
+                const docApplicantType = (doc.applicant_type?.toLowerCase() || 'principal').trim();
+                const columnTypeNormalized = columnType.toLowerCase().trim();
+                const applicantTypeMatches = docApplicantType === columnTypeNormalized || 
+                                         (!doc.applicant_type && columnTypeNormalized === 'principal');
+                
+                // Check if document type matches the requirement
+                const documentTypeMatch = !doc.acc_portal_kyc || 
+                                       (doc.acc_portal_kyc.name && 
+                                        item.name && 
+                                        doc.acc_portal_kyc.name.toLowerCase() === item.name.toLowerCase());
+                
+                console.log(`Document matching check:`);
+                console.log(`- Doc ID: ${docId} (normalized: ${normalizeId(docId)})`);
+                console.log(`- Looking for: ${documentId} (normalized: ${normalizeId(documentId)})`);
+                console.log(`- ID Match: ${idMatch}`);
+                console.log(`- Document Type Match: ${documentTypeMatch}`);
+                console.log(`- Applicant type: ${doc.applicant_type || 'null'} (normalized: ${docApplicantType})`);
+                console.log(`- Column type: ${columnType} (normalized: ${columnTypeNormalized})`);
+                console.log(`- Applicant type match: ${applicantTypeMatches}`);
+                
+                return (idMatch || documentTypeMatch) && applicantTypeMatches;
+            }).map(doc => ({
+                ...doc,
+                // Add view URL for the document
+                viewUrl: doc.file_path ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${doc.file_path}` : null,
+                documentName: doc.acc_portal_kyc?.display_name || doc.acc_portal_kyc?.name || 'Document',
+                documentType: doc.acc_portal_kyc?.name || 'Unknown',
+                issueDate: doc.issue_date,
+                expiryDate: doc.expiry_date,
+                status: doc.status || 'unknown'
+            }));
+
+              console.log('matchingDocuments:', matchingDocuments);
+
+              // Check if we have matching documents
+              const hasMatchingDocuments = matchingDocuments.length > 0;
+              
+              status = {
+                type: hasMatchingDocuments ? 'view' : 'upload',
+                documents: hasMatchingDocuments ? matchingDocuments : [],
+                count: hasMatchingDocuments ? matchingDocuments.length : 0,
+                applicantTypes: {
+                  principal: item.ap === true || item.display === true,
+                  dependant: item.dp === true || item.display === true,
+                  understudy: item.understudy === true || item.display === true
+                },
+                // Add document info for the first matching document (if any)
+                documentInfo: hasMatchingDocuments ? {
+                  id: matchingDocuments[0].id,
+                  name: matchingDocuments[0].documentName,
+                  type: matchingDocuments[0].documentType,
+                  viewUrl: matchingDocuments[0].viewUrl,
+                  status: matchingDocuments[0].status,
+                  issueDate: matchingDocuments[0].issue_date,
+                  expiryDate: matchingDocuments[0].expiry_date
+                } : null
+              };
+              
+              // Add view document handler
+              if (hasMatchingDocuments && onViewDocument) {
+                status.onView = () => {
+                  const doc = matchingDocuments[0];
+                  if (doc.viewUrl) {
+                    window.open(doc.viewUrl, '_blank');
+                  } else if (onViewDocument) {
+                    onViewDocument(task, {
+                      ...item,
+                      documentUrl: doc.viewUrl,
+                      documentName: doc.documentName,
+                      documentType: doc.documentType
+                    });
+                  }
+                };
+              }
+            }
+
+            console.log('Final status:', status);
+
+            statusUpdates[key] = {
+              status,
+              loading: false
+            };
+          } else {
+            console.log('No task or item found for key:', key);
+            statusUpdates[key] = {
+              ...documentStatusesMap[key],
+              loading: false
+            };
+          }
+        } catch (error) {
+          console.error('Error fetching document status for key:', key, error);
+          statusUpdates[key] = {
+            ...documentStatusesMap[key],
+            loading: false
+          };
+        }
+      }));
     }
 
-    if (status.type === 'na') {
-      return (
-        <div className="flex items-center justify-center h-full" title="Not applicable">
-          <span className="text-gray-400 text-xs">N/A</span>
-        </div>
-      );
+    if (Object.keys(statusUpdates).length > 0) {
+      setDocumentStatusesMap(prev => ({
+        ...prev,
+        ...statusUpdates
+      }));
+    }
+  };
+
+  fetchDocumentStatuses();
+}, [documentStatusesMap, filteredTasks, taskClassRequirements, filteredGroupedTasks, allIndividualDocuments, parseSelectionId]);
+
+const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy') => {
+  const status = getDocumentStatusForColumn(task, item, columnType);
+  const itemId = item.selectionId || item.id;
+  const key = `${task.id}-${itemId}-${columnType}`;
+  const isLoading = documentStatusesMap[key]?.loading || false;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    )
+  }
+
+  if (status.type === 'na') {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <span className="text-gray-400 text-xs">N/A</span>
+      </div>
+    )
+  }
+
+    const handleUploadClick = () => {
+      setSelectedUploadData({
+        task,
+        document: item,
+        columnType
+      })
+      setUploadDialogOpen(true)
     }
 
+    const handleViewClick = async () => {
+      if (status.documents.length > 0) {
+        // Get the file URL and set up preview data
+        const document = status.documents[0]; // Show first document, we can add navigation later
+
+        try {
+          const { data: signedUrl, error } = await supabase.storage
+            .from('kyc-documents')
+            .createSignedUrl(document.file_path, 3600)
+
+          if (error) throw error
+
+          // Get the document definition from your documents array
+          const documentDefinition = documents.find(doc => doc.id === document.document_id);
+
+          // Prepare extraction fields from document definition
+          const extractionFields = documentDefinition?.fields?.map((field: any) => ({
+            id: field.id,
+            name: field.name,
+            type: field.type || 'text',
+            required: field.required || false
+          })) || [];
+
+          // Set up preview data
+          setSelectedDocumentForPreview({
+            documentName: documentDefinition?.display_name || documentDefinition?.name || document.acc_portal_kyc?.display_name || 'Document',
+            extractedData: document.extracted_details || {},
+            fields: extractionFields,
+            fileUrl: signedUrl.signedUrl,
+            fileName: document.file_path?.split('/').pop() || '',
+            allDocuments: status.documents,
+            currentIndex: 0,
+            task,
+            item,
+            columnType,
+            uploadDate: document.created_at,
+            documentStatus: document.status
+          })
+          setDocumentPreviewOpen(true)
+        } catch (error) {
+          console.error('Error getting file URL:', error)
+          toast({
+            title: 'Error',
+            description: 'Failed to load document preview',
+            variant: 'destructive'
+          })
+        }
+      }
+    }
     switch (status.type) {
       case 'view':
         return (
@@ -868,7 +1253,7 @@ export function RequirementsTable({
                 variant="ghost"
                 size="sm"
                 className="h-8 w-8 p-0 text-green-600 hover:bg-green-100 hover:text-green-700 transition-colors"
-                onClick={() => handleViewAction(task, item)}
+                onClick={handleViewClick}
                 title={`View ${status.count} ${status.count > 1 ? 'documents' : 'document'}`}
               >
                 <Eye className="h-4 w-4" />
@@ -884,23 +1269,7 @@ export function RequirementsTable({
             </div>
             <span className="text-[10px] text-green-600 font-medium mt-0.5">Uploaded</span>
           </div>
-        );
-
-      case 'missing':
-        return (
-          <div className="flex flex-col items-center justify-center h-full">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors"
-              onClick={() => handleUploadAction(task, item, columnType)}
-              title={`Upload ${item.display_name || 'document'} for ${columnType}`}
-            >
-              <Upload className="h-4 w-4" />
-            </Button>
-            <span className="text-[10px] text-red-600 font-medium mt-0.5">Required</span>
-          </div>
-        );
+        )
 
       case 'upload':
         return (
@@ -909,23 +1278,47 @@ export function RequirementsTable({
               variant="ghost"
               size="sm"
               className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50 hover:text-amber-700 transition-colors"
-              onClick={() => handleUploadAction(task, item, columnType)}
-              title={`Update or replace document for ${columnType}`}
+              onClick={handleUploadClick}
+              title={`Upload ${item.display_name || item.name} for ${columnType}`}
             >
               <Upload className="h-4 w-4" />
             </Button>
-            <span className="text-[10px] text-amber-600 font-medium mt-0.5">Update</span>
+            <span className="text-[10px] text-amber-600 font-medium mt-0.5">Upload</span>
           </div>
-        );
+        )
 
       default:
         return (
           <div className="flex items-center justify-center h-full">
             <span className="text-gray-400 text-xs">-</span>
           </div>
-        );
+        )
     }
-  }, [getDocumentStatusForColumn, loadingDocuments, handleViewAction, handleUploadAction]);
+  }, [getDocumentStatusForColumn, documentStatusesMap])
+
+  // Add this to handle upload completion and refresh
+  const handleUploadComplete = useCallback(() => {
+    // Clear the document statuses map to force re-fetch
+    setDocumentStatusesMap(prev => {
+      const updated = { ...prev };
+      // Mark all as loading to trigger refresh
+      Object.keys(updated).forEach(key => {
+        updated[key] = {
+          ...updated[key],
+          loading: true
+        };
+      });
+      return updated;
+    });
+
+    // Also clear other caches
+    setAllIndividualDocuments({});
+
+    // Re-fetch all individual data
+    if (filteredTasks.length > 0) {
+      fetchAllIndividualData(filteredTasks);
+    }
+  }, [filteredTasks, fetchAllIndividualData]);
 
   // Render client field data
   const renderClientFieldData = useCallback((task: any, item: any) => {
@@ -1738,125 +2131,125 @@ export function RequirementsTable({
                             })}
                           </TableRow>
 
-                         {/* Individual Document Items */}
-{organizedRequirements.documents.individual.map((docItem, docIndex) => {
-  const isExpanded = expandedDocuments.has(docItem.document.id);
+                          {/* Individual Document Items */}
+                          {organizedRequirements.documents.individual.map((docItem, docIndex) => {
+                            const isExpanded = expandedDocuments.has(docItem.document.id);
 
-  return (
-    <React.Fragment key={`individual-doc-${docItem.document.id}`}>
-      {/* Document Row */}
-      <TableRow className="group bg-blue-50 hover:bg-blue-100">
-        <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
-          {docIndex + 1}
-        </TableCell>
-        <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
-          <div className="flex items-center px-2">
-            <span className="text-sm font-semibold text-gray-800">
-              {docItem.document.display_name}
-            </span>
-            {docItem.fields.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 w-6 p-0 ml-2"
-                onClick={() => toggleDocumentExpansion(docItem.document.id)}
-              >
-                {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-              </Button>
-            )}
-          </div>
-        </TableCell>
-        {/* ========== UPDATED: Use the same logic as company documents ========== */}
-        {filteredGroupedTasks.map((group, groupIndex) => {
-          const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-          
-          // Get all tasks from this group for reference
-          const principalTask = group.tasks.find(task => task.applicant_type === 'principal');
-          const dependantTask = group.tasks.find(task => task.applicant_type === 'dependant');
-          const understudyTask = group.tasks.find(task => task.applicant_type === 'understudy');
-          
-          // Use any task from the group as reference (they all belong to the same applicant group)
-          const referenceTask = principalTask || dependantTask || understudyTask || group.tasks[0];
+                            return (
+                              <React.Fragment key={`individual-doc-${docItem.document.id}`}>
+                                {/* Document Row */}
+                                <TableRow className="group bg-blue-50 hover:bg-blue-100">
+                                  <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
+                                    {docIndex + 1}
+                                  </TableCell>
+                                  <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
+                                    <div className="flex items-center px-2">
+                                      <span className="text-sm font-semibold text-gray-800">
+                                        {docItem.document.display_name}
+                                      </span>
+                                      {docItem.fields.length > 0 && (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-6 w-6 p-0 ml-2"
+                                          onClick={() => toggleDocumentExpansion(docItem.document.id)}
+                                        >
+                                          {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  {/* ========== UPDATED: Use the same logic as company documents ========== */}
+                                  {filteredGroupedTasks.map((group, groupIndex) => {
+                                    const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
 
-          const columns = [
-            <TableCell key={`${docItem.document.id}-${groupIndex}-principal`} className="text-center border p-1">
-              {/* Always render for principal column if document is applicable */}
-              {renderDocumentStatus(referenceTask, docItem.document, 'principal')}
-            </TableCell>,
-            <TableCell key={`${docItem.document.id}-${groupIndex}-dependant`} className="text-center border p-1">
-              {/* Always render for dependant column if document is applicable */}
-              {renderDocumentStatus(referenceTask, docItem.document, 'dependant')}
-            </TableCell>
-          ];
+                                    // Get all tasks from this group for reference
+                                    const principalTask = group.tasks.find(task => task.applicant_type === 'principal');
+                                    const dependantTask = group.tasks.find(task => task.applicant_type === 'dependant');
+                                    const understudyTask = group.tasks.find(task => task.applicant_type === 'understudy');
 
-          if (hasClassD) {
-            columns.push(
-              <TableCell key={`${docItem.document.id}-${groupIndex}-understudy`} className="text-center border p-1">
-                {/* Always render for understudy column if document is applicable */}
-                {renderDocumentStatus(referenceTask, docItem.document, 'understudy')}
-              </TableCell>
-            );
-          }
+                                    // Use any task from the group as reference (they all belong to the same applicant group)
+                                    const referenceTask = principalTask || dependantTask || understudyTask || group.tasks[0];
 
-          return columns;
-        })}
-      </TableRow>
+                                    const columns = [
+                                      <TableCell key={`${docItem.document.id}-${groupIndex}-principal`} className="text-center border p-1">
+                                        {/* Always render for principal column if document is applicable */}
+                                        {renderDocumentStatus(referenceTask, docItem.document, 'principal')}
+                                      </TableCell>,
+                                      <TableCell key={`${docItem.document.id}-${groupIndex}-dependant`} className="text-center border p-1">
+                                        {/* Always render for dependant column if document is applicable */}
+                                        {renderDocumentStatus(referenceTask, docItem.document, 'dependant')}
+                                      </TableCell>
+                                    ];
 
-      {/* Document Fields (if expanded) */}
-{isExpanded && docItem.fields.map((field, fieldIndex) => (
-  <TableRow key={`company-field-${field.id}`} className="group bg-blue-25 hover:bg-blue-50">
-    <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] text-center text-sm text-gray-500">
-      {docIndex + 1}.{fieldIndex + 1}
-    </TableCell>
-    <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5]">
-      <div className="flex items-center px-2 pl-8">
-        <span className="text-sm text-gray-700">{field.name}</span>
-        <Badge variant="outline" className="text-xs ml-2 bg-yellow-50 text-yellow-700">
-          Field
-        </Badge>
-        {field.type && (
-          <span className="text-xs text-gray-400 ml-2">
-            ({field.type})
-          </span>
-        )}
-      </div>
-    </TableCell>
-    {/* ========== UPDATED: Use the new logic for company fields too ========== */}
-    {filteredGroupedTasks.map((group, groupIndex) => {
-      const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-      
-      // Get all tasks from this group for reference
-      const principalTask = group.tasks.find(task => task.applicant_type === 'principal');
-      const dependantTask = group.tasks.find(task => task.applicant_type === 'dependant');
-      const understudyTask = group.tasks.find(task => task.applicant_type === 'understudy');
-      
-      // Use any task from the group as reference
-      const referenceTask = principalTask || dependantTask || understudyTask || group.tasks[0];
+                                    if (hasClassD) {
+                                      columns.push(
+                                        <TableCell key={`${docItem.document.id}-${groupIndex}-understudy`} className="text-center border p-1">
+                                          {/* Always render for understudy column if document is applicable */}
+                                          {renderDocumentStatus(referenceTask, docItem.document, 'understudy')}
+                                        </TableCell>
+                                      );
+                                    }
 
-      const columns = [
-        <TableCell key={`${field.id}-${groupIndex}-principal`} className="text-center border p-1">
-          {renderDocumentStatus(referenceTask, field, 'principal')}
-        </TableCell>,
-        <TableCell key={`${field.id}-${groupIndex}-dependant`} className="text-center border p-1">
-          {renderDocumentStatus(referenceTask, field, 'dependant')}
-        </TableCell>
-      ];
+                                    return columns;
+                                  })}
+                                </TableRow>
 
-      if (hasClassD) {
-        columns.push(
-          <TableCell key={`${field.id}-${groupIndex}-understudy`} className="text-center border p-1">
-            {renderDocumentStatus(referenceTask, field, 'understudy')}
-          </TableCell>
-        );
-      }
+                                {/* Document Fields (if expanded) */}
+                                {isExpanded && docItem.fields.map((field, fieldIndex) => (
+                                  <TableRow key={`company-field-${field.id}`} className="group bg-blue-25 hover:bg-blue-50">
+                                    <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] text-center text-sm text-gray-500">
+                                      {docIndex + 1}.{fieldIndex + 1}
+                                    </TableCell>
+                                    <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5]">
+                                      <div className="flex items-center px-2 pl-8">
+                                        <span className="text-sm text-gray-700">{field.name}</span>
+                                        <Badge variant="outline" className="text-xs ml-2 bg-yellow-50 text-yellow-700">
+                                          Field
+                                        </Badge>
+                                        {field.type && (
+                                          <span className="text-xs text-gray-400 ml-2">
+                                            ({field.type})
+                                          </span>
+                                        )}
+                                      </div>
+                                    </TableCell>
+                                    {/* ========== UPDATED: Use the new logic for company fields too ========== */}
+                                    {filteredGroupedTasks.map((group, groupIndex) => {
+                                      const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
 
-      return columns;
-    })}
-  </TableRow>
-))}
-    </React.Fragment>
-  );
-})}
+                                      // Get all tasks from this group for reference
+                                      const principalTask = group.tasks.find(task => task.applicant_type === 'principal');
+                                      const dependantTask = group.tasks.find(task => task.applicant_type === 'dependant');
+                                      const understudyTask = group.tasks.find(task => task.applicant_type === 'understudy');
+
+                                      // Use any task from the group as reference
+                                      const referenceTask = principalTask || dependantTask || understudyTask || group.tasks[0];
+
+                                      const columns = [
+                                        <TableCell key={`${field.id}-${groupIndex}-principal`} className="text-center border p-1">
+                                          {renderDocumentStatus(referenceTask, field, 'principal')}
+                                        </TableCell>,
+                                        <TableCell key={`${field.id}-${groupIndex}-dependant`} className="text-center border p-1">
+                                          {renderDocumentStatus(referenceTask, field, 'dependant')}
+                                        </TableCell>
+                                      ];
+
+                                      if (hasClassD) {
+                                        columns.push(
+                                          <TableCell key={`${field.id}-${groupIndex}-understudy`} className="text-center border p-1">
+                                            {renderDocumentStatus(referenceTask, field, 'understudy')}
+                                          </TableCell>
+                                        );
+                                      }
+
+                                      return columns;
+                                    })}
+                                  </TableRow>
+                                ))}
+                              </React.Fragment>
+                            );
+                          })}
                         </>
                       )}
                     </>
@@ -2032,6 +2425,144 @@ export function RequirementsTable({
           </div>
         </div>
       </div>
+
+      {/* Document Preview Dialog */}
+      {selectedDocumentForPreview && (
+        <Dialog open={documentPreviewOpen} onOpenChange={setDocumentPreviewOpen}>
+          <DialogContent className="max-w-[98vw] max-h-[98vh] p-0">
+            <div className="h-[98vh] flex flex-col">
+              {/* Header with document info and navigation */}
+              <div className="p-4 border-b flex items-center justify-between">
+                <div className="flex flex-col">
+                  <DialogTitle className="flex items-center gap-2">
+                    {selectedDocumentForPreview.documentName}
+                    {selectedDocumentForPreview.documentStatus && (
+                      <Badge
+                        variant={selectedDocumentForPreview.documentStatus === 'valid' ? 'default' : 'secondary'}
+                        className="text-xs"
+                      >
+                        {selectedDocumentForPreview.documentStatus}
+                      </Badge>
+                    )}
+                    {selectedDocumentForPreview.allDocuments?.length > 1 && (
+                      <span className="text-sm font-normal text-gray-500">
+                        ({selectedDocumentForPreview.currentIndex + 1} of {selectedDocumentForPreview.allDocuments.length})
+                      </span>
+                    )}
+                  </DialogTitle>
+                  {selectedDocumentForPreview.uploadDate && (
+                    <p className="text-sm text-gray-500 mt-1">
+                      Uploaded: {format(parseISO(selectedDocumentForPreview.uploadDate), 'MMM dd, yyyy HH:mm')}
+                      {selectedDocumentForPreview.columnType && (
+                        <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">
+                          {selectedDocumentForPreview.columnType}
+                        </span>
+                      )}
+                    </p>
+                  )}
+                </div>
+
+                {/* Navigation buttons for multiple documents */}
+                {selectedDocumentForPreview.allDocuments?.length > 1 && (
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const newIndex = selectedDocumentForPreview.currentIndex > 0
+                          ? selectedDocumentForPreview.currentIndex - 1
+                          : selectedDocumentForPreview.allDocuments.length - 1;
+
+                        const document = selectedDocumentForPreview.allDocuments[newIndex];
+
+                        try {
+                          const { data: signedUrl, error } = await supabase.storage
+                            .from('kyc-documents')
+                            .createSignedUrl(document.file_path, 3600)
+
+                          if (error) throw error;
+
+                          setSelectedDocumentForPreview({
+                            ...selectedDocumentForPreview,
+                            extractedData: document.extracted_details || {},
+                            fileUrl: signedUrl.signedUrl,
+                            fileName: document.file_path?.split('/').pop() || '',
+                            currentIndex: newIndex,
+                            uploadDate: document.created_at,
+                            documentStatus: document.status
+                          });
+                        } catch (error) {
+                          console.error('Error loading previous document:', error);
+                        }
+                      }}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const newIndex = selectedDocumentForPreview.currentIndex < selectedDocumentForPreview.allDocuments.length - 1
+                          ? selectedDocumentForPreview.currentIndex + 1
+                          : 0;
+
+                        const document = selectedDocumentForPreview.allDocuments[newIndex];
+
+                        try {
+                          const { data: signedUrl, error } = await supabase.storage
+                            .from('kyc-documents')
+                            .createSignedUrl(document.file_path, 3600)
+
+                          if (error) throw error;
+
+                          setSelectedDocumentForPreview({
+                            ...selectedDocumentForPreview,
+                            extractedData: document.extracted_details || {},
+                            fileUrl: signedUrl.signedUrl,
+                            fileName: document.file_path?.split('/').pop() || '',
+                            currentIndex: newIndex,
+                            uploadDate: document.created_at,
+                            documentStatus: document.status
+                          });
+                        } catch (error) {
+                          console.error('Error loading next document:', error);
+                        }
+                      }}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Document content and extraction preview */}
+              <div className="flex-1 overflow-auto">
+                <ExtractionPreview
+                  documentName={selectedDocumentForPreview.documentName}
+                  extractedData={selectedDocumentForPreview.extractedData || {}}
+                  fields={selectedDocumentForPreview.fields || []}
+                  fileUrl={selectedDocumentForPreview.fileUrl}
+                  fileName={selectedDocumentForPreview.fileName}
+                  expanded={true}
+                  showSaveButton={false}
+                  type={selectedDocumentForPreview.columnType}
+                  onDataChange={() => {}} // Read-only for preview
+                />
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+      <FileUploadComponent
+        open={uploadDialogOpen}
+        onOpenChange={setUploadDialogOpen}
+        task={selectedUploadData?.task}
+        document={selectedUploadData?.document}
+        columnType={selectedUploadData?.columnType || 'principal'}
+        onUploadComplete={handleUploadComplete}
+      />
     </div>
   );
 }
