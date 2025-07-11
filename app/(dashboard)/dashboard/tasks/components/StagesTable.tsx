@@ -8,10 +8,10 @@ import { Badge } from "@/components/ui/badge"
 import { AlertTriangle, FileText, ChevronDown, Edit, Trash2, Eye, Upload } from "lucide-react"
 import { format, parseISO } from "date-fns"
 import { StageTimer } from "@/components/stage-timer"
+import { EditableStageCell } from "./EditableStageCell"
 
 interface StagesTableProps {
   tasks: any[]
-  columns: any[]
   loading: boolean
   error: string | null
   onTaskAction?: (action: string, task: any) => void
@@ -23,11 +23,16 @@ interface StagesTableProps {
   sortConfig?: { key: string; direction: 'asc' | 'desc' } | null
   onSort?: (key: string) => void
   columnVisibility?: Record<string, boolean>
+  selectedDepartment?: string
+  selectedSubdepartment?: string
+  selectedClass?: string
+  selectedSubclass?: string
+  getTaskStageStatus?: (taskId: string, stageId: string) => any
+  handleStageStatusSave?: (stageId: string, taskId: string, date: string) => Promise<any>
 }
 
 export function StagesTable({
   tasks,
-  columns,
   loading,
   error,
   onTaskAction,
@@ -38,10 +43,148 @@ export function StagesTable({
   departments = [],
   sortConfig,
   onSort,
-  columnVisibility = {}
+  columnVisibility = {},
+  selectedDepartment,
+  selectedSubdepartment,
+  selectedClass,
+  selectedSubclass,
+  getTaskStageStatus,
+  handleStageStatusSave
 }: StagesTableProps) {
-  
-  // Format task data for display
+ // Define base stage columns
+ const baseStageColumns = [
+  { key: 'index', header: '#', width: '50px' },
+  { key: 'website', header: 'Website', width: '120px' },
+  { key: 'job_description', header: 'Job', width: '150px' },
+  { key: 'task_manager', header: 'Task Manager', width: '120px' },
+  { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
+  { key: 'officer', header: 'Officer', width: '120px' },
+  { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
+  { key: 'principal_member_name', header: 'Principal Member Name', width: '180px' },
+  { key: 'company_name', header: 'Company Name', width: '150px' },
+  {
+    key: 'documents',
+    header: 'All Submitted Documents',
+    width: '80px'
+  },
+  { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
+  { key: 'account_used', header: 'Account Used', width: '120px' },
+  { key: 'applied_by', header: 'Applied by Who', width: '120px' },
+  { key: 'batch', header: 'Batch', width: '100px' },
+  {
+    key: 'actions',
+    header: 'Actions',
+    width: '120px'
+  }
+];
+
+const generateStageColumns = useCallback(() => {
+  const baseColumns = baseStageColumns
+    .slice(0, baseStageColumns.findIndex(col => col.key === 'renewal_status') + 1)
+    .filter(col => columnVisibility[col.key] !== false);
+
+  const movedColumns = baseStageColumns
+    .slice(
+      baseStageColumns.findIndex(col => col.key === 'account_used'),
+      baseStageColumns.findIndex(col => col.key === 'actions') + 1
+    )
+    .filter(col => ['account_used', 'applied_by', 'batch', 'actions'].includes(col.key) &&
+      columnVisibility[col.key] !== false);
+
+  const endColumns: any[] = [];
+
+  const currentDept = departments.find(d => d.id === selectedDepartment);
+  if (!currentDept) {
+    return [...baseColumns, ...endColumns];
+  }
+
+  // Get ALL stages (not filtered for enquiry like in EnquiryTable)
+  let departmentStages = currentDept.stages || [];
+
+  // Apply subdepartment filter if selected
+  if (selectedSubdepartment) {
+    const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id === selectedSubdepartment);
+    if (currentSubdept) {
+      departmentStages = departmentStages.filter(stage => {
+        const subdeptStageConfig = currentSubdept.stages?.find(s => s.stage_id === stage.id);
+
+        if (subdeptStageConfig && subdeptStageConfig.applicable === false) {
+          return false;
+        }
+
+        if (subdeptStageConfig && subdeptStageConfig.display !== undefined) {
+          return subdeptStageConfig.display;
+        }
+
+        return true;
+      });
+    }
+  }
+
+  // Apply class filter if selected
+  if (selectedClass) {
+    const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id === selectedSubdepartment);
+    if (currentSubdept) {
+      const currentClass = currentSubdept.classes?.find(c =>
+        c.id === selectedClass || c.name === selectedClass
+      );
+
+      if (currentClass && currentClass.stages) {
+        departmentStages = departmentStages.filter(stage => {
+          const classStageConfig = currentClass.stages?.find(s => s.stage_id === stage.id);
+
+          if (classStageConfig && classStageConfig.applicable === false) {
+            return false;
+          }
+
+          if (classStageConfig && classStageConfig.display !== undefined) {
+            return classStageConfig.display;
+          }
+
+          return true;
+        });
+      }
+    }
+  }
+
+  // Generate stage columns from filtered stages
+  const stageColumnsList = departmentStages
+    .filter(stage => columnVisibility[`stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`] !== false)
+    .map(stage => ({
+      key: `stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`,
+      header: stage.name,
+      width: '150px',
+      parentHeader: 'Stages',
+      sortable: true,
+      stage: stage,
+      render: (value: any, task: any, index: number, stage: any) => {
+        // Use the stage parameter passed to the render function
+        const taskStageStatus = getTaskStageStatus?.(task.id, stage.id);
+
+        return (
+          <EditableStageCell
+            stage={stage}
+            task={task}
+            value={taskStageStatus?.completedAt || taskStageStatus?.date}
+            onSave={handleStageStatusSave}
+            onDocumentUpload={onStageDocumentUpload}
+            onShowDocuments={onShowUploadDialog}
+          />
+        );
+      }
+    }));
+
+  return [
+    ...baseColumns,
+    ...stageColumnsList,
+    ...movedColumns.map(col => ({
+      ...col,
+      parentHeader: 'Additional Info'
+    })),
+    ...endColumns
+  ];
+}, [departments, selectedDepartment, selectedSubdepartment, selectedClass, columnVisibility, getTaskStageStatus, handleStageStatusSave, onStageDocumentUpload, onShowUploadDialog]);
+
   const formatTaskData = useCallback((task: any, index: number) => {
     const formatDate = (dateString?: string | null) => {
       if (!dateString) return '';
@@ -110,20 +253,18 @@ export function StagesTable({
     return getSortedTasks(tasks);
   }, [tasks, getSortedTasks]);
 
-  // Group columns by parent header for display
-  const groupedColumns = useMemo(() => {
-    return columns.reduce((acc: Record<string, any[]>, col: any) => {
-      const parent = col.parentHeader || 'ungrouped';
-      if (!acc[parent]) acc[parent] = [];
-      acc[parent].push(col);
-      return acc;
-    }, {} as Record<string, any[]>);
-  }, [columns]);
+  const columns = useMemo(() => generateStageColumns(), [generateStageColumns]);
 
-  // Flatten all columns for easier access
-  const allColumns = useMemo(() => {
-    return Object.values(groupedColumns).flat();
-  }, [groupedColumns]);
+// Group columns by parent header for display
+  const groupedColumns = useMemo(() => {
+    const grouped = {};
+    columns.forEach(col => {
+      const parent = col.parentHeader || 'ungrouped';
+      if (!grouped[parent]) grouped[parent] = [];
+      grouped[parent].push(col);
+    });
+    return grouped;
+  }, [columns]);
 
   // Define background colors for parent headers
   const getParentHeaderBgColor = (groupName: string) => {
@@ -137,17 +278,6 @@ export function StagesTable({
   const getParentHeaderTextColor = (groupName: string) => {
     if (groupName === 'ungrouped') return 'text-white';
     return 'text-white';
-  };
-
-  // Get stage date from task.stages object
-  const getStageDate = (task: any, stageId: string) => {
-    // Check both the new format (stage ID as key with date property) and legacy format (stage ID as key with date string)
-    if (task.stages?.[stageId]?.date) {
-      return task.stages[stageId].date;
-    } else if (typeof task.stages?.[stageId] === 'string') {
-      return task.stages[stageId];
-    }
-    return null;
   };
 
   const renderStageColumn = useCallback((task: any, stage: any) => {
@@ -307,7 +437,8 @@ export function StagesTable({
     const formattedTask = formatTaskData(task, index);
 
     if (col.render) {
-      return col.render(formattedTask[col.key], task, index);
+      // Pass the stage object as the fourth parameter to the render function
+      return col.render(formattedTask[col.key], task, index, col.stage);
     }
 
     // Handle special cases
@@ -350,18 +481,14 @@ export function StagesTable({
 
     // Handle stage columns
     if (col.key.startsWith('stage_')) {
-      const stageName = col.header;
-      const stage = departments
-        .flatMap(d => d.stages || [])
-        .find(s => s.name === stageName);
-      
-      if (stage) {
-        return renderStageColumn(task, stage);
+      // Use the stage from the column definition
+      if (col.stage) {
+        return renderStageColumn(task, col.stage);
       }
     }
 
     return formattedTask[col.key] || '-';
-  }, [formatTaskData, onTaskAction, onShowUploadDialog, departments, renderStageColumn]);
+  }, [formatTaskData, onTaskAction, onShowUploadDialog, renderStageColumn]);
 
   return (
     <div className="rounded-md border w-full flex flex-col bg-background shadow-sm" style={{ maxHeight: '80vh', maxWidth: '95vw' }}>
@@ -385,7 +512,7 @@ export function StagesTable({
 
             {/* Second row - column headers */}
             <TableRow className="h-12">
-              {allColumns.map((col: any) => {
+              {columns.map((col: any) => {
                 const isStageColumn = col.parentHeader === 'Stages';
                 const bgColor = isStageColumn ? 'bg-blue-500' : 'bg-blue-600';
                 return (
@@ -422,7 +549,7 @@ export function StagesTable({
             {loading ? (
               <TableRow>
                 <TableCell
-                  colSpan={allColumns.length}
+                  colSpan={columns.length}
                   className="h-24 text-center bg-gray-50"
                 >
                   <div className="flex items-center justify-center space-x-2">
@@ -434,7 +561,7 @@ export function StagesTable({
             ) : error ? (
               <TableRow>
                 <TableCell
-                  colSpan={allColumns.length}
+                  colSpan={columns.length}
                   className="h-24 text-center text-destructive bg-red-50"
                 >
                   <div className="flex items-center justify-center space-x-2">
@@ -452,7 +579,7 @@ export function StagesTable({
                     key={task.id}
                     className={`hover:bg-gray-50 ${isEven ? 'bg-white' : 'bg-gray-50'}`}
                   >
-                    {allColumns.map((col: any) => {
+                    {columns.map((col: any) => {
                       const cellValue = renderCellContent(col, task, index);
 
                       return (
@@ -476,7 +603,7 @@ export function StagesTable({
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={allColumns.length}
+                  colSpan={columns.length}
                   className="text-center p-8 text-muted-foreground bg-gray-50"
                 >
                   <div className="flex flex-col items-center space-y-2">

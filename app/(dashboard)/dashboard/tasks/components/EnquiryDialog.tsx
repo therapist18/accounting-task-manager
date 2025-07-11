@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import { useState, useCallback, useMemo, useEffect } from "react"
+import { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -15,6 +15,7 @@ import { User, Users, Phone, Mail, MapPin, Building2, Loader2, Info, FileText, B
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 import { fetchDepartments } from "../../departments/departments/database"
+import { format } from "date-fns"
 
 interface Individual {
     id: number
@@ -49,7 +50,15 @@ interface EnquiryDialogProps {
 export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryDialogProps) {
     const [applicantType, setApplicantType] = useState<'principal' | 'dependant'>('principal')
     const [individuals, setIndividuals] = useState<Individual[]>([])
-    const [selectedIndividual, setSelectedIndividual] = useState<Individual | null>(null)
+    // Use a ref to maintain the selected individual across re-renders
+    const selectedIndividualRef = useRef<Individual | null>(null);
+    const [selectedIndividual, setSelectedIndividualState] = useState<Individual | null>(null);
+    
+    // Update both the state and ref when selected individual changes
+    const setSelectedIndividual = useCallback((individual: Individual | null) => {
+        selectedIndividualRef.current = individual;
+        setSelectedIndividualState(individual);
+    }, []);
     const [departments, setDepartments] = useState<any[]>([])
     const [loading, setLoading] = useState(false)
     const [searchLoading, setSearchLoading] = useState(false)
@@ -446,39 +455,89 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         setLoading(true);
 
         try {
-            // Check if we have a selected individual or if we're creating a new one
-            const individualToUse = selectedIndividual || {
-                id: null, // This will be handled as a new individual
-                full_name: formData.full_name,
-                contact_details: {
-                    phone: {
-                        kenyan: { primary: formData.mobile_number }
-                    }
-                },
-                individual_type: applicantType
-            };
+            // Use the ref to get the current selected individual
+            const currentSelectedIndividual = selectedIndividualRef.current;
+            console.log('Form submitted with selectedIndividual (from ref):', currentSelectedIndividual);
+            console.log('Form data:', formData);
 
-            // If we don't have a selected individual and required fields are missing
-            if (!selectedIndividual && (!formData.full_name || !formData.mobile_number)) {
-                throw new Error('Please select an individual or enter name and mobile number');
+            // If we don't have a selected individual, try to find it from form data
+            if (!currentSelectedIndividual && formData.full_name) {
+                // Try to find the individual in the loaded list
+                const foundIndividual = individuals.find(
+                    ind => ind.full_name === formData.full_name && 
+                    (ind.contact_details?.phone?.kenyan?.primary === formData.mobile_number ||
+                     ind.contact_details?.personal_mobile_num_kenyan_1 === formData.mobile_number)
+                );
+                
+                if (foundIndividual) {
+                    console.log('Found matching individual:', foundIndividual);
+                    setSelectedIndividual(foundIndividual);
+                } else {
+                    throw new Error('Please select an individual from the dropdown');
+                }
             }
 
+            // Get the current selected individual after potential updates
+            const individualToUse = selectedIndividualRef.current;
+            
+            if (!individualToUse) {
+                throw new Error('No individual selected. Please select an individual from the dropdown.');
+            }
+
+            const individualId = individualToUse.id;
+            
+            if (!individualId) {
+                throw new Error('Selected individual does not have a valid ID');
+            }
+
+            // Prepare dependant data with full details
+            const dependantsToSave = includeDependants
+                ? selectedDependants.map(id => {
+                    const dependant = availableDependants.find(d => d.id.toString() === id);
+                    return dependant ? {
+                        id: dependant.id,
+                        name: dependant.full_name,
+                        relationship: dependant.relationship_type || 'family member'
+                    } : null;
+                }).filter(Boolean)
+                : [];
+
+            // Prepare the initial stage data for the "Enquiry" stage
+            const enquiryStageId = '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'; // Hardcoded as per request
+            const now = new Date();
+            const formattedDate = format(now, 'dd/MM/yyyy'); // e.g., "09/07/2024"
+            const initialStages = {
+                [enquiryStageId]: {
+                    date: formattedDate,
+                    status: 'completed',
+                    completedAt: now.toISOString(),
+                },
+            };
+
             // Prepare the task data
-            const taskData = {
+            const taskData: any = {
                 job_description: formData.job_description || '',
                 status: 'enquiry',
                 department_id: formData.department_id,
                 subdepartment_id: formData.subdepartment_id,
-                individual_id: selectedIndividual ? selectedIndividual.id : null,
+                individual_id: individualId,
                 applicant_type: applicantType,
                 class_id: formData.class_id || null,
                 subclass_id: formData.subclass_id || null,
-                date_initiated: new Date(),
+                date_initiated: now,
                 applicant_name: selectedIndividual ? selectedIndividual.full_name : formData.full_name,
-                dependant_member: includeDependants ? selectedDependants : [],
+                stages: initialStages,
+                dependant_member: dependantsToSave,
                 understudy: selectedUnderstudy || null,
                 company_id: selectedCompany || null,
             };
+
+            // If applicant is principal, include their ID as principal_member
+            if (applicantType === 'principal') {
+                taskData.principal_member = individualId;
+            }
+            
+            console.log('Submitting task with individual_id:', individualId, 'and data:', taskData);
 
             // Insert the task into the database
             const { data, error } = await supabase
@@ -714,19 +773,26 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
     }
 
     const handleIndividualSelect = async (individual: Individual) => {
+        // Update the selected individual in state
         setSelectedIndividual(individual);
+        
+        // Reset related states
         setSelectedCompany('');
         setUnderstudies([]);
         setSelectedUnderstudy('');
 
+        // Get the primary phone number from contact details
+        const primaryPhone = individual.contact_details?.phone?.kenyan?.primary ||
+            individual.contact_details?.personal_mobile_num_kenyan_1 ||
+            individual.contact_details?.personal_mobile_num_kenyan_2 ||
+            individual.contact_details?.office_phone_number ||
+            individual.contact_details?.broadcast_whatsapp_number ||
+            '';
+
         // Update form data with individual details
         const formUpdate: any = {
             full_name: individual.full_name,
-            mobile_number: individual.contact_details?.personal_mobile_num_kenyan_1 ||
-                individual.contact_details?.personal_mobile_num_kenyan_2 ||
-                individual.contact_details?.office_phone_number ||
-                individual.contact_details?.broadcast_whatsapp_number ||
-                '',
+            mobile_number: primaryPhone,
             principal_member_id: ''
         };
 
@@ -831,11 +897,25 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
                                             value={selectedIndividual?.id?.toString() || ''}
                                             onValueChange={(value) => {
                                                 const individual = individuals.find(i => i.id.toString() === value);
-                                                if (individual) handleIndividualSelect(individual);
+                                                console.log('Selected individual:', individual);
+                                                if (individual) {
+                                                    handleIndividualSelect(individual);
+                                                }
                                             }}
                                         >
                                             <SelectTrigger>
-                                                <SelectValue placeholder={`Select ${applicantType}...`} />
+                                                <SelectValue placeholder={`Select ${applicantType}...`}>
+                                                    {selectedIndividual && (
+                                                        <div className="flex flex-col">
+                                                            <span>{selectedIndividual.full_name}</span>
+                                                            {selectedIndividual.contact_details?.phone?.kenyan?.primary && (
+                                                                <span className="text-xs text-gray-500">
+                                                                    {selectedIndividual.contact_details.phone.kenyan.primary}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </SelectValue>
                                             </SelectTrigger>
                                             <SelectContent className="max-h-60">
                                                 {individuals.map((individual) => (
@@ -1323,3 +1403,4 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         </Dialog>
     )
 }
+

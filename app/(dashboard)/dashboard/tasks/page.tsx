@@ -27,6 +27,7 @@ import { EditableStageCell } from "./components/EditableStageCell"
 import { EnquiryDialog } from "./components/EnquiryDialog"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { RequirementsTable } from "./components/RequirementsTable"
+import { EnquiryTable } from "./components/EnquiryTable"
 
 const fuzzyMatch = (str1: string, str2: string, threshold = 0.8): boolean => {
   if (!str1 || !str2) return false;
@@ -229,48 +230,7 @@ export default function TasksPage() {
     // Implement document viewing logic
   }
 
-  // Define requirement columns
-  const requirementColumns = [
-    { key: 'index', header: '#', width: '50px' },
-    { key: 'website', header: 'Website', width: '120px' },
-    { key: 'job_description', header: 'Job', width: '150px' },
-    { key: 'task_manager', header: 'Task Manager', width: '120px' },
-    { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
-    { key: 'officer', header: 'Officer', width: '120px' },
-    { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
-    { key: 'company_name', header: 'Company Name', width: '150px' },
-    { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
-    { key: 'account_used', header: 'Account Used', width: '120px' },
-    { key: 'applied_by', header: 'Applied by Who', width: '120px' },
-    { key: 'batch', header: 'Batch', width: '100px' },
-  ];
- 
-  // Define stage columns
-  const stageColumns = [
-    { key: 'index', header: '#', width: '50px' },
-    { key: 'website', header: 'Website', width: '120px' },
-    { key: 'job_description', header: 'Job', width: '150px' },
-    { key: 'task_manager', header: 'Task Manager', width: '120px' },
-    { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
-    { key: 'officer', header: 'Officer', width: '120px' },
-    { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
-    { key: 'principal_member_name', header: 'Principal Member Name', width: '180px' },
-    { key: 'company_name', header: 'Company Name', width: '150px' },
-    {
-      key: 'documents',
-      header: 'All Submitted Documents',
-      width: '80px'
-    },
-    { key: 'renewal_status', header: 'New/Renewal', width: '120px' },
-    { key: 'account_used', header: 'Account Used', width: '120px' },
-    { key: 'applied_by', header: 'Applied by Who', width: '120px' },
-    { key: 'batch', header: 'Batch', width: '100px' },
-    {
-      key: 'actions',
-      header: 'Actions',
-      width: '120px'
-    }
-  ];
+
  
   // Transform departments data
   const transformDepartments = useCallback((depts: any[]) => {
@@ -527,119 +487,7 @@ export default function TasksPage() {
     }
   }
  
-  // Update the generateStageColumns function to handle enquiry stages
-  const generateStageColumns = useCallback(() => {
-    const baseColumns = stageColumns
-      .slice(0, stageColumns.findIndex(col => col.key === 'renewal_status') + 1)
-      .filter(col => columnVisibility[col.key] !== false)
- 
-    const movedColumns = stageColumns
-      .slice(
-        stageColumns.findIndex(col => col.key === 'account_used'),
-        stageColumns.findIndex(col => col.key === 'actions') + 1
-      )
-      .filter(col => ['account_used', 'applied_by', 'batch', 'actions'].includes(col.key) &&
-        columnVisibility[col.key] !== false)
- 
-    const endColumns: any[] = []
- 
-    const currentDept = departments.find(d => d.id === selectedDepartment)
-    if (!currentDept) {
-      return [...baseColumns, ...endColumns]
-    }
- 
-    // Get stages - for enquiry tab, only show enquiry and confirmation stages
-    let departmentStages = currentDept.stages || []
- 
-    // Filter stages for enquiry view
-    const isEnquiryView = window.location.hash.includes('enquiry')
-    if (isEnquiryView) {
-      departmentStages = departmentStages.filter(stage =>
-        stage.name === 'Enquiry' || stage.name === 'Confirmation'
-      )
-    }
- 
-    // Apply subdepartment and class filters as before...
-    if (selectedSubdepartment) {
-      const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id === selectedSubdepartment)
-      if (currentSubdept) {
-        departmentStages = departmentStages.filter(stage => {
-          const subdeptStageConfig = currentSubdept.stages?.find(s => s.stage_id === stage.id)
- 
-          if (subdeptStageConfig && subdeptStageConfig.applicable === false) {
-            return false
-          }
- 
-          if (subdeptStageConfig && subdeptStageConfig.display !== undefined) {
-            return subdeptStageConfig.display
-          }
- 
-          return true
-        })
-      }
-    }
- 
-    if (selectedClass) {
-      const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id === selectedSubdepartment)
-      if (currentSubdept) {
-        const currentClass = currentSubdept.classes?.find(c =>
-          c.id === selectedClass || c.name === selectedClass
-        )
- 
-        if (currentClass && currentClass.stages) {
-          departmentStages = departmentStages.filter(stage => {
-            const classStageConfig = currentClass.stages?.find(s => s.stage_id === stage.id)
- 
-            if (classStageConfig && classStageConfig.applicable === false) {
-              return false
-            }
- 
-            if (classStageConfig && classStageConfig.display !== undefined) {
-              return classStageConfig.display
-            }
- 
-            return true
-          })
-        }
-      }
-    }
- 
-    // Generate stage columns from filtered stages
-    const stageColumnsList = departmentStages
-      .filter(stage => columnVisibility[`stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`] !== false)
-      .map(stage => ({
-        key: `stage_${stage.name.toLowerCase().replace(/\s+/g, '_')}`,
-        header: stage.name,
-        width: '150px',
-        parentHeader: 'Stages',
-        sortable: true,
-        stage: stage,
-        render: (value: any, task: any) => {
-          const taskStageStatus = getTaskStageStatus(task.id, stage.id)
- 
-          return (
-            <EditableStageCell
-              stage={stage}
-              task={task}
-              value={taskStageStatus?.completedAt || taskStageStatus?.date}
-              onSave={handleStageStatusSave}
-              onDocumentUpload={handleStageDocumentUpload}
-              onShowDocuments={handleShowUploadDialog}
-            />
-          )
-        }
-      }))
- 
-    return [
-      ...baseColumns,
-      ...stageColumnsList,
-      ...movedColumns.map(col => ({
-        ...col,
-        parentHeader: 'Additional Info'
-      })),
-      ...endColumns
-    ]
-  }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, columnVisibility])
+
  
   // Helper function to check if IDs match
   const idsMatch = (id1: any, id2: any): boolean => {
@@ -929,9 +777,8 @@ export default function TasksPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="p-4">
-                    <StagesTable
+                    <EnquiryTable
                       tasks={getEnquiryTasks()}
-                      columns={generateStageColumns()}
                       loading={loading}
                       error={error}
                       onTaskAction={handleTaskAction}
@@ -942,7 +789,12 @@ export default function TasksPage() {
                       departments={departments}
                       sortConfig={sortConfig}
                       onSort={handleSort}
-                      columnVisibility={columnVisibility}
+                      selectedDepartment={selectedDepartment}
+                      selectedSubdepartment={selectedSubdepartment}
+                      selectedClass={selectedClass}
+                      selectedSubclass={selectedSubclass}
+                      getTaskStageStatus={getTaskStageStatus}
+                      handleStageStatusSave={handleStageStatusSave}
                     />
                   </CardContent>
                 </Card>
@@ -976,7 +828,6 @@ export default function TasksPage() {
                       <CardContent className="p-4">
                         <StagesTable
                           tasks={getFilteredTasks('in_progress')}
-                          columns={generateStageColumns()}
                           loading={loading}
                           error={error}
                           onTaskAction={handleTaskAction}
@@ -988,6 +839,12 @@ export default function TasksPage() {
                           sortConfig={sortConfig}
                           onSort={handleSort}
                           columnVisibility={columnVisibility}
+                          selectedDepartment={selectedDepartment}
+                          selectedSubdepartment={selectedSubdepartment}
+                          selectedClass={selectedClass}
+                          selectedSubclass={selectedSubclass}
+                          getTaskStageStatus={getTaskStageStatus}
+                          handleStageStatusSave={handleStageStatusSave}
                         />
                       </CardContent>
                     </Card>
@@ -1057,7 +914,6 @@ export default function TasksPage() {
                   <CardContent className="p-4">
                     <StagesTable
                       tasks={getFilteredTasks('completed')}
-                      columns={generateStageColumns()}
                       loading={loading}
                       error={error}
                       onTaskAction={handleTaskAction}
@@ -1069,6 +925,12 @@ export default function TasksPage() {
                       sortConfig={sortConfig}
                       onSort={handleSort}
                       columnVisibility={columnVisibility}
+                      selectedDepartment={selectedDepartment}
+                      selectedSubdepartment={selectedSubdepartment}
+                      selectedClass={selectedClass}
+                      selectedSubclass={selectedSubclass}
+                      getTaskStageStatus={getTaskStageStatus}
+                      handleStageStatusSave={handleStageStatusSave}
                     />
                   </CardContent>
                 </Card>
