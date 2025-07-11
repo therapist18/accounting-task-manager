@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { AlertTriangle, FileText, ChevronDown, Edit, Trash2, Eye, Upload, Users } from "lucide-react"
 import { format, parseISO } from "date-fns"
 import { StageTimer } from "@/components/stage-timer"
+import { EditableStageCell } from "./EditableStageCell"
 
 interface EnquiryTableProps {
   tasks: any[]
@@ -55,11 +56,10 @@ export function EnquiryTable({
   // Define base enquiry columns
   const baseEnquiryColumns = [
     { key: 'index', header: '#', width: '50px' },
-    { key: 'website', header: 'Website', width: '120px' },
     { key: 'job_description', header: 'Job', width: '150px' },
-    { key: 'task_manager', header: 'Task Manager', width: '120px' },
-    { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
-    { key: 'officer', header: 'Officer', width: '120px' },
+    // { key: 'task_manager', header: 'Task Manager', width: '120px' },
+    // { key: 'task_assistant', header: 'Task Assistant', width: '120px' },
+    // { key: 'officer', header: 'Officer', width: '120px' },
     { key: 'applicant_name', header: 'Applicant Name', width: '150px' },
     { key: 'company_name', header: 'Company Name', width: '150px' },
     { key: 'principal_member_name', header: 'Principal Member Name', width: '180px' },
@@ -118,161 +118,26 @@ export function EnquiryTable({
       header: stage.name,
       width: '150px',
       parentHeader: 'Stages',
-      stage: stage, // Store the stage object
+      sortable: true,
+      stage: stage,
       render: (value: any, task: any, index: number, stage: any) => {
-        // Use the stage parameter passed to the render function
         const taskStageStatus = getTaskStageStatus?.(task.id, stage.id);
-        return renderStageColumn(task, stage, taskStageStatus);
+
+        return (
+          <EditableStageCell
+            stage={stage}
+            task={task}
+            value={taskStageStatus?.completedAt || taskStageStatus?.date}
+            onSave={handleStageStatusSave}
+            onDocumentUpload={onStageDocumentUpload}
+            onShowDocuments={onShowUploadDialog}
+          />
+        );
       }
     }));
 
     return [...baseColumns, ...stageColumns, ...additionalInfoColumns];
-  }, [departments, selectedDepartment, columnVisibility, getTaskStageStatus, onTaskAction]);
-
-  const renderStageColumn = useCallback((task: any, stage: any, stageStatus?: any) => {
-    const isCurrentStage = task.current_stage?.id === stage.id;
-
-    // Get stage date from task.stages JSON
-    const getStageDate = (task: any, stageId: string): string => {
-      if (task.stages && task.stages[stageId]) {
-        const stageData = task.stages[stageId];
-        if (typeof stageData === 'object' && stageData.date) {
-          return stageData.date;
-        } else if (typeof stageData === 'string') {
-          return stageData;
-        }
-      }
-      return '';
-    };
-
-    const stageDate = getStageDate(task, stage.id);
-    const isCompleted = Boolean(stageDate);
-
-    const taskDocuments = applicantDocuments[task.id] || [];
-
-    // Format date for display
-    const formatDateDisplay = (dateStr: string) => {
-      if (!dateStr) return '';
-
-      // If it's already in DD/MM/YYYY format, return as is
-      if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
-        return dateStr;
-      }
-
-      try {
-        const date = new Date(dateStr);
-        if (!isNaN(date.getTime())) {
-          return format(date, 'dd/MM/yyyy');
-        }
-        return dateStr;
-      } catch (e) {
-        console.warn('Error formatting date:', e);
-        return dateStr;
-      }
-    };
-
-    // Handle document upload for document-based stages
-    if (stage.documents && stage.documents.length > 0) {
-      return (
-        <div className="flex flex-col gap-1 items-center">
-          {stageDate && (
-            <div className="text-xs text-muted-foreground mb-1">
-              {formatDateDisplay(stageDate)}
-            </div>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-full p-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              onStageDocumentUpload?.(task, stage);
-            }}
-          >
-            <Upload className="h-4 w-4 mr-1" />
-            Upload
-          </Button>
-
-          {/* Show document indicators with enhanced status */}
-          <div className="flex items-center justify-center gap-1 flex-wrap">
-            {stage.documents.map((stageDoc: any, docIndex: number) => {
-              const hasDocument = taskDocuments.some(doc =>
-                doc.document_id === stageDoc.kycId ||
-                doc.kyc_document_id === stageDoc.id
-              );
-
-              const matchingDoc = taskDocuments.find(doc =>
-                doc.document_id === stageDoc.kycId ||
-                doc.kyc_document_id === stageDoc.id
-              );
-
-              return (
-                <div key={docIndex} className="relative">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={`h-6 w-6 p-0 ${hasDocument ? 'text-green-600 bg-green-50' : 'text-gray-300'}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (hasDocument && matchingDoc) {
-                        onViewStageDocument?.(task, stage, stageDoc, matchingDoc);
-                      }
-                    }}
-                    title={`${stageDoc.name} - ${hasDocument ? 'Uploaded' : 'Not uploaded'}${matchingDoc ? ` (${matchingDoc.status})` : ''}`}
-                  >
-                    <Eye className="h-4 w-4" />
-                  </Button>
-                  {hasDocument && matchingDoc && (
-                    <div className={`absolute -top-1 -right-1 w-2 h-2 rounded-full ${matchingDoc.status === 'valid' ? 'bg-green-500' :
-                        matchingDoc.status === 'pending' ? 'bg-yellow-500' : 'bg-gray-500'
-                      }`} />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      );
-    }
-
-    // Regular stage status display
-    if (isCurrentStage) {
-      return (
-        <div className="flex flex-col items-center gap-1">
-          {stageDate && (
-            <div className="text-xs text-muted-foreground">
-              {formatDateDisplay(stageDate)}
-            </div>
-          )}
-          <Badge variant="default" className="w-fit">In Progress</Badge>
-          {task.current_stage_started_at && (
-            <StageTimer
-              startTime={task.current_stage_started_at}
-              estimatedTime={stage.estimated_time}
-            />
-          )}
-        </div>
-      );
-    } else if (isCompleted) {
-      return (
-        <div className="flex flex-col items-center">
-          {stageDate && (
-            <div className="text-xs text-muted-foreground">
-              {formatDateDisplay(stageDate)}
-            </div>
-          )}
-          <Badge variant="secondary" className="mt-1">Completed</Badge>
-        </div>
-      );
-    }
-
-    // Pending stage
-    return (
-      <div className="flex flex-col items-center">
-        <Badge variant="outline" className="text-muted-foreground">Pending</Badge>
-      </div>
-    );
-  }, [applicantDocuments, onStageDocumentUpload, onViewStageDocument]);
+  }, [departments, selectedDepartment, columnVisibility, getTaskStageStatus, handleStageStatusSave, onStageDocumentUpload, onShowUploadDialog, onTaskAction]);
 
   // Generate columns once and store them
   const columns = useMemo(() => generateEnquiryColumns(), [generateEnquiryColumns]);
@@ -433,12 +298,23 @@ export function EnquiryTable({
     if (col.key.startsWith('stage_')) {
       // Use the stage from the column definition
       if (col.stage) {
-        return renderStageColumn(task, col.stage);
+        const taskStageStatus = getTaskStageStatus?.(task.id, col.stage.id);
+
+        return (
+          <EditableStageCell
+            stage={col.stage}
+            task={task}
+            value={taskStageStatus?.completedAt || taskStageStatus?.date}
+            onSave={handleStageStatusSave}
+            onDocumentUpload={onStageDocumentUpload}
+            onShowDocuments={onShowUploadDialog}
+          />
+        );
       }
     }
 
     return formattedTask[col.key] || '-';
-  }, [formatTaskData, onTaskAction, onShowUploadDialog, renderStageColumn]);
+  }, [formatTaskData, onShowUploadDialog, getTaskStageStatus, handleStageStatusSave, onStageDocumentUpload, onShowUploadDialog]);
 
   return (
     <div className="rounded-md border w-full flex flex-col bg-background shadow-sm" style={{ maxHeight: '80vh', maxWidth: '95vw' }}>
