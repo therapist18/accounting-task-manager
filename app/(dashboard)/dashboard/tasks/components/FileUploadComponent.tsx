@@ -40,17 +40,18 @@ export function FileUploadComponent({
   const [uploading, setUploading] = useState(false)
   const [fileUrl, setFileUrl] = useState<string | null>(null)
   const [previewData, setPreviewData] = useState<any>(null)
-  
-  // Initialize extraction fields from document
+
+  // Update the extraction fields initialization
   const extractionFields = React.useMemo(() => {
     return document?.fields?.map((field: any) => ({
       id: field.id,
       name: field.name,
       type: field.type || 'text',
-      required: field.required || false
+      required: field.required || false,
+      isArray: field.isArray || field.type === 'array',
+      arrayConfig: field.arrayConfig || null
     })) || [];
   }, [document])
-
   // Clean up when dialog closes
   React.useEffect(() => {
     if (!open) {
@@ -134,7 +135,7 @@ export function FileUploadComponent({
       setSelectedFile(file)
       const objectUrl = URL.createObjectURL(file)
       setFileUrl(objectUrl)
-      
+
       // Set up immediate preview with empty data
       const previewData = {
         fileUrl: objectUrl,
@@ -143,82 +144,121 @@ export function FileUploadComponent({
         extractedData: {}
       }
       setPreviewData(previewData)
-      
+
       // Make refreshExtraction available globally
       window.refreshExtraction = async () => {
         if (file) {
           await performDataExtraction(file, objectUrl, true)
         }
       }
-      
+
       // Start extraction in the background
       performDataExtraction(file, objectUrl)
     }
   }
+  // In the performDataExtraction function, update the array field processing:
+  const performDataExtraction = async (file: File, fileUrl: string, isRefresh = false) => {
+    if (!file || !document) return
 
-const performDataExtraction = async (file: File, fileUrl: string, isRefresh = false) => {
-  if (!file || !document) return
-
-  setUploading(true)
-  try {
-    const { extractedData, success, message } = await performExtraction(
-      fileUrl,
-      extractionFields,
-      document?.category || 'document',
-      (progressMessage) => {
-        console.log('Extraction progress:', progressMessage)
-      },
-      file.name
-    )
-
-    let parsedData = extractedData
-    if (typeof extractedData === 'string') {
-      try {
-        const match = extractedData.match(/```json\n([\s\S]*?)\n```/)
-        parsedData = match && match[1] ? JSON.parse(match[1]) : {}
-      } catch (parseError) {
-        console.error('Error parsing extracted data:', parseError)
-        parsedData = {}
-      }
-    }
-
-    // Ensure array fields are properly structured
-    if (parsedData && extractionFields) {
-      extractionFields.forEach(field => {
-        if ((field.type === 'array' || field.isArray) && parsedData[field.name]) {
-          // Ensure array fields are actual arrays
-          if (!Array.isArray(parsedData[field.name])) {
-            parsedData[field.name] = [parsedData[field.name]];
+    setUploading(true)
+    try {
+      // Process extraction fields to include array configurations
+      const processedFields = extractionFields.map(field => {
+        if (field.type === 'array' && document.fields) {
+          // Find the corresponding field in document.fields to get arrayConfig
+          const docField = document.fields.find(df => df.id === field.id || df.name === field.name);
+          if (docField && docField.arrayConfig) {
+            return {
+              ...field,
+              isArray: true,
+              arrayConfig: docField.arrayConfig
+            };
           }
         }
+        return field;
       });
-    }
 
-    setExtractedData(parsedData)
-    
-    // Update preview data with extracted data
-    setPreviewData(prev => ({
-      ...prev,
-      extractedData: parsedData
-    }))
+      console.log('Processed extraction fields:', processedFields);
 
-    if (success) {
+      const { extractedData, success, message } = await performExtraction(
+        fileUrl,
+        processedFields, // Use processed fields instead of extractionFields
+        document?.category || 'document',
+        (progressMessage) => {
+          console.log('Extraction progress:', progressMessage)
+        },
+        file.name
+      )
+
+      let parsedData = extractedData
+      if (typeof extractedData === 'string') {
+        try {
+          const match = extractedData.match(/```json\n([\s\S]*?)\n```/)
+          parsedData = match && match[1] ? JSON.parse(match[1]) : {}
+        } catch (parseError) {
+          console.error('Error parsing extracted data:', parseError)
+          parsedData = {}
+        }
+      }
+
+      // Enhanced array field processing
+      if (parsedData && processedFields) {
+        processedFields.forEach(field => {
+          if ((field.type === 'array' || field.isArray) && field.arrayConfig?.fields) {
+            const fieldName = field.name;
+            if (parsedData[fieldName]) {
+              // Ensure array fields are properly structured
+              if (!Array.isArray(parsedData[fieldName])) {
+                parsedData[fieldName] = [parsedData[fieldName]];
+              }
+
+              // Validate each array item has the expected structure
+              parsedData[fieldName] = parsedData[fieldName].map((item: any) => {
+                if (typeof item !== 'object' || item === null) {
+                  return {};
+                }
+
+                const validatedItem: Record<string, any> = {};
+                field.arrayConfig!.fields!.forEach(subField => {
+                  validatedItem[subField.name] = item[subField.name] || null;
+                });
+
+                return validatedItem;
+              }).filter((item: any) => {
+                // Remove completely empty items
+                return Object.values(item).some(val => val !== null && val !== undefined && val !== '');
+              });
+            } else {
+              parsedData[fieldName] = [];
+            }
+          }
+        });
+      }
+
+      setExtractedData(parsedData)
+
+      setPreviewData(prev => ({
+        ...prev,
+        extractedData: parsedData
+      }))
+
+      if (success) {
+        toast({
+          title: 'Success',
+          description: `Successfully extracted data from ${file.name}`
+        })
+      }
+    } catch (error) {
+      console.error('Extraction error:', error)
       toast({
-        title: 'Success',
-        description: `Successfully extracted data from ${file.name}`
+        title: 'Error',
+        description: `Extraction failed: ${error.message}`,
+        variant: 'destructive'
       })
+    } finally {
+      setUploading(false)
     }
-  } catch (error) {
-    console.error('Extraction error:', error)
-    toast({
-      title: 'Error',
-      description: `Extraction failed: ${error.message}`,
-      variant: 'destructive'
-    })
-  } finally {
-    setUploading(false)
   }
-}
 
   // Handle data change from ExtractionPreview
   const handleDataChange = (fieldName: string, value: any) => {
@@ -331,54 +371,54 @@ const performDataExtraction = async (file: File, fileUrl: string, isRefresh = fa
           {/* Right Panel - Preview */}
           <div>
             <div className="mt-6">
-            {fileUrl ? (
-              <ExtractionPreview
-                documentName={document?.display_name || document?.name || 'Document'}
-                extractedData={previewData?.extractedData || {}}
-                fields={extractionFields}
-                onDataChange={(field, value) => {
-                  setExtractedData((prev: any) => ({
-                    ...prev,
-                    [field]: value
-                  }))
-                }}
-                fileUrl={fileUrl}
-                fileName={selectedFile?.name || ''}
-                expanded={true}
-              />
-            ) : (
-              <div className="flex items-center justify-center h-64 border-2 border-dashed rounded-lg">
-                <p className="text-muted-foreground">Upload a file to see the preview</p>
-              </div>
-            )}
+              {fileUrl ? (
+                <ExtractionPreview
+                  documentName={document?.display_name || document?.name || 'Document'}
+                  extractedData={previewData?.extractedData || {}}
+                  fields={extractionFields}
+                  onDataChange={(field, value) => {
+                    setExtractedData((prev: any) => ({
+                      ...prev,
+                      [field]: value
+                    }))
+                  }}
+                  fileUrl={fileUrl}
+                  fileName={selectedFile?.name || ''}
+                  expanded={true}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-64 border-2 border-dashed rounded-lg">
+                  <p className="text-muted-foreground">Upload a file to see the preview</p>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
 
-        <div className="flex justify-end gap-2 pt-4 border-t">
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={uploading}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSaveDocument}
-            disabled={!selectedFile || uploading}
-          >
-            {uploading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Upload className="mr-2 h-4 w-4" />
-                Save Document
-              </>
-            )}
-          </Button>
-        </div>
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={uploading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveDocument}
+              disabled={!selectedFile || uploading}
+            >
+              {uploading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Upload className="mr-2 h-4 w-4" />
+                  Save Document
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

@@ -445,14 +445,27 @@ export default function TasksPage() {
   };
  
   // Add this function to handle enquiry creation
-  const handleEnquiryCreated = (newEnquiry: any) => {
+  const handleEnquiryCreated = async (newEnquiry: any) => {
+    // Update the enquiry tasks state
     setEnquiryTasks(prev => [newEnquiry, ...prev])
+
     // Refresh all tasks
-    const loadTasks = async () => {
+    try {
       const tasksData = await getTasks()
       setTasks(tasksData)
+      toast({
+        title: 'Success',
+        description: 'Enquiry created and tasks refreshed successfully',
+        variant: 'default'
+      })
+    } catch (error) {
+      console.error('Error refreshing tasks:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to refresh tasks',
+        variant: 'destructive'
+      })
     }
-    loadTasks()
   }
  
   const handleStageStatusSave = async (stageId: string, taskId: string, date: string) => {

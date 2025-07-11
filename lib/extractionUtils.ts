@@ -413,7 +413,7 @@ const validateExtractedData = (
   }
 };
 
-// Update the performExtraction function
+// Update the performExtraction function to handle array fields better
 export const performExtraction = async (
   fileUrl: string,
   fields: Field[],
@@ -446,21 +446,42 @@ export const performExtraction = async (
         exampleOutput
       });
 
+      // Create detailed array field descriptions for better extraction
+      const arrayFieldDescriptions = fields
+        .filter(field => (field.type === 'array' || field.isArray) && field.arrayConfig?.fields)
+        .map(field => {
+          const subFieldsDesc = field.arrayConfig!.fields!.map(sf => `"${sf.name}": "${sf.type}"`).join(', ');
+          return `${field.name}: Array of objects, each containing {${subFieldsDesc}}`;
+        })
+        .join('\n');
+
       const prompt = `
         Extract the following information from this ${documentType}:
         ${fieldPrompts}
         
-        Please return the extracted data in this JSON format:
+        ${arrayFieldDescriptions ? `\nArray Fields Structure:\n${arrayFieldDescriptions}\n` : ''}
+        
+        Please return the extracted data in this exact JSON format:
         ${JSON.stringify(exampleOutput, null, 2)}
         
-        Only return the JSON data, no other text.
+        IMPORTANT INSTRUCTIONS:
+        - For array fields, extract multiple items if present in the document
+        - Each array item should be a complete object with all specified fields
+        - If no data is found for an array field, return an empty array []
+        - If no data is found for a regular field, return null
+        - Ensure all dates are in DD/MM/YYYY format
+        - Return ONLY valid JSON, no additional text or markdown formatting
       `.trim();
 
       console.log('Extraction prompt:', prompt);
 
+      // Use structured output for better results
       const model = genAI.getGenerativeModel({ 
         model: "gemini-2.0-flash",
-        generationConfig,
+        generationConfig: {
+          ...generationConfig,
+          responseMimeType: "application/json"
+        },
       });
 
       const result = await model.generateContent([prompt, filePart]);
@@ -476,142 +497,71 @@ export const performExtraction = async (
       onProgress?.('Parsing extracted data...');
       const extractedData = parseExtractionResponse(text);
       console.log('Parsed extraction data:', extractedData);
+      
+      // Clean and validate the extracted data
       const cleanedData = cleanExtractedData(extractedData, fields);
       
-      let mappedData = extractedData.rawData || {};
+      // Enhanced array field processing
+      const processedData = { ...cleanedData };
       
-      if (!extractedData.rawData) {
-        fields.forEach(field => {
-          if (field.type === 'array' && field.isArray && field.arrayConfig?.fields) {
-            // Generic array field handling
-            const arrayFieldName = field.name;
-            let arrayData = extractedData[arrayFieldName] || [];
-            
-            // If data is not in array format, try to construct array from flat data
-            if (!Array.isArray(arrayData)) {
-              const constructedArray = [];
-              const maxItems = field.arrayConfig.maxItems || 1;
-              
-              // First, try to find data in nested format
-              if (typeof extractedData[arrayFieldName] === 'object') {
-                const itemData = {};
-                let hasData = false;
-                
-                field.arrayConfig.fields.forEach(subField => {
-                  const value = extractedData[arrayFieldName][subField.name.trim()];
-                  if (value !== undefined) {
-                    itemData[subField.name.trim()] = value;
-                    hasData = true;
-                  }
-                });
-                
-                if (hasData) {
-                  constructedArray.push(itemData);
-                }
-              }
-              
-              // If no nested data found, try various field naming patterns
-              if (constructedArray.length === 0) {
-                for (let i = 0; i < maxItems; i++) {
-                  const itemData = {};
-                  let hasData = false;
-                  
-                  field.arrayConfig.fields.forEach(subField => {
-                    // Try multiple field name patterns
-                    const possibleKeys = [
-                      // Array index patterns
-                      `${arrayFieldName}_${i + 1}_${subField.name.trim()}`,
-                      `${arrayFieldName}[${i}].${subField.name.trim()}`,
-                      `${arrayFieldName}.${i}.${subField.name.trim()}`,
-                      `${arrayFieldName}[${i}][${subField.name.trim()}]`,
-                      // Direct field patterns
-                      `${subField.name.trim()}`,
-                      `${subField.name.toLowerCase().trim()}`,
-                      // Nested object patterns
-                      `${arrayFieldName}.${subField.name.trim()}`,
-                      `${arrayFieldName}_${subField.name.trim()}`
-                    ];
-                    
-                    // Try to find value in extractedData using possible keys
-                    const value = possibleKeys.reduce((val, key) => {
-                      if (val !== undefined) return val;
-                      
-                      // Check direct match
-                      if (extractedData[key] !== undefined) return extractedData[key];
-                      
-                      // Check nested objects
-                      const parts = key.split('.');
-                      let current = extractedData;
-                      for (const part of parts) {
-                        if (current === undefined || current === null) return undefined;
-                        current = current[part];
-                      }
-                      return current;
-                    }, undefined);
-                    
-                    if (value !== undefined) {
-                      itemData[subField.name.trim()] = value;
-                      hasData = true;
-                    }
-                  });
-                  
-                  if (hasData) {
-                    constructedArray.push(itemData);
-                  }
-                }
-              }
-              
-              // If we found any data in our constructed array, use it
-              if (constructedArray.length > 0) {
-                arrayData = constructedArray;
-              }
-            }
-            
-            // Clean up array data - remove empty or undefined values
-            arrayData = arrayData.filter(item => {
-              if (!item || typeof item !== 'object') return false;
-              return Object.values(item).some(val => val !== undefined && val !== null && val !== '');
-            });
-            
-            // Only add the array if it contains data
-            if (arrayData.length > 0) {
-              mappedData[arrayFieldName] = arrayData;
-            }
-          } else {
-            // Handle regular fields
-            const fieldKeys = [
-              field.name.trim(),
-              field.name.toLowerCase().trim(),
-              field.name.replace(/[_\s]/g, ''),
-              field.name.replace(/[_\s]/g, '.')
-            ];
-            
-            const value = fieldKeys.reduce((val, key) => {
-              if (val !== undefined) return val;
-              
-              // Check direct match
-              if (extractedData[key] !== undefined) return extractedData[key];
-              
-              // Check nested objects
-              const parts = key.split('.');
-              let current = extractedData;
-              for (const part of parts) {
-                if (current === undefined || current === null) return undefined;
-                current = current[part];
-              }
-              return current;
-            }, undefined);
-            
-            if (value !== undefined) {
-              mappedData[field.name] = value;
+      fields.forEach(field => {
+        if ((field.type === 'array' || field.isArray) && field.arrayConfig?.fields) {
+          const fieldName = field.name;
+          let arrayData = extractedData[fieldName] || [];
+          
+          // Ensure it's an array
+          if (!Array.isArray(arrayData)) {
+            if (typeof arrayData === 'object' && arrayData !== null) {
+              // If it's a single object, wrap it in an array
+              arrayData = [arrayData];
+            } else {
+              arrayData = [];
             }
           }
-        });
-      }
+          
+          // Process each array item to ensure proper structure
+          arrayData = arrayData.map((item: any) => {
+            if (typeof item !== 'object' || item === null) {
+              return {};
+            }
+            
+            const processedItem: Record<string, any> = {};
+            field.arrayConfig!.fields!.forEach(subField => {
+              const subFieldName = subField.name.trim();
+              let value = item[subFieldName];
+              
+              // Transform value based on type
+              if (value !== undefined && value !== null && value !== '') {
+                switch (subField.type) {
+                  case 'date':
+                    processedItem[subFieldName] = transformDateToISO(String(value));
+                    break;
+                  case 'number':
+                    const numValue = Number(value);
+                    processedItem[subFieldName] = isNaN(numValue) ? null : numValue;
+                    break;
+                  default:
+                    processedItem[subFieldName] = String(value).trim();
+                    break;
+                }
+              } else {
+                processedItem[subFieldName] = null;
+              }
+            });
+            
+            return processedItem;
+          }).filter((item: any) => {
+            // Remove completely empty items
+            return Object.values(item).some(val => val !== null && val !== undefined && val !== '');
+          });
+          
+          processedData[fieldName] = arrayData;
+        }
+      });
 
       let validationErrors: ValidationError[] = [];
       fields.forEach(field => {
-        const value = mappedData[field.name];
+        const value = processedData[field.name];
         const validation = validateField(value, field);
         if (!validation.isValid) {
           validationErrors.push({
@@ -621,16 +571,15 @@ export const performExtraction = async (
         }
       });
 
-      // Even if we have validation errors, return the data for manual review
       return {
-        extractedData: mappedData,
+        extractedData: processedData,
         success: true,
         message: validationErrors.length > 0 
           ? 'Data extracted with some validation issues. Please review and correct if needed.'
           : 'Data extracted successfully',
         validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
-        failedImage: fileUrl,  // Always include the image URL
-        failedFields: fields   // Always include the fields
+        failedImage: fileUrl,
+        failedFields: fields
       };
 
     } catch (error) {
@@ -648,10 +597,8 @@ export const performExtraction = async (
         currentApiKeyIndex = API_KEYS.indexOf(nextKey);
         genAI = new GoogleGenerativeAI(nextKey);
         
-        // Add a small delay before retrying
         await delay(1000);
       } else {
-        // Return empty data but include image and fields for manual entry
         return {
           extractedData: {},
           success: false,
@@ -663,7 +610,6 @@ export const performExtraction = async (
     }
   }
 
-  // Return empty data but include image and fields for manual entry
   return {
     extractedData: {},
     success: false,
@@ -960,6 +906,7 @@ export const isValidExtractionResponse = (
   );
 };
 
+// Update the formatFieldPrompts function
 export const formatFieldPrompts = (fields: Field[]): string => {
   if (!Array.isArray(fields)) {
     console.warn('Invalid fields parameter:', fields);
@@ -970,33 +917,66 @@ export const formatFieldPrompts = (fields: Field[]): string => {
     let prompt = `- ${field.name}`;
     
     if (field.type === 'array' && field.arrayConfig?.fields) {
-      prompt += ' (multiple entries possible) with fields:';
+      prompt += ' (array of objects with the following structure):';
       field.arrayConfig.fields.forEach(subField => {
-        prompt += `\n  * ${subField.name}`;
+        prompt += `\n  * ${subField.name} (${subField.type})`;
+      });
+    } else if (field.isArray && field.arrayConfig?.fields) {
+      prompt += ' (array of objects with the following structure):';
+      field.arrayConfig.fields.forEach(subField => {
+        prompt += `\n  * ${subField.name} (${subField.type})`;
       });
     } else if (field.type === 'date') {
       prompt += ' (in DD/MM/YYYY format)';
+    } else {
+      prompt += ` (${field.type})`;
     }
     
     return prompt;
   }).join('\n');
 };
 
+// Update the createExampleOutput function
 export const createExampleOutput = (fields: Field[]): Record<string, any> => {
   return fields.reduce((acc, field) => {
-    if (field.type === 'array' && field.arrayConfig?.fields) {
-      acc[field.name] = [{
-        ...field.arrayConfig.fields.reduce<Record<string, string>>((subAcc, subField) => {
-          subAcc[subField.name] = `example_${subField.type}`;
-          return subAcc;
-        }, {})
-      }];
+    if ((field.type === 'array' || field.isArray) && field.arrayConfig?.fields) {
+      // Create example array with proper nested structure
+      const exampleItem = field.arrayConfig.fields.reduce<Record<string, string>>((subAcc, subField) => {
+        switch (subField.type) {
+          case 'date':
+            subAcc[subField.name] = 'DD/MM/YYYY';
+            break;
+          case 'number':
+            subAcc[subField.name] = '123';
+            break;
+          case 'text':
+          default:
+            subAcc[subField.name] = `sample_${subField.name.toLowerCase()}`;
+            break;
+        }
+        return subAcc;
+      }, {});
+      acc[field.name] = [exampleItem];
     } else {
-      acc[field.name] = `example_${field.type}`;
+      switch (field.type) {
+        case 'date':
+          acc[field.name] = 'DD/MM/YYYY';
+          break;
+        case 'number':
+          acc[field.name] = '123';
+          break;
+        case 'array':
+          acc[field.name] = [];
+          break;
+        default:
+          acc[field.name] = `sample_${field.type}`;
+          break;
+      }
     }
     return acc;
   }, {} as Record<string, any>);
 };
+
 
 export const handleExtractionAPIError = (error: unknown): never => {
   let errorMessage = 'Failed to extract document details';

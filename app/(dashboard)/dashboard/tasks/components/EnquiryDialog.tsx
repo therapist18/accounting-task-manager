@@ -446,51 +446,77 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         setLoading(true);
 
         try {
-            if (!selectedIndividual) {
-                throw new Error('Please select an individual');
+            // Check if we have a selected individual or if we're creating a new one
+            const individualToUse = selectedIndividual || {
+                id: null, // This will be handled as a new individual
+                full_name: formData.full_name,
+                contact_details: {
+                    phone: {
+                        kenyan: { primary: formData.mobile_number }
+                    }
+                },
+                individual_type: applicantType
+            };
+
+            // If we don't have a selected individual and required fields are missing
+            if (!selectedIndividual && (!formData.full_name || !formData.mobile_number)) {
+                throw new Error('Please select an individual or enter name and mobile number');
             }
 
             // Prepare the task data
             const taskData = {
-                title: `Enquiry for ${selectedIndividual.full_name}`,
-                description: formData.job_description,
-                status: 'new',
-                priority: 'medium',
-                due_date: null, // Set appropriate due date if needed
-                assigned_to: null, // Will be assigned by the workflow
-                created_by: null, // Will be set by the server
-                department_id: formData.department_id || null,
-                subdepartment_id: formData.subdepartment_id || null,
+                job_description: formData.job_description || '',
+                status: 'enquiry',
+                department_id: formData.department_id,
+                subdepartment_id: formData.subdepartment_id,
+                individual_id: selectedIndividual ? selectedIndividual.id : null,
+                applicant_type: applicantType,
                 class_id: formData.class_id || null,
                 subclass_id: formData.subclass_id || null,
-                individual_id: selectedIndividual.id,
-                task_type: taskType,
-                dependant_data: {
-                    company_id: selectedCompany || null,
-                    understudy_id: selectedUnderstudy || null,
-                    dependants: includeDependants ? selectedDependants : []
-                },
-                metadata: {
-                    enquiry_date: formData.enquiry_date,
-                    applicant_type: applicantType,
-                    ...(applicantType === 'dependant' && principalMemberDetails && {
-                        principal_member_id: principalMemberDetails.id,
-                        relationship_type: principalMemberDetails.relationship_type
-                    })
-                }
+                date_initiated: new Date(),
+                applicant_name: selectedIndividual ? selectedIndividual.full_name : formData.full_name,
+                dependant_member: includeDependants ? selectedDependants : [],
+                understudy: selectedUnderstudy || null,
+                company_id: selectedCompany || null,
             };
 
             // Insert the task into the database
             const { data, error } = await supabase
-                .from('tasks')
+                .from('tm_tasks')
                 .insert([taskData])
                 .select()
                 .single();
 
             if (error) throw error;
 
-            // Notify parent component
-            onEnquiryCreated(data);
+            // Notify parent component with the full task data
+            const { data: fullTask, error: fetchError } = await supabase
+                .from('tm_tasks')
+                .select(`
+                    *,
+                    department:department_id(
+                        name
+                    ),
+                    subdepartment:subdepartment_id(
+                        name
+                    ),
+                    individual:individual_id(
+                        full_name
+                    )
+                `)
+                .eq('id', data.id)
+                .single();
+
+            if (fetchError) {
+                console.error('Error fetching task details:', fetchError);
+                toast({
+                    title: 'Error',
+                    description: 'Failed to fetch task details',
+                    variant: 'destructive'
+                });
+            }
+
+            onEnquiryCreated(fullTask || data);
 
             // Reset form
             setFormData({

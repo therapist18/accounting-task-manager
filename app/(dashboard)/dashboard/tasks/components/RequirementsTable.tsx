@@ -1979,16 +1979,22 @@ export function RequirementsTable({
                           </TableRow>
 
                           {/* Company Document Items */}
-                          {organizedRequirements.documents.company.map((docItem, docIndex) => {
-                            const isExpanded = expandedDocuments.has(docItem.document.id);
+                          {organizedRequirements.documents.company
+                            .slice()
+                            .sort((a, b) => (a.document.custom_order || 0) - (b.document.custom_order || 0))
+                            .map((docItem, docIndex) => {
+                              const isExpanded = expandedDocuments.has(docItem.document.id);
 
-                            return (
-                              <React.Fragment key={`company-doc-${docItem.document.id}`}>
-                                {/* Document Row */}
-                                <TableRow className="group bg-blue-50 hover:bg-blue-100">
-                                  <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
-                                    {docIndex + 1}
-                                  </TableCell>
+                              // Get the custom_order from the document, fallback to index + 1
+                              const displayText = docItem.document.custom_order ? `${docItem.document.custom_order}` : `${docIndex + 1}.`;
+
+                              return (
+                                <React.Fragment key={`company-doc-${docItem.document.id}`}>
+                                  {/* Document Row */}
+                                  <TableRow className="group bg-blue-50 hover:bg-blue-100">
+                                    <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
+                                      {displayText}
+                                    </TableCell>
                                   <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
                                     <div className="flex items-center px-2">
                                       <span className="text-sm font-semibold text-gray-800">
@@ -2123,16 +2129,22 @@ export function RequirementsTable({
                           </TableRow>
 
                           {/* Individual Document Items */}
-                          {organizedRequirements.documents.individual.map((docItem, docIndex) => {
-                            const isExpanded = expandedDocuments.has(docItem.document.id);
+                          {organizedRequirements.documents.individual
+                            .slice()
+                            .sort((a, b) => (a.document.custom_order || 0) - (b.document.custom_order || 0))
+                            .map((docItem, docIndex) => {
+                              const isExpanded = expandedDocuments.has(docItem.document.id);
 
-                            return (
-                              <React.Fragment key={`individual-doc-${docItem.document.id}`}>
-                                {/* Document Row */}
-                                <TableRow className="group bg-blue-50 hover:bg-blue-100">
-                                  <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
-                                    {docIndex + 1}
-                                  </TableCell>
+                              // Get the custom_order from the document, fallback to index + 1
+                              const displayText = docItem.document.custom_order ? `${docItem.document.custom_order}` : `${docIndex + 1}.`;
+
+                              return (
+                                <React.Fragment key={`individual-doc-${docItem.document.id}`}>
+                                  {/* Document Row */}
+                                  <TableRow className="group bg-blue-50 hover:bg-blue-100">
+                                    <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
+                                      {displayText}
+                                    </TableCell>
                                   <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
                                     <div className="flex items-center px-2">
                                       <span className="text-sm font-semibold text-gray-800">
