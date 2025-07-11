@@ -104,7 +104,7 @@ export function RequirementsTable({
     documentStatus?: string;
     columnType?: 'principal' | 'dependant' | 'understudy';
   } | null>(null);
-  
+
   // Document status tracking
   const [documentStatusesMap, setDocumentStatusesMap] = useState<Record<string, {
     status: DocumentStatus;
@@ -112,14 +112,10 @@ export function RequirementsTable({
   }>>({});
 
   const fetchAllIndividualData = useCallback(async (tasks: any[]) => {
-    console.log('=== fetchAllIndividualData called ===');
-    console.log('tasks:', tasks);
-    
     const uniqueIds = new Set<number>();
-  
+
     // Collect all individual IDs from tasks
     tasks.forEach(task => {
-      console.log('Processing task:', task);
       if (task.principal_member) {
         uniqueIds.add(task.principal_member);
       }
@@ -133,8 +129,8 @@ export function RequirementsTable({
         uniqueIds.add(task.individual_id);
       }
     });
-  
-    console.log('uniqueIds:', Array.from(uniqueIds));  
+
+    console.log('uniqueIds:', Array.from(uniqueIds));
 
     // Remove any undefined or null values
     const validIds = Array.from(uniqueIds).filter(id => id != null);
@@ -197,11 +193,8 @@ export function RequirementsTable({
         }, {} as Record<string, any[]>);
 
         setAllIndividualDocuments(documentsByDirector);
-        console.log('Fetched documents response:', documents);
-        console.log('Final documentsByDirector:', documentsByDirector);
       } else {
         setAllIndividualDocuments({});
-        console.log('No documents found for the given IDs');
       }
     } catch (error) {
       console.error('Error fetching all individual documents:', error);
@@ -551,7 +544,7 @@ export function RequirementsTable({
 
     // Get the individual ID based on the column type
     let individualId: number | null = null;
-    
+
     if (columnType === 'principal') {
       individualId = task.principal_member || task.individual_id;
     } else if (columnType === 'dependant') {
@@ -564,36 +557,36 @@ export function RequirementsTable({
     let documents: any[] = [];
     if (individualId) {
       const individualDocs = allIndividualDocuments[individualId] || [];
-      
+
       // Extract the base document ID (remove any suffixes)
       const baseItemId = itemId.split('_')[0];
-      
+
       // Find matching documents by document_id or acc_portal_kyc.id
       documents = individualDocs.filter(doc => {
         // Get both possible ID fields from the document
         const docId = doc.document_id || '';
         const kycId = (doc.acc_portal_kyc?.id || '');
-        
+
         // Check if either ID matches the base item ID or full item ID
-        return docId === baseItemId || 
-               docId === itemId ||
-               kycId === baseItemId ||
-               kycId === itemId;
+        return docId === baseItemId ||
+          docId === itemId ||
+          kycId === baseItemId ||
+          kycId === itemId;
       });
 
-      console.log('Matching documents:', {
-        individualId,
-        itemId,
-        baseItemId,
-        allDocs: individualDocs,
-        matched: documents,
-        documentIds: documents.map(d => ({
-          docId: d.document_id,
-          kycId: d.acc_portal_kyc?.id,
-          name: d.acc_portal_kyc?.display_name || d.acc_portal_kyc?.name,
-          extractedDetails: d.extracted_details ? 'exists' : 'none'
-        }))
-      });
+      // console.log('Matching documents:', {
+      //   individualId,
+      //   itemId,
+      //   baseItemId,
+      //   allDocs: individualDocs,
+      //   matched: documents,
+      //   documentIds: documents.map(d => ({
+      //     docId: d.document_id,
+      //     kycId: d.acc_portal_kyc?.id,
+      //     name: d.acc_portal_kyc?.display_name || d.acc_portal_kyc?.name,
+      //     extractedDetails: d.extracted_details ? 'exists' : 'none'
+      //   }))
+      // });
     }
 
     // Check if we have cached data for this status
@@ -664,7 +657,6 @@ export function RequirementsTable({
       clearDocumentStatuses();
       setDocumentsLoading(true);
       setDocuments([]);
-
       try {
         const documentsResponse = await supabase
           .from('acc_portal_kyc')
@@ -901,7 +893,7 @@ export function RequirementsTable({
 
             for (const columnType of columnTypes) {
               const key = `${task.id}-${itemId}-${columnType}`;
-              
+
               // Get the individual ID for this column type
               let individualId: number | null = null;
               if (columnType === 'principal') {
@@ -918,10 +910,10 @@ export function RequirementsTable({
                 documents = allIndividualDocuments[individualId].filter(doc => {
                   const docId = doc.document_id || '';
                   const kycId = (doc.acc_portal_kyc?.id || '');
-                  return docId === baseItemId || 
-                         docId === itemId ||
-                         kycId === baseItemId ||
-                         kycId === itemId;
+                  return docId === baseItemId ||
+                    docId === itemId ||
+                    kycId === baseItemId ||
+                    kycId === itemId;
                 });
               }
 
@@ -929,7 +921,7 @@ export function RequirementsTable({
               const currentStatus = documentStatusesMap[key];
               const documentCount = documents.length;
               const currentCount = currentStatus?.status.count || 0;
-              
+
               if (!currentStatus || documentCount !== currentCount) {
                 updates[key] = {
                   status: {
@@ -962,261 +954,260 @@ export function RequirementsTable({
     updateDocumentStatuses();
   }, [filteredTasks, taskClassRequirements, allIndividualDocuments, documentStatusesMap]);
 
-// Add this at the beginning of the fetchDocumentStatuses function
-useEffect(() => {
-  const fetchDocumentStatuses = async () => {
-    console.log('allIndividualDocuments:', allIndividualDocuments);
-    console.log('filteredTasks:', filteredTasks);
-    
-    const pendingKeys = Object.entries(documentStatusesMap)
-      .filter(([key, value]) => value.loading)
-      .map(([key]) => key);
+  // Add this at the beginning of the fetchDocumentStatuses function
+  useEffect(() => {
+    const fetchDocumentStatuses = async () => {
+      console.log('allIndividualDocuments:', allIndividualDocuments);
+
+      const pendingKeys = Object.entries(documentStatusesMap)
+        .filter(([key, value]) => value.loading)
+        .map(([key]) => key);
 
 
-    if (pendingKeys.length === 0) return;
+      if (pendingKeys.length === 0) return;
 
-    const statusUpdates: Record<string, { status: DocumentStatus; loading: boolean }> = {};
+      const statusUpdates: Record<string, { status: DocumentStatus; loading: boolean }> = {};
 
-    // Process in batches to avoid overwhelming the system
-    const batchSize = 5;
-    for (let i = 0; i < pendingKeys.length; i += batchSize) {
-      const batch = pendingKeys.slice(i, i + batchSize);
+      // Process in batches to avoid overwhelming the system
+      const batchSize = 5;
+      for (let i = 0; i < pendingKeys.length; i += batchSize) {
+        const batch = pendingKeys.slice(i, i + batchSize);
 
-      await Promise.all(batch.map(async (key) => {
-        try {
-          const [taskId, itemId, columnType] = key.split('-');
-          const task = filteredTasks.find(t => t.id.toString() === taskId);
-          const classRequirements = taskClassRequirements[taskId];
-          const item = classRequirements?.documents_and_fields?.find(
-            (i: any) => (i.selectionId || i.id) === itemId
-          );
+        await Promise.all(batch.map(async (key) => {
+          try {
+            const [taskId, itemId, columnType] = key.split('-');
+            const task = filteredTasks.find(t => t.id.toString() === taskId);
+            const classRequirements = taskClassRequirements[taskId];
+            const item = classRequirements?.documents_and_fields?.find(
+              (i: any) => (i.selectionId || i.id) === itemId
+            );
 
-          if (task && item) {
-            // Get individual ID for this column type
-            let individualId = null;
-            const group = filteredGroupedTasks.find(g => g.tasks.some(t => t.id.toString() === taskId));
+            if (task && item) {
+              // Get individual ID for this column type
+              let individualId = null;
+              const group = filteredGroupedTasks.find(g => g.tasks.some(t => t.id.toString() === taskId));
 
-            if (group) {
-              if (columnType === 'principal') {
-                const principalTask = group.tasks.find(t => t.applicant_type === 'principal');
-                individualId = principalTask?.principal_member || principalTask?.individual_id;
-              } else if (columnType === 'dependant') {
-                const dependantTask = group.tasks.find(t => t.applicant_type === 'dependant');
-                individualId = dependantTask?.dependant_member || dependantTask?.individual_id;
-              } else if (columnType === 'understudy') {
-                const understudyTask = group.tasks.find(t => t.applicant_type === 'understudy');
-                individualId = understudyTask?.understudy_member || understudyTask?.individual_id;
+              if (group) {
+                if (columnType === 'principal') {
+                  const principalTask = group.tasks.find(t => t.applicant_type === 'principal');
+                  individualId = principalTask?.principal_member || principalTask?.individual_id;
+                } else if (columnType === 'dependant') {
+                  const dependantTask = group.tasks.find(t => t.applicant_type === 'dependant');
+                  individualId = dependantTask?.dependant_member || dependantTask?.individual_id;
+                } else if (columnType === 'understudy') {
+                  const understudyTask = group.tasks.find(t => t.applicant_type === 'understudy');
+                  individualId = understudyTask?.understudy_member || understudyTask?.individual_id;
+                }
               }
-            }
 
-            let status: DocumentStatus;
+              let status: DocumentStatus;
 
-            if (!individualId) {
-              status = {
-                type: 'upload',
-                documents: [],
-                count: 0,
-                applicantTypes: {
-                  principal: item.ap === true || item.display === true,
-                  dependant: item.dp === true || item.display === true,
-                  understudy: item.understudy === true || item.display === true
-                }
-              };
-            } else {
-              // Extract the document ID from the item
-              const extractDocumentId = (id: string): string => {
-                // If it's a simple UUID, return as is
-                if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
-                  return id;
-                }
-                // If it's in the format "taskId-docId_...", extract the docId part
-                const match = id.match(/-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
-                return match ? match[1] : id;
-              };
-
-              const documentId = extractDocumentId(item.id);
-              console.log('Extracted documentId:', documentId);
-              console.log('Full item.id:', item.id);
-
-              // Find documents from cached data
-              const individualDocuments = allIndividualDocuments[individualId] || [];
-              console.log(`Documents for individual ${individualId}:`, individualDocuments);
-
-              const matchingDocuments = individualDocuments.filter(doc => {
-                // Normalize all IDs for comparison
-                const normalizeId = (id: string) => (id || '').toLowerCase().trim();
-                
-                // Get the document ID from the document - handle both direct ID and document_id
-                const docId = doc.id || doc.document_id || '';
-                
-                // Check if the document ID matches either the direct ID or the document_id
-                const idMatch = normalizeId(docId) === normalizeId(documentId) || 
-                              (doc.acc_portal_kyc && normalizeId(doc.acc_portal_kyc.id) === normalizeId(documentId));
-                
-                // For applicant_type, if it's null, treat it as 'principal' (default)
-                const docApplicantType = (doc.applicant_type?.toLowerCase() || 'principal').trim();
-                const columnTypeNormalized = columnType.toLowerCase().trim();
-                const applicantTypeMatches = docApplicantType === columnTypeNormalized || 
-                                         (!doc.applicant_type && columnTypeNormalized === 'principal');
-                
-                // Check if document type matches the requirement
-                const documentTypeMatch = !doc.acc_portal_kyc || 
-                                       (doc.acc_portal_kyc.name && 
-                                        item.name && 
-                                        doc.acc_portal_kyc.name.toLowerCase() === item.name.toLowerCase());
-                
-                console.log(`Document matching check:`);
-                console.log(`- Doc ID: ${docId} (normalized: ${normalizeId(docId)})`);
-                console.log(`- Looking for: ${documentId} (normalized: ${normalizeId(documentId)})`);
-                console.log(`- ID Match: ${idMatch}`);
-                console.log(`- Document Type Match: ${documentTypeMatch}`);
-                console.log(`- Applicant type: ${doc.applicant_type || 'null'} (normalized: ${docApplicantType})`);
-                console.log(`- Column type: ${columnType} (normalized: ${columnTypeNormalized})`);
-                console.log(`- Applicant type match: ${applicantTypeMatches}`);
-                
-                return (idMatch || documentTypeMatch) && applicantTypeMatches;
-            }).map(doc => ({
-                ...doc,
-                // Add view URL for the document
-                viewUrl: doc.file_path ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${doc.file_path}` : null,
-                documentName: doc.acc_portal_kyc?.display_name || doc.acc_portal_kyc?.name || 'Document',
-                documentType: doc.acc_portal_kyc?.name || 'Unknown',
-                issueDate: doc.issue_date,
-                expiryDate: doc.expiry_date,
-                status: doc.status || 'unknown'
-            }));
-
-              console.log('matchingDocuments:', matchingDocuments);
-
-              // Check if we have matching documents
-              const hasMatchingDocuments = matchingDocuments.length > 0;
-              
-              status = {
-                type: hasMatchingDocuments ? 'view' : 'upload',
-                documents: hasMatchingDocuments ? matchingDocuments : [],
-                count: hasMatchingDocuments ? matchingDocuments.length : 0,
-                applicantTypes: {
-                  principal: item.ap === true || item.display === true,
-                  dependant: item.dp === true || item.display === true,
-                  understudy: item.understudy === true || item.display === true
-                },
-                // Add document info for the first matching document (if any)
-                documentInfo: hasMatchingDocuments ? {
-                  id: matchingDocuments[0].id,
-                  name: matchingDocuments[0].documentName,
-                  type: matchingDocuments[0].documentType,
-                  viewUrl: matchingDocuments[0].viewUrl,
-                  status: matchingDocuments[0].status,
-                  issueDate: matchingDocuments[0].issue_date,
-                  expiryDate: matchingDocuments[0].expiry_date
-                } : null
-              };
-              
-              // Add view document handler
-              if (hasMatchingDocuments && onViewDocument) {
-                status.onView = () => {
-                  const doc = matchingDocuments[0];
-                  if (doc.viewUrl) {
-                    window.open(doc.viewUrl, '_blank');
-                  } else if (onViewDocument) {
-                    onViewDocument(task, {
-                      ...item,
-                      documentUrl: doc.viewUrl,
-                      documentName: doc.documentName,
-                      documentType: doc.documentType
-                    });
+              if (!individualId) {
+                status = {
+                  type: 'upload',
+                  documents: [],
+                  count: 0,
+                  applicantTypes: {
+                    principal: item.ap === true || item.display === true,
+                    dependant: item.dp === true || item.display === true,
+                    understudy: item.understudy === true || item.display === true
                   }
                 };
+              } else {
+                // Extract the document ID from the item
+                const extractDocumentId = (id: string): string => {
+                  // If it's a simple UUID, return as is
+                  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+                    return id;
+                  }
+                  // If it's in the format "taskId-docId_...", extract the docId part
+                  const match = id.match(/-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+                  return match ? match[1] : id;
+                };
+
+                const documentId = extractDocumentId(item.id);
+                console.log('Extracted documentId:', documentId);
+                console.log('Full item.id:', item.id);
+
+                // Find documents from cached data
+                const individualDocuments = allIndividualDocuments[individualId] || [];
+                console.log(`Documents for individual ${individualId}:`, individualDocuments);
+
+                const matchingDocuments = individualDocuments.filter(doc => {
+                  // Normalize all IDs for comparison
+                  const normalizeId = (id: string) => (id || '').toLowerCase().trim();
+
+                  // Get the document ID from the document - handle both direct ID and document_id
+                  const docId = doc.id || doc.document_id || '';
+
+                  // Check if the document ID matches either the direct ID or the document_id
+                  const idMatch = normalizeId(docId) === normalizeId(documentId) ||
+                    (doc.acc_portal_kyc && normalizeId(doc.acc_portal_kyc.id) === normalizeId(documentId));
+
+                  // For applicant_type, if it's null, treat it as 'principal' (default)
+                  const docApplicantType = (doc.applicant_type?.toLowerCase() || 'principal').trim();
+                  const columnTypeNormalized = columnType.toLowerCase().trim();
+                  const applicantTypeMatches = docApplicantType === columnTypeNormalized ||
+                    (!doc.applicant_type && columnTypeNormalized === 'principal');
+
+                  // Check if document type matches the requirement
+                  const documentTypeMatch = !doc.acc_portal_kyc ||
+                    (doc.acc_portal_kyc.name &&
+                      item.name &&
+                      doc.acc_portal_kyc.name.toLowerCase() === item.name.toLowerCase());
+
+                  console.log(`Document matching check:`);
+                  console.log(`- Doc ID: ${docId} (normalized: ${normalizeId(docId)})`);
+                  console.log(`- Looking for: ${documentId} (normalized: ${normalizeId(documentId)})`);
+                  console.log(`- ID Match: ${idMatch}`);
+                  console.log(`- Document Type Match: ${documentTypeMatch}`);
+                  console.log(`- Applicant type: ${doc.applicant_type || 'null'} (normalized: ${docApplicantType})`);
+                  console.log(`- Column type: ${columnType} (normalized: ${columnTypeNormalized})`);
+                  console.log(`- Applicant type match: ${applicantTypeMatches}`);
+
+                  return (idMatch || documentTypeMatch) && applicantTypeMatches;
+                }).map(doc => ({
+                  ...doc,
+                  // Add view URL for the document
+                  viewUrl: doc.file_path ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${doc.file_path}` : null,
+                  documentName: doc.acc_portal_kyc?.display_name || doc.acc_portal_kyc?.name || 'Document',
+                  documentType: doc.acc_portal_kyc?.name || 'Unknown',
+                  issueDate: doc.issue_date,
+                  expiryDate: doc.expiry_date,
+                  status: doc.status || 'unknown'
+                }));
+
+                console.log('matchingDocuments:', matchingDocuments);
+
+                // Check if we have matching documents
+                const hasMatchingDocuments = matchingDocuments.length > 0;
+
+                status = {
+                  type: hasMatchingDocuments ? 'view' : 'upload',
+                  documents: hasMatchingDocuments ? matchingDocuments : [],
+                  count: hasMatchingDocuments ? matchingDocuments.length : 0,
+                  applicantTypes: {
+                    principal: item.ap === true || item.display === true,
+                    dependant: item.dp === true || item.display === true,
+                    understudy: item.understudy === true || item.display === true
+                  },
+                  // Add document info for the first matching document (if any)
+                  documentInfo: hasMatchingDocuments ? {
+                    id: matchingDocuments[0].id,
+                    name: matchingDocuments[0].documentName,
+                    type: matchingDocuments[0].documentType,
+                    viewUrl: matchingDocuments[0].viewUrl,
+                    status: matchingDocuments[0].status,
+                    issueDate: matchingDocuments[0].issue_date,
+                    expiryDate: matchingDocuments[0].expiry_date
+                  } : null
+                };
+
+                // Add view document handler
+                if (hasMatchingDocuments && onViewDocument) {
+                  status.onView = () => {
+                    const doc = matchingDocuments[0];
+                    if (doc.viewUrl) {
+                      window.open(doc.viewUrl, '_blank');
+                    } else if (onViewDocument) {
+                      onViewDocument(task, {
+                        ...item,
+                        documentUrl: doc.viewUrl,
+                        documentName: doc.documentName,
+                        documentType: doc.documentType
+                      });
+                    }
+                  };
+                }
               }
+
+              console.log('Final status:', status);
+
+              statusUpdates[key] = {
+                status,
+                loading: false
+              };
+            } else {
+              console.log('No task or item found for key:', key);
+              statusUpdates[key] = {
+                ...documentStatusesMap[key],
+                loading: false
+              };
             }
-
-            console.log('Final status:', status);
-
-            statusUpdates[key] = {
-              status,
-              loading: false
-            };
-          } else {
-            console.log('No task or item found for key:', key);
+          } catch (error) {
+            console.error('Error fetching document status for key:', key, error);
             statusUpdates[key] = {
               ...documentStatusesMap[key],
               loading: false
             };
           }
-        } catch (error) {
-          console.error('Error fetching document status for key:', key, error);
-          statusUpdates[key] = {
-            ...documentStatusesMap[key],
-            loading: false
-          };
-        }
-      }));
-    }
-
-    if (Object.keys(statusUpdates).length > 0) {
-      setDocumentStatusesMap(prev => ({
-        ...prev,
-        ...statusUpdates
-      }));
-    }
-  };
-
-  fetchDocumentStatuses();
-}, [documentStatusesMap, filteredTasks, taskClassRequirements, filteredGroupedTasks, allIndividualDocuments, parseSelectionId]);
-
-const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy') => {
-  const status = getDocumentStatusForColumn(task, item, columnType);
-  const itemId = item.selectionId || item.id;
-  const key = `${task.id}-${itemId}-${columnType}`;
-  const isLoading = documentStatusesMap[key]?.loading || false;
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    )
-  }
-
-  if (status.type === 'na') {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <span className="text-gray-400 text-xs">N/A</span>
-      </div>
-    )
-  }
-
-  const handleUploadClick = () => {
-    setSelectedUploadData({
-      task,
-      document: item,
-      columnType
-    });
-    setUploadDialogOpen(true);
-  };
-
-  const handleViewClick = async () => {
-    if (status.documents.length > 0) {
-      // Get the file URL and set up preview data
-      const document = status.documents[0]; // Show first document, we can add navigation later
-
-      try {
-        const { data: signedUrl, error } = await supabase.storage
-          .from('kyc-documents')
-          .createSignedUrl(document.file_path, 3600);
-
-        if (error) throw error;
-
-        // Get the document definition from your documents array
-        const documentDefinition = documents.find(doc => doc.id === document.document_id);
-
-        // Prepare extraction fields from document definition
-        const extractionFields = (documentDefinition?.fields || []).map((field: any) => ({
-          id: field.id,
-          name: field.name,
-          type: field.type || 'text',
-          required: field.required || false
         }));
+      }
+
+      if (Object.keys(statusUpdates).length > 0) {
+        setDocumentStatusesMap(prev => ({
+          ...prev,
+          ...statusUpdates
+        }));
+      }
+    };
+
+    fetchDocumentStatuses();
+  }, [documentStatusesMap, filteredTasks, taskClassRequirements, filteredGroupedTasks, allIndividualDocuments, parseSelectionId]);
+
+  const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy') => {
+    const status = getDocumentStatusForColumn(task, item, columnType);
+    const itemId = item.selectionId || item.id;
+    const key = `${task.id}-${itemId}-${columnType}`;
+    const isLoading = documentStatusesMap[key]?.loading || false;
+
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center h-full">
+          <div className="h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      )
+    }
+
+    if (status.type === 'na') {
+      return (
+        <div className="flex items-center justify-center h-full">
+          <span className="text-gray-400 text-xs">N/A</span>
+        </div>
+      )
+    }
+
+    const handleUploadClick = () => {
+      setSelectedUploadData({
+        task,
+        document: item,
+        columnType
+      });
+      setUploadDialogOpen(true);
+    };
+
+    const handleViewClick = async () => {
+      if (status.documents.length > 0) {
+        // Get the file URL and set up preview data
+        const document = status.documents[0]; // Show first document, we can add navigation later
+
+        try {
+          const { data: signedUrl, error } = await supabase.storage
+            .from('kyc-documents')
+            .createSignedUrl(document.file_path, 3600);
+
+          if (error) throw error;
+
+          // Get the document definition from your documents array
+          const documentDefinition = documents.find(doc => doc.id === document.document_id);
+
+          // Prepare extraction fields from document definition
+          const extractionFields = (documentDefinition?.fields || []).map((field: any) => ({
+            id: field.id,
+            name: field.name,
+            type: field.type || 'text',
+            required: field.required || false
+          }));
 
           // Set up preview data
           setSelectedDocumentForPreview({
@@ -2549,7 +2540,7 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
                   showSaveButton={false}
                   type={selectedDocumentForPreview.columnType}
                   viewMode={true} // Set to true for view-only mode
-                  onDataChange={() => {}} // Empty callback since we're in view mode
+                  onDataChange={() => { }} // Empty callback since we're in view mode
                 />
               </div>
             </div>

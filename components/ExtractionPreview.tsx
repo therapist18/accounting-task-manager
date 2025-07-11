@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Clock, Eye, Save, Trash2, FileText, RefreshCw, Loader2 } from 'lucide-react'
+import { Clock, Eye, Save, Trash2, FileText, RefreshCw, Loader2, Plus, Minus } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import Image from 'next/image'
 import { toast } from 'sonner'
@@ -19,11 +19,15 @@ interface Field {
   id: string
   name: string
   type: string
+  isArray?: boolean
   arrayConfig?: {
     fields?: Array<{
+      id: string
       name: string
       type: string
+      parentField?: string
     }>
+    maxItems?: number
   }
 }
 
@@ -108,7 +112,6 @@ const ExtractionPreview = ({
 }: ExtractionPreviewProps) => {
   const [isOpen, setIsOpen] = useState(expanded);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [formData, setFormData] = useState<Record<string, any>>({});
   const [documents, setDocuments] = useState<DocumentData[]>([]);
 
   // Initialize documents array with current document
@@ -125,21 +128,15 @@ const ExtractionPreview = ({
     }
   }, [documentName, extractedData, fields, fileUrl, fileName, type]);
 
-  // Initialize form data with extracted data
-  useEffect(() => {
-    if (extractedData) {
-      setFormData(extractedData);
-      
-      if (!viewMode && onDataChange) {
-        Object.entries(extractedData).forEach(([key, value]) => {
-          onDataChange(key, value);
-        });
-      }
-    }
-  }, [extractedData, onDataChange, viewMode]);
-
   const getNestedValue = (obj: any, path: string, defaultValue: any = '') => {
-    if (!path) return defaultValue;
+    if (!path || !obj) return defaultValue;
+    
+    // Handle direct field access
+    if (obj.hasOwnProperty(path)) {
+      return obj[path] !== undefined ? obj[path] : defaultValue;
+    }
+    
+    // Handle nested path access (for array items)
     const keys = path.split('.');
     let result = obj;
     
@@ -151,27 +148,17 @@ const ExtractionPreview = ({
     return result !== undefined ? result : defaultValue;
   };
 
-  const handleFieldChange = (fieldName: string, value: any, docIndex: number, isArrayItem = false) => {
+  const handleFieldChange = (fieldName: string, value: any, docIndex: number) => {
     if (viewMode) return;
     
     setDocuments(prevDocs => {
       const updatedDocs = [...prevDocs];
       const currentDoc = { ...updatedDocs[docIndex] };
       
-      // If it's an array item update, we need to handle it differently
-      if (isArrayItem) {
-        // For array items, fieldName is the array field name, value is the new array
-        currentDoc.extractedData = {
-          ...currentDoc.extractedData,
-          [fieldName]: value
-        };
-      } else {
-        // For regular fields
-        currentDoc.extractedData = {
-          ...currentDoc.extractedData,
-          [fieldName]: value
-        };
-      }
+      currentDoc.extractedData = {
+        ...currentDoc.extractedData,
+        [fieldName]: value
+      };
       
       updatedDocs[docIndex] = currentDoc;
       return updatedDocs;
@@ -179,76 +166,166 @@ const ExtractionPreview = ({
     
     // Notify parent component of the change
     if (onDataChange) {
-      // For array fields, we need to update the entire array
-      const currentDoc = documents[docIndex];
-      const currentValue = currentDoc?.extractedData?.[fieldName];
-      
-      // If the field is an array, send the entire array, otherwise just the value
-      const valueToSend = Array.isArray(currentValue) ? currentValue : value;
-      
-      onDataChange(fieldName, valueToSend);
+      onDataChange(fieldName, value);
     }
   };
 
-  const renderField = (field: Field, docIndex: number, parentKey = '', arrayIndex = -1) => {
-    // Handle array fields differently
+  const handleArrayItemChange = (fieldName: string, itemIndex: number, subFieldName: string, value: any, docIndex: number) => {
+    if (viewMode) return;
+    
+    setDocuments(prevDocs => {
+      const updatedDocs = [...prevDocs];
+      const currentDoc = { ...updatedDocs[docIndex] };
+      
+      // Get current array value
+      const currentArray = Array.isArray(currentDoc.extractedData[fieldName]) 
+        ? [...currentDoc.extractedData[fieldName]] 
+        : [];
+      
+      // Ensure the array has enough items
+      while (currentArray.length <= itemIndex) {
+        currentArray.push({});
+      }
+      
+      // Update the specific item
+      currentArray[itemIndex] = {
+        ...currentArray[itemIndex],
+        [subFieldName]: value
+      };
+      
+      // Update the document
+      currentDoc.extractedData = {
+        ...currentDoc.extractedData,
+        [fieldName]: currentArray
+      };
+      
+      updatedDocs[docIndex] = currentDoc;
+      return updatedDocs;
+    });
+    
+    // Notify parent component of the change
+    if (onDataChange) {
+      const currentDoc = documents[docIndex];
+      const currentArray = Array.isArray(currentDoc?.extractedData?.[fieldName]) 
+        ? [...currentDoc.extractedData[fieldName]] 
+        : [];
+      
+      // Ensure the array has enough items
+      while (currentArray.length <= itemIndex) {
+        currentArray.push({});
+      }
+      
+      // Update the specific item
+      currentArray[itemIndex] = {
+        ...currentArray[itemIndex],
+        [subFieldName]: value
+      };
+      
+      onDataChange(fieldName, currentArray);
+    }
+  };
+
+  const addArrayItem = (fieldName: string, docIndex: number) => {
+    if (viewMode) return;
+    
+    const currentDoc = documents[docIndex];
+    const currentArray = Array.isArray(currentDoc?.extractedData?.[fieldName]) 
+      ? [...currentDoc.extractedData[fieldName]] 
+      : [];
+    
+    currentArray.push({});
+    handleFieldChange(fieldName, currentArray, docIndex);
+  };
+
+  const removeArrayItem = (fieldName: string, itemIndex: number, docIndex: number) => {
+    if (viewMode) return;
+    
+    const currentDoc = documents[docIndex];
+    const currentArray = Array.isArray(currentDoc?.extractedData?.[fieldName]) 
+      ? [...currentDoc.extractedData[fieldName]] 
+      : [];
+    
+    if (currentArray.length > 1) { // Keep at least one item
+      currentArray.splice(itemIndex, 1);
+      handleFieldChange(fieldName, currentArray, docIndex);
+    }
+  };
+
+  const renderField = (field: Field, docIndex: number) => {
     const isArrayField = field.type === 'array' || field.isArray;
     const fieldKey = field.name.trim();
     const displayName = field.name.replace(/_/g, ' ').replace(/^\s+|\s+$/g, '');
     
-    // Get the value based on whether it's an array field or not
-    let value = '';
-    if (isArrayField) {
-      // For array fields, get the entire array
-      value = getNestedValue(documents[docIndex]?.extractedData || {}, fieldKey, []);
-    } else {
-      // For regular fields, get the direct value
-      const fullPath = parentKey ? `${parentKey}.0.${fieldKey}` : fieldKey;
-      value = getNestedValue(documents[docIndex]?.extractedData || {}, fullPath, '');
-    }
-
     // Handle array fields with config
     if (isArrayField && field.arrayConfig?.fields) {
-      const arrayValue = Array.isArray(value) ? value : [{}]; // Default to one empty item if no data
+      const arrayValue = getNestedValue(documents[docIndex]?.extractedData || {}, fieldKey, []);
+      const arrayData = Array.isArray(arrayValue) ? arrayValue : [{}]; // Default to one empty item if no data
       
       return (
         <div key={`${docIndex}-${fieldKey}`} className="space-y-4">
           <div className="flex items-center justify-between">
             <h4 className="font-medium text-gray-900">{displayName}</h4>
+            {!viewMode && (
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => addArrayItem(fieldKey, docIndex)}
+                  className="flex items-center gap-1"
+                >
+                  <Plus className="h-3 w-3" />
+                  Add Item
+                </Button>
+              </div>
+            )}
           </div>
           
           <div className="space-y-4">
-            {arrayValue.map((item, itemIndex) => (
-              <div key={itemIndex} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
-                {field.arrayConfig.fields.map((subField) => {
-                  const subFieldKey = subField.name.trim();
-                  const subFieldValue = item[subFieldKey] || '';
-                  const subFieldDisplayName = subField.name.replace(/_/g, ' ').replace(/^\s+|\s+$/g, '');
-                  
-                  return (
-                    <div key={`${fieldKey}-${itemIndex}-${subFieldKey}`} className="mb-4 last:mb-0">
-                      <Label htmlFor={`${docIndex}-${fieldKey}-${itemIndex}-${subFieldKey}`} className="text-sm font-medium text-gray-700">
-                        {subFieldDisplayName}
-                        {subField.required && <span className="text-red-500 ml-1">*</span>}
-                      </Label>
-                      <Input
-                        id={`${docIndex}-${fieldKey}-${itemIndex}-${subFieldKey}`}
-                        value={subFieldValue}
-                        onChange={(e) => {
-                          const newArray = [...arrayValue];
-                          newArray[itemIndex] = {
-                            ...newArray[itemIndex],
-                            [subFieldKey]: e.target.value
-                          };
-                          handleFieldChange(fieldKey, newArray, docIndex);
-                        }}
-                        placeholder={`Enter ${subFieldDisplayName.toLowerCase()}`}
-                        className="w-full mt-1"
-                        disabled={viewMode}
-                      />
-                    </div>
-                  );
-                })}
+            {arrayData.map((item, itemIndex) => (
+              <div key={`${fieldKey}-${itemIndex}`} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                <div className="flex items-center justify-between mb-4">
+                  <h5 className="font-medium text-sm text-gray-700">Item {itemIndex + 1}</h5>
+                  {!viewMode && arrayData.length > 1 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => removeArrayItem(fieldKey, itemIndex, docIndex)}
+                      className="flex items-center gap-1 text-red-600 hover:text-red-700"
+                    >
+                      <Minus className="h-3 w-3" />
+                      Remove
+                    </Button>
+                  )}
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {field.arrayConfig.fields.map((subField) => {
+                    const subFieldKey = subField.name.trim();
+                    const subFieldValue = item[subFieldKey] || '';
+                    const subFieldDisplayName = subField.name.replace(/_/g, ' ').replace(/^\s+|\s+$/g, '');
+                    
+                    return (
+                      <div key={`${fieldKey}-${itemIndex}-${subFieldKey}`} className="space-y-2">
+                        <Label 
+                          htmlFor={`${docIndex}-${fieldKey}-${itemIndex}-${subFieldKey}`} 
+                          className="text-sm font-medium text-gray-700"
+                        >
+                          {subFieldDisplayName}
+                        </Label>
+                        <Input
+                          id={`${docIndex}-${fieldKey}-${itemIndex}-${subFieldKey}`}
+                          value={subFieldValue}
+                          onChange={(e) => handleArrayItemChange(fieldKey, itemIndex, subFieldKey, e.target.value, docIndex)}
+                          placeholder={`Enter ${subFieldDisplayName.toLowerCase()}`}
+                          className="w-full"
+                          disabled={viewMode}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ))}
           </div>
@@ -257,6 +334,8 @@ const ExtractionPreview = ({
     }
 
     // Handle regular fields
+    const value = getNestedValue(documents[docIndex]?.extractedData || {}, fieldKey, '');
+    
     return (
       <div key={`${docIndex}-${fieldKey}`} className="space-y-2">
         <Label htmlFor={`${docIndex}-${fieldKey}`} className="text-sm font-medium text-gray-700">
@@ -289,7 +368,7 @@ const ExtractionPreview = ({
         </div>
 
         {/* Extracted Data */}
-        <div className="lg:w-[500px] space-y-6">
+        <div className="lg:w-[600px] space-y-6">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold">Document Details</h3>
             {!viewMode && (
@@ -328,7 +407,7 @@ const ExtractionPreview = ({
           </div>
           
           <div className={`rounded-lg p-6 ${getStylesByType?.(doc.type || 'principal')?.getBgColor() || 'bg-white'} ${getStylesByType?.(doc.type || 'principal')?.getBorderColor() || 'border border-gray-200'} shadow-sm`}>
-            <div className="space-y-6">
+            <div className="space-y-6 max-h-[70vh] overflow-y-auto">
               {doc.fields?.length > 0 ? (
                 doc.fields.map((field, fieldIndex) => (
                   <div key={`${field.id || fieldIndex}-${field.name}`}>
@@ -339,20 +418,6 @@ const ExtractionPreview = ({
                 <p className="text-sm text-gray-500">No fields defined for this document</p>
               )}
             </div>
-            
-            {showSaveButton && !viewMode && (
-              <div className="mt-6 pt-4 border-t border-gray-100 flex justify-end">
-                <Button
-                  onClick={() => {
-                    toast.success('Document details saved successfully');
-                  }}
-                  className={`${getStylesByType?.(doc.type || 'principal')?.getButtonStyle() || 'bg-gray-600 hover:bg-gray-700 text-white'} px-6`}
-                >
-                  <Save className="w-4 h-4 mr-2" />
-                  Save Changes
-                </Button>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -388,4 +453,5 @@ const ExtractionPreview = ({
     </Dialog>
   );
 };
+
 export default ExtractionPreview;

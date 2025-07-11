@@ -156,60 +156,69 @@ export function FileUploadComponent({
     }
   }
 
+const performDataExtraction = async (file: File, fileUrl: string, isRefresh = false) => {
+  if (!file || !document) return
 
+  setUploading(true)
+  try {
+    const { extractedData, success, message } = await performExtraction(
+      fileUrl,
+      extractionFields,
+      document?.category || 'document',
+      (progressMessage) => {
+        console.log('Extraction progress:', progressMessage)
+      },
+      file.name
+    )
 
-// Update the FileUploadComponent to use fields from the document
-  const performDataExtraction = async (file: File, fileUrl: string, isRefresh = false) => {
-    if (!file || !document) return
-
-    setUploading(true)
-    try {
-      const { extractedData, success, message } = await performExtraction(
-        fileUrl,
-        extractionFields,
-        document?.category || 'document',
-        (progressMessage) => {
-          console.log('Extraction progress:', progressMessage)
-        },
-        file.name
-      )
-  
-      let parsedData = extractedData
-      if (typeof extractedData === 'string') {
-        try {
-          const match = extractedData.match(/```json\n([\s\S]*?)\n```/)
-          parsedData = match && match[1] ? JSON.parse(match[1]) : {}
-        } catch (parseError) {
-          console.error('Error parsing extracted data:', parseError)
-          parsedData = {}
-        }
+    let parsedData = extractedData
+    if (typeof extractedData === 'string') {
+      try {
+        const match = extractedData.match(/```json\n([\s\S]*?)\n```/)
+        parsedData = match && match[1] ? JSON.parse(match[1]) : {}
+      } catch (parseError) {
+        console.error('Error parsing extracted data:', parseError)
+        parsedData = {}
       }
-  
-      setExtractedData(parsedData)
-      
-      // Update preview data with extracted data
-      setPreviewData(prev => ({
-        ...prev,
-        extractedData: parsedData
-      }))
-  
-      if (success) {
-        toast({
-          title: 'Success',
-          description: `Successfully extracted data from ${file.name}`
-        })
-      }
-    } catch (error) {
-      console.error('Extraction error:', error)
-      toast({
-        title: 'Error',
-        description: `Extraction failed: ${error.message}`,
-        variant: 'destructive'
-      })
-    } finally {
-      setUploading(false)
     }
+
+    // Ensure array fields are properly structured
+    if (parsedData && extractionFields) {
+      extractionFields.forEach(field => {
+        if ((field.type === 'array' || field.isArray) && parsedData[field.name]) {
+          // Ensure array fields are actual arrays
+          if (!Array.isArray(parsedData[field.name])) {
+            parsedData[field.name] = [parsedData[field.name]];
+          }
+        }
+      });
+    }
+
+    setExtractedData(parsedData)
+    
+    // Update preview data with extracted data
+    setPreviewData(prev => ({
+      ...prev,
+      extractedData: parsedData
+    }))
+
+    if (success) {
+      toast({
+        title: 'Success',
+        description: `Successfully extracted data from ${file.name}`
+      })
+    }
+  } catch (error) {
+    console.error('Extraction error:', error)
+    toast({
+      title: 'Error',
+      description: `Extraction failed: ${error.message}`,
+      variant: 'destructive'
+    })
+  } finally {
+    setUploading(false)
   }
+}
 
   // Handle data change from ExtractionPreview
   const handleDataChange = (fieldName: string, value: any) => {
@@ -247,7 +256,6 @@ export function FileUploadComponent({
         document_id: document.id,
         file_path: filePath,
         extracted_details: extractedData,
-        applicant_type: columnType,
         status: 'uploaded',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
