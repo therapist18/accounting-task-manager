@@ -568,82 +568,85 @@ export function RequirementsTable({
     }
   }, [fetchingDocuments])
 
-  // Remove the async from getDocumentStatusForColumn and make it synchronous
-  const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number): DocumentStatus => {
-    const itemId = item.selectionId || item.id;
-    const statusKey = dependantId ? `${task.id}-${itemId}-${columnType}-${dependantId}` : `${task.id}-${itemId}-${columnType}`;
+  // Update the getDocumentStatusForColumn function to handle BCL templates correctly
+const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number): DocumentStatus => {
+  const itemId = item.selectionId || item.id;
+  const statusKey = dependantId ? `${task.id}-${itemId}-${columnType}-${dependantId}` : `${task.id}-${itemId}-${columnType}`;
 
-    // Check if document is applicable for this column
-    const isApplicableForColumn =
-      (columnType === 'principal' && (item.ap === true || item.display === true)) ||
-      (columnType === 'dependant' && (item.dp === true || item.display === true)) ||
-      (columnType === 'understudy' && (item.understudy === true || item.display === true));
+  // Check if document is applicable for this column
+  const isApplicableForColumn =
+    (columnType === 'principal' && (item.ap === true || item.display === true)) ||
+    (columnType === 'dependant' && (item.dp === true || item.display === true)) ||
+    (columnType === 'understudy' && (item.understudy === true || item.display === true));
 
-    if (!isApplicableForColumn) {
-      return {
-        type: 'na',
-        documents: [],
-        count: 0,
-        applicantTypes: {
-          principal: item.ap === true || item.display === true,
-          dependant: item.dp === true || item.display === true,
-          understudy: item.understudy === true || item.display === true
-        }
-      };
-    }
-
-    // Get the individual ID based on the column type
-    let individualId: number | null = null;
-
-    if (columnType === 'principal') {
-      individualId = task.principal_member || task.individual_id;
-    } else if (columnType === 'dependant') {
-      individualId = dependantId || task.dependant_member || task.individual_id;
-    } else if (columnType === 'understudy') {
-      individualId = task.understudy_member || task.individual_id;
-    }
-
-    // Get documents from allIndividualDocuments
-    let documents: any[] = [];
-    if (individualId) {
-      const individualDocs = allIndividualDocuments[individualId] || [];
-
-      // Extract the base document ID (remove any suffixes)
-      const baseItemId = itemId.split('_')[0];
-
-      // Find matching documents by document_id or acc_portal_kyc.id
-      documents = individualDocs.filter(doc => {
-        // Get both possible ID fields from the document
-        const docId = doc.document_id || '';
-        const kycId = (doc.acc_portal_kyc?.id || '');
-
-        // Check if either ID matches the base item ID or full item ID
-        return docId === baseItemId ||
-          docId === itemId ||
-          kycId === baseItemId ||
-          kycId === itemId;
-      });
-    }
-
-    // Check if we have cached data for this status
-    const cachedStatus = documentStatusesMap[statusKey];
-    if (cachedStatus && !cachedStatus.loading) {
-      return cachedStatus.status;
-    }
-
-    // If we have documents, return 'view' status regardless of extracted details
-    // The actual document viewing will handle the matching logic
+  if (!isApplicableForColumn) {
     return {
-      type: documents.length > 0 ? 'view' : 'upload',
-      documents: documents,
-      count: documents.length,
+      type: 'na',
+      documents: [],
+      count: 0,
       applicantTypes: {
         principal: item.ap === true || item.display === true,
         dependant: item.dp === true || item.display === true,
         understudy: item.understudy === true || item.display === true
       }
     };
-  }, [documentStatusesMap, allIndividualDocuments]);
+  }
+
+  // Get the individual ID based on the column type
+  let individualId: number | null = null;
+
+  if (columnType === 'principal') {
+    individualId = task.principal_member || task.individual_id;
+  } else if (columnType === 'dependant') {
+    individualId = dependantId || task.dependant_member || task.individual_id;
+  } else if (columnType === 'understudy') {
+    individualId = task.understudy_member || task.individual_id;
+  }
+
+  // Get documents from allIndividualDocuments
+  let documents: any[] = [];
+  if (individualId) {
+    const individualDocs = allIndividualDocuments[individualId] || [];
+
+    // Extract the base document ID (remove any suffixes)
+    const baseItemId = itemId.split('_')[0];
+
+    // Find matching documents by document_id or acc_portal_kyc.id
+    // This works for both regular documents and BCL templates
+    documents = individualDocs.filter(doc => {
+      // Get both possible ID fields from the document
+      const docId = doc.document_id || '';
+      const kycId = (doc.acc_portal_kyc?.id || '');
+
+      // Check if either ID matches the base item ID or full item ID
+      return docId === baseItemId ||
+        docId === itemId ||
+        kycId === baseItemId ||
+        kycId === itemId ||
+        docId === item.id || // Also check against the item.id directly
+        kycId === item.id;
+    });
+  }
+
+  // Check if we have cached data for this status
+  const cachedStatus = documentStatusesMap[statusKey];
+  if (cachedStatus && !cachedStatus.loading) {
+    return cachedStatus.status;
+  }
+
+  // If we have documents, return 'view' status regardless of extracted details
+  // The actual document viewing will handle the matching logic
+  return {
+    type: documents.length > 0 ? 'view' : 'upload',
+    documents: documents,
+    count: documents.length,
+    applicantTypes: {
+      principal: item.ap === true || item.display === true,
+      dependant: item.dp === true || item.display === true,
+      understudy: item.understudy === true || item.display === true
+    }
+  };
+}, [documentStatusesMap, allIndividualDocuments]);
 
   // Calculate statistics
   const calculateStats = useMemo(() => {
@@ -1246,7 +1249,7 @@ const getDocumentName = useCallback((docId: string) => {
    );
  }, [taskIndividualData]);
 
-const organizedRequirements = useMemo(() => {
+ const organizedRequirements = useMemo(() => {
   const documentsMap = new Map<string, {
     document: any,
     fields: any[],
@@ -1263,9 +1266,10 @@ const organizedRequirements = useMemo(() => {
     category: 'company' | 'individual'
   }>();
 
-  // Track selected BCL template IDs from class requirements
+  // Track selected BCL template IDs to exclude from regular documents
   const selectedBclTemplateIds = new Set<string>();
 
+  // First pass: identify all BCL templates that are selected
   filteredTasks.forEach(task => {
     const classRequirements = taskClassRequirements[task.id];
     if (!classRequirements) return;
@@ -1279,37 +1283,34 @@ const organizedRequirements = useMemo(() => {
           const parsed = parseSelectionId(item.id);
 
           if (parsed.type === 'document') {
-            // Check if this document ID exists in regular documents
-            const document = documents.find(doc => doc.id === parsed.documentId);
-            
-            if (document && !documentsMap.has(parsed.documentId)) {
-              const category = document.category === 'company-docs' ? 'company' : 'individual';
-              documentsMap.set(parsed.documentId, {
-                document: {
-                  ...document,
-                  selectionId: item.id,
-                  ap: item.ap,
-                  dp: item.dp,
-                  understudy: item.understudy,
-                  display: item.display,
-                  kycdocumentid: item.kycdocumentid || document.id
-                },
-                fields: [],
-                category: category,
-                applicabilitySettings: {
-                  ap: item.ap,
-                  dp: item.dp,
-                  understudy: item.understudy,
-                  display: item.display
-                }
-              });
-            } else {
-              // Check if this document ID exists in BCL templates
+            // Check if this document ID exists in BCL templates
+            const bclTemplate = bclTemplateDocuments.find(doc => doc.id === parsed.documentId);
+            if (bclTemplate) {
+              selectedBclTemplateIds.add(parsed.documentId);
+            }
+          }
+        });
+    }
+  });
+
+  // Second pass: process documents and fields, excluding BCL templates
+  filteredTasks.forEach(task => {
+    const classRequirements = taskClassRequirements[task.id];
+    if (!classRequirements) return;
+
+    if (Array.isArray(classRequirements.documents_and_fields)) {
+      classRequirements.documents_and_fields
+        .filter((item: any) => {
+          return item.ap === true || item.dp === true || item.understudy === true || item.display === true;
+        })
+        .forEach((item: any) => {
+          const parsed = parseSelectionId(item.id);
+
+          if (parsed.type === 'document') {
+            // Check if this is a BCL template - if so, add to BCL section
+            if (selectedBclTemplateIds.has(parsed.documentId)) {
               const bclTemplate = bclTemplateDocuments.find(doc => doc.id === parsed.documentId);
               if (bclTemplate) {
-                selectedBclTemplateIds.add(parsed.documentId);
-                
-                // Add to appropriate BCL category with applicability settings
                 const category = bclTemplate.category === 'company-docs' ? 'company' : 'individual';
                 const templateWithSettings = {
                   ...bclTemplate,
@@ -1333,44 +1334,74 @@ const organizedRequirements = useMemo(() => {
                   }
                 }
               }
-            }
-          } else if (parsed.type === 'field' && parsed.fieldId) {
-            // Handle fields for both regular documents and BCL templates
-            const document = documents.find(doc => doc.id === parsed.documentId) ||
-                            bclTemplateDocuments.find(doc => doc.id === parsed.documentId);
-            
-            if (document) {
-              const category = document.category === 'company-docs' ? 'company' : 'individual';
-
-              if (!documentsMap.has(parsed.documentId)) {
+            } else {
+              // This is a regular document - add to Documents & Fields section
+              const document = documents.find(doc => doc.id === parsed.documentId);
+              if (document && !documentsMap.has(parsed.documentId)) {
+                const category = document.category === 'company-docs' ? 'company' : 'individual';
                 documentsMap.set(parsed.documentId, {
-                  document: document,
-                  fields: [],
-                  category: category
-                });
-              }
-
-              const field = document.fields?.find((f: any) => f.id === parsed.fieldId);
-              if (field) {
-                const docEntry = documentsMap.get(parsed.documentId)!;
-                const fieldExists = docEntry.fields.some(f => f.id === field.id);
-                if (!fieldExists) {
-                  docEntry.fields.push({
-                    ...field,
+                  document: {
+                    ...document,
                     selectionId: item.id,
                     ap: item.ap,
                     dp: item.dp,
                     understudy: item.understudy,
                     display: item.display,
-                    kycdocumentid: item.kycdocumentid || `${document.id}-${field.id}`
+                    kycdocumentid: item.kycdocumentid || document.id
+                  },
+                  fields: [],
+                  category: category,
+                  applicabilitySettings: {
+                    ap: item.ap,
+                    dp: item.dp,
+                    understudy: item.understudy,
+                    display: item.display
+                  }
+                });
+              }
+            }
+          } else if (parsed.type === 'field' && parsed.fieldId) {
+            // Handle fields for both regular documents and BCL templates
+            // But only add them to documentsMap if the parent document is not a BCL template
+            if (!selectedBclTemplateIds.has(parsed.documentId)) {
+              const document = documents.find(doc => doc.id === parsed.documentId);
+              
+              if (document) {
+                const category = document.category === 'company-docs' ? 'company' : 'individual';
+
+                if (!documentsMap.has(parsed.documentId)) {
+                  documentsMap.set(parsed.documentId, {
+                    document: document,
+                    fields: [],
+                    category: category
                   });
+                }
+
+                const field = document.fields?.find((f: any) => f.id === parsed.fieldId);
+                if (field) {
+                  const docEntry = documentsMap.get(parsed.documentId)!;
+                  const fieldExists = docEntry.fields.some(f => f.id === field.id);
+                  if (!fieldExists) {
+                    docEntry.fields.push({
+                      ...field,
+                      selectionId: item.id,
+                      ap: item.ap,
+                      dp: item.dp,
+                      understudy: item.understudy,
+                      display: item.display,
+                      kycdocumentid: item.kycdocumentid || `${document.id}-${field.id}`
+                    });
+                  }
                 }
               }
             }
+            // Note: We don't process fields for BCL templates in the Documents & Fields section
+            // BCL templates are shown as complete documents in their own section
           }
         });
     }
 
+    // Process client fields (unchanged)
     if (Array.isArray(classRequirements.client_fields)) {
       classRequirements.client_fields
         .filter((item: any) => {
@@ -1432,7 +1463,6 @@ const organizedRequirements = useMemo(() => {
     }
   };
 }, [filteredTasks, taskClassRequirements, documents, bclTemplateDocuments, clientFormFields, documentTab, parseSelectionId]);
-
  // Format task data helper
  const formatTaskData = useCallback((task: any) => {
    const formatDate = (dateString?: string | null) => {

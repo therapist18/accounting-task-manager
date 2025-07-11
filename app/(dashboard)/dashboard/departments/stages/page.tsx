@@ -76,7 +76,7 @@ const getStageColumnColor = (index: number) => {
 }
 
 const getStageHeaderColor = (index: number) => {
-  return index % 2 === 0 ? 'bg-blue-800' : 'bg-blue-700'
+  return index % 2 === 0 ? 'bg-blue-600' : 'bg-blue-600'
 }
 
 export default function Stages() {
@@ -963,17 +963,17 @@ export default function Stages() {
                   {/* Sticky Headers */}
                   <TableHeader className="sticky top-0 z-50">
                     {/* Stage Names Row */}
-                    <TableRow className="bg-blue-800">
-                      <TableHead className="sticky left-0 bg-blue-800 border-r-2 border-blue-300 font-bold w-16 z-50 text-center text-white" rowSpan={4}>
+                    <TableRow className="bg-blue-600">
+                      <TableHead className="sticky left-0 bg-blue-600 border-r-2 border-blue-300 font-bold w-16 z-50 text-center text-white" rowSpan={4}>
                         #
                       </TableHead>
-                      <TableHead className="sticky left-16 bg-blue-800 border-r-2 border-blue-300 font-bold w-64 z-50 text-white" rowSpan={4}>
+                      <TableHead className="sticky left-16 bg-blue-600 border-r-2 border-blue-300 font-bold w-64 z-50 text-white" rowSpan={4}>
                         <div className="flex items-center gap-2">
                           <FileText className="h-4 w-4" />
                           Department / Entity
                         </div>
                       </TableHead>
-                      <TableHead className="sticky left-80 bg-blue-800 border-r-2 border-blue-300 z-50 text-white">Stage Name</TableHead>
+                      <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-300 z-50 text-white">Stage Name</TableHead>
  
                       {dept.stages.map((stage, index) => (
                         <TableHead
@@ -1164,8 +1164,8 @@ export default function Stages() {
                     </TableRow>
  
                     {/* Duration Row */}
-                    <TableRow className="bg-blue-700">
-                      <TableHead className="sticky left-80 bg-blue-800 border-r-2 border-blue-300 z-50 text-white">Duration</TableHead>
+                    <TableRow className="bg-blue-600">
+                      <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-300 z-50 text-white">Duration</TableHead>
                       {dept.stages.map((stage, index) => {
                         const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
                         return (
@@ -1188,8 +1188,8 @@ export default function Stages() {
                     </TableRow>
  
                     {/* Follow Up Row */}
-                    <TableRow className="bg-blue-700">
-                      <TableHead className="sticky left-80 bg-blue-800 border-r-2 border-blue-300 z-50 text-white">Follow Up</TableHead>
+                    <TableRow className="bg-blue-600">
+                      <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-300 z-50 text-white">Follow Up</TableHead>
                       {dept.stages.map((stage, index) => (
                         <TableHead
                           key={`followup-${stage.id}`}
@@ -1207,7 +1207,7 @@ export default function Stages() {
  
                     {/* Applicable/Display Headers Row */}
                     <TableRow className="bg-blue-600">
-                      <TableHead className="sticky left-80 bg-blue-800 border-r-2 border-blue-300 z-50"></TableHead>
+                      <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-300 z-50"></TableHead>
                       {dept.stages.map((stage, index) => (
                         <TableHead
                           key={`controls-${stage.id}`}

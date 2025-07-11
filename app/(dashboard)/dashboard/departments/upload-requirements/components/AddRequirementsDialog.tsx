@@ -23,6 +23,7 @@ export interface RequirementForm {
   hasWebForm?: boolean
   webFormName?: string
   automationId?: string
+  kycDocumentName?: string
 
   // New fields
   applicantType?: 'individual' | 'company' | 'both'
@@ -61,6 +62,7 @@ export function AddRequirementsDialog({
     hasWebForm: false,
     webFormName: '',
     automationId: '',
+    kycDocumentName: '',
     applicantType: 'individual',
     requiredDocumentCount: 1,
     billingEntity: 'applicant',
@@ -169,7 +171,11 @@ export function AddRequirementsDialog({
 
           if (req.kycDocumentOption === 'create_new') {
             const departmentName = context?.subdepartmentName?.split(' ')[0] || 'General'
-            kycDocumentId = await createNewKycDocument(req.name, departmentName)
+            const docName = req.kycDocumentName?.trim() || req.name.trim()
+            if (!docName) {
+              throw new Error('Document type name is required when creating a new document type')
+            }
+            kycDocumentId = await createNewKycDocument(docName, departmentName)
           }
 
           // Prepare web automation data for JSON column
@@ -241,6 +247,7 @@ export function AddRequirementsDialog({
         hasWebForm: false,
         webFormName: '',
         automationId: '',
+        kycDocumentName: '',
         applicantType: 'individual',
         requiredDocumentCount: 1,
         billingEntity: 'applicant',
@@ -270,6 +277,7 @@ export function AddRequirementsDialog({
       hasWebForm: false,
       webFormName: '',
       automationId: '',
+      kycDocumentName: '',
       applicantType: 'individual',
       requiredDocumentCount: 1,
       billingEntity: 'applicant',
@@ -289,6 +297,7 @@ export function AddRequirementsDialog({
       hasWebForm: false,
       webFormName: '',
       automationId: '',
+      kycDocumentName: '',
       applicantType: 'individual',
       requiredDocumentCount: 1,
       billingEntity: 'applicant',
@@ -329,6 +338,7 @@ export function AddRequirementsDialog({
         hasWebForm: false,
         webFormName: '',
         automationId: '',
+        kycDocumentName: '',
         applicantType: 'individual',
         requiredDocumentCount: 1,
         billingEntity: 'applicant',
@@ -348,6 +358,7 @@ export function AddRequirementsDialog({
       hasWebForm: false,
       webFormName: '',
       automationId: '',
+      kycDocumentName: '',
       applicantType: 'individual' as const,
       requiredDocumentCount: 1,
       billingEntity: 'applicant' as const,
@@ -528,12 +539,12 @@ export function AddRequirementsDialog({
                     <div className="flex items-center space-x-2">
                       <input
                         type="radio"
-                        id={`create-new-${idx}`}
-                        name={`kyc-option-${idx}`}
+                        id="create-new-option"
+                        name="kyc-option"
                         checked={req.kycDocumentOption === 'create_new'}
                         onChange={() => handleNewRequirementChange(idx, 'kycDocumentOption', 'create_new')}
                       />
-                      <Label htmlFor={`create-new-${idx}`} className="text-sm">
+                      <Label htmlFor="create-new-option" className="text-sm">
                         Create new document type
                       </Label>
                     </div>
@@ -541,12 +552,12 @@ export function AddRequirementsDialog({
                     <div className="flex items-center space-x-2">
                       <input
                         type="radio"
-                        id={`existing-${idx}`}
-                        name={`kyc-option-${idx}`}
+                        id="existing-option"
+                        name="kyc-option"
                         checked={req.kycDocumentOption === 'existing'}
                         onChange={() => handleNewRequirementChange(idx, 'kycDocumentOption', 'existing')}
                       />
-                      <Label htmlFor={`existing-${idx}`} className="text-sm">
+                      <Label htmlFor="existing-option" className="text-sm">
                         Link to existing document type
                       </Label>
                     </div>
@@ -579,9 +590,22 @@ export function AddRequirementsDialog({
                     )}
 
                     {req.kycDocumentOption === 'create_new' && (
-                      <div className="ml-6 text-sm text-muted-foreground bg-blue-50 p-3 rounded">
-                        <Info className="h-4 w-4 inline mr-2" />
-                        A new document type will be created with the name "{req.name || 'Requirement Name'}"
+                      <div className="ml-6 space-y-3">
+                        <div className="text-sm text-muted-foreground bg-blue-50 p-3 rounded">
+                          <Info className="h-4 w-4 inline mr-2" />
+                          Specify a custom name for the new document type
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm">Document Type Name *</Label>
+                          <Input
+                            value={req.kycDocumentName || ''}
+                            onChange={(e) => handleNewRequirementChange(idx, 'kycDocumentName', e.target.value)}
+                            placeholder="Enter custom document type name"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Leave empty to use requirement name
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>

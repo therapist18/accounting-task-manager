@@ -42,6 +42,7 @@ export function EditRequirementDialog({
     hasWebForm: false,
     webFormName: '',
     automationId: '',
+    kycDocumentName: '',
     // New requirement context fields
     applicantType: 'individual',
     requiredDocumentCount: 1,
@@ -181,14 +182,18 @@ export function EditRequirementDialog({
       if (kycDocumentOption === 'create_new') {
         try {
           const departmentName = context?.subdepartmentName?.split(' ')[0] || 'General'
-          const newDocId = await createNewKycDocument(formData.name, departmentName)
+          const docName = formData.kycDocumentName?.trim() || formData.name.trim()
+          if (!docName) {
+            throw new Error('Document type name is required when creating a new document type')
+          }
+          const newDocId = await createNewKycDocument(docName, departmentName)
           updatedData.kycDocumentId = newDocId
           await fetchKycDocuments()
         } catch (error) {
           console.error('Error creating KYC document:', error)
           toast({
             title: 'Error',
-            description: 'Failed to create new document type. Please try again.',
+            description: error instanceof Error ? error.message : 'Failed to create new document type. Please try again.',
             variant: 'destructive'
           })
           return
@@ -497,9 +502,22 @@ export function EditRequirementDialog({
               )}
 
               {kycDocumentOption === 'create_new' && (
-                <div className="ml-6 text-sm text-muted-foreground bg-blue-50 p-3 rounded">
-                  <Info className="h-4 w-4 inline mr-2" />
-                  A new document type will be created with the name "{formData.name || 'Requirement Name'}"
+                <div className="ml-6 space-y-3">
+                  <div className="text-sm text-muted-foreground bg-blue-50 p-3 rounded">
+                    <Info className="h-4 w-4 inline mr-2" />
+                    Specify a custom name for the new document type
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm">Document Type Name *</Label>
+                    <Input
+                      value={formData.kycDocumentName || ''}
+                      onChange={(e) => setFormData(prev => ({ ...prev, kycDocumentName: e.target.value }))}
+                      placeholder="Enter custom document type name"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Leave empty to use requirement name
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
