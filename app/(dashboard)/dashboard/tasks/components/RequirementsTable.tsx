@@ -91,7 +91,7 @@ export function RequirementsTable({
     document: any,
     columnType: 'principal' | 'dependant' | 'understudy'
   } | null>(null)
-  // Document preview state
+  const [stageDocuments, setStageDocuments] = useState<any[]>([])
   const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
   const [selectedDocumentForPreview, setSelectedDocumentForPreview] = useState<{
     documentName: string;

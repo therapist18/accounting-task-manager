@@ -70,15 +70,6 @@ const getTimeFromMinutes = (minutes: number | null) => {
   return { days, hours, minutes: mins }
 }
 
-// Helper function to get alternating blue colors for stages
-const getStageColumnColor = (index: number) => {
-  return index % 2 === 0 ? 'bg-blue-100/50' : 'bg-blue-50/50'
-}
-
-const getStageHeaderColor = (index: number) => {
-  return index % 2 === 0 ? 'bg-blue-600' : 'bg-blue-600'
-}
-
 export default function Stages() {
   const [departments, setDepartments] = useState<Department[]>([])
   const [activeTab, setActiveTab] = useState<string>("")
@@ -785,7 +776,8 @@ export default function Stages() {
     }
   }
 
-  const moveStage = async (stageId: string, direction: 'up' | 'down') => {const currentDept = getCurrentDepartment()
+  const moveStage = async (stageId: string, direction: 'up' | 'down') => {
+    const currentDept = getCurrentDepartment()
     if (!currentDept) return
  
     const currentStages = JSON.parse(JSON.stringify(currentDept.stages))
@@ -799,7 +791,7 @@ export default function Stages() {
     const newStages = [...currentStages]
     const [movedStage] = newStages.splice(currentIndex, 1)
     newStages.splice(newIndex, 0, movedStage)
- 
+
     const updatedStages = newStages.map((stage: Stage, index: number) => ({
       ...stage,
       order_num: index + 1
@@ -892,15 +884,39 @@ export default function Stages() {
  
   const currentDept = getCurrentDepartment()
  
-  if (loading) return <div className="flex items-center justify-center h-64">Loading...</div>
-  if (error) return <div className="text-red-500 p-4">{error}</div>
-  if (!currentDept) return <div className="p-4">No department selected</div>
+  if (loading) {
+    return (
+      <div className="p-12 text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+        <p className="mt-4 text-gray-600">Loading stages...</p>
+      </div>
+    )
+  }
+ 
+  if (error) {
+    return (
+      <div className="p-12 text-center">
+        <div className="text-red-500 mb-4">{error}</div>
+        <Button onClick={() => window.location.reload()} variant="outline">
+          Retry
+        </Button>
+      </div>
+    )
+  }
+ 
+  if (!currentDept) {
+    return (
+      <div className="p-12 text-center">
+        <p className="text-gray-600">No department selected.</p>
+      </div>
+    )
+  }
  
   const normalizedSubdepartments = currentDept.subdepartments && currentDept.subdepartments.length > 0
     ? currentDept.subdepartments
     : [{
       id: -1,
-      name: 'N/A',
+      name: 'No Subdepartments',
       department_id: currentDept.id,
       stages: [],
       hasClasses: false,
@@ -908,564 +924,442 @@ export default function Stages() {
     }]
  
   return (
-    <div className="w-full space-y-6 h-screen flex flex-col">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold">Stages Management</h2>
-          <p className="text-muted-foreground">Configure workflow stages and their allocations</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <ExportStages
-            currentDept={currentDept}
-            disabled={!currentDept || !currentDept.stages || currentDept.stages.length === 0}
-          />
+    <div className="w-full min-h-screen">
+      <div className="mx-auto p-4">
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <h1 className="text-3xl font-semibold text-gray-900">Stages Management</h1>
+            <p className="text-gray-600 mt-1">Configure workflow stages and their allocations</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <ExportStages
+              currentDept={currentDept}
+              disabled={!currentDept || !currentDept.stages || currentDept.stages.length === 0}
+            />
  
-          <AddStageDialog
-            open={isDialogOpen}
-            onOpenChange={setIsDialogOpen}
-            onAddStages={handleAddStages}
-            departments={departmentList}
-          />
+            <AddStageDialog
+              open={isDialogOpen}
+              onOpenChange={setIsDialogOpen}
+              onAddStages={handleAddStages}
+              departments={departmentList}
+            />
+          </div>
         </div>
-      </div>
  
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex-1 flex flex-col">
-        <TabsList className="w-full mb-4 items-start justify-start overflow-x-auto">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="mb-4">
+            {departments.map(dept => (
+              <TabsTrigger key={dept.id} value={dept.id}>
+                {dept.name}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+ 
           {departments.map(dept => (
-            <TabsTrigger key={dept.id} value={dept.id} className="whitespace-nowrap">
-              <div className="flex items-center gap-2">
-                <span>{dept.name}</span>
-                {/* <Badge variant="secondary" className="text-xs">
-                  {dept.stages?.length || 0}
-                </Badge> */}
-              </div>
-            </TabsTrigger>
-          ))}
-        </TabsList>
- 
-        {departments.map(dept => (
-          <TabsContent key={dept.id} value={dept.id} className="space-y-4 flex-1 flex flex-col">
-            {dept.stages.length === 0 ? (
-              <div className="text-center py-12 border-2 border-dashed border-muted rounded-lg">
-                <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-                <h3 className="text-lg font-medium text-muted-foreground mb-2">No stages yet</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Create your first stage to get started with the workflow
-                </p>
-                <Button onClick={() => setIsDialogOpen(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add First Stage
-                </Button>
-              </div>
-            ) : (
-              <div className="relative overflow-auto h-[calc(100vh-210px)] border rounded-lg shadow-lg">
-                <Table className="min-w-max">
-                  {/* Sticky Headers */}
-                  <TableHeader className="sticky top-0 z-50">
-                    {/* Stage Names Row */}
-                    <TableRow className="bg-blue-600">
-                      <TableHead className="sticky left-0 bg-blue-600 border-r-2 border-blue-300 font-bold w-16 z-50 text-center text-white" rowSpan={4}>
-                        #
-                      </TableHead>
-                      <TableHead className="sticky left-16 bg-blue-600 border-r-2 border-blue-300 font-bold w-64 z-50 text-white" rowSpan={4}>
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4" />
-                          Department / Entity
-                        </div>
-                      </TableHead>
-                      <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-300 z-50 text-white">Stage Name</TableHead>
- 
-                      {dept.stages.map((stage, index) => (
-                        <TableHead
-                          key={stage.id}
-                          className={cn(
-                            "border-r border-blue-300 text-center font-bold text-white min-w-[200px]",
-                            getStageHeaderColor(index)
-                          )}
-                        >
-                          <div className="flex flex-col items-center p-2 space-y-2">
+            <TabsContent key={dept.id} value={dept.id} className="space-y-4">
+              {dept.stages.length === 0 ? (
+                <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+                  <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No stages yet</h3>
+                  <p className="text-sm text-gray-500 mb-4">
+                    Create your first stage to get started with the workflow
+                  </p>
+                  <Button onClick={() => setIsDialogOpen(true)}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add First Stage
+                  </Button>
+                </div>
+              ) : (
+                <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                  <div className="relative overflow-auto max-h-[calc(100vh-300px)]">
+                    <Table className="min-w-max">
+                      {/* Sticky Headers */}
+                      <TableHeader className="sticky top-0 z-10">
+                        {/* Stage Names Row */}
+                        <TableRow className="bg-blue-600">
+                          <TableHead className="sticky left-0 bg-blue-600 border-r-2 border-blue-400 font-bold w-16 z-20 text-center text-white" rowSpan={4}>
+                            #
+                          </TableHead>
+                          <TableHead className="sticky left-16 bg-blue-600 border-r-2 border-blue-400 font-bold w-64 z-20 text-white" rowSpan={4}>
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-sm">{stage.order_num}. {stage.name}</span>
-                            </div>
- 
-                            <div className="flex items-center gap-2 text-xs">
-                              {/* Document Indicator */}
-                              {stage.documents && stage.documents.length > 0 && (
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-5 w-5 p-0 relative bg-purple-600 shadow-sm hover:bg-purple-700">
-                                      <FileText className="h-3 w-3 text-white" />
-                                      <Badge
-                                        variant="secondary"
-                                        className="absolute -top-1 -right-1 h-4 w-4 text-xs p-0 flex items-center justify-center rounded-full"
-                                      >
-                                        <div className="flex items-center justify-center h-full w-full">
-                                          {stage.documents.length}
-                                        </div>
-                                      </Badge>
-                                    </Button>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-96 max-h-96 overflow-y-auto">
-                                    <div className="space-y-3">
-                                      <div className="flex items-center justify-between">
-                                        <h4 className="font-medium">Stage Documents</h4>
-                                        <Badge variant="outline" className="text-xs">
-                                          {stage.documents.length} document{stage.documents.length > 1 ? 's' : ''}
-                                        </Badge>
-                                      </div>
- 
-                                      <div className="space-y-3">
-                                        {stage.documents.map((doc, i) => (
-                                          <div key={doc.id || i} className="bg-muted/50 p-3 rounded-lg space-y-2">
-                                            <div className="flex items-start justify-between">
-                                              <div className="space-y-1">
-                                                <div className="font-medium flex items-center gap-2">
-                                                  <FileText className="h-4 w-4" />
-                                                  {doc.name}
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                  <Badge variant={doc.isRequired ? "default" : "secondary"} className="text-xs">
-                                                    {doc.isRequired ? "Required" : "Optional"}
-                                                  </Badge>
-                                                  <Badge variant="outline" className="text-xs">
-                                                    {doc.documentType}
-                                                  </Badge>
-                                                  {doc.inputType && (
-                                                    <Badge variant="outline" className="text-xs">
-                                                      {doc.inputType}
-                                                    </Badge>
-                                                  )}
-                                                  {doc.kycId && (
-                                                    <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                                                      KYC Synced
-                                                    </Badge>
-                                                  )}
-                                                </div>
-                                              </div>
-                                            </div>
- 
-                                            {doc.description && (
-                                              <div className="text-muted-foreground text-xs">
-                                                {doc.description}
-                                              </div>
-                                            )}
- 
-                                            {doc.extractionSpecs && doc.extractionSpecs.length > 0 && (
-                                              <div className="space-y-2">
-                                                <div className="flex items-center gap-1 text-xs font-medium">
-                                                  <Info className="h-3 w-3" />
-                                                  Extraction Fields ({doc.extractionSpecs.length})
-                                                </div>
-                                                <div className="grid grid-cols-1 gap-1">
-                                                  {doc.extractionSpecs.map((spec, specIndex) => (
-                                                    <div key={spec.id || specIndex} className="bg-background p-2 rounded text-xs">
-                                                      <div className="flex items-center justify-between">
-                                                        <span className="font-medium">{spec.fieldName}</span>
-                                                        <div className="flex items-center gap-1">
-                                                          <Badge variant="outline" className="text-xs py-0">
-                                                            {spec.fieldType}
-                                                          </Badge>
-                                                          {spec.isRequired && (
-                                                            <Badge variant="destructive" className="text-xs py-0">
-                                                              Required
-                                                            </Badge>
-                                                          )}
-                                                        </div>
-                                                      </div>
-                                                      {spec.description && (
-                                                        <div className="text-muted-foreground mt-1">
-                                                          {spec.description}
-                                                        </div>
-                                                      )}
-                                                    </div>
-                                                  ))}
-                                                </div>
-                                              </div>
-                                            )}
-                                          </div>
-                                        ))}
-                                      </div>
- 
-                                      <div className="pt-2 border-t">
-                                        <p className="text-xs text-muted-foreground">
-                                          Documents are automatically synced with the KYC system when stages are saved.
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-                              )}
- 
-                              {/* Special Time Config Indicator */}
-                              {stage.isSpecial && (
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-5 w-5 p-0 bg-orange-500 hover:bg-orange-600 rounded">
-                                      <Clock className="h-3 w-3 text-white" />
-                                    </Button>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-80">
-                                    <div className="space-y-2">
-                                      <h4 className="font-medium">Special Time Requirements</h4>
-                                      <div className="text-sm text-muted-foreground">
-                                        This stage has different time requirements based on application type:
-                                      </div>
-                                      <div className="space-y-2 mt-2">
-                                        {stage.timeConfigs?.map((config, i) => (
-                                          <div key={i} className="bg-muted/50 p-2 rounded text-sm">
-                                            <div className="font-medium">{config.applicationType || 'Default'}</div>
-                                            <div className="text-muted-foreground">
-                                              {config.days > 0 && `${config.days}d `}
-                                              {config.hours > 0 && `${config.hours}h `}
-                                              {config.minutes > 0 ? `${config.minutes}m` : ''}
-                                              {!config.days && !config.hours && !config.minutes ? '0m' : ''}
-                                            </div>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-                              )}
- 
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 hover:bg-white/20"
-                                  onClick={() => moveStage(stage.id, 'up')}
-                                  disabled={stage.order_num === 1}
-                                >
-                                  <ChevronLeft className="h-3 w-3 text-white" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 hover:bg-white/20"
-                                  onClick={() => moveStage(stage.id, 'down')}
-                                  disabled={stage.order_num === dept.stages.length}
-                                >
-                                  <ChevronRight className="h-3 w-3 text-white" />
-                                </Button>
- 
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 hover:bg-white/20"
-                                  onClick={() => setEditingStage(stage)}
-                                >
-                                  <Pencil className="h-3 w-3 text-white" />
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-                        </TableHead>
-                      ))}
-                    </TableRow>
- 
-                    {/* Duration Row */}
-                    <TableRow className="bg-blue-600">
-                      <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-300 z-50 text-white">Duration</TableHead>
-                      {dept.stages.map((stage, index) => {
-                        const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
-                        return (
-                          <TableHead
-                            key={`duration-${stage.id}`}
-                            className={cn(
-                              "border-r border-blue-300 text-center",
-                              getStageHeaderColor(index)
-                            )}
-                          >
-                            <div className="font-mono font-bold text-sm text-white">
-                              {days > 0 && `${days}d `}
-                              {hours > 0 && `${hours}h `}
-                              {minutes > 0 ? `${minutes}m` : ''}
-                              {!days && !hours && !minutes && '0m'}
+                              <FileText className="h-4 w-4" />
+                              Department / Entity
                             </div>
                           </TableHead>
-                        )
-                      })}
-                    </TableRow>
+                          <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-400 z-20 text-white">Stage Name</TableHead>
  
-                    {/* Follow Up Row */}
-                    <TableRow className="bg-blue-600">
-                      <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-300 z-50 text-white">Follow Up</TableHead>
-                      {dept.stages.map((stage, index) => (
-                        <TableHead
-                          key={`followup-${stage.id}`}
-                          className={cn(
-                            "border-r border-blue-300 text-center",
-                            getStageHeaderColor(index)
-                          )}
-                        >
-                          <div className="font-bold text-sm text-white">
-                            {stage.follow_up || '-'}
-                          </div>
-                        </TableHead>
-                      ))}
-                    </TableRow>
+                          {dept.stages.map((stage, index) => (
+                            <TableHead
+                              key={stage.id}
+                              className="border-r border-blue-400 text-center font-bold text-white min-w-[200px] bg-blue-600"
+                            >
+                              <div className="flex flex-col items-center p-2 space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-sm">{stage.order_num}. {stage.name}</span>
+                                </div>
  
-                    {/* Applicable/Display Headers Row */}
-                    <TableRow className="bg-blue-600">
-                      <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-300 z-50"></TableHead>
-                      {dept.stages.map((stage, index) => (
-                        <TableHead
-                          key={`controls-${stage.id}`}
-                          className={cn(
-                            "border-r border-blue-300",
-                            getStageHeaderColor(index)
-                          )}
-                        >
-                          <div className="grid grid-cols-2 gap-1 p-1">
-                            <div className="text-center text-xs font-medium text-white">
-                              Applicable
-                            </div>
-                            <div className="text-center text-xs font-medium text-white">
-                              Display
-                            </div>
-                          </div>
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
- 
-                  <TableBody>
-                    {normalizedSubdepartments.flatMap((subdept, subdeptIndex) => {
-                      const subdeptRowId = `subdept-${subdept.id}`
-                      const isExpanded = expandedRows.has(subdeptRowId)
-                      const rows = []
-                      let rowIndex = subdeptIndex + 1
- 
-                      const hasClasses = subdept.classes && subdept.classes.length > 0
- 
-                      rows.push(
-                        <TableRow key={subdeptRowId} className="hover:bg-muted/30 transition-colors">
-                          <TableCell className="sticky left-0 bg-white border-2 border-gray-300 text-center font-mono text-sm z-30 font-semibold">
-                            {rowIndex}
-                          </TableCell>
-                          <TableCell className="sticky left-16 bg-white border-2 border-gray-300 font-medium z-30">
-                            <div className="flex justify-between items-center gap-2">
-                              <span className="font-semibold text-gray-900">{subdept.name}</span>
-                              {hasClasses && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 hover:bg-blue-100"
-                                  onClick={() => toggleRowExpansion(subdeptRowId)}
-                                >
-                                  {isExpanded ? (
-                                    <Minus className="h-4 w-4 text-blue-600" />
-                                  ) : (
-                                    <Plus className="h-4 w-4 text-blue-600" />
-                                  )}
-                                </Button>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="sticky left-80 bg-white border-2 border-gray-300 text-center font-mono text-sm z-30"></TableCell>
-                          {dept.stages.map((stage, stageIndex) => {
-                            const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id)
-                            const hasAllocation = stageAllocation?.applicable ?? true
-                            const hasDisplay = stageAllocation?.display ?? true
- 
-                            return (
-                              <TableCell
-                                key={`subdept-${subdept.id}-${stage.id}`}
-                                className={cn(
-                                  "border-2 border-gray-300 p-0",
-                                  getStageColumnColor(stageIndex)
-                                )}
-                              >
-                                {!hasClasses ? (
-                                  <div className="grid grid-cols-2 gap-1 p-1">
-                                    <div className="flex justify-center">
-                                      <div
-                                        className="w-full"
-                                        data-subdept-id={subdept.id}
-                                        data-stage-id={stage.id}
-                                        onKeyDown={(e) => handleKeyDown(e, subdept.id, stage.id, !hasAllocation)}
-                                      >
-                                        <Select
-                                          value={hasAllocation ? 'applicable' : 'not-applicable'}
-                                          onValueChange={async (value) => {
-                                            const newValue = value === 'applicable';
-                                            setDepartments(prevDepartments => {
-                                              return prevDepartments.map(dept => {
-                                                if (dept.id !== activeTab) return dept;
- 
-                                                return {
-                                                  ...dept,
-                                                  subdepartments: dept.subdepartments?.map(sd => {
-                                                    if (sd.id !== subdept.id) return sd;
- 
-                                                    const updatedStages = [...(sd.stages || [])];
-                                                    let stageAlloc = updatedStages.find(s => s.stage_id === stage.id);
- 
-                                                    if (!stageAlloc) {
-                                                      stageAlloc = { stage_id: stage.id, applicable: newValue, display: newValue };
-                                                      updatedStages.push(stageAlloc);
-                                                    } else {
-                                                      stageAlloc.applicable = newValue;
-                                                      if (!newValue) stageAlloc.display = false;
-                                                    }
- 
-                                                    return {
-                                                      ...sd,
-                                                      stages: updatedStages
-                                                    };
-                                                  }) || []
-                                                };
-                                              });
-                                            });
- 
-                                            await handleAllocationChangeInternal(subdept.id, stage.id, newValue);
-                                          }}
-                                        >
-                                          <SelectTrigger
-                                            className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50"
-                                            onClick={(e) => e.stopPropagation()}
+                                <div className="flex items-center gap-2 text-xs">
+                                  {/* Document Indicator */}
+                                  {stage.documents && stage.documents.length > 0 && (
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <Button variant="ghost" size="icon" className="h-5 w-5 p-0 relative bg-purple-600 shadow-sm hover:bg-purple-700">
+                                          <FileText className="h-3 w-3 text-white" />
+                                          <Badge
+                                            variant="secondary"
+                                            className="absolute -top-1 -right-1 h-4 w-4 text-xs p-0 flex items-center justify-center rounded-full"
                                           >
-                                            <SelectValue>
-                                              <div className="flex items-center gap-1">
-                                                <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                                <span className="ml-1 font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
-                                              </div>
-                                            </SelectValue>
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            <SelectItem value="applicable">
-                                              <div className="flex items-center gap-2">
-                                                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                                <span>Applicable</span>
-                                              </div>
-                                            </SelectItem>
-                                            <SelectItem value="not-applicable">
-                                              <div className="flex items-center gap-2">
-                                                <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                                <span>Not Applicable</span>
-                                              </div>
-                                            </SelectItem>
-                                          </SelectContent>
-                                        </Select>
-                                      </div>
-                                    </div>
-                                    <div className="flex justify-center items-center">
-                                      <Checkbox
-                                        checked={hasDisplay}
-                                        onCheckedChange={(checked) =>
-                                          handleDisplayToggle(subdept.id, stage.id, checked as boolean)
-                                        }
-                                        disabled={!hasAllocation}
-                                        className="h-4 w-4"
-                                      />
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center justify-center p-2 text-muted-foreground">
-                                    -
-                                  </div>
-                                )}
-                              </TableCell>
-                            )
-                          })}
-                        </TableRow>
-                      )
+                                            <div className="flex items-center justify-center h-full w-full">
+                                              {stage.documents.length}
+                                            </div>
+                                          </Badge>
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent className="w-96 max-h-96 overflow-y-auto">
+                                        <div className="space-y-3">
+                                          <div className="flex items-center justify-between">
+                                            <h4 className="font-medium">Stage Documents</h4>
+                                            <Badge variant="outline" className="text-xs">
+                                              {stage.documents.length} document{stage.documents.length > 1 ? 's' : ''}
+                                            </Badge>
+                                          </div>
  
-                      // Add class rows if expanded
-                      if (isExpanded && hasClasses) {
-                        subdept.classes?.forEach((cls, clsIndex) => {
-                          const hasSubClasses = cls.subClasses && cls.subClasses.length > 0
-                          const classRowId = `class-${subdept.id}-${cls.id}`
-                          const isClassExpanded = expandedRows.has(classRowId)
+                                          <div className="space-y-3">
+                                            {stage.documents.map((doc, i) => (
+                                              <div key={doc.id || i} className="bg-gray-50 p-3 rounded-lg space-y-2">
+                                                <div className="flex items-start justify-between">
+                                                  <div className="space-y-1">
+                                                    <div className="font-medium flex items-center gap-2">
+                                                      <FileText className="h-4 w-4" />
+                                                      {doc.name}
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                      <Badge variant={doc.isRequired ? "default" : "secondary"} className="text-xs">
+                                                        {doc.isRequired ? "Required" : "Optional"}
+                                                      </Badge>
+                                                      <Badge variant="outline" className="text-xs">
+                                                        {doc.documentType}
+                                                      </Badge>
+                                                      {doc.inputType && (
+                                                        <Badge variant="outline" className="text-xs">
+                                                          {doc.inputType}
+                                                        </Badge>
+                                                      )}
+                                                      {doc.kycId && (
+                                                        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                                          KYC Synced
+                                                        </Badge>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                </div>
  
-                          rows.push(
-                            <TableRow key={classRowId} className="bg-blue-50/50 hover:bg-blue-100/50 transition-colors">
-                              <TableCell className="sticky left-0 bg-blue-50/50 border-2 border-gray-300 text-center font-mono text-sm z-30 font-semibold">
-                                {rowIndex}.{clsIndex + 1}
-                              </TableCell>
-                              <TableCell className="sticky left-16 bg-blue-50/50 border-2 border-gray-300 pl-8 z-30">
-                                <div className="flex justify-between items-center gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <ChevronRight className="h-3 w-3 text-blue-500" />
-                                    <span className="text-blue-700 text-sm font-medium">{cls.name}</span>
-                                  </div>
-                                  {hasSubClasses && (
+                                                {doc.description && (
+                                                  <div className="text-gray-600 text-xs">
+                                                    {doc.description}
+                                                  </div>
+                                                )}
+ 
+                                                {doc.extractionSpecs && doc.extractionSpecs.length > 0 && (
+                                                  <div className="space-y-2">
+                                                    <div className="flex items-center gap-1 text-xs font-medium">
+                                                      <Info className="h-3 w-3" />
+                                                      Extraction Fields ({doc.extractionSpecs.length})
+                                                    </div>
+                                                    <div className="grid grid-cols-1 gap-1">
+                                                      {doc.extractionSpecs.map((spec, specIndex) => (
+                                                        <div key={spec.id || specIndex} className="bg-white p-2 rounded text-xs">
+                                                          <div className="flex items-center justify-between">
+                                                            <span className="font-medium">{spec.fieldName}</span>
+                                                            <div className="flex items-center gap-1">
+                                                              <Badge variant="outline" className="text-xs py-0">
+                                                                {spec.fieldType}
+                                                              </Badge>
+                                                              {spec.isRequired && (
+                                                                <Badge variant="destructive" className="text-xs py-0">
+                                                                  Required
+                                                                </Badge>
+                                                              )}
+                                                            </div>
+                                                          </div>
+                                                          {spec.description && (
+                                                            <div className="text-gray-600 mt-1">
+                                                              {spec.description}
+                                                            </div>
+                                                          )}
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            ))}
+                                          </div>
+ 
+                                          <div className="pt-2 border-t">
+                                            <p className="text-xs text-gray-500">
+                                              Documents are automatically synced with the KYC system when stages are saved.
+                                            </p>
+                                          </div>
+                                        </div>
+                                      </PopoverContent>
+                                    </Popover>
+                                  )}
+ 
+                                  {/* Special Time Config Indicator */}
+                                  {stage.isSpecial && (
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <Button variant="ghost" size="icon" className="h-5 w-5 p-0 bg-orange-500 hover:bg-orange-600 rounded">
+                                          <Clock className="h-3 w-3 text-white" />
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent className="w-80">
+                                        <div className="space-y-2">
+                                          <h4 className="font-medium">Special Time Requirements</h4>
+                                          <div className="text-sm text-gray-600">
+                                            This stage has different time requirements based on application type:
+                                          </div>
+                                          <div className="space-y-2 mt-2">
+                                            {stage.timeConfigs?.map((config, i) => (
+                                              <div key={i} className="bg-gray-50 p-2 rounded text-sm">
+                                                <div className="font-medium">{config.applicationType || 'Default'}</div>
+                                                <div className="text-gray-600">
+                                                  {config.days > 0 && `${config.days}d `}
+                                                  {config.hours > 0 && `${config.hours}h `}
+                                                  {config.minutes > 0 ? `${config.minutes}m` : ''}
+                                                  {!config.days && !config.hours && !config.minutes ? '0m' : ''}
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      </PopoverContent>
+                                    </Popover>
+                                  )}
+ 
+                                  <div className="flex items-center gap-1">
                                     <Button
                                       variant="ghost"
                                       size="icon"
-                                      className="h-5 w-5 hover:bg-blue-200"
-                                      onClick={() => toggleRowExpansion(classRowId)}
+                                      className="h-6 w-6 hover:bg-white/20"
+                                      onClick={() => moveStage(stage.id, 'up')}
+                                      disabled={stage.order_num === 1}
                                     >
-                                      {isClassExpanded ? (
-                                        <Minus className="h-3 w-3 text-blue-600" />
+                                      <ChevronLeft className="h-3 w-3 text-white" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 hover:bg-white/20"
+                                      onClick={() => moveStage(stage.id, 'down')}
+                                      disabled={stage.order_num === dept.stages.length}
+                                    >
+                                      <ChevronRight className="h-3 w-3 text-white" />
+                                    </Button>
+ 
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 hover:bg-white/20"
+                                      onClick={() => setEditingStage(stage)}
+                                    >
+                                      <Pencil className="h-3 w-3 text-white" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            </TableHead>
+                          ))}
+                        </TableRow>
+ 
+                        {/* Duration Row */}
+                        <TableRow className="bg-blue-600">
+                          <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-400 z-20 text-white">Duration</TableHead>
+                          {dept.stages.map((stage, index) => {
+                            const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
+                            return (
+                              <TableHead
+                                key={`duration-${stage.id}`}
+                                className="border-r border-blue-400 text-center bg-blue-600"
+                              >
+                                <div className="font-mono font-bold text-sm text-white">
+                                  {days > 0 && `${days}d `}
+                                  {hours > 0 && `${hours}h `}
+                                  {minutes > 0 ? `${minutes}m` : ''}
+                                  {!days && !hours && !minutes && '0m'}
+                                </div>
+                              </TableHead>
+                            )
+                          })}
+                        </TableRow>
+ 
+                        {/* Follow Up Row */}
+                        <TableRow className="bg-blue-600">
+                          <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-400 z-20 text-white">Follow Up</TableHead>
+                          {dept.stages.map((stage, index) => (
+                            <TableHead
+                              key={`followup-${stage.id}`}
+                              className="border-r border-blue-400 text-center bg-blue-600"
+                            >
+                              <div className="font-bold text-sm text-white">
+                                {stage.follow_up || '-'}
+                              </div>
+                            </TableHead>
+                          ))}
+                        </TableRow>
+ 
+                        {/* Applicable/Display Headers Row */}
+                        <TableRow className="bg-blue-600">
+                          <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-400 z-20"></TableHead>
+                          {dept.stages.map((stage, index) => (
+                            <TableHead
+                              key={`controls-${stage.id}`}
+                              className="border-r border-blue-400 bg-blue-600"
+                            >
+                              <div className="grid grid-cols-2 gap-1 p-1">
+                                <div className="text-center text-xs font-medium text-white">
+                                  Applicable
+                                </div>
+                                <div className="text-center text-xs font-medium text-white">
+                                  Display
+                                </div>
+                              </div>
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+ 
+                      <TableBody>
+                        {normalizedSubdepartments.flatMap((subdept, subdeptIndex) => {
+                          const subdeptRowId = `subdept-${subdept.id}`
+                          const isExpanded = expandedRows.has(subdeptRowId)
+                          const rows = []
+                          let rowIndex = subdeptIndex + 1
+ 
+                          const hasClasses = subdept.classes && subdept.classes.length > 0
+ 
+                          rows.push(
+                            <TableRow key={subdeptRowId} className="hover:bg-blue-25 bg-blue-100 transition-colors">
+                              <TableCell className="sticky left-0 bg-blue-100 border-r-2 border-gray-200 text-center font-mono text-sm z-1 font-semibold">
+                                {rowIndex}
+                              </TableCell>
+                              <TableCell className="sticky left-16 bg-blue-100 border-r-2 border-gray-200 font-medium z-1">
+                                <div className="flex justify-between items-center gap-2">
+                                  <span className="font-semibold text-gray-900">{subdept.name}</span>
+                                  {hasClasses && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 hover:bg-blue-100"
+                                      onClick={() => toggleRowExpansion(subdeptRowId)}
+                                    >
+                                      {isExpanded ? (
+                                        <Minus className="h-4 w-4 text-blue-600" />
                                       ) : (
-                                        <Plus className="h-3 w-3 text-blue-600" />
+                                        <Plus className="h-4 w-4 text-blue-600" />
                                       )}
                                     </Button>
                                   )}
                                 </div>
                               </TableCell>
- 
-                              <TableCell className="sticky left-80 bg-blue-50/50 border-2 border-gray-300 text-center font-mono text-sm z-30"></TableCell>
+                              <TableCell className="sticky left-80 bg-blue-100 border-r-2 border-gray-200 text-center font-mono text-sm z-1"></TableCell>
                               {dept.stages.map((stage, stageIndex) => {
-                                const stageAllocation = cls.stages?.find(s => s.stage_id === stage.id)
+                                const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id)
                                 const hasAllocation = stageAllocation?.applicable ?? true
                                 const hasDisplay = stageAllocation?.display ?? true
  
                                 return (
                                   <TableCell
-                                    key={`class-${subdept.id}-${cls.id}-${stage.id}`}
-                                    className={cn(
-                                      "border-2 border-gray-300 p-0 z-30",
-                                      getStageColumnColor(stageIndex)
-                                    )}
+                                    key={`subdept-${subdept.id}-${stage.id}`}
+                                    className="border-r border-l border-gray-200 p-0"
                                   >
-                                    {!hasSubClasses ? (
+                                    {!hasClasses ? (
                                       <div className="grid grid-cols-2 gap-1 p-1">
                                         <div className="flex justify-center">
-                                          <Select
-                                            value={hasAllocation ? 'applicable' : 'not-applicable'}
-                                            onValueChange={(value) =>
-                                              handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex)
-                                            }
+                                          <div
+                                            className="w-full"
+                                            data-subdept-id={subdept.id}
+                                            data-stage-id={stage.id}
+                                            onKeyDown={(e) => handleKeyDown(e, subdept.id, stage.id, !hasAllocation)}
                                           >
-                                            <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50">
-                                              <SelectValue>
-                                                <div className="flex items-center gap-1">
-                                                  <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                                  <span className="font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
-                                                </div>
-                                              </SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              <SelectItem value="applicable">
-                                                <div className="flex items-center gap-2">
-                                                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                                  Applicable
-                                                </div>
-                                              </SelectItem>
-                                              <SelectItem value="not-applicable">
-                                                <div className="flex items-center gap-2">
-                                                  <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                                  Not Applicable
-                                                </div>
-                                              </SelectItem>
-                                            </SelectContent>
-                                          </Select>
+                                            <Select
+                                              value={hasAllocation ? 'applicable' : 'not-applicable'}
+                                              onValueChange={async (value) => {
+                                                const newValue = value === 'applicable';
+                                                setDepartments(prevDepartments => {
+                                                  return prevDepartments.map(dept => {
+                                                    if (dept.id !== activeTab) return dept;
+ 
+                                                    return {
+                                                      ...dept,
+                                                      subdepartments: dept.subdepartments?.map(sd => {
+                                                        if (sd.id !== subdept.id) return sd;
+ 
+                                                        const updatedStages = [...(sd.stages || [])];
+                                                        let stageAlloc = updatedStages.find(s => s.stage_id === stage.id);
+ 
+                                                        if (!stageAlloc) {
+                                                          stageAlloc = { stage_id: stage.id, applicable: newValue, display: newValue };
+                                                          updatedStages.push(stageAlloc);
+                                                        } else {
+                                                          stageAlloc.applicable = newValue;
+                                                          if (!newValue) stageAlloc.display = false;
+                                                        }
+ 
+                                                        return {
+                                                          ...sd,
+                                                          stages: updatedStages
+                                                        };
+                                                      }) || []
+                                                    };
+                                                  });
+                                                });
+ 
+                                                await handleAllocationChangeInternal(subdept.id, stage.id, newValue);
+                                              }}
+                                            >
+                                              <SelectTrigger
+                                                className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50"
+                                                onClick={(e) => e.stopPropagation()}
+                                              >
+                                                <SelectValue>
+                                                  <div className="flex items-center gap-1">
+                                                    <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                                    <span className="ml-1 font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
+                                                  </div>
+                                                </SelectValue>
+                                              </SelectTrigger>
+                                              <SelectContent>
+                                                <SelectItem value="applicable">
+                                                  <div className="flex items-center gap-2">
+                                                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                                    <span>Applicable</span>
+                                                  </div>
+                                                </SelectItem>
+                                                <SelectItem value="not-applicable">
+                                                  <div className="flex items-center gap-2">
+                                                    <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                                    <span>Not Applicable</span>
+                                                  </div>
+                                                </SelectItem>
+                                              </SelectContent>
+                                            </Select>
+                                          </div>
                                         </div>
                                         <div className="flex justify-center items-center">
                                           <Checkbox
                                             checked={hasDisplay}
                                             onCheckedChange={(checked) =>
-                                              handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex)
+                                              handleDisplayToggle(subdept.id, stage.id, checked as boolean)
                                             }
                                             disabled={!hasAllocation}
-                                            className="h-4 w-4"
+                                            className="h-4 w-4 text-blue-500"
                                           />
                                         </div>
                                       </div>
                                     ) : (
-                                      <div className="flex items-center justify-center p-2 text-muted-foreground">
+                                      <div className="flex items-center justify-center p-2 text-gray-500">
                                         -
                                       </div>
                                     )}
@@ -1475,109 +1369,208 @@ export default function Stages() {
                             </TableRow>
                           )
  
-                          // Add subclass rows if class is expanded
-                          if (isClassExpanded && hasSubClasses) {
-                            cls.subClasses?.forEach((subCls, subClsIndex) => {
+                          // Add class rows if expanded
+                          if (isExpanded && hasClasses) {
+                            subdept.classes?.forEach((cls, clsIndex) => {
+                              const hasSubClasses = cls.subClasses && cls.subClasses.length > 0
+                              const classRowId = `class-${subdept.id}-${cls.id}`
+                              const isClassExpanded = expandedRows.has(classRowId)
+ 
                               rows.push(
-                                <TableRow key={`subclass-${subdept.id}-${cls.id}-${subCls.id}`} className="bg-purple-50/50 hover:bg-purple-100/50 transition-colors">
-                                  <TableCell className="sticky left-0 bg-purple-50/50 border-2 border-gray-300 text-center font-mono text-sm z-30 font-semibold">
-                                    {rowIndex}.{clsIndex + 1}.{subClsIndex + 1}
+                                <TableRow key={classRowId} className="bg-blue-25 hover:bg-blue-50 transition-colors">
+                                  <TableCell className="sticky left-0 bg-blue-25 border-r-2 border-gray-200 text-center font-mono text-sm z-30 font-semibold">
+                                    {rowIndex}.{clsIndex + 1}
                                   </TableCell>
-                                  <TableCell className="sticky left-16 bg-purple-50/50 border-2 border-gray-300 pl-16 z-30">
-                                    <div className="flex items-center gap-2">
-                                      <ChevronRight className="h-3 w-3 text-blue-500" />
-                                      <span className="text-blue-700 text-sm font-medium">{subCls.name}</span>
+                                  <TableCell className="sticky left-16 bg-blue-25 border-r-2 border-gray-200 pl-8 z-1">
+                                    <div className="flex justify-between items-center gap-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm font-medium">{cls.name}</span>
+                                      </div>
+                                      {hasSubClasses && (
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-5 w-5 hover:bg-blue-200"
+                                          onClick={() => toggleRowExpansion(classRowId)}
+                                        >
+                                          {isClassExpanded ? (
+                                            <Minus className="h-3 w-3 text-blue-600" />
+                                          ) : (
+                                            <Plus className="h-3 w-3 text-blue-600" />
+                                          )}
+                                        </Button>
+                                      )}
                                     </div>
                                   </TableCell>
  
-                                  <TableCell className="sticky left-80 bg-purple-50/50 border-2 border-gray-300 text-center font-mono text-sm z-30"></TableCell>
+                                  <TableCell className="sticky left-80 bg-blue-25 border-r-2 border-gray-200 text-center font-mono text-sm z-30"></TableCell>
                                   {dept.stages.map((stage, stageIndex) => {
-                                    const stageAllocation = subCls.stages?.find(s => s.stage_id === stage.id)
+                                    const stageAllocation = cls.stages?.find(s => s.stage_id === stage.id)
                                     const hasAllocation = stageAllocation?.applicable ?? true
                                     const hasDisplay = stageAllocation?.display ?? true
  
                                     return (
                                       <TableCell
-                                        key={`subclass-${subdept.id}-${cls.id}-${subCls.id}-${stage.id}`}
-                                        className={cn(
-                                          "border-2 border-gray-300 p-0",
-                                          getStageColumnColor(stageIndex)
-                                        )}
+                                        key={`class-${subdept.id}-${cls.id}-${stage.id}`}
+                                        className="border-r border-l border-gray-200 p-0 z-30"
                                       >
-                                        <div className="grid grid-cols-2 gap-1 p-1">
-                                          <div className="flex justify-center">
-                                            <Select
-                                              value={hasAllocation ? 'applicable' : 'not-applicable'}
-                                              onValueChange={(value) =>
-                                                handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex, subClsIndex)
-                                              }
-                                            >
-                                              <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50">
-                                                <SelectValue>
-                                                  <div className="flex items-center gap-1">
-                                                    <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                                    <span className="font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
-                                                  </div>
-                                                </SelectValue>
-                                              </SelectTrigger>
-                                              <SelectContent>
-                                                <SelectItem value="applicable">
-                                                  <div className="flex items-center gap-2">
-                                                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                                    Applicable
-                                                  </div>
-                                                </SelectItem>
-                                                <SelectItem value="not-applicable">
-                                                  <div className="flex items-center gap-2">
-                                                    <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                                    Not Applicable
-                                                  </div>
-                                                </SelectItem>
-                                              </SelectContent>
-                                            </Select>
-                                          </div>
-                                          <div className="flex justify-center items-center">
-                                            <Checkbox
-                                              checked={hasDisplay}
-                                              onCheckedChange={(checked) =>
-                                                handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex, subClsIndex)
-                                              }
-                                              disabled={!hasAllocation}
-                                              className="h-4 w-4"
-                                            />
-                                          </div>
-                                        </div>
-                                      </TableCell>
-                                    )
-                                  })}
-                                </TableRow>
-                              )
-                            })
-                          }
-                        })
-                      }
- 
-                      return rows
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </TabsContent>
-        ))}
-      </Tabs>
- 
-      <EditStageDialog
-        open={!!editingStage}
-        onOpenChange={(open) => {
-          if (!open) {
-            setEditingStage(null)
-            setIsEditDialogOpen(false)
-          }
-        }}
-        stage={editingStage}
-        onSave={handleUpdateStage}
-      />
-    </div>
-  )
- }
+                                        {!hasSubClasses ? (
+                                          <div className="grid grid-cols-2 gap-1 p-1">
+                                            <div className="flex justify-center">
+                                              <Select
+                                                value={hasAllocation ? 'applicable' : 'not-applicable'}
+                                                onValueChange={(value) =>
+                                                  handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex)
+                                                }
+                                              >
+                                                <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50">
+                                                  <SelectValue>
+                                                    <div className="flex items-center gap-1">
+                                                      <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                                      <span className="font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
+                                                    </div>
+                                                  </SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                  <SelectItem value="applicable">
+                                                    <div className="flex items-center gap-2">
+                                                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                                      Applicable
+                                                    </div>
+                                                  </SelectItem>
+                                                  <SelectItem value="not-applicable">
+                                                    <div className="flex items-center gap-2">
+                                                      <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                                      Not Applicable
+                                                    </div>
+                                                  </SelectItem>
+                                                </SelectContent>
+                                              </Select>
+                                            </div>
+                                            <div className="flex justify-center items-center">
+                                             <Checkbox
+                                               checked={hasDisplay}
+                                               onCheckedChange={(checked) =>
+                                                 handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex)
+                                               }
+                                               disabled={!hasAllocation}
+                                               className="h-4 w-4 text-blue-500"
+                                             />
+                                           </div>
+                                         </div>
+                                       ) : (
+                                         <div className="flex items-center justify-center p-2 text-gray-500">
+                                           -
+                                         </div>
+                                       )}
+                                     </TableCell>
+                                   )
+                                 })}
+                               </TableRow>
+                             )
+
+                             // Add subclass rows if class is expanded
+                             if (isClassExpanded && hasSubClasses) {
+                               cls.subClasses?.forEach((subCls, subClsIndex) => {
+                                 rows.push(
+                                   <TableRow key={`subclass-${subdept.id}-${cls.id}-${subCls.id}`} className="bg-blue-50 hover:bg-blue-100 transition-colors">
+                                     <TableCell className="sticky left-0 bg-blue-50 border-r-2 border-gray-200 text-center font-mono text-sm z-30 font-semibold">
+                                       {rowIndex}.{clsIndex + 1}.{subClsIndex + 1}
+                                     </TableCell>
+                                     <TableCell className="sticky left-16 bg-blue-50 border-r-2 border-gray-200 pl-16 z-30">
+                                       <div className="flex items-center gap-2">
+                                         <ChevronRight className="h-3 w-3 text-blue-500" />
+                                         <span className="text-blue-700 text-sm font-medium">{subCls.name}</span>
+                                       </div>
+                                     </TableCell>
+
+                                     <TableCell className="sticky left-80 bg-blue-50 border-r-2 border-gray-200 text-center font-mono text-sm z-30"></TableCell>
+                                     {dept.stages.map((stage, stageIndex) => {
+                                       const stageAllocation = subCls.stages?.find(s => s.stage_id === stage.id)
+                                       const hasAllocation = stageAllocation?.applicable ?? true
+                                       const hasDisplay = stageAllocation?.display ?? true
+
+                                       return (
+                                         <TableCell
+                                           key={`subclass-${subdept.id}-${cls.id}-${subCls.id}-${stage.id}`}
+                                           className="border-r border-l border-gray-200 p-0"
+                                         >
+                                           <div className="grid grid-cols-2 gap-1 p-1">
+                                             <div className="flex justify-center">
+                                               <Select
+                                                 value={hasAllocation ? 'applicable' : 'not-applicable'}
+                                                 onValueChange={(value) =>
+                                                   handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex, subClsIndex)
+                                                 }
+                                               >
+                                                 <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50">
+                                                   <SelectValue>
+                                                     <div className="flex items-center gap-1">
+                                                       <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                                       <span className="font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
+                                                     </div>
+                                                   </SelectValue>
+                                                 </SelectTrigger>
+                                                 <SelectContent>
+                                                   <SelectItem value="applicable">
+                                                     <div className="flex items-center gap-2">
+                                                       <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                                       Applicable
+                                                     </div>
+                                                   </SelectItem>
+                                                   <SelectItem value="not-applicable">
+                                                     <div className="flex items-center gap-2">
+                                                       <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                                       Not Applicable
+                                                     </div>
+                                                   </SelectItem>
+                                                 </SelectContent>
+                                               </Select>
+                                             </div>
+                                             <div className="flex justify-center items-center">
+                                               <Checkbox
+                                                 checked={hasDisplay}
+                                                 onCheckedChange={(checked) =>
+                                                   handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex, subClsIndex)
+                                                 }
+                                                 disabled={!hasAllocation}
+                                                 className="h-4 w-4 text-blue-500"
+                                               />
+                                             </div>
+                                           </div>
+                                         </TableCell>
+                                       )
+                                     })}
+                                   </TableRow>
+                                 )
+                               })
+                             }
+                           })
+                         }
+
+                         return rows
+                       })}
+                     </TableBody>
+                   </Table>
+                 </div>
+               </div>
+             )}
+           </TabsContent>
+         ))}
+       </Tabs>
+
+       <EditStageDialog
+         open={!!editingStage}
+         onOpenChange={(open) => {
+           if (!open) {
+             setEditingStage(null)
+             setIsEditDialogOpen(false)
+           }
+         }}
+         stage={editingStage}
+         onSave={handleUpdateStage}
+       />
+     </div>
+   </div>
+ )
+}
