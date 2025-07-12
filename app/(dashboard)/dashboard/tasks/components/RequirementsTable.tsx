@@ -1982,7 +1982,7 @@ export function RequirementsTable({
                         </TableCell>
                         {filteredGroupedTasks.map((group, groupIndex) => {
                           const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                          const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+                          const columnsCount = hasClassD ? 1 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
 
                           return Array.from({ length: columnsCount }, (_, idx) => (
                             <TableCell
@@ -2008,7 +2008,7 @@ export function RequirementsTable({
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {
                               const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+                              const columnsCount = hasClassD ? 1 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
 
                               return Array.from({ length: columnsCount }, (_, idx) => (
                                 <TableCell
@@ -2153,7 +2153,7 @@ export function RequirementsTable({
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {
                               const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+                              const columnsCount = hasClassD ? 1 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
 
                               return Array.from({ length: columnsCount }, (_, idx) => (
                                 <TableCell
@@ -2305,7 +2305,7 @@ export function RequirementsTable({
                         </TableCell>
                         {filteredGroupedTasks.map((group, groupIndex) => {
                           const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                          const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+                          const columnsCount = hasClassD ? 1 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
 
                           return Array.from({ length: columnsCount }, (_, idx) => (
                             <TableCell
@@ -2331,7 +2331,7 @@ export function RequirementsTable({
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {
                               const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+                              const columnsCount = hasClassD ? 1 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
 
                               return Array.from({ length: columnsCount }, (_, idx) => (
                                 <TableCell
@@ -2414,7 +2414,7 @@ export function RequirementsTable({
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {
                               const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+                              const columnsCount = hasClassD ? 1 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
 
                               return Array.from({ length: columnsCount }, (_, idx) => (
                                 <TableCell
@@ -2504,7 +2504,7 @@ export function RequirementsTable({
                         </TableCell>
                         {filteredGroupedTasks.map((group, groupIndex) => {
                           const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                          const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+                          const columnsCount = hasClassD ? 1 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
 
                           return Array.from({ length: columnsCount }, (_, idx) => (
                             <TableCell
@@ -2530,7 +2530,7 @@ export function RequirementsTable({
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {
                               const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+                              const columnsCount = hasClassD ? 1 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
 
                               return Array.from({ length: columnsCount }, (_, idx) => (
                                 <TableCell
@@ -2617,7 +2617,7 @@ export function RequirementsTable({
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {
                               const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+                              const columnsCount = hasClassD ? 1 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
 
                               return Array.from({ length: columnsCount }, (_, idx) => (
                                 <TableCell
@@ -2710,7 +2710,7 @@ export function RequirementsTable({
                         </TableCell>
                         {filteredGroupedTasks.map((group, groupIndex) => {
                           const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                          const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+                          const columnsCount = hasClassD ? 1 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
 
                           return Array.from({ length: columnsCount }, (_, idx) => (
                             <TableCell
@@ -2734,9 +2734,9 @@ export function RequirementsTable({
                                 {organizedRequirements.clientFields.individual.length}
                               </span>
                             </TableCell>
-                            {filteredGroupedTasks.map((group, groupIndex) => {
+                            {filteredGroupedTasks.map((group, groupIndex) => {  
                               const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+                              const columnsCount = hasClassD ? 1 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
 
                               return Array.from({ length: columnsCount }, (_, idx) => (
                                 <TableCell
