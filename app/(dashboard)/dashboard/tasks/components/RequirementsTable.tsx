@@ -115,7 +115,7 @@ export function RequirementsTable({
   // Helper function to extract dependant IDs from tasks
   const extractDependantIds = useCallback((tasks: any[]): number[] => {
     const dependantIds = new Set<number>();
-    
+
     tasks.forEach(task => {
       if (task.dependant_member) {
         if (Array.isArray(task.dependant_member)) {
@@ -131,7 +131,7 @@ export function RequirementsTable({
         }
       }
     });
-    
+
     return Array.from(dependantIds);
   }, []);
 
@@ -149,7 +149,7 @@ export function RequirementsTable({
       if (task.individual_id && typeof task.individual_id === 'number') {
         uniqueIds.add(task.individual_id);
       }
-      
+
       // Handle dependant_member array properly
       if (task.dependant_member) {
         if (Array.isArray(task.dependant_member)) {
@@ -569,84 +569,84 @@ export function RequirementsTable({
   }, [fetchingDocuments])
 
   // Update the getDocumentStatusForColumn function to handle BCL templates correctly
-const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number): DocumentStatus => {
-  const itemId = item.selectionId || item.id;
-  const statusKey = dependantId ? `${task.id}-${itemId}-${columnType}-${dependantId}` : `${task.id}-${itemId}-${columnType}`;
+  const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number): DocumentStatus => {
+    const itemId = item.selectionId || item.id;
+    const statusKey = dependantId ? `${task.id}-${itemId}-${columnType}-${dependantId}` : `${task.id}-${itemId}-${columnType}`;
 
-  // Check if document is applicable for this column
-  const isApplicableForColumn =
-    (columnType === 'principal' && (item.ap === true || item.display === true)) ||
-    (columnType === 'dependant' && (item.dp === true || item.display === true)) ||
-    (columnType === 'understudy' && (item.understudy === true || item.display === true));
+    // Check if document is applicable for this column
+    const isApplicableForColumn =
+      (columnType === 'principal' && (item.ap === true || item.display === true)) ||
+      (columnType === 'dependant' && (item.dp === true || item.display === true)) ||
+      (columnType === 'understudy' && (item.understudy === true || item.display === true));
 
-  if (!isApplicableForColumn) {
+    if (!isApplicableForColumn) {
+      return {
+        type: 'na',
+        documents: [],
+        count: 0,
+        applicantTypes: {
+          principal: item.ap === true || item.display === true,
+          dependant: item.dp === true || item.display === true,
+          understudy: item.understudy === true || item.display === true
+        }
+      };
+    }
+
+    // Get the individual ID based on the column type
+    let individualId: number | null = null;
+
+    if (columnType === 'principal') {
+      individualId = task.principal_member || task.individual_id;
+    } else if (columnType === 'dependant') {
+      individualId = dependantId || task.dependant_member || task.individual_id;
+    } else if (columnType === 'understudy') {
+      individualId = task.understudy_member || task.individual_id;
+    }
+
+    // Get documents from allIndividualDocuments
+    let documents: any[] = [];
+    if (individualId) {
+      const individualDocs = allIndividualDocuments[individualId] || [];
+
+      // Extract the base document ID (remove any suffixes)
+      const baseItemId = itemId.split('_')[0];
+
+      // Find matching documents by document_id or acc_portal_kyc.id
+      // This works for both regular documents and BCL templates
+      documents = individualDocs.filter(doc => {
+        // Get both possible ID fields from the document
+        const docId = doc.document_id || '';
+        const kycId = (doc.acc_portal_kyc?.id || '');
+
+        // Check if either ID matches the base item ID or full item ID
+        return docId === baseItemId ||
+          docId === itemId ||
+          kycId === baseItemId ||
+          kycId === itemId ||
+          docId === item.id || // Also check against the item.id directly
+          kycId === item.id;
+      });
+    }
+
+    // Check if we have cached data for this status
+    const cachedStatus = documentStatusesMap[statusKey];
+    if (cachedStatus && !cachedStatus.loading) {
+      return cachedStatus.status;
+    }
+
+    // If we have documents, return 'view' status regardless of extracted details
+    // The actual document viewing will handle the matching logic
     return {
-      type: 'na',
-      documents: [],
-      count: 0,
+      type: documents.length > 0 ? 'view' : 'upload',
+      documents: documents,
+      count: documents.length,
       applicantTypes: {
         principal: item.ap === true || item.display === true,
         dependant: item.dp === true || item.display === true,
         understudy: item.understudy === true || item.display === true
       }
     };
-  }
-
-  // Get the individual ID based on the column type
-  let individualId: number | null = null;
-
-  if (columnType === 'principal') {
-    individualId = task.principal_member || task.individual_id;
-  } else if (columnType === 'dependant') {
-    individualId = dependantId || task.dependant_member || task.individual_id;
-  } else if (columnType === 'understudy') {
-    individualId = task.understudy_member || task.individual_id;
-  }
-
-  // Get documents from allIndividualDocuments
-  let documents: any[] = [];
-  if (individualId) {
-    const individualDocs = allIndividualDocuments[individualId] || [];
-
-    // Extract the base document ID (remove any suffixes)
-    const baseItemId = itemId.split('_')[0];
-
-    // Find matching documents by document_id or acc_portal_kyc.id
-    // This works for both regular documents and BCL templates
-    documents = individualDocs.filter(doc => {
-      // Get both possible ID fields from the document
-      const docId = doc.document_id || '';
-      const kycId = (doc.acc_portal_kyc?.id || '');
-
-      // Check if either ID matches the base item ID or full item ID
-      return docId === baseItemId ||
-        docId === itemId ||
-        kycId === baseItemId ||
-        kycId === itemId ||
-        docId === item.id || // Also check against the item.id directly
-        kycId === item.id;
-    });
-  }
-
-  // Check if we have cached data for this status
-  const cachedStatus = documentStatusesMap[statusKey];
-  if (cachedStatus && !cachedStatus.loading) {
-    return cachedStatus.status;
-  }
-
-  // If we have documents, return 'view' status regardless of extracted details
-  // The actual document viewing will handle the matching logic
-  return {
-    type: documents.length > 0 ? 'view' : 'upload',
-    documents: documents,
-    count: documents.length,
-    applicantTypes: {
-      principal: item.ap === true || item.display === true,
-      dependant: item.dp === true || item.display === true,
-      understudy: item.understudy === true || item.display === true
-    }
-  };
-}, [documentStatusesMap, allIndividualDocuments]);
+  }, [documentStatusesMap, allIndividualDocuments]);
 
   // Calculate statistics
   const calculateStats = useMemo(() => {
@@ -686,7 +686,6 @@ const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType
     });
   }, []);
 
-  // Updated: Fetch all required data with proper class requirements filtering
   useEffect(() => {
     let isMounted = true;
 
@@ -696,8 +695,9 @@ const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType
       clearDocumentStatuses();
       setDocumentsLoading(true);
       setDocuments([]);
-      setBclTemplateDocuments([]); // Clear BCL templates
-      
+      setBclTemplateDocuments([]);
+      setStageDocuments([]); // Clear stage documents
+
       try {
         // Fetch regular documents
         const documentsResponse = await supabase
@@ -742,6 +742,42 @@ const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType
 
         setDocuments(processedDocuments);
         setBclTemplateDocuments(processedBclTemplates);
+
+        // Collect all stage documents from filtered tasks
+        const allStageDocuments = new Map<string, any>();
+
+        filteredTasks.forEach(task => {
+          if (task.department?.stages) {
+            task.department.stages.forEach((stage: any) => {
+              if (stage.documents && Array.isArray(stage.documents)) {
+                stage.documents.forEach((stageDoc: any) => {
+                  if (stageDoc.kycId) {
+                    // Find the corresponding KYC document
+                    const kycDoc = processedDocuments.find(doc => doc.id === stageDoc.kycId) ||
+                      processedBclTemplates.find(doc => doc.id === stageDoc.kycId);
+
+                    if (kycDoc && !allStageDocuments.has(stageDoc.kycId)) {
+                      allStageDocuments.set(stageDoc.kycId, {
+                        ...kycDoc,
+                        stageName: stage.name,
+                        stageId: stage.id,
+                        stageOrder: stage.order_num || 0,
+                        stageDocumentConfig: stageDoc,
+                        // Add applicability from stage document config if available
+                        ap: true, // Stages typically apply to principal
+                        dp: stageDoc.dp !== undefined ? stageDoc.dp : true,
+                        understudy: stageDoc.understudy !== undefined ? stageDoc.understudy : true,
+                        display: true
+                      });
+                    }
+                  }
+                });
+              }
+            });
+          }
+        });
+
+        setStageDocuments(Array.from(allStageDocuments.values()));
 
         const taskDataPromises = filteredTasks.map(async (task) => {
           let constructedClassId = null;
@@ -827,1927 +863,2167 @@ const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType
           }
           if (result.counts) {
             countsMap[result.taskId] = result
-            .counts;
-         }
-       });
+              .counts;
+          }
+        });
 
-       setTaskClassRequirements(requirementsMap);
-       setTaskIndividualData(individualDataMap);
-       setTaskCounts(countsMap);
+        setTaskClassRequirements(requirementsMap);
+        setTaskIndividualData(individualDataMap);
+        setTaskCounts(countsMap);
 
-     } catch (err) {
-       console.error('Error fetching data:', err);
-     } finally {
-       if (isMounted) {
-         setDocumentsLoading(false);
-       }
-     }
-   };
+      } catch (err) {
+        console.error('Error fetching data:', err);
+      } finally {
+        if (isMounted) {
+          setDocumentsLoading(false);
+        }
+      }
+    };
 
-   if (filteredTasks.length > 0) {
-     fetchData();
-   } else {
-     setDocumentsLoading(false);
-   }
+    if (filteredTasks.length > 0) {
+      fetchData();
+    } else {
+      setDocumentsLoading(false);
+    }
 
-   return () => {
-     isMounted = false;
-   };
- }, [documentTab, filteredTasks, clearDocumentStatuses]);
+    return () => {
+      isMounted = false;
+    };
+  }, [documentTab, filteredTasks, clearDocumentStatuses]);
 
- // Helper function to get document name by ID
-const getDocumentName = useCallback((docId: string) => {
-  if (!docId) return 'Unknown Document';
-  const doc = documents.find(d => d.id === docId) || bclTemplateDocuments.find(d => d.id === docId);
-  return doc?.display_name || doc?.name || `Document (${docId.substring(0, 8)}...)`;
-}, [documents, bclTemplateDocuments]);
+  // Helper function to get document name by ID
+  const getDocumentName = useCallback((docId: string) => {
+    if (!docId) return 'Unknown Document';
+    const doc = documents.find(d => d.id === docId) || bclTemplateDocuments.find(d => d.id === docId);
+    return doc?.display_name || doc?.name || `Document (${docId.substring(0, 8)}...)`;
+  }, [documents, bclTemplateDocuments]);
 
- // Handle upload action
- const handleUploadAction = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number) => {
-   if (onShowUploadDialog) {
-     const itemId = item.selectionId || item.id;
-     const statusKey = dependantId ? `${task.id}-${itemId}-${columnType}-${dependantId}` : `${task.id}-${itemId}-${columnType}`;
-     
-     const newStatuses = { ...documentStatuses };
-     Object.keys(newStatuses).forEach(key => {
-       if (key.startsWith(`${task.id}-${itemId}-`)) {
-         delete newStatuses[key];
-       }
-     });
-     setDocumentStatuses(newStatuses);
+  // Handle upload action
+  const handleUploadAction = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number) => {
+    if (onShowUploadDialog) {
+      const itemId = item.selectionId || item.id;
+      const statusKey = dependantId ? `${task.id}-${itemId}-${columnType}-${dependantId}` : `${task.id}-${itemId}-${columnType}`;
 
-     onShowUploadDialog({ 
-       ...task, 
-       currentColumnType: columnType,
-       currentDependantId: dependantId 
-     }, item);
-   }
- }, [documentStatuses, onShowUploadDialog]);
+      const newStatuses = { ...documentStatuses };
+      Object.keys(newStatuses).forEach(key => {
+        if (key.startsWith(`${task.id}-${itemId}-`)) {
+          delete newStatuses[key];
+        }
+      });
+      setDocumentStatuses(newStatuses);
 
- // Handle view action
- const handleViewAction = useCallback(async (task: any, item: any, dependantId?: number) => {
-   const itemId = item.selectionId || item.id;
-   const statusKey = dependantId 
-     ? Object.keys(documentStatuses).find(key => key.startsWith(`${task.id}-${itemId}-`) && key.endsWith(`-${dependantId}`))
-     : Object.keys(documentStatuses).find(key => key.startsWith(`${task.id}-${itemId}-`) && !key.includes(`-${dependantId}`));
-   
-   const status = statusKey ? documentStatuses[statusKey] : null;
+      onShowUploadDialog({
+        ...task,
+        currentColumnType: columnType,
+        currentDependantId: dependantId
+      }, item);
+    }
+  }, [documentStatuses, onShowUploadDialog]);
 
-   if (status && status.documents.length > 0) {
-     // Check if we have matching documents
-     const matchingDocs = status.documents.filter(doc => {
-       // Check if document has matching extracted details
-       const extractedDetails = doc.extracted_details || {};
-       const hasMatchingDetails = Object.keys(extractedDetails).length > 0;
-       return hasMatchingDetails;
-     });
+  // Handle view action
+  const handleViewAction = useCallback(async (task: any, item: any, dependantId?: number) => {
+    const itemId = item.selectionId || item.id;
+    const statusKey = dependantId
+      ? Object.keys(documentStatuses).find(key => key.startsWith(`${task.id}-${itemId}-`) && key.endsWith(`-${dependantId}`))
+      : Object.keys(documentStatuses).find(key => key.startsWith(`${task.id}-${itemId}-`) && !key.includes(`-${dependantId}`));
 
-     if (matchingDocs.length > 0) {
-       if (onViewDocument) {
-         onViewDocument(task, { ...item, documents: matchingDocs });
-       } else {
-         const firstDoc = matchingDocs[0];
-         if (firstDoc.file_path) {
-           try {
-             const { data: fileUrl, error } = await supabase.storage
-               .from(documentTab === 'company' ? 'kyc-documents' : 'kyc-documents')
-               .createSignedUrl(firstDoc.file_path, 3600);
+    const status = statusKey ? documentStatuses[statusKey] : null;
 
-             if (error) throw error;
+    if (status && status.documents.length > 0) {
+      // Check if we have matching documents
+      const matchingDocs = status.documents.filter(doc => {
+        // Check if document has matching extracted details
+        const extractedDetails = doc.extracted_details || {};
+        const hasMatchingDetails = Object.keys(extractedDetails).length > 0;
+        return hasMatchingDetails;
+      });
 
-             if (fileUrl?.signedUrl) {
-               window.open(fileUrl.signedUrl, '_blank');
-             }
-           } catch (error) {
-             console.error('Error viewing document:', error);
-             toast({
-               title: "Error",
-               description: "Failed to open document",
-               variant: "destructive"
-             });
-           }
-         }
-       }
-     } else {
-       toast({
-         title: "No Matching Documents",
-         description: "No documents with matching extracted details found",
-         variant: "default"
-       });
-     }
-   }
- }, [documentStatuses, onViewDocument, documentTab]);
+      if (matchingDocs.length > 0) {
+        if (onViewDocument) {
+          onViewDocument(task, { ...item, documents: matchingDocs });
+        } else {
+          const firstDoc = matchingDocs[0];
+          if (firstDoc.file_path) {
+            try {
+              const { data: fileUrl, error } = await supabase.storage
+                .from(documentTab === 'company' ? 'kyc-documents' : 'kyc-documents')
+                .createSignedUrl(firstDoc.file_path, 3600);
 
- // Effect to update document status when tasks or items change
- useEffect(() => {
-   const updateDocumentStatuses = async () => {
-     const updates: Record<string, {
-       status: DocumentStatus;
-       loading: boolean;
-     }> = {};
+              if (error) throw error;
 
-     // Process all tasks and their requirements
-     for (const task of filteredTasks) {
-       const classRequirements = taskClassRequirements[task.id];
-       if (!classRequirements?.documents_and_fields) continue;
-
-       for (const item of classRequirements.documents_and_fields) {
-         const itemId = item.selectionId || item.id;
-         const baseItemId = itemId.split('_')[0];
-
-         // Only process items that are applicable to any applicant type
-         if (item.ap || item.dp || item.understudy || item.display) {
-           const columnTypes: ('principal' | 'dependant' | 'understudy')[] = [];
-           if (item.ap || item.display) columnTypes.push('principal');
-           if (item.dp || item.display) columnTypes.push('dependant');
-           if (item.understudy || item.display) columnTypes.push('understudy');
-
-           for (const columnType of columnTypes) {
-             // For dependant columns, handle multiple dependants
-             if (columnType === 'dependant' && task.dependant_member && Array.isArray(task.dependant_member)) {
-               for (const dependant of task.dependant_member) {
-                 const key = `${task.id}-${itemId}-${columnType}-${dependant.id}`;
-                 
-                 let documents: any[] = [];
-                 if (dependant.id && allIndividualDocuments[dependant.id]) {
-                   documents = allIndividualDocuments[dependant.id].filter(doc => {
-                     const docId = doc.document_id || '';
-                     const kycId = (doc.acc_portal_kyc?.id || '');
-                     return docId === baseItemId ||
-                       docId === itemId ||
-                       kycId === baseItemId ||
-                       kycId === itemId;
-                   });
-                 }
-
-                 const currentStatus = documentStatusesMap[key];
-                 const documentCount = documents.length;
-                 const currentCount = currentStatus?.status.count || 0;
-
-                 if (!currentStatus || documentCount !== currentCount) {
-                   updates[key] = {
-                     status: {
-                       type: documentCount > 0 ? 'view' : 'upload',
-                       documents: documents,
-                       count: documentCount,
-                       applicantTypes: {
-                         principal: item.ap || item.display || false,
-                         dependant: item.dp || item.display || false,
-                         understudy: item.understudy || item.display || false
-                       }
-                     },
-                     loading: false
-                   };
-                 }
-               }
-             } else {
-               // Handle principal and understudy columns (single individual)
-               const key = `${task.id}-${itemId}-${columnType}`;
-               
-               let individualId: number | null = null;
-               if (columnType === 'principal') {
-                 individualId = task.principal_member || task.individual_id;
-               } else if (columnType === 'understudy') {
-                 individualId = task.understudy_member || task.individual_id;
-               }
-
-               let documents: any[] = [];
-               if (individualId && allIndividualDocuments[individualId]) {
-                 documents = allIndividualDocuments[individualId].filter(doc => {
-                   const docId = doc.document_id || '';
-                   const kycId = (doc.acc_portal_kyc?.id || '');
-                   return docId === baseItemId ||
-                     docId === itemId ||
-                     kycId === baseItemId ||
-                     kycId === itemId;
-                 });
-               }
-
-               const currentStatus = documentStatusesMap[key];
-               const documentCount = documents.length;
-               const currentCount = currentStatus?.status.count || 0;
-
-               if (!currentStatus || documentCount !== currentCount) {
-                 updates[key] = {
-                   status: {
-                     type: documentCount > 0 ? 'view' : 'upload',
-                     documents: documents,
-                     count: documentCount,
-                     applicantTypes: {
-                       principal: item.ap || item.display || false,
-                       dependant: item.dp || item.display || false,
-                       understudy: item.understudy || item.display || false
-                     }
-                   },
-                   loading: false
-                 };
-               }
-             }
-           }
-         }
-       }
-     }
-
-     // Apply all updates
-     if (Object.keys(updates).length > 0) {
-       setDocumentStatusesMap(prev => ({
-         ...prev,
-         ...updates
-       }));
-     }
-   };
-
-   updateDocumentStatuses();
- }, [filteredTasks, taskClassRequirements, allIndividualDocuments, documentStatusesMap]);
-
- const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number) => {
-  const status = getDocumentStatusForColumn(task, item, columnType, dependantId);
-  const itemId = item.selectionId || item.id;
-  const key = dependantId ? `${task.id}-${itemId}-${columnType}-${dependantId}` : `${task.id}-${itemId}-${columnType}`;
-  const isLoading = documentStatusesMap[key]?.loading || false;
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    )
-  }
-
-  if (status.type === 'na') {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <span className="text-gray-400 text-xs">N/A</span>
-      </div>
-    )
-  }
-
-  const handleUploadClick = () => {
-    setSelectedUploadData({
-      task,
-      document: item,
-      columnType
-    });
-    setUploadDialogOpen(true);
-  };
-
-  const handleViewClick = async () => {
-    if (status.documents.length > 0) {
-      // Get the file URL and set up preview data
-      const document = status.documents[0]; // Show first document, we can add navigation later
-
-      try {
-        const { data: signedUrl, error } = await supabase.storage
-          .from('kyc-documents')
-          .createSignedUrl(document.file_path, 3600);
-
-        if (error) throw error;
-
-        // Get the document definition from your documents array or BCL templates
-        const documentDefinition = documents.find(doc => doc.id === document.document_id) || 
-                                 bclTemplateDocuments.find(doc => doc.id === document.document_id);
-
-        // Prepare extraction fields from document definition
-        const extractionFields = (documentDefinition?.fields || []).map((field: any) => ({
-          id: field.id,
-          name: field.name,
-          type: field.type || 'text',
-          required: field.required || false
-        }));
-
-        // Set up preview data
-        setSelectedDocumentForPreview({
-          documentName: documentDefinition?.display_name || documentDefinition?.name || document.acc_portal_kyc?.display_name || 'Document',
-          extractedData: document.extracted_details || {},
-          fields: extractionFields,
-          fileUrl: signedUrl.signedUrl,
-          fileName: document.file_path?.split('/').pop() || '',
-          allDocuments: status.documents,
-          currentIndex: 0,
-          task,
-          item,
-          columnType,
-          dependantId,
-          uploadDate: document.created_at,
-          documentStatus: document.status
-        })
-        setDocumentPreviewOpen(true)
-      } catch (error) {
-        console.error('Error getting file URL:', error)
+              if (fileUrl?.signedUrl) {
+                window.open(fileUrl.signedUrl, '_blank');
+              }
+            } catch (error) {
+              console.error('Error viewing document:', error);
+              toast({
+                title: "Error",
+                description: "Failed to open document",
+                variant: "destructive"
+              });
+            }
+          }
+        }
+      } else {
         toast({
-          title: 'Error',
-          description: 'Failed to load document preview',
-          variant: 'destructive'
-        })
+          title: "No Matching Documents",
+          description: "No documents with matching extracted details found",
+          variant: "default"
+        });
       }
     }
-  }
-  
-  switch (status.type) {
-    case 'view':
+  }, [documentStatuses, onViewDocument, documentTab]);
+
+  // Effect to update document status when tasks or items change
+  useEffect(() => {
+    const updateDocumentStatuses = async () => {
+      const updates: Record<string, {
+        status: DocumentStatus;
+        loading: boolean;
+      }> = {};
+
+      // Process all tasks and their requirements
+      for (const task of filteredTasks) {
+        const classRequirements = taskClassRequirements[task.id];
+        if (!classRequirements?.documents_and_fields) continue;
+
+        for (const item of classRequirements.documents_and_fields) {
+          const itemId = item.selectionId || item.id;
+          const baseItemId = itemId.split('_')[0];
+
+          // Only process items that are applicable to any applicant type
+          if (item.ap || item.dp || item.understudy || item.display) {
+            const columnTypes: ('principal' | 'dependant' | 'understudy')[] = [];
+            if (item.ap || item.display) columnTypes.push('principal');
+            if (item.dp || item.display) columnTypes.push('dependant');
+            if (item.understudy || item.display) columnTypes.push('understudy');
+
+            for (const columnType of columnTypes) {
+              // For dependant columns, handle multiple dependants
+              if (columnType === 'dependant' && task.dependant_member && Array.isArray(task.dependant_member)) {
+                for (const dependant of task.dependant_member) {
+                  const key = `${task.id}-${itemId}-${columnType}-${dependant.id}`;
+
+                  let documents: any[] = [];
+                  if (dependant.id && allIndividualDocuments[dependant.id]) {
+                    documents = allIndividualDocuments[dependant.id].filter(doc => {
+                      const docId = doc.document_id || '';
+                      const kycId = (doc.acc_portal_kyc?.id || '');
+                      return docId === baseItemId ||
+                        docId === itemId ||
+                        kycId === baseItemId ||
+                        kycId === itemId;
+                    });
+                  }
+
+                  const currentStatus = documentStatusesMap[key];
+                  const documentCount = documents.length;
+                  const currentCount = currentStatus?.status.count || 0;
+
+                  if (!currentStatus || documentCount !== currentCount) {
+                    updates[key] = {
+                      status: {
+                        type: documentCount > 0 ? 'view' : 'upload',
+                        documents: documents,
+                        count: documentCount,
+                        applicantTypes: {
+                          principal: item.ap || item.display || false,
+                          dependant: item.dp || item.display || false,
+                          understudy: item.understudy || item.display || false
+                        }
+                      },
+                      loading: false
+                    };
+                  }
+                }
+              } else {
+                // Handle principal and understudy columns (single individual)
+                const key = `${task.id}-${itemId}-${columnType}`;
+
+                let individualId: number | null = null;
+                if (columnType === 'principal') {
+                  individualId = task.principal_member || task.individual_id;
+                } else if (columnType === 'understudy') {
+                  individualId = task.understudy_member || task.individual_id;
+                }
+
+                let documents: any[] = [];
+                if (individualId && allIndividualDocuments[individualId]) {
+                  documents = allIndividualDocuments[individualId].filter(doc => {
+                    const docId = doc.document_id || '';
+                    const kycId = (doc.acc_portal_kyc?.id || '');
+                    return docId === baseItemId ||
+                      docId === itemId ||
+                      kycId === baseItemId ||
+                      kycId === itemId;
+                  });
+                }
+
+                const currentStatus = documentStatusesMap[key];
+                const documentCount = documents.length;
+                const currentCount = currentStatus?.status.count || 0;
+
+                if (!currentStatus || documentCount !== currentCount) {
+                  updates[key] = {
+                    status: {
+                      type: documentCount > 0 ? 'view' : 'upload',
+                      documents: documents,
+                      count: documentCount,
+                      applicantTypes: {
+                        principal: item.ap || item.display || false,
+                        dependant: item.dp || item.display || false,
+                        understudy: item.understudy || item.display || false
+                      }
+                    },
+                    loading: false
+                  };
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Apply all updates
+      if (Object.keys(updates).length > 0) {
+        setDocumentStatusesMap(prev => ({
+          ...prev,
+          ...updates
+        }));
+      }
+    };
+
+    updateDocumentStatuses();
+  }, [filteredTasks, taskClassRequirements, allIndividualDocuments, documentStatusesMap]);
+
+  const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number) => {
+    const status = getDocumentStatusForColumn(task, item, columnType, dependantId);
+    const itemId = item.selectionId || item.id;
+    const key = dependantId ? `${task.id}-${itemId}-${columnType}-${dependantId}` : `${task.id}-${itemId}-${columnType}`;
+    const isLoading = documentStatusesMap[key]?.loading || false;
+
+    if (isLoading) {
       return (
-        <div className="flex flex-col items-center justify-center h-full">
-          <div className="flex items-center justify-center gap-1">
+        <div className="flex items-center justify-center h-full">
+          <div className="h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      )
+    }
+
+    if (status.type === 'na') {
+      return (
+        <div className="flex items-center justify-center h-full">
+          <span className="text-gray-400 text-xs">N/A</span>
+        </div>
+      )
+    }
+
+    const handleUploadClick = () => {
+      setSelectedUploadData({
+        task,
+        document: item,
+        columnType
+      });
+      setUploadDialogOpen(true);
+    };
+
+    const handleViewClick = async () => {
+      if (status.documents.length > 0) {
+        // Get the file URL and set up preview data
+        const document = status.documents[0]; // Show first document, we can add navigation later
+
+        try {
+          const { data: signedUrl, error } = await supabase.storage
+            .from('kyc-documents')
+            .createSignedUrl(document.file_path, 3600);
+
+          if (error) throw error;
+
+          // Get the document definition from your documents array or BCL templates
+          const documentDefinition = documents.find(doc => doc.id === document.document_id) ||
+            bclTemplateDocuments.find(doc => doc.id === document.document_id);
+
+          // Prepare extraction fields from document definition
+          const extractionFields = (documentDefinition?.fields || []).map((field: any) => ({
+            id: field.id,
+            name: field.name,
+            type: field.type || 'text',
+            required: field.required || false
+          }));
+
+          // Set up preview data
+          setSelectedDocumentForPreview({
+            documentName: documentDefinition?.display_name || documentDefinition?.name || document.acc_portal_kyc?.display_name || 'Document',
+            extractedData: document.extracted_details || {},
+            fields: extractionFields,
+            fileUrl: signedUrl.signedUrl,
+            fileName: document.file_path?.split('/').pop() || '',
+            allDocuments: status.documents,
+            currentIndex: 0,
+            task,
+            item,
+            columnType,
+            dependantId,
+            uploadDate: document.created_at,
+            documentStatus: document.status
+          })
+          setDocumentPreviewOpen(true)
+        } catch (error) {
+          console.error('Error getting file URL:', error)
+          toast({
+            title: 'Error',
+            description: 'Failed to load document preview',
+            variant: 'destructive'
+          })
+        }
+      }
+    }
+
+    switch (status.type) {
+      case 'view':
+        return (
+          <div className="flex flex-col items-center justify-center h-full">
+            <div className="flex items-center justify-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 text-green-600 hover:bg-green-100 hover:text-green-700 transition-colors"
+                onClick={handleViewClick}
+                title={`View ${status.count} ${status.count > 1 ? 'documents' : 'document'}`}
+              >
+                <Eye className="h-4 w-4" />
+              </Button>
+              {status.count > 1 && (
+                <Badge
+                  variant="outline"
+                  className="h-5 w-5 p-0 flex items-center justify-center text-xs font-semibold bg-green-50 text-green-700 border-green-200"
+                >
+                  {status.count}
+                </Badge>
+              )}
+            </div>
+            <span className="text-[10px] text-green-600 font-medium mt-0.5">Uploaded</span>
+          </div>
+        )
+
+      case 'upload':
+        return (
+          <div className="flex flex-col items-center justify-center h-full">
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 w-8 p-0 text-green-600 hover:bg-green-100 hover:text-green-700 transition-colors"
-              onClick={handleViewClick}
-              title={`View ${status.count} ${status.count > 1 ? 'documents' : 'document'}`}
+              className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50 hover:text-amber-700 transition-colors"
+              onClick={() => handleUploadAction(task, item, columnType, dependantId)}
+              title={`Upload ${item.display_name || item.name} for ${columnType}${dependantId ? ` (${individualNames[dependantId]})` : ''}`}
             >
-              <Eye className="h-4 w-4" />
+              <Upload className="h-4 w-4" />
             </Button>
-            {status.count > 1 && (
-              <Badge
-                variant="outline"
-                className="h-5 w-5 p-0 flex items-center justify-center text-xs font-semibold bg-green-50 text-green-700 border-green-200"
-              >
-                {status.count}
-              </Badge>
-            )}
+            <span className="text-[10px] text-amber-600 font-medium mt-0.5">Upload</span>
           </div>
-          <span className="text-[10px] text-green-600 font-medium mt-0.5">Uploaded</span>
-        </div>
-      )
+        )
 
-    case 'upload':
-      return (
-        <div className="flex flex-col items-center justify-center h-full">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50 hover:text-amber-700 transition-colors"
-            onClick={() => handleUploadAction(task, item, columnType, dependantId)}
-            title={`Upload ${item.display_name || item.name} for ${columnType}${dependantId ? ` (${individualNames[dependantId]})` : ''}`}
-          >
-            <Upload className="h-4 w-4" />
-          </Button>
-          <span className="text-[10px] text-amber-600 font-medium mt-0.5">Upload</span>
-        </div>
-      )
-
-    default:
-      return (
-        <div className="flex items-center justify-center h-full">
-          <span className="text-gray-400 text-xs">-</span>
-        </div>
-      )
-  }
-}, [getDocumentStatusForColumn, documentStatusesMap, documents, bclTemplateDocuments, individualNames, handleUploadAction])
-
- // Add this to handle upload completion and refresh
- const handleUploadComplete = useCallback(() => {
-   // Clear the document statuses map to force re-fetch
-   setDocumentStatusesMap(prev => {
-     const updated = { ...prev };
-     // Mark all as loading to trigger refresh
-     Object.keys(updated).forEach(key => {
-       updated[key] = {
-         ...updated[key],
-         loading: true
-       };
-     });
-     return updated;
-   });
-
-   // Also clear other caches
-   setAllIndividualDocuments({});
-
-   // Re-fetch all individual data
-   if (filteredTasks.length > 0) {
-     fetchAllIndividualData(filteredTasks);
-   }
- }, [filteredTasks, fetchAllIndividualData]);
-
- // Render client field data
- const renderClientFieldData = useCallback((task: any, item: any) => {
-   const individualData = taskIndividualData[task.id];
-   if (!individualData) {
-     return (
-       <div className="text-center">
-         <span className="text-red-500 text-xs font-medium">No Registry Data</span>
-       </div>
-     );
-   }
-
-   const fieldValue = individualData[item.field.name];
-
-   if (!fieldValue && fieldValue !== 0) {
-     return (
-       <div className="text-center">
-         <span className="text-red-500 text-xs font-medium">Missing</span>
-       </div>
-     );
-   }
-
-   return (
-     <div className="text-center">
-       <span className="text-blue-600 text-xs font-medium truncate max-w-[100px] inline-block">
-         {String(fieldValue)}
-       </span>
-     </div>
-   );
- }, [taskIndividualData]);
-
- const organizedRequirements = useMemo(() => {
-  const documentsMap = new Map<string, {
-    document: any,
-    fields: any[],
-    category: 'company' | 'individual',
-    applicabilitySettings?: any
-  }>();
-  
-  // BCL templates organized by category - only selected ones
-  const bclCompanyTemplates: any[] = [];
-  const bclIndividualTemplates: any[] = [];
-  
-  const clientFieldsMap = new Map<string, {
-    field: any,
-    category: 'company' | 'individual'
-  }>();
-
-  // Track selected BCL template IDs to exclude from regular documents
-  const selectedBclTemplateIds = new Set<string>();
-
-  // First pass: identify all BCL templates that are selected
-  filteredTasks.forEach(task => {
-    const classRequirements = taskClassRequirements[task.id];
-    if (!classRequirements) return;
-
-    if (Array.isArray(classRequirements.documents_and_fields)) {
-      classRequirements.documents_and_fields
-        .filter((item: any) => {
-          return item.ap === true || item.dp === true || item.understudy === true || item.display === true;
-        })
-        .forEach((item: any) => {
-          const parsed = parseSelectionId(item.id);
-
-          if (parsed.type === 'document') {
-            // Check if this document ID exists in BCL templates
-            const bclTemplate = bclTemplateDocuments.find(doc => doc.id === parsed.documentId);
-            if (bclTemplate) {
-              selectedBclTemplateIds.add(parsed.documentId);
-            }
-          }
-        });
+      default:
+        return (
+          <div className="flex items-center justify-center h-full">
+            <span className="text-gray-400 text-xs">-</span>
+          </div>
+        )
     }
-  });
+  }, [getDocumentStatusForColumn, documentStatusesMap, documents, bclTemplateDocuments, individualNames, handleUploadAction])
 
-  // Second pass: process documents and fields, excluding BCL templates
-  filteredTasks.forEach(task => {
-    const classRequirements = taskClassRequirements[task.id];
-    if (!classRequirements) return;
+  // Add this to handle upload completion and refresh
+  const handleUploadComplete = useCallback(() => {
+    // Clear the document statuses map to force re-fetch
+    setDocumentStatusesMap(prev => {
+      const updated = { ...prev };
+      // Mark all as loading to trigger refresh
+      Object.keys(updated).forEach(key => {
+        updated[key] = {
+          ...updated[key],
+          loading: true
+        };
+      });
+      return updated;
+    });
 
-    if (Array.isArray(classRequirements.documents_and_fields)) {
-      classRequirements.documents_and_fields
-        .filter((item: any) => {
-          return item.ap === true || item.dp === true || item.understudy === true || item.display === true;
-        })
-        .forEach((item: any) => {
-          const parsed = parseSelectionId(item.id);
+    // Also clear other caches
+    setAllIndividualDocuments({});
 
-          if (parsed.type === 'document') {
-            // Check if this is a BCL template - if so, add to BCL section
-            if (selectedBclTemplateIds.has(parsed.documentId)) {
+    // Re-fetch all individual data
+    if (filteredTasks.length > 0) {
+      fetchAllIndividualData(filteredTasks);
+    }
+  }, [filteredTasks, fetchAllIndividualData]);
+
+  // Render client field data
+  const renderClientFieldData = useCallback((task: any, item: any) => {
+    const individualData = taskIndividualData[task.id];
+    if (!individualData) {
+      return (
+        <div className="text-center">
+          <span className="text-red-500 text-xs font-medium">No Registry Data</span>
+        </div>
+      );
+    }
+
+    const fieldValue = individualData[item.field.name];
+
+    if (!fieldValue && fieldValue !== 0) {
+      return (
+        <div className="text-center">
+          <span className="text-red-500 text-xs font-medium">Missing</span>
+        </div>
+      );
+    }
+
+    return (
+      <div className="text-center">
+        <span className="text-blue-600 text-xs font-medium truncate max-w-[100px] inline-block">
+          {String(fieldValue)}
+        </span>
+      </div>
+    );
+  }, [taskIndividualData]);
+
+  const organizedRequirements = useMemo(() => {
+    const documentsMap = new Map<string, {
+      document: any,
+      fields: any[],
+      category: 'company' | 'individual',
+      applicabilitySettings?: any
+    }>();
+
+    // BCL templates organized by category - only selected ones
+    const bclCompanyTemplates: any[] = [];
+    const bclIndividualTemplates: any[] = [];
+
+    // Post Application documents organized by category
+    const postAppCompanyDocuments: any[] = [];
+    const postAppIndividualDocuments: any[] = [];
+
+    const clientFieldsMap = new Map<string, {
+      field: any,
+      category: 'company' | 'individual'
+    }>();
+
+    // Track selected BCL template IDs to exclude from regular documents
+    const selectedBclTemplateIds = new Set<string>();
+
+    // Track stage document IDs to exclude from other sections
+    const stageDocumentIds = new Set<string>();
+
+    // Organize stage documents by category
+    stageDocuments.forEach(stageDoc => {
+      stageDocumentIds.add(stageDoc.id);
+      const category = stageDoc.category === 'company-docs' ? 'company' : 'individual';
+
+      if (category === 'company') {
+        postAppCompanyDocuments.push(stageDoc);
+      } else {
+        postAppIndividualDocuments.push(stageDoc);
+      }
+    });
+
+    // First pass: identify all BCL templates that are selected (excluding stage documents)
+    filteredTasks.forEach(task => {
+      const classRequirements = taskClassRequirements[task.id];
+      if (!classRequirements) return;
+
+      if (Array.isArray(classRequirements.documents_and_fields)) {
+        classRequirements.documents_and_fields
+          .filter((item: any) => {
+            return item.ap === true || item.dp === true || item.understudy === true || item.display === true;
+          })
+          .forEach((item: any) => {
+            const parsed = parseSelectionId(item.id);
+
+            if (parsed.type === 'document') {
+              // Skip if this is a stage document
+              if (stageDocumentIds.has(parsed.documentId)) {
+                return;
+              }
+
+              // Check if this document ID exists in BCL templates
               const bclTemplate = bclTemplateDocuments.find(doc => doc.id === parsed.documentId);
               if (bclTemplate) {
-                const category = bclTemplate.category === 'company-docs' ? 'company' : 'individual';
-                const templateWithSettings = {
-                  ...bclTemplate,
-                  selectionId: item.id,
-                  ap: item.ap,
-                  dp: item.dp,
-                  understudy: item.understudy,
-                  display: item.display,
-                  kycdocumentid: item.kycdocumentid || bclTemplate.id
-                };
-                
-                if (category === 'company') {
-                  // Check if already added
-                  if (!bclCompanyTemplates.some(t => t.id === bclTemplate.id)) {
-                    bclCompanyTemplates.push(templateWithSettings);
-                  }
-                } else {
-                  // Check if already added
-                  if (!bclIndividualTemplates.some(t => t.id === bclTemplate.id)) {
-                    bclIndividualTemplates.push(templateWithSettings);
-                  }
-                }
+                selectedBclTemplateIds.add(parsed.documentId);
               }
-            } else {
-              // This is a regular document - add to Documents & Fields section
-              const document = documents.find(doc => doc.id === parsed.documentId);
-              if (document && !documentsMap.has(parsed.documentId)) {
-                const category = document.category === 'company-docs' ? 'company' : 'individual';
-                documentsMap.set(parsed.documentId, {
-                  document: {
-                    ...document,
+            }
+          });
+      }
+    });
+
+    // Second pass: process documents and fields, excluding BCL templates and stage documents
+    filteredTasks.forEach(task => {
+      const classRequirements = taskClassRequirements[task.id];
+      if (!classRequirements) return;
+
+      if (Array.isArray(classRequirements.documents_and_fields)) {
+        classRequirements.documents_and_fields
+          .filter((item: any) => {
+            return item.ap === true || item.dp === true || item.understudy === true || item.display === true;
+          })
+          .forEach((item: any) => {
+            const parsed = parseSelectionId(item.id);
+
+            if (parsed.type === 'document') {
+              // Skip if this is a stage document
+              if (stageDocumentIds.has(parsed.documentId)) {
+                return;
+              }
+
+              // Check if this is a BCL template - if so, add to BCL section
+              if (selectedBclTemplateIds.has(parsed.documentId)) {
+                const bclTemplate = bclTemplateDocuments.find(doc => doc.id === parsed.documentId);
+                if (bclTemplate) {
+                  const category = bclTemplate.category === 'company-docs' ? 'company' : 'individual';
+                  const templateWithSettings = {
+                    ...bclTemplate,
                     selectionId: item.id,
                     ap: item.ap,
                     dp: item.dp,
                     understudy: item.understudy,
                     display: item.display,
-                    kycdocumentid: item.kycdocumentid || document.id
-                  },
-                  fields: [],
-                  category: category,
-                  applicabilitySettings: {
-                    ap: item.ap,
-                    dp: item.dp,
-                    understudy: item.understudy,
-                    display: item.display
+                    kycdocumentid: item.kycdocumentid || bclTemplate.id
+                  };
+
+                  if (category === 'company') {
+                    if (!bclCompanyTemplates.some(t => t.id === bclTemplate.id)) {
+                      bclCompanyTemplates.push(templateWithSettings);
+                    }
+                  } else {
+                    if (!bclIndividualTemplates.some(t => t.id === bclTemplate.id)) {
+                      bclIndividualTemplates.push(templateWithSettings);
+                    }
                   }
-                });
-              }
-            }
-          } else if (parsed.type === 'field' && parsed.fieldId) {
-            // Handle fields for both regular documents and BCL templates
-            // But only add them to documentsMap if the parent document is not a BCL template
-            if (!selectedBclTemplateIds.has(parsed.documentId)) {
-              const document = documents.find(doc => doc.id === parsed.documentId);
-              
-              if (document) {
-                const category = document.category === 'company-docs' ? 'company' : 'individual';
-
-                if (!documentsMap.has(parsed.documentId)) {
-                  documentsMap.set(parsed.documentId, {
-                    document: document,
-                    fields: [],
-                    category: category
-                  });
                 }
-
-                const field = document.fields?.find((f: any) => f.id === parsed.fieldId);
-                if (field) {
-                  const docEntry = documentsMap.get(parsed.documentId)!;
-                  const fieldExists = docEntry.fields.some(f => f.id === field.id);
-                  if (!fieldExists) {
-                    docEntry.fields.push({
-                      ...field,
+              } else {
+                // This is a regular document - add to Documents & Fields section
+                const document = documents.find(doc => doc.id === parsed.documentId);
+                if (document && !documentsMap.has(parsed.documentId)) {
+                  const category = document.category === 'company-docs' ? 'company' : 'individual';
+                  documentsMap.set(parsed.documentId, {
+                    document: {
+                      ...document,
                       selectionId: item.id,
                       ap: item.ap,
                       dp: item.dp,
                       understudy: item.understudy,
                       display: item.display,
-                      kycdocumentid: item.kycdocumentid || `${document.id}-${field.id}`
+                      kycdocumentid: item.kycdocumentid || document.id
+                    },
+                    fields: [],
+                    category: category,
+                    applicabilitySettings: {
+                      ap: item.ap,
+                      dp: item.dp,
+                      understudy: item.understudy,
+                      display: item.display
+                    }
+                  });
+                }
+              }
+            } else if (parsed.type === 'field' && parsed.fieldId) {
+              // Handle fields for documents (excluding stage documents and BCL templates)
+              if (!selectedBclTemplateIds.has(parsed.documentId) && !stageDocumentIds.has(parsed.documentId)) {
+                const document = documents.find(doc => doc.id === parsed.documentId);
+
+                if (document) {
+                  const category = document.category === 'company-docs' ? 'company' : 'individual';
+
+                  if (!documentsMap.has(parsed.documentId)) {
+                    documentsMap.set(parsed.documentId, {
+                      document: document,
+                      fields: [],
+                      category: category
                     });
+                  }
+
+                  const field = document.fields?.find((f: any) => f.id === parsed.fieldId);
+                  if (field) {
+                    const docEntry = documentsMap.get(parsed.documentId)!;
+                    const fieldExists = docEntry.fields.some(f => f.id === field.id);
+                    if (!fieldExists) {
+                      docEntry.fields.push({
+                        ...field,
+                        selectionId: item.id,
+                        ap: item.ap,
+                        dp: item.dp,
+                        understudy: item.understudy,
+                        display: item.display,
+                        kycdocumentid: item.kycdocumentid || `${document.id}-${field.id}`
+                      });
+                    }
                   }
                 }
               }
             }
-            // Note: We don't process fields for BCL templates in the Documents & Fields section
-            // BCL templates are shown as complete documents in their own section
-          }
-        });
-    }
+          });
+      }
 
-    // Process client fields (unchanged)
-    if (Array.isArray(classRequirements.client_fields)) {
-      classRequirements.client_fields
-        .filter((item: any) => {
-          return item.ap === true || item.dp === true || item.understudy === true || item.display === true;
-        })
-        .forEach((item: any) => {
-          let fieldName = '';
-          const itemId = item.id;
+      // Process client fields (unchanged)
+      if (Array.isArray(classRequirements.client_fields)) {
+        classRequirements.client_fields
+          .filter((item: any) => {
+            return item.ap === true || item.dp === true || item.understudy === true || item.display === true;
+          })
+          .forEach((item: any) => {
+            let fieldName = '';
+            const itemId = item.id;
 
-          if (itemId.startsWith('form-field-')) {
-            const withoutPrefix = itemId.replace(/^form-field-/, '');
-            fieldName = withoutPrefix.replace(/_\d+_\d+$/, '');
-          } else if (itemId.startsWith('platform-')) {
-            const withoutPrefix = itemId.replace(/^platform-/, '');
-            const parts = withoutPrefix.split('-');
-            if (parts.length >= 2) {
-              fieldName = parts.slice(1).join('-').replace(/_\d+_\d+$/, '');
+            if (itemId.startsWith('form-field-')) {
+              const withoutPrefix = itemId.replace(/^form-field-/, '');
+              fieldName = withoutPrefix.replace(/_\d+_\d+$/, '');
+            } else if (itemId.startsWith('platform-')) {
+              const withoutPrefix = itemId.replace(/^platform-/, '');
+              const parts = withoutPrefix.split('-');
+              if (parts.length >= 2) {
+                fieldName = parts.slice(1).join('-').replace(/_\d+_\d+$/, '');
+              }
+            } else {
+              fieldName = itemId.split('_')[0];
             }
-          } else {
-            fieldName = itemId.split('_')[0];
-          }
 
-          const field = clientFormFields.find(f => f.name === fieldName);
-          if (field && !clientFieldsMap.has(item.id)) {
-            const category = documentTab;
-            clientFieldsMap.set(item.id, {
-              field: {
-                ...field,
-                selectionId: item.id,
-                ap: item.ap,
-                dp: item.dp,
-                understudy: item.understudy,
-                display: item.display
-              },
-              category: category
-            });
-          }
-        });
+            const field = clientFormFields.find(f => f.name === fieldName);
+            if (field && !clientFieldsMap.has(item.id)) {
+              const category = documentTab;
+              clientFieldsMap.set(item.id, {
+                field: {
+                  ...field,
+                  selectionId: item.id,
+                  ap: item.ap,
+                  dp: item.dp,
+                  understudy: item.understudy,
+                  display: item.display
+                },
+                category: category
+              });
+            }
+          });
+      }
+    });
+
+    const companyDocuments = Array.from(documentsMap.values()).filter(item => item.category === 'company');
+    const individualDocuments = Array.from(documentsMap.values()).filter(item => item.category === 'individual');
+    const companyFields = Array.from(clientFieldsMap.values()).filter(item => item.category === 'company');
+    const individualFields = Array.from(clientFieldsMap.values()).filter(item => item.category === 'individual');
+
+    return {
+      documents: {
+        company: companyDocuments,
+        individual: individualDocuments
+      },
+      clientFields: {
+        company: companyFields,
+        individual: individualFields
+      },
+      bclTemplates: {
+        company: bclCompanyTemplates,
+        individual: bclIndividualTemplates
+      },
+      postApplication: {
+        company: postAppCompanyDocuments.sort((a, b) => (a.stageOrder || 0) - (b.stageOrder || 0)),
+        individual: postAppIndividualDocuments.sort((a, b) => (a.stageOrder || 0) - (b.stageOrder || 0))
+      }
+    };
+  }, [filteredTasks, taskClassRequirements, documents, bclTemplateDocuments, stageDocuments, clientFormFields, documentTab, parseSelectionId]);
+
+  // Format task data helper
+  const formatTaskData = useCallback((task: any) => {
+    const formatDate = (dateString?: string | null) => {
+      if (!dateString) return '';
+      try {
+        return format(parseISO(dateString), 'yyyy-MM-dd');
+      } catch (e) {
+        return dateString;
+      }
+    };
+
+    return {
+      ...task,
+      applicant_name: task.applicant_name || task.company_name || 'Missing',
+      renewal_status: task.renewal_status || 'New',
     }
-  });
-
-  const companyDocuments = Array.from(documentsMap.values()).filter(item => item.category === 'company');
-  const individualDocuments = Array.from(documentsMap.values()).filter(item => item.category === 'individual');
-  const companyFields = Array.from(clientFieldsMap.values()).filter(item => item.category === 'company');
-  const individualFields = Array.from(clientFieldsMap.values()).filter(item => item.category === 'individual');
-
-  return {
-    documents: {
-      company: companyDocuments,
-      individual: individualDocuments
-    },
-    clientFields: {
-      company: companyFields,
-      individual: individualFields
-    },
-    bclTemplates: {
-      company: bclCompanyTemplates,
-      individual: bclIndividualTemplates
-    }
-  };
-}, [filteredTasks, taskClassRequirements, documents, bclTemplateDocuments, clientFormFields, documentTab, parseSelectionId]);
- // Format task data helper
- const formatTaskData = useCallback((task: any) => {
-   const formatDate = (dateString?: string | null) => {
-     if (!dateString) return '';
-     try {
-       return format(parseISO(dateString), 'yyyy-MM-dd');
-     } catch (e) {
-       return dateString;
-     }
-   };
-
-   return {
-     ...task,
-     applicant_name: task.applicant_name || task.company_name || 'Missing',
-     renewal_status: task.renewal_status || 'New',
-   }
- }, [groupedTasks, selectedApplicant]);
-
- if (documentsLoading) {
-   return (
-     <div className="flex h-[85vh] w-full">
-       {/* Sidebar */}
-       <div className={cn(
-         "w-64 border-r transition-all duration-300 ease-in-out bg-white",
-         !sidebarOpen && "hidden md:block"
-       )}>
-         <div className="p-4 border-b flex items-center justify-between">
-           <h2 className="text-lg font-semibold">Applicants</h2>
-           <Button
-             variant="ghost"
-             size="sm"
-             className="md:hidden"
-             onClick={() => setSidebarOpen(false)}
-           >
-             <ChevronLeft className="h-4 w-4" />
-           </Button>
-         </div>
-         <ScrollArea className="h-[calc(100%-60px)]">
-           <div className="space-y-1 p-2">
-             {groupedTasks.map((group, index) => (
-               <Button
-                 key={index}
-                 variant={selectedApplicant === group.applicantName ? "secondary" : "ghost"}
-                 className={cn(
-                   "w-full justify-start",
-                   selectedApplicant === group.applicantName ? "bg-muted" : "hover:bg-muted/50"
-                 )}
-                 onClick={() => handleSelectApplicant(group.applicantName)}
-               >
-                 <span className="truncate">{group.applicantName}</span>
-                 <Badge variant="outline" className="ml-2">
-                   {group.tasks.length}
-                 </Badge>
-               </Button>
-             ))}
-           </div>
-         </ScrollArea>
-       </div>
-
-       {/* Main Content */}
-       <div className="flex-1 flex flex-col border rounded-md bg-background shadow-sm">
-         {/* Table Container */}
-         <div className="overflow-auto flex-1">
-           <div className="flex items-center space-x-2">
-             <div className="h-4 w-4 border-2 border-t-2 border-t-primary rounded-full animate-spin"></div>
-             <span>Loading documents and fields...</span>
-           </div>
-         </div>
-       </div>
-     </div>
-   );
- }
-
- return (
-   <div className="flex h-[85vh] w-full">
-     {/* Sidebar */}
-     <div className={cn(
-       "w-64 border-r transition-all duration-300 ease-in-out bg-white",
-       !sidebarOpen && "hidden md:block"
-     )}>
-       <div className="p-4 border-b flex items-center justify-between">
-         <h2 className="text-lg font-semibold">Applicants</h2>
-         <Button
-           variant="ghost"
-           size="sm"
-           className="md:hidden"
-           onClick={() => setSidebarOpen(false)}
-         >
-           <ChevronLeft className="h-4 w-4" />
-         </Button>
-       </div>
-       <ScrollArea className="h-[calc(100%-60px)]">
-         <div className="space-y-1 p-2">
-           {groupedTasks.map((group, index) => (
-             <Button
-               key={index}
-               variant={selectedApplicant === group.applicantName ? "secondary" : "ghost"}
-               className={cn(
-                 "w-full justify-start",
-                 selectedApplicant === group.applicantName ? "bg-muted" : "hover:bg-muted/50"
-               )}
-               onClick={() => handleSelectApplicant(group.applicantName)}
-             >
-               <span className="truncate">{group.applicantName}</span>
-               <Badge variant="outline" className="ml-2">
-                 {group.tasks.length}
-               </Badge>
-             </Button>
-           ))}
-         </div>
-       </ScrollArea>
-     </div>
-
-     {/* Main Content */}
-     <div className="flex-1 flex flex-col border rounded-md bg-background shadow-sm">
-       {/* Table Container */}
-       <div className="overflow-auto flex-1">
-         {/* Stats Row */}
-         {showStats && (
-           <div className="border-b bg-gray-50 p-4">
-             <div className="flex items-center justify-between">
-               <div className="flex items-center gap-6">
-                 <div className="flex items-center gap-2">
-                   <div className="w-3 h-3 bg-green-500 rounded"></div>
-                   <span className="text-sm font-medium">Uploaded: {calculateStats.uploaded}</span>
-                 </div>
-                 <div className="flex items-center gap-2">
-                   <div className="w-3 h-3 bg-orange-500 rounded"></div>
-                   <span className="text-sm font-medium">Missing: {calculateStats.missing}</span>
-                 </div>
-                 <div className="flex items-center gap-2">
-                   <div className="w-3 h-3 bg-gray-400 rounded"></div>
-                   <span className="text-sm font-medium">N/A: {calculateStats.na}</span>
-                 </div>
-                 <div className="flex items-center gap-2">
-                   <BarChart3 className="w-4 h-4 text-blue-600" />
-                   <span className="text-sm font-medium">Total: {calculateStats.total}</span>
-                 </div>
-               </div>
-               <Button
-                 variant="ghost"
-                 size="sm"
-                 onClick={() => setShowStats(false)}
-                 className="text-gray-500 hover:text-gray-700"
-               >
-                 <EyeOff className="h-4 w-4 mr-2" />
-                 Hide Stats
-               </Button>
-             </div>
-           </div>
-         )}
-
-         {/* Show Stats Button when hidden */}
-         {!showStats && (
-           <div className="border-b bg-gray-50 p-2">
-             <Button
-               variant="ghost"
-               size="sm"
-               onClick={() => setShowStats(true)}
-               className="text-gray-500 hover:text-gray-700"
-             >
-               <BarChart3 className="h-4 w-4 mr-2" />
-               Show Stats
-             </Button>
-           </div>
-         )}
-
-         <Table className="min-w-full w-full border-collapse">
-           <TableHeader className="sticky top-0 z-10">
-             {/* Main header row - Applicant Names */}
-             <TableRow className="h-12">
-               <TableHead
-                 rowSpan={3}
-                 className="sticky left-0 bg-blue-600 border-r border-blue-500 w-16 z-20 text-white text-center font-semibold"
-               >
-                 #
-               </TableHead>
-               <TableHead
-                 rowSpan={3}
-                 className="sticky left-16 bg-blue-600 border-r border-blue-500 w-[300px] z-20 text-white font-semibold"
-               >
-                 Requirements
-               </TableHead>
-               {filteredGroupedTasks.map((group, groupIndex) => {
-                 const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                 const hasDependant = group.tasks.some(task => task.applicant_type === 'dependant');
-                 const dependantCount = group.dependantIds.length;
-                 const columnsCount = hasClassD ? 2 + dependantCount + 1 : 1 + dependantCount; // principal + dependants + understudy(if applicable)
-
-                 return (
-                   <TableHead
-                     key={`applicant-${groupIndex}`}
-                     colSpan={columnsCount}
-                     className="bg-blue-700 border-r border-blue-500 text-white text-center font-bold px-2"
-                   >
-                     <div className="flex flex-col items-center gap-1">
-                       <div className="flex items-center gap-1"><span className="text-sm font-bold truncate max-w-[200px]">
-                           {group.applicantName}
-                         </span>
-                         {hasDependant && (
-                           <UserCheck className="h-3 w-3 text-white" title="Has dependant relationship" />
-                         )}
-                       </div>
-                       <span className="text-xs opacity-75">
-                         {group.tasks.length} application{group.tasks.length !== 1 ? 's' : ''}
-                         {dependantCount > 0 && ` • ${dependantCount} dependant${dependantCount !== 1 ? 's' : ''}`}
-                       </span>
-                     </div>
-                   </TableHead>
-                 );
-               })}
-             </TableRow>
-
-             {/* Updated Applicant Name Row - Now includes individual dependant columns */}
-             <TableRow className="h-14">
-               {filteredGroupedTasks.map((group, groupIndex) => {
-                 const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-
-                 // Robustly find IDs for each role by checking all tasks in the group
-                 const { principalId, understudyId } = group.tasks.reduce(
-                   (acc, task) => {
-                     // The primary ID is from the task for that specific applicant type
-                     if (task.applicant_type === 'principal') acc.principalId = task.individual_id;
-                     if (task.applicant_type === 'understudy') acc.understudyId = task.individual_id;
-
-                     // Use the relationship fields as fallbacks or to link across tasks
-                     if (task.principal_member) acc.principalId = acc.principalId || task.principal_member;
-                     if (task.understudy_member) acc.understudyId = acc.understudyId || task.understudy_member;
-
-                     return acc;
-                   },
-                   { principalId: null, understudyId: null }
-                 );
-
-                 // Look up names using the IDs from the central `individualNames` map.
-                 const principalName = (principalId && individualNames[principalId]);
-                 const understudyName = (understudyId && individualNames[understudyId]);
-
-                 const columns = [
-                   // Principal Column
-                   <TableHead
-                     key={`${groupIndex}-principal`}
-                     colSpan={1}
-                     className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2"
-                   >
-                     <div className="flex flex-col items-center gap-1">
-                       <span className="text-xs font-bold">Principal</span>
-                       {principalName ? (
-                         <div className="flex items-center gap-1">
-                           <UserCheck className="h-3 w-3 text-blue-200" />
-                           <span className="text-xs truncate max-w-[100px]" title={principalName}>
-                             {principalName}
-                           </span>
-                         </div>
-                       ) : (
-                         <span className="text-xs text-muted-foreground">-</span>
-                       )}
-                     </div>
-                   </TableHead>
-                 ];
-
-                 // Add individual columns for each dependant
-                 group.dependantIds.forEach((dependantId, depIndex) => {
-                   const dependantName = individualNames[dependantId];
-                   columns.push(
-                     <TableHead
-                       key={`${groupIndex}-dependant-${dependantId}`}
-                       colSpan={1}
-                       className="bg-blue-500 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2"
-                     >
-                       <div className="flex flex-col items-center gap-1">
-                         <span className="text-xs font-bold">Dependant {depIndex + 1}</span>
-                         {dependantName ? (
-                           <div className="flex items-center gap-1">
-                             <Users className="h-3 w-3 text-blue-200" />
-                             <span className="text-xs truncate max-w-[100px]" title={dependantName}>
-                               {dependantName}
-                             </span>
-                           </div>
-                         ) : (
-                           <span className="text-xs text-muted-foreground">-</span>
-                         )}
-                       </div>
-                     </TableHead>
-                   );
-                 });
-
-                 // Add Understudy Column if needed
-                 if (hasClassD) {
-                   columns.push(
-                     <TableHead
-                       key={`${groupIndex}-understudy`}
-                       colSpan={1}
-                       className="bg-blue-400 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2"
-                     >
-                       <div className="flex flex-col items-center gap-1">
-                         <span className="text-xs font-bold">Understudy</span>
-                         {understudyName ? (
-                           <div className="flex items-center gap-1">
-                             <UserCheck className="h-3 w-3 text-blue-200" />
-                             <span className="text-xs truncate max-w-[100px]" title={understudyName}>
-                               {understudyName}
-                             </span>
-                           </div>
-                         ) : (
-                           <span className="text-xs text-muted-foreground">-</span>
-                         )}
-                       </div>
-                     </TableHead>
-                   );
-                 }
-
-                 return columns;
-               })}
-             </TableRow>
-
-             {/* Status row with plus/minus icons */}
-             <TableRow className="h-8">
-               {filteredGroupedTasks.map((group, groupIndex) => {
-                 const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                 const principalTask = group.tasks.find(task => task.applicant_type === 'principal');
-                 const understudyTask = group.tasks.find(task => task.applicant_type === 'understudy');
-
-                 const columns = [
-                   <TableHead
-                     key={`${groupIndex}-principal-status`}
-                     colSpan={1}
-                     className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
-                   >
-                     <div className="flex flex-col items-center gap-1">
-                       {principalTask && (
-                         <Button
-                           variant="ghost"
-                           size="sm"
-                           className="h-6 w-6 p-0"
-                           onClick={() => toggleDocumentExpansion(principalTask.id)}
-                           title="Toggle document fields"
-                         >
-                           {expandedDocuments.has(principalTask.id) ? (
-                             <Minus className="h-4 w-4" />
-                           ) : (
-                             <Plus className="h-4 w-4" />
-                           )}
-                         </Button>
-                       )}
-                     </div>
-                   </TableHead>
-                 ];
-
-                 // Add status buttons for each dependant
-                 group.dependantIds.forEach((dependantId) => {
-                   columns.push(
-                     <TableHead
-                       key={`${groupIndex}-dependant-${dependantId}-status`}
-                       colSpan={1}
-                       className="bg-blue-500 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
-                     >
-                       <div className="flex flex-col items-center gap-1">
-                         <Button
-                           variant="ghost"
-                           size="sm"
-                           className="h-6 w-6 p-0"
-                           onClick={() => toggleDocumentExpansion(`dependant-${dependantId}`)}
-                           title="Toggle document fields"
-                         >
-                           {expandedDocuments.has(`dependant-${dependantId}`) ? (
-                             <Minus className="h-4 w-4" />
-                           ) : (
-                             <Plus className="h-4 w-4" />
-                           )}
-                         </Button>
-                       </div>
-                     </TableHead>
-                   );
-                 });
-
-                 if (hasClassD) {
-                   columns.push(
-                     <TableHead
-                       key={`${groupIndex}-understudy-status`}
-                       colSpan={1}
-                       className="bg-blue-400 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
-                     >
-                       <div className="flex flex-col items-center gap-1">
-                         {understudyTask && (
-                           <Button
-                             variant="ghost"
-                             size="sm"
-                             className="h-6 w-6 p-0"
-                             onClick={() => toggleDocumentExpansion(understudyTask.id)}
-                             title="Toggle document fields"
-                           >
-                             {expandedDocuments.has(understudyTask.id) ? (
-                               <Minus className="h-4 w-4" />
-                             ) : (
-                               <Plus className="h-4 w-4" />
-                             )}
-                           </Button>
-                         )}
-                       </div>
-                     </TableHead>
-                   );
-                 }
-
-                 return columns;
-               })}
-             </TableRow>
-           </TableHeader>
-
-           <TableBody className="divide-y">
-             {loading ? (
-               <TableRow>
-                 <TableCell
-                   colSpan={2 + groupedTasks.reduce((acc, group) => acc + (group.tasks.some(task => task.class_id === CLASS_D_ID) ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length), 0)}
-                   className="h-24 text-center bg-gray-50"
-                 >
-                   <div className="flex items-center justify-center space-x-2">
-                     <div className="h-4 w-4 border-2 border-t-2 border-t-primary rounded-full animate-spin"></div>
-                     <span>Loading requirements...</span>
-                   </div>
-                 </TableCell>
-               </TableRow>
-             ) : error ? (
-               <TableRow>
-                 <TableCell
-                   colSpan={2 + groupedTasks.reduce((acc, group) => acc + (group.tasks.some(task => task.class_id === CLASS_D_ID) ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length), 0)}
-                   className="h-24 text-center text-destructive bg-red-50"
-                 >
-                   <div className="flex items-center justify-center space-x-2">
-                     <AlertTriangle className="h-5 w-5 text-destructive" />
-                     <span>{error}</span>
-                   </div>
-                 </TableCell>
-               </TableRow>
-             ) : (
-               <>
-                 {/* Documents & Fields Section */}
-                 {(organizedRequirements.documents.company.length > 0 || organizedRequirements.documents.individual.length > 0) && (
-                   <>
-                     {/* Main Documents & Fields Header */}
-                     <TableRow className="bg-gradient-to-r from-slate-100 to-slate-50 border-y-2 border-slate-300">
-                       <TableCell className="sticky left-0 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5] text-center font-bold text-slate-700">
-                         <FileText className="h-4 w-4 mx-auto" />
-                       </TableCell>
-                       <TableCell className="sticky left-16 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5]">
-                         <div className="flex items-center gap-2 px-2 py-2">
-                           <span className="font-bold text-slate-700 text-lg">Documents & Fields</span>
-                           <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">
-                             {organizedRequirements.documents.company.length + organizedRequirements.documents.individual.length}
-                           </span>
-                         </div>
-                       </TableCell>
-                       {filteredGroupedTasks.map((group, groupIndex) => {
-                         const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                         const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
-
-                         return Array.from({ length: columnsCount }, (_, idx) => (
-                           <TableCell
-                             key={`doc-section-${groupIndex}-${idx}`}
-                             className="bg-gradient-to-r from-slate-100 to-slate-50 border-r text-center"
-                           >
-                             <div className="h-px bg-slate-300 w-full"></div>
-                           </TableCell>
-                         ));
-                       })}
-                     </TableRow>
-
-                     {/* Company Documents Subsection */}
-                     {organizedRequirements.documents.company.length > 0 && (
-                       <>
-                         <TableRow className="bg-blue-100">
-                           <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
-                           <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
-                             <span className="font-semibold text-blue-700">Company Documents</span>
-                             <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
-                               {organizedRequirements.documents.company.length}
-                             </span>
-                           </TableCell>
-                           {filteredGroupedTasks.map((group, groupIndex) => {
-                             const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                             const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
-
-                             return Array.from({ length: columnsCount }, (_, idx) => (
-                               <TableCell
-                                 key={`company-doc-header-${groupIndex}-${idx}`}
-                                 className="bg-blue-100 border-r text-center"
-                               >
-                                 -
-                               </TableCell>
-                             ));
-                           })}
-                         </TableRow>
-
-                         {/* Company Document Items */}
-                         {organizedRequirements.documents.company
-                           .slice()
-                           .sort((a, b) => (a.document.custom_order || 0) - (b.document.custom_order || 0))
-                           .map((docItem, docIndex) => {
-                             const isExpanded = expandedDocuments.has(docItem.document.id);
-                             const displayText = docItem.document.custom_order ? `${docItem.document.custom_order}` : `${docIndex + 1}.`;
-
-                             return (
-                               <React.Fragment key={`company-doc-${docItem.document.id}`}>
-                                 {/* Document Row */}
-                                 <TableRow className="group bg-blue-50 hover:bg-blue-100">
-                                   <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
-                                     {displayText}
-                                   </TableCell>
-                                   <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
-                                     <div className="flex items-center px-2">
-                                       <span className="text-sm font-semibold text-gray-800">
-                                         {docItem.document.display_name}
-                                       </span>
-                                       {docItem.fields.length > 0 && (
-                                         <Button
-                                           variant="ghost"
-                                           size="sm"
-                                           className="h-6 w-6 p-0 ml-2"
-                                           onClick={() => toggleDocumentExpansion(docItem.document.id)}
-                                         >
-                                           {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                         </Button>
-                                       )}
-                                     </div>
-                                   </TableCell>
-                                   {filteredGroupedTasks.map((group, groupIndex) => {
-                                     const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                                     const referenceTask = group.tasks[0];
-
-                                     const columns = [
-                                       <TableCell key={`${docItem.document.id}-${groupIndex}-principal`} className="text-center border p-1">
-                                         {renderDocumentStatus(referenceTask, docItem.document, 'principal')}
-                                       </TableCell>
-                                     ];
-
-                                     // Add columns for each dependant
-                                     group.dependantIds.forEach((dependantId) => {
-                                       columns.push(
-                                         <TableCell key={`${docItem.document.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
-                                           {renderDocumentStatus(referenceTask, docItem.document, 'dependant', dependantId)}
-                                         </TableCell>
-                                       );
-                                     });
-
-                                     if (hasClassD) {
-                                       columns.push(
-                                         <TableCell key={`${docItem.document.id}-${groupIndex}-understudy`} className="text-center border p-1">
-                                           {renderDocumentStatus(referenceTask, docItem.document, 'understudy')}
-                                         </TableCell>
-                                       );
-                                     }
-
-                                     return columns;
-                                   })}
-                                 </TableRow>
-
-                                 {/* Document Fields (if expanded) */}
-                                 {isExpanded && docItem.fields.map((field, fieldIndex) => (
-                                   <TableRow key={`company-field-${field.id}`} className="group bg-blue-25 hover:bg-blue-50">
-                                     <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] text-center text-sm text-gray-500">
-                                       {docIndex + 1}.{fieldIndex + 1}
-                                     </TableCell>
-                                     <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5]">
-                                       <div className="flex items-center px-2 pl-8">
-                                         <span className="text-sm text-gray-700">{field.name}</span>
-                                         <Badge variant="outline" className="text-xs ml-2 bg-yellow-50 text-yellow-700">
-                                           Field
-                                         </Badge>
-                                         {field.type && (
-                                           <span className="text-xs text-gray-400 ml-2">
-                                             ({field.type})
-                                           </span>
-                                         )}
-                                       </div>
-                                     </TableCell>
-                                     {filteredGroupedTasks.map((group, groupIndex) => {
-                                       const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                                       const referenceTask = group.tasks[0];
-
-                                       const columns = [
-                                         <TableCell key={`${field.id}-${groupIndex}-principal`} className="text-center border p-1">
-                                           {renderDocumentStatus(referenceTask, field, 'principal')}
-                                         </TableCell>
-                                       ];
-
-                                       // Add columns for each dependant
-                                       group.dependantIds.forEach((dependantId) => {
-                                         columns.push(
-                                           <TableCell key={`${field.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
-                                             {renderDocumentStatus(referenceTask, field, 'dependant', dependantId)}
-                                           </TableCell>
-                                         );
-                                       });
-
-                                       if (hasClassD) {
-                                         columns.push(
-                                           <TableCell key={`${field.id}-${groupIndex}-understudy`} className="text-center border p-1">
-                                             {renderDocumentStatus(referenceTask, field, 'understudy')}
-                                           </TableCell>
-                                         );
-                                       }
-
-                                       return columns;
-                                     })}
-                                   </TableRow>
-                                 ))}
-                               </React.Fragment>
-                             );
-                           })}
-                       </>
-                     )}
-
-                     {/* Individual Documents Subsection */}
-                     {organizedRequirements.documents.individual.length > 0 && (
-                       <>
-                         <TableRow className="bg-blue-100">
-                           <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
-                           <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
-                             <span className="font-semibold text-blue-700">Individual Documents</span>
-                             <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
-                               {organizedRequirements.documents.individual.length}
-                             </span>
-                           </TableCell>
-                           {filteredGroupedTasks.map((group, groupIndex) => {
-                             const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                             const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
-
-                             return Array.from({ length: columnsCount }, (_, idx) => (
-                               <TableCell
-                                 key={`individual-doc-header-${groupIndex}-${idx}`}
-                                 className="bg-blue-100 border-r text-center"
-                               >
-                                 -
-                               </TableCell>
-                             ));
-                           })}
-                         </TableRow>
-
-                         {/* Individual Document Items - Same pattern as company documents */}
-                         {organizedRequirements.documents.individual
-                           .slice()
-                           .sort((a, b) => (a.document.custom_order || 0) - (b.document.custom_order || 0))
-                           .map((docItem, docIndex) => {
-                             const isExpanded = expandedDocuments.has(docItem.document.id);
-                             const displayText = docItem.document.custom_order ? `${docItem.document.custom_order}` : `${docIndex + 1}.`;
-
-                             return (
-                               <React.Fragment key={`individual-doc-${docItem.document.id}`}>
-                                 {/* Document Row */}
-                                 <TableRow className="group bg-blue-50 hover:bg-blue-100">
-                                   <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
-                                     {displayText}
-                                   </TableCell>
-                                   <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
-                                     <div className="flex items-center px-2">
-                                       <span className="text-sm font-semibold text-gray-800">
-                                         {docItem.document.display_name}
-                                       </span>
-                                       {docItem.fields.length > 0 && (
-                                         <Button
-                                           variant="ghost"
-                                           size="sm"
-                                           className="h-6 w-6 p-0 ml-2"
-                                           onClick={() => toggleDocumentExpansion(docItem.document.id)}
-                                         >
-                                           {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                         </Button>
-                                       )}
-                                     </div>
-                                   </TableCell>
-                                   {filteredGroupedTasks.map((group, groupIndex) => {
-                                     const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                                     const referenceTask = group.tasks[0];
-
-                                     const columns = [
-                                       <TableCell key={`${docItem.document.id}-${groupIndex}-principal`} className="text-center border p-1">
-                                         {renderDocumentStatus(referenceTask, docItem.document, 'principal')}
-                                       </TableCell>
-                                     ];
-
-                                     // Add columns for each dependant
-                                     group.dependantIds.forEach((dependantId) => {
-                                       columns.push(
-                                         <TableCell key={`${docItem.document.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
-                                           {renderDocumentStatus(referenceTask, docItem.document, 'dependant', dependantId)}
-                                         </TableCell>
-                                       );
-                                     });
-
-                                     if (hasClassD) {
-                                       columns.push(
-                                         <TableCell key={`${docItem.document.id}-${groupIndex}-understudy`} className="text-center border p-1">
-                                           {renderDocumentStatus(referenceTask, docItem.document, 'understudy')}
-                                         </TableCell>
-                                       );
-                                     }
-
-                                     return columns;
-                                   })}
-                                 </TableRow>
-
-                                 {/* Document Fields (if expanded) - Same pattern */}
-                                 {isExpanded && docItem.fields.map((field, fieldIndex) => (
-                                   <TableRow key={`individual-field-${field.id}`} className="group bg-blue-25 hover:bg-blue-50">
-                                     <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] text-center text-sm text-gray-500">
-                                       {docIndex + 1}.{fieldIndex + 1}
-                                     </TableCell>
-                                     <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5]">
-                                       <div className="flex items-center px-2 pl-8">
-                                         <span className="text-sm text-gray-700">{field.name}</span>
-                                         <Badge variant="outline" className="text-xs ml-2 bg-yellow-50 text-yellow-700">
-                                           Field
-                                         </Badge>
-                                         {field.type && (
-                                           <span className="text-xs text-gray-400 ml-2">
-                                             ({field.type})
-                                           </span>
-                                         )}
-                                       </div>
-                                     </TableCell>
-                                     {filteredGroupedTasks.map((group, groupIndex) => {
-                                       const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                                       const referenceTask = group.tasks[0];
-
-                                       const columns = [
-                                         <TableCell key={`${field.id}-${groupIndex}-principal`} className="text-center border p-1">
-                                           {renderDocumentStatus(referenceTask, field, 'principal')}
-                                         </TableCell>
-                                       ];
-
-                                       // Add columns for each dependant
-                                       group.dependantIds.forEach((dependantId) => {
-                                         columns.push(
-                                           <TableCell key={`${field.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
-                                             {renderDocumentStatus(referenceTask, field, 'dependant', dependantId)}
-                                           </TableCell>
-                                         );
-                                       });
-
-                                       if (hasClassD) {
-                                         columns.push(
-                                           <TableCell key={`${field.id}-${groupIndex}-understudy`} className="text-center border p-1">
-                                             {renderDocumentStatus(referenceTask, field, 'understudy')}
-                                           </TableCell>
-                                         );
-                                       }
-
-                                       return columns;
-                                     })}
-                                   </TableRow>
-                                 ))}
-                               </React.Fragment>
-                             );
-                           })}
-                       </>
-                     )}
-                   </>
-                 )}
-
-                 {/* BCL Workings Section - NEW */}
-                 {(organizedRequirements.bclTemplates.company.length > 0 || organizedRequirements.bclTemplates.individual.length > 0) && (
-                   <>
-                     {/* Main BCL Workings Header */}
-                     <TableRow className="bg-gradient-to-r from-yellow-100 to-yellow-50 border-y-2 border-yellow-300">
-                       <TableCell className="sticky left-0 bg-gradient-to-r from-yellow-100 to-yellow-50 border-r z-[5] text-center font-bold text-yellow-700">
-                         <Briefcase className="h-4 w-4 mx-auto" />
-                       </TableCell>
-                       <TableCell className="sticky left-16 bg-gradient-to-r from-yellow-100 to-yellow-50 border-r z-[5]">
-                         <div className="flex items-center gap-2 px-2 py-2">
-                           <span className="font-bold text-yellow-700 text-lg">BCL Workings</span>
-                           <span className="text-sm bg-yellow-200 text-yellow-700 px-2 py-1 rounded-full ml-2">
-                             {organizedRequirements.bclTemplates.company.length + organizedRequirements.bclTemplates.individual.length}
-                           </span>
-                         </div>
-                       </TableCell>
-                       {filteredGroupedTasks.map((group, groupIndex) => {
-                         const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                         const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
-
-                         return Array.from({ length: columnsCount }, (_, idx) => (
-                           <TableCell
-                             key={`bcl-section-${groupIndex}-${idx}`}
-                             className="bg-gradient-to-r from-yellow-100 to-yellow-50 border-r text-center"
-                           >
-                             <div className="h-px bg-yellow-300 w-full"></div>
-                           </TableCell>
-                         ));
-                       })}
-                     </TableRow>
-
-                     {/* Company BCL Templates Subsection */}
-                     {organizedRequirements.bclTemplates.company.length > 0 && (
-                       <>
-                         <TableRow className="bg-yellow-100">
-                           <TableCell className="sticky left-0 bg-yellow-100 border-r z-[5] text-center font-semibold text-yellow-700"></TableCell>
-                           <TableCell className="sticky left-16 bg-yellow-100 border-r z-[5] px-4 py-2">
-                             <span className="font-semibold text-yellow-700">Company BCL Templates</span>
-                             <span className="text-sm bg-yellow-200 text-yellow-700 px-2 py-1 rounded-full ml-2">
-                               {organizedRequirements.bclTemplates.company.length}
-                             </span>
-                           </TableCell>
-                           {filteredGroupedTasks.map((group, groupIndex) => {
-                             const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                             const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
-
-                             return Array.from({ length: columnsCount }, (_, idx) => (
-                               <TableCell
-                                 key={`company-bcl-header-${groupIndex}-${idx}`}
-                                 className="bg-yellow-100 border-r text-center"
-                               >
-                                 -
-                               </TableCell>
-                             ));
-                           })}
-                         </TableRow>
-
-                         {/* Company BCL Template Items */}
-                         {organizedRequirements.bclTemplates.company
-                           .slice()
-                           .sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0))
-                           .map((template, templateIndex) => {
-                             const displayText = template.custom_order ? `${template.custom_order}` : `BCL-${templateIndex + 1}`;
-
-                             return (
-                               <TableRow key={`company-bcl-${template.id}`} className="group bg-yellow-50 hover:bg-yellow-100">
-                                 <TableCell className="sticky left-0 bg-yellow-50 group-hover:bg-yellow-100 border-r z-[5] text-center text-sm font-semibold">
-                                   {displayText}
-                                 </TableCell>
-                                 <TableCell className="sticky left-16 bg-yellow-50 group-hover:bg-yellow-100 border-r z-[5]">
-                                   <div className="flex items-center px-2">
-                                     <span className="text-sm font-semibold text-gray-800">
-                                       {template.display_name}
-                                     </span>
-                                     <Badge variant="outline" className="text-xs ml-2 bg-yellow-50 text-yellow-700">
-                                       Template
-                                     </Badge>
-                                   </div>
-                                 </TableCell>
-                                 {filteredGroupedTasks.map((group, groupIndex) => {
-                                   const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                                   const referenceTask = group.tasks[0];
-
-                                   const columns = [
-                                     <TableCell key={`${template.id}-${groupIndex}-principal`} className="text-center border p-1">
-                                       {renderDocumentStatus(referenceTask, template, 'principal')}
-                                     </TableCell>
-                                   ];
-
-                                   // Add columns for each dependant
-                                   group.dependantIds.forEach((dependantId) => {
-                                     columns.push(
-                                       <TableCell key={`${template.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
-                                         {renderDocumentStatus(referenceTask, template, 'dependant', dependantId)}
-                                       </TableCell>
-                                     );
-                                   });
-
-                                   if (hasClassD) {
-                                     columns.push(
-                                       <TableCell key={`${template.id}-${groupIndex}-understudy`} className="text-center border p-1">
-                                         {renderDocumentStatus(referenceTask, template, 'understudy')}
-                                       </TableCell>
-                                     );
-                                   }
-
-                                   return columns;
-                                 })}
-                               </TableRow>
-                             );
-                           })}
-                       </>
-                     )}
-
-                     {/* Individual BCL Templates Subsection */}
-                     {organizedRequirements.bclTemplates.individual.length > 0 && (
-                       <>
-                         <TableRow className="bg-yellow-100">
-                           <TableCell className="sticky left-0 bg-yellow-100 border-r z-[5] text-center font-semibold text-yellow-700"></TableCell>
-                           <TableCell className="sticky left-16 bg-yellow-100 border-r z-[5] px-4 py-2">
-                             <span className="font-semibold text-yellow-700">Individual BCL Templates</span>
-                             <span className="text-sm bg-yellow-200 text-yellow-700 px-2 py-1 rounded-full ml-2">
-                               {organizedRequirements.bclTemplates.individual.length}
-                             </span>
-                           </TableCell>
-                           {filteredGroupedTasks.map((group, groupIndex) => {
-                             const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                             const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
-
-                             return Array.from({ length: columnsCount }, (_, idx) => (
-                               <TableCell
-                                 key={`individual-bcl-header-${groupIndex}-${idx}`}
-                                 className="bg-yellow-100 border-r text-center"
-                               >
-                                 -
-                               </TableCell>
-                             ));
-                           })}
-                         </TableRow>
-
-                         {/* Individual BCL Template Items */}
-                         {organizedRequirements.bclTemplates.individual
-                           .slice()
-                           .sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0))
-                           .map((template, templateIndex) => {
-                             const displayText = template.custom_order ? `${template.custom_order}` : `BCL-${templateIndex + 1}`;
-
-                             return (
-                               <TableRow key={`individual-bcl-${template.id}`} className="group bg-yellow-50 hover:bg-yellow-100">
-                                 <TableCell className="sticky left-0 bg-yellow-50 group-hover:bg-yellow-100 border-r z-[5] text-center text-sm font-semibold">
-                                   {displayText}
-                                 </TableCell>
-                                 <TableCell className="sticky left-16 bg-yellow-50 group-hover:bg-yellow-100 border-r z-[5]">
-                                   <div className="flex items-center px-2">
-                                     <span className="text-sm font-semibold text-gray-800">
-                                       {template.display_name}
-                                     </span>
-                                     <Badge variant="outline" className="text-xs ml-2 bg-yellow-50 text-yellow-700">
-                                       Template
-                                     </Badge>
-                                   </div>
-                                 </TableCell>
-                                 {filteredGroupedTasks.map((group, groupIndex) => {
-                                   const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                                   const referenceTask = group.tasks[0];
-
-                                   const columns = [
-                                     <TableCell key={`${template.id}-${groupIndex}-principal`} className="text-center border p-1">
-                                       {renderDocumentStatus(referenceTask, template, 'principal')}
-                                     </TableCell>
-                                   ];
-
-                                   // Add columns for each dependant
-                                   group.dependantIds.forEach((dependantId) => {
-                                     columns.push(
-                                       <TableCell key={`${template.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
-                                         {renderDocumentStatus(referenceTask, template, 'dependant', dependantId)}
-                                       </TableCell>
-                                     );
-                                   });
-
-                                   if (hasClassD) {
-                                     columns.push(
-                                       <TableCell key={`${template.id}-${groupIndex}-understudy`} className="text-center border p-1">
-                                         {renderDocumentStatus(referenceTask, template, 'understudy')}
-                                       </TableCell>
-                                     );
-                                   }
-
-                                   return columns;
-                                 })}
-                               </TableRow>
-                             );
-                           })}
-                       </>
-                     )}
-                   </>
-                 )}
-
-                 {/* Client Form Fields Section */}
-                 {(organizedRequirements.clientFields.company.length > 0 || organizedRequirements.clientFields.individual.length > 0) && (
-                   <>
-                     {/* Main Client Form Fields Header */}
-                     <TableRow className="bg-gradient-to-r from-slate-100 to-slate-50 border-y-2 border-slate-300">
-                       <TableCell className="sticky left-0 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5] text-center font-bold text-slate-700">
-                         <Users className="h-4 w-4 mx-auto" />
-                       </TableCell>
-                       <TableCell className="sticky left-16 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5]">
-                         <div className="flex items-center gap-2 px-2 py-2">
-                           <span className="font-bold text-slate-700 text-lg">Client Form Fields</span>
-                           <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">
-                             {organizedRequirements.clientFields.company.length + organizedRequirements.clientFields.individual.length}
-                           </span>
-                         </div>
-                       </TableCell>
-                       {filteredGroupedTasks.map((group, groupIndex) => {
-                         const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                         const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
-
-                         return Array.from({ length: columnsCount }, (_, idx) => (
-                           <TableCell
-                             key={`client-section-${groupIndex}-${idx}`}
-                             className="bg-gradient-to-r from-slate-100 to-slate-50 border-r text-center"
-                           >
-                             <div className="h-px bg-slate-300 w-full"></div>
-                           </TableCell>
-                         ));
-                       })}
-                     </TableRow>
-
-                     {/* Individual Client Fields Subsection */}
-                     {organizedRequirements.clientFields.individual.length > 0 && (
-                       <>
-                         <TableRow className="bg-blue-100">
-                           <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-gray-700"></TableCell>
-                           <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
-                             <span className="font-semibold text-gray-700">Individual Fields</span>
-                             <span className="text-sm bg-blue-200 text-gray-700 px-2 py-1 rounded-full ml-2">
-                               {organizedRequirements.clientFields.individual.length}
-                             </span>
-                           </TableCell>
-                           {filteredGroupedTasks.map((group, groupIndex) => {
-                             const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                             const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
-
-                             return Array.from({ length: columnsCount }, (_, idx) => (
-                               <TableCell
-                                 key={`individual-field-header-${groupIndex}-${idx}`}
-                                 className="bg-blue-100 border-r text-center"
-                               >
-                                 -
-                               </TableCell>
-                             ));
-                           })}
-                         </TableRow>
-
-                         {/* Individual Client Field Items */}
-                         {organizedRequirements.clientFields.individual.map((fieldItem, fieldIndex) => (
-                           <TableRow key={`individual-field-${fieldItem.field.selectionId}`} className="group bg-blue-50 hover:bg-blue-100">
-                             <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
-                               {fieldIndex + 1}
-                             </TableCell>
-                             <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
-                               <div className="flex items-center px-2">
-                                 <span className="text-sm font-medium text-gray-700">
-                                   {fieldItem.field.tableHeader || fieldItem.field.label}
-                                 </span>
-                                 {fieldItem.field.type && (
-                                   <span className="text-xs text-gray-400 ml-2">
-                                     ({fieldItem.field.type})
-                                   </span>
-                                 )}
-                               </div>
-                             </TableCell>
-                             {filteredGroupedTasks.map((group, groupIndex) => {
-                               const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                               const principalTask = group.tasks.find(task => task.applicant_type === 'principal');
-                               const understudyTask = group.tasks.find(task => task.applicant_type === 'understudy');
-
-                               const columns = [
-                                 <TableCell key={`${fieldItem.field.selectionId}-${groupIndex}-principal`} className="text-center border p-1">
-                                   {principalTask ? renderClientFieldData(principalTask, fieldItem) :
-                                     <span className="text-gray-400 text-xs">N/A</span>}
-                                 </TableCell>
-                               ];
-
-                               // Add columns for each dependant
-                               group.dependantIds.forEach((dependantId) => {
-                                 // Find a task that has this dependant ID in their dependant_member array
-                                 const dependantTask = group.tasks.find(task => 
-                                   task.dependant_member && 
-                                   Array.isArray(task.dependant_member) && 
-                                   task.dependant_member.some((dep: any) => dep.id === dependantId)
-                                 );
-                                 
-                                 columns.push(
-                                   <TableCell key={`${fieldItem.field.selectionId}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
-                                     {dependantTask ? renderClientFieldData(dependantTask, fieldItem) :
-                                       <span className="text-gray-400 text-xs">N/A</span>}
-                                   </TableCell>
-                                 );
-                               });
-
-                               if (hasClassD) {
-                                 columns.push(
-                                   <TableCell key={`${fieldItem.field.selectionId}-${groupIndex}-understudy`} className="text-center border p-1">
-                                     {understudyTask ? renderClientFieldData(understudyTask, fieldItem) :
-                                       <span className="text-gray-400 text-xs">N/A</span>}
-                                   </TableCell>
-                                 );
-                               }
-
-                               return columns;
-                             })}
-                           </TableRow>
-                         ))}
-                       </>
-                     )}
-                   </>
-                 )}
-
-                 {/* Empty state */}
-                 {organizedRequirements.documents.company.length === 0 &&
-                   organizedRequirements.documents.individual.length === 0 &&
-                   organizedRequirements.bclTemplates.company.length === 0 &&
-                   organizedRequirements.bclTemplates.individual.length === 0 &&
-                   organizedRequirements.clientFields.company.length === 0 &&
-                   organizedRequirements.clientFields.individual.length === 0 && (
-                     <TableRow>
-                       <TableCell
-                         colSpan={2 + groupedTasks.reduce((acc, group) => acc + (group.tasks.some(task => task.class_id === CLASS_D_ID) ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length), 0)}
-                         className="text-center p-8 text-muted-foreground bg-gray-50"
-                       >
-                         <div className="flex flex-col items-center space-y-2">
-                           <FileText className="h-8 w-8 text-muted-foreground/50" />
-                           <p className="font-medium">No requirements found</p>
-                           <p className="text-sm text-muted-foreground">
-                             No selected documents, BCL templates, or client fields to display for {documentTab} applications
-                           </p>
-                         </div>
-                       </TableCell>
-                     </TableRow>
-                   )}
-               </>
-             )}
-           </TableBody>
-         </Table>
-       </div>
-
-       {/* Footer with summary information */}
-       <div className="border-t bg-gray-50 p-3">
-         <div className="flex items-center justify-between text-sm text-gray-600">
-           <div className="flex items-center gap-4">
-             <span>
-               <strong>{filteredTasks.length}</strong> {activeTab === 'completed' ? 'completed' : 'active'} applications
-             </span>
-             <span>
-               <strong>{groupedTasks.length}</strong> applicant{groupedTasks.length !== 1 ? 's' : ''}
-             </span>
-             <span>
-               <strong>{organizedRequirements.documents.company.length + organizedRequirements.documents.individual.length}</strong> document items
-             </span>
-             <span>
-               <strong>{organizedRequirements.bclTemplates.company.length + organizedRequirements.bclTemplates.individual.length}</strong> BCL templates
-             </span>
-             <span>
-               <strong>{organizedRequirements.clientFields.company.length + organizedRequirements.clientFields.individual.length}</strong> client fields
-             </span>
-           </div>
-           <div className="flex items-center gap-2">
-             <div className="flex items-center gap-1">
-               <div className="w-3 h-3 bg-green-500 rounded"></div>
-               <span className="text-xs">Uploaded ({calculateStats.uploaded})</span>
-             </div>
-             <div className="flex items-center gap-1">
-               <div className="w-3 h-3 bg-orange-500 rounded"></div>
-               <span className="text-xs">Missing ({calculateStats.missing})</span>
-             </div>
-             <div className="flex items-center gap-1">
-               <div className="w-3 h-3 bg-gray-400 rounded"></div>
-               <span className="text-xs">N/A ({calculateStats.na})</span>
-             </div>
-           </div>
-         </div>
-       </div>
-     </div>
-
-     {/* Document Preview Dialog */}
-     {selectedDocumentForPreview && (
-       <Dialog open={documentPreviewOpen} onOpenChange={setDocumentPreviewOpen}>
-         <DialogContent className="max-w-6xl max-h-[98vh] p-0">
-           <div className="h-[98vh] flex flex-col">
-             {/* Header with document info and navigation */}
-             <div className="p-4 border-b flex items-center justify-between">
-               <div className="flex flex-col">
-                 <DialogTitle className="flex items-center gap-2">
-                   {selectedDocumentForPreview.documentName}
-                   {selectedDocumentForPreview.documentStatus && (
-                     <Badge
-                       variant={selectedDocumentForPreview.documentStatus === 'valid' ? 'default' : 'secondary'}
-                       className="text-xs"
-                     >
-                       {selectedDocumentForPreview.documentStatus}
-                     </Badge>
-                   )}
-                   {selectedDocumentForPreview.allDocuments?.length > 1 && (
-                     <span className="text-sm font-normal text-gray-500">
-                       ({selectedDocumentForPreview.currentIndex + 1} of {selectedDocumentForPreview.allDocuments.length})
-                     </span>
-                   )}
-                 </DialogTitle>
-                 {selectedDocumentForPreview.uploadDate && (
-                   <p className="text-sm text-gray-500 mt-1">
-                     Uploaded: {format(parseISO(selectedDocumentForPreview.uploadDate), 'MMM dd, yyyy HH:mm')}
-                     {selectedDocumentForPreview.columnType && (
-                       <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">
-                         {selectedDocumentForPreview.columnType}
-                         {selectedDocumentForPreview.dependantId && ` - ${individualNames[selectedDocumentForPreview.dependantId]}`}
-                       </span>
-                     )}
-                   </p>
-                 )}
-               </div>
-
-               {/* Navigation buttons for multiple documents */}
-               {selectedDocumentForPreview.allDocuments?.length > 1 && (
-                 <div className="flex gap-2">
-                   <Button
-                     variant="outline"
-                     size="sm"
-                     onClick={async () => {
-                       const newIndex = selectedDocumentForPreview.currentIndex > 0
-                         ? selectedDocumentForPreview.currentIndex - 1
-                         : selectedDocumentForPreview.allDocuments.length - 1;
-
-                       const document = selectedDocumentForPreview.allDocuments[newIndex];
-
-                       try {
-                         const { data: signedUrl, error } = await supabase.storage
-                           .from('kyc-documents')
-                           .createSignedUrl(document.file_path, 3600)
-
-                         if (error) throw error;
-
-                         setSelectedDocumentForPreview({
-                           ...selectedDocumentForPreview,
-                           extractedData: document.extracted_details || {},
-                           fileUrl: signedUrl.signedUrl,
-                           fileName: document.file_path?.split('/').pop() || '',
-                           currentIndex: newIndex,
-                           uploadDate: document.created_at,
-                           documentStatus: document.status
-                         });
-                       } catch (error) {
-                         console.error('Error loading previous document:', error);
-                       }
-                     }}
-                   >
-                     <ChevronLeft className="h-4 w-4" />
-                     Previous
-                   </Button>
-                   <Button
-                     variant="outline"
-                     size="sm"
-                     onClick={async () => {
-                       const newIndex = selectedDocumentForPreview.currentIndex < selectedDocumentForPreview.allDocuments.length - 1
-                         ? selectedDocumentForPreview.currentIndex + 1
-                         : 0;
-
-                       const document = selectedDocumentForPreview.allDocuments[newIndex];
-
-                       try {
-                         const { data: signedUrl, error } = await supabase.storage
-                           .from('kyc-documents')
-                           .createSignedUrl(document.file_path, 3600)
-
-                         if (error) throw error;
-
-                         setSelectedDocumentForPreview({
-                           ...selectedDocumentForPreview,
-                           extractedData: document.extracted_details || {},
-                           fileUrl: signedUrl.signedUrl,
-                           fileName: document.file_path?.split('/').pop() || '',
-                           currentIndex: newIndex,
-                           uploadDate: document.created_at,
-                           documentStatus: document.status
-                         });
-                       } catch (error) {
-                         console.error('Error loading next document:', error);
-                       }
-                     }}
-                   >
-                     Next
-                     <ChevronRight className="h-4 w-4" />
-                   </Button>
-                 </div>
-               )}
-             </div>
-
-             {/* Document content and extraction preview */}
-             <div className="flex-1 overflow-auto">
-               <ExtractionPreview
-                 documentName={selectedDocumentForPreview.documentName}
-                 extractedData={selectedDocumentForPreview.extractedData || {}}
-                 fields={selectedDocumentForPreview.fields || []}
-                 fileUrl={selectedDocumentForPreview.fileUrl}
-                 fileName={selectedDocumentForPreview.fileName}
-                 expanded={true}
-                 showSaveButton={false}
-                 type={selectedDocumentForPreview.columnType}
-                 viewMode={true} // Set to true for view-only mode
-                 onDataChange={() => { }} // Empty callback since we're in view mode
-               />
-             </div>
-           </div>
-         </DialogContent>
-       </Dialog>
-     )}
-     <FileUploadComponent
-       open={uploadDialogOpen}
-       onOpenChange={setUploadDialogOpen}
-       task={selectedUploadData?.task}
-       document={selectedUploadData?.document}
-       columnType={selectedUploadData?.columnType || 'principal'}
-       onUploadComplete={handleUploadComplete}
-     />
-   </div>
- );
+  }, [groupedTasks, selectedApplicant]);
+
+  if (documentsLoading) {
+    return (
+      <div className="flex h-[85vh] w-full">
+        {/* Sidebar */}
+        <div className={cn(
+          "w-64 border-r transition-all duration-300 ease-in-out bg-white",
+          !sidebarOpen && "hidden md:block"
+        )}>
+          <div className="p-4 border-b flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Applicants</h2>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="md:hidden"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+          </div>
+          <ScrollArea className="h-[calc(100%-60px)]">
+            <div className="space-y-1 p-2">
+              {groupedTasks.map((group, index) => (
+                <Button
+                  key={index}
+                  variant={selectedApplicant === group.applicantName ? "secondary" : "ghost"}
+                  className={cn(
+                    "w-full justify-start",
+                    selectedApplicant === group.applicantName ? "bg-muted" : "hover:bg-muted/50"
+                  )}
+                  onClick={() => handleSelectApplicant(group.applicantName)}
+                >
+                  <span className="truncate">{group.applicantName}</span>
+                  <Badge variant="outline" className="ml-2">
+                    {group.tasks.length}
+                  </Badge>
+                </Button>
+              ))}
+            </div>
+          </ScrollArea>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col border rounded-md bg-background shadow-sm">
+          {/* Table Container */}
+          <div className="overflow-auto flex-1">
+            <div className="flex items-center space-x-2">
+              <div className="h-4 w-4 border-2 border-t-2 border-t-primary rounded-full animate-spin"></div>
+              <span>Loading documents and fields...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-[85vh] w-full">
+      {/* Sidebar */}
+      <div className={cn(
+        "w-64 border-r transition-all duration-300 ease-in-out bg-white",
+        !sidebarOpen && "hidden md:block"
+      )}>
+        <div className="p-4 border-b flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Applicants</h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="md:hidden"
+            onClick={() => setSidebarOpen(false)}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+        </div>
+        <ScrollArea className="h-[calc(100%-60px)]">
+          <div className="space-y-1 p-2">
+            {groupedTasks.map((group, index) => (
+              <Button
+                key={index}
+                variant={selectedApplicant === group.applicantName ? "secondary" : "ghost"}
+                className={cn(
+                  "w-full justify-start",
+                  selectedApplicant === group.applicantName ? "bg-muted" : "hover:bg-muted/50"
+                )}
+                onClick={() => handleSelectApplicant(group.applicantName)}
+              >
+                <span className="truncate">{group.applicantName}</span>
+                <Badge variant="outline" className="ml-2">
+                  {group.tasks.length}
+                </Badge>
+              </Button>
+            ))}
+          </div>
+        </ScrollArea>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col border rounded-md bg-background shadow-sm">
+        {/* Table Container */}
+        <div className="overflow-auto flex-1">
+          {/* Stats Row */}
+          {showStats && (
+            <div className="border-b bg-gray-50 p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-6">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-green-500 rounded"></div>
+                    <span className="text-sm font-medium">Uploaded: {calculateStats.uploaded}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-orange-500 rounded"></div>
+                    <span className="text-sm font-medium">Missing: {calculateStats.missing}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-gray-400 rounded"></div>
+                    <span className="text-sm font-medium">N/A: {calculateStats.na}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-blue-600" />
+                    <span className="text-sm font-medium">Total: {calculateStats.total}</span>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowStats(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <EyeOff className="h-4 w-4 mr-2" />
+                  Hide Stats
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Show Stats Button when hidden */}
+          {!showStats && (
+            <div className="border-b bg-gray-50 p-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowStats(true)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <BarChart3 className="h-4 w-4 mr-2" />
+                Show Stats
+              </Button>
+            </div>
+          )}
+
+          <Table className="min-w-full w-full border-collapse">
+            <TableHeader className="sticky top-0 z-10">
+              {/* Main header row - Applicant Names */}
+              <TableRow className="h-12">
+                <TableHead
+                  rowSpan={3}
+                  className="sticky left-0 bg-blue-600 border-r border-blue-500 w-16 z-20 text-white text-center font-semibold"
+                >
+                  #
+                </TableHead>
+                <TableHead
+                  rowSpan={3}
+                  className="sticky left-16 bg-blue-600 border-r border-blue-500 w-[300px] z-20 text-white font-semibold"
+                >
+                  Requirements
+                </TableHead>
+                {filteredGroupedTasks.map((group, groupIndex) => {
+                  const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                  const hasDependant = group.tasks.some(task => task.applicant_type === 'dependant');
+                  const dependantCount = group.dependantIds.length;
+                  const columnsCount = hasClassD ? 2 + dependantCount + 1 : 1 + dependantCount; // principal + dependants + understudy(if applicable)
+
+                  return (
+                    <TableHead
+                      key={`applicant-${groupIndex}`}
+                      colSpan={columnsCount}
+                      className="bg-blue-700 border-r border-blue-500 text-white text-center font-bold px-2"
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="flex items-center gap-1"><span className="text-sm font-bold truncate max-w-[200px]">
+                          {group.applicantName}
+                        </span>
+                          {hasDependant && (
+                            <UserCheck className="h-3 w-3 text-white" title="Has dependant relationship" />
+                          )}
+                        </div>
+                        <span className="text-xs opacity-75">
+                          {group.tasks.length} application{group.tasks.length !== 1 ? 's' : ''}
+                          {dependantCount > 0 && ` • ${dependantCount} dependant${dependantCount !== 1 ? 's' : ''}`}
+                        </span>
+                      </div>
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
+
+              {/* Updated Applicant Name Row - Now includes individual dependant columns */}
+              <TableRow className="h-14">
+                {filteredGroupedTasks.map((group, groupIndex) => {
+                  const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+
+                  // Robustly find IDs for each role by checking all tasks in the group
+                  const { principalId, understudyId } = group.tasks.reduce(
+                    (acc, task) => {
+                      // The primary ID is from the task for that specific applicant type
+                      if (task.applicant_type === 'principal') acc.principalId = task.individual_id;
+                      if (task.applicant_type === 'understudy') acc.understudyId = task.individual_id;
+
+                      // Use the relationship fields as fallbacks or to link across tasks
+                      if (task.principal_member) acc.principalId = acc.principalId || task.principal_member;
+                      if (task.understudy_member) acc.understudyId = acc.understudyId || task.understudy_member;
+
+                      return acc;
+                    },
+                    { principalId: null, understudyId: null }
+                  );
+
+                  // Look up names using the IDs from the central `individualNames` map.
+                  const principalName = (principalId && individualNames[principalId]);
+                  const understudyName = (understudyId && individualNames[understudyId]);
+
+                  const columns = [
+                    // Principal Column
+                    <TableHead
+                      key={`${groupIndex}-principal`}
+                      colSpan={1}
+                      className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2"
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="text-xs font-bold">Principal</span>
+                        {principalName ? (
+                          <div className="flex items-center gap-1">
+                            <UserCheck className="h-3 w-3 text-blue-200" />
+                            <span className="text-xs truncate max-w-[100px]" title={principalName}>
+                              {principalName}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
+                        )}
+                      </div>
+                    </TableHead>
+                  ];
+
+                  // Add individual columns for each dependant
+                  group.dependantIds.forEach((dependantId, depIndex) => {
+                    const dependantName = individualNames[dependantId];
+                    columns.push(
+                      <TableHead
+                        key={`${groupIndex}-dependant-${dependantId}`}
+                        colSpan={1}
+                        className="bg-blue-500 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2"
+                      >
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-xs font-bold">Dependant {depIndex + 1}</span>
+                          {dependantName ? (
+                            <div className="flex items-center gap-1">
+                              <Users className="h-3 w-3 text-blue-200" />
+                              <span className="text-xs truncate max-w-[100px]" title={dependantName}>
+                                {dependantName}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
+                        </div>
+                      </TableHead>
+                    );
+                  });
+
+                  // Add Understudy Column if needed
+                  if (hasClassD) {
+                    columns.push(
+                      <TableHead
+                        key={`${groupIndex}-understudy`}
+                        colSpan={1}
+                        className="bg-blue-400 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2"
+                      >
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-xs font-bold">Understudy</span>
+                          {understudyName ? (
+                            <div className="flex items-center gap-1">
+                              <UserCheck className="h-3 w-3 text-blue-200" />
+                              <span className="text-xs truncate max-w-[100px]" title={understudyName}>
+                                {understudyName}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
+                        </div>
+                      </TableHead>
+                    );
+                  }
+
+                  return columns;
+                })}
+              </TableRow>
+
+              {/* Status row with plus/minus icons */}
+              <TableRow className="h-8">
+                {filteredGroupedTasks.map((group, groupIndex) => {
+                  const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                  const principalTask = group.tasks.find(task => task.applicant_type === 'principal');
+                  const understudyTask = group.tasks.find(task => task.applicant_type === 'understudy');
+
+                  const columns = [
+                    <TableHead
+                      key={`${groupIndex}-principal-status`}
+                      colSpan={1}
+                      className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        {principalTask && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => toggleDocumentExpansion(principalTask.id)}
+                            title="Toggle document fields"
+                          >
+                            {expandedDocuments.has(principalTask.id) ? (
+                              <Minus className="h-4 w-4" />
+                            ) : (
+                              <Plus className="h-4 w-4" />
+                            )}
+                          </Button>
+                        )}
+                      </div>
+                    </TableHead>
+                  ];
+
+                  // Add status buttons for each dependant
+                  group.dependantIds.forEach((dependantId) => {
+                    columns.push(
+                      <TableHead
+                        key={`${groupIndex}-dependant-${dependantId}-status`}
+                        colSpan={1}
+                        className="bg-blue-500 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
+                      >
+                        <div className="flex flex-col items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => toggleDocumentExpansion(`dependant-${dependantId}`)}
+                            title="Toggle document fields"
+                          >
+                            {expandedDocuments.has(`dependant-${dependantId}`) ? (
+                              <Minus className="h-4 w-4" />
+                            ) : (
+                              <Plus className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
+                      </TableHead>
+                    );
+                  });
+
+                  if (hasClassD) {
+                    columns.push(
+                      <TableHead
+                        key={`${groupIndex}-understudy-status`}
+                        colSpan={1}
+                        className="bg-blue-400 border-r border-blue-400 text-white text-center font-semibold min-w-[120px] px-2"
+                      >
+                        <div className="flex flex-col items-center gap-1">
+                          {understudyTask && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0"
+                              onClick={() => toggleDocumentExpansion(understudyTask.id)}
+                              title="Toggle document fields"
+                            >
+                              {expandedDocuments.has(understudyTask.id) ? (
+                                <Minus className="h-4 w-4" />
+                              ) : (
+                                <Plus className="h-4 w-4" />
+                              )}
+                            </Button>
+                          )}
+                        </div>
+                      </TableHead>
+                    );
+                  }
+
+                  return columns;
+                })}
+              </TableRow>
+            </TableHeader>
+
+            <TableBody className="divide-y">
+              {loading ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={2 + groupedTasks.reduce((acc, group) => acc + (group.tasks.some(task => task.class_id === CLASS_D_ID) ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length), 0)}
+                    className="h-24 text-center bg-gray-50"
+                  >
+                    <div className="flex items-center justify-center space-x-2">
+                      <div className="h-4 w-4 border-2 border-t-2 border-t-primary rounded-full animate-spin"></div>
+                      <span>Loading requirements...</span>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : error ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={2 + groupedTasks.reduce((acc, group) => acc + (group.tasks.some(task => task.class_id === CLASS_D_ID) ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length), 0)}
+                    className="h-24 text-center text-destructive bg-red-50"
+                  >
+                    <div className="flex items-center justify-center space-x-2">
+                      <AlertTriangle className="h-5 w-5 text-destructive" />
+                      <span>{error}</span>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                <>
+                  {/* Documents & Fields Section */}
+                  {(organizedRequirements.documents.company.length > 0 || organizedRequirements.documents.individual.length > 0) && (
+                    <>
+                      {/* Main Documents & Fields Header */}
+                      <TableRow className="bg-gradient-to-r from-slate-100 to-slate-50 border-y-2 border-slate-300">
+                        <TableCell className="sticky left-0 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5] text-center font-bold text-slate-700">
+                          <FileText className="h-4 w-4 mx-auto" />
+                        </TableCell>
+                        <TableCell className="sticky left-16 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5]">
+                          <div className="flex items-center gap-2 px-2 py-2">
+                            <span className="font-bold text-slate-700 text-lg">Documents & Fields</span>
+                            <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">
+                              {organizedRequirements.documents.company.length + organizedRequirements.documents.individual.length}
+                            </span>
+                          </div>
+                        </TableCell>
+                        {filteredGroupedTasks.map((group, groupIndex) => {
+                          const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                          const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+
+                          return Array.from({ length: columnsCount }, (_, idx) => (
+                            <TableCell
+                              key={`doc-section-${groupIndex}-${idx}`}
+                              className="bg-gradient-to-r from-slate-100 to-slate-50 border-r text-center"
+                            >
+                              <div className="h-px bg-slate-300 w-full"></div>
+                            </TableCell>
+                          ));
+                        })}
+                      </TableRow>
+
+                      {/* Company Documents Subsection */}
+                      {organizedRequirements.documents.company.length > 0 && (
+                        <>
+                          <TableRow className="bg-blue-100">
+                            <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
+                            <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
+                              <span className="font-semibold text-blue-700">Company Documents</span>
+                              <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                {organizedRequirements.documents.company.length}
+                              </span>
+                            </TableCell>
+                            {filteredGroupedTasks.map((group, groupIndex) => {
+                              const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+
+                              return Array.from({ length: columnsCount }, (_, idx) => (
+                                <TableCell
+                                  key={`company-doc-header-${groupIndex}-${idx}`}
+                                  className="bg-blue-100 border-r text-center"
+                                >
+                                  -
+                                </TableCell>
+                              ));
+                            })}
+                          </TableRow>
+
+                          {/* Company Document Items */}
+                          {organizedRequirements.documents.company
+                            .slice()
+                            .sort((a, b) => (a.document.custom_order || 0) - (b.document.custom_order || 0))
+                            .map((docItem, docIndex) => {
+                              const isExpanded = expandedDocuments.has(docItem.document.id);
+                              const displayText = docItem.document.custom_order ? `${docItem.document.custom_order}` : `${docIndex + 1}.`;
+
+                              return (
+                                <React.Fragment key={`company-doc-${docItem.document.id}`}>
+                                  {/* Document Row */}
+                                  <TableRow className="group bg-blue-50 hover:bg-blue-100">
+                                    <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
+                                      {displayText}
+                                    </TableCell>
+                                    <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
+                                      <div className="flex items-center px-2">
+                                        <span className="text-sm font-semibold text-gray-800">
+                                          {docItem.document.display_name}
+                                        </span>
+                                        {docItem.fields.length > 0 && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 w-6 p-0 ml-2"
+                                            onClick={() => toggleDocumentExpansion(docItem.document.id)}
+                                          >
+                                            {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                                          </Button>
+                                        )}
+                                      </div>
+                                    </TableCell>
+                                    {filteredGroupedTasks.map((group, groupIndex) => {
+                                      const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                                      const referenceTask = group.tasks[0];
+
+                                      const columns = [
+                                        <TableCell key={`${docItem.document.id}-${groupIndex}-principal`} className="text-center border p-1">
+                                          {renderDocumentStatus(referenceTask, docItem.document, 'principal')}
+                                        </TableCell>
+                                      ];
+
+                                      // Add columns for each dependant
+                                      group.dependantIds.forEach((dependantId) => {
+                                        columns.push(
+                                          <TableCell key={`${docItem.document.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
+                                            {renderDocumentStatus(referenceTask, docItem.document, 'dependant', dependantId)}
+                                          </TableCell>
+                                        );
+                                      });
+
+                                      if (hasClassD) {
+                                        columns.push(
+                                          <TableCell key={`${docItem.document.id}-${groupIndex}-understudy`} className="text-center border p-1">
+                                            {renderDocumentStatus(referenceTask, docItem.document, 'understudy')}
+                                          </TableCell>
+                                        );
+                                      }
+
+                                      return columns;
+                                    })}
+                                  </TableRow>
+
+                                  {/* Document Fields (if expanded) */}
+                                  {isExpanded && docItem.fields.map((field, fieldIndex) => (
+                                    <TableRow key={`company-field-${field.id}`} className="group bg-blue-25 hover:bg-blue-50">
+                                      <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] text-center text-sm text-gray-500">
+                                        {docIndex + 1}.{fieldIndex + 1}
+                                      </TableCell>
+                                      <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5]">
+                                        <div className="flex items-center px-2 pl-8">
+                                          <span className="text-sm text-gray-700">{field.name}</span>
+                                          <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700">
+                                            Field
+                                          </Badge>
+                                          {field.type && (
+                                            <span className="text-xs text-gray-400 ml-2">
+                                              ({field.type})
+                                            </span>
+                                          )}
+                                        </div>
+                                      </TableCell>
+                                      {filteredGroupedTasks.map((group, groupIndex) => {
+                                        const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                                        const referenceTask = group.tasks[0];
+
+                                        const columns = [
+                                          <TableCell key={`${field.id}-${groupIndex}-principal`} className="text-center border p-1">
+                                            {renderDocumentStatus(referenceTask, field, 'principal')}
+                                          </TableCell>
+                                        ];
+
+                                        // Add columns for each dependant
+                                        group.dependantIds.forEach((dependantId) => {
+                                          columns.push(
+                                            <TableCell key={`${field.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
+                                              {renderDocumentStatus(referenceTask, field, 'dependant', dependantId)}
+                                            </TableCell>
+                                          );
+                                        });
+
+                                        if (hasClassD) {
+                                          columns.push(
+                                            <TableCell key={`${field.id}-${groupIndex}-understudy`} className="text-center border p-1">
+                                              {renderDocumentStatus(referenceTask, field, 'understudy')}
+                                            </TableCell>
+                                          );
+                                        }
+
+                                        return columns;
+                                      })}
+                                    </TableRow>
+                                  ))}
+                                </React.Fragment>
+                              );
+                            })}
+                        </>
+                      )}
+
+                      {/* Individual Documents Subsection */}
+                      {organizedRequirements.documents.individual.length > 0 && (
+                        <>
+                          <TableRow className="bg-blue-100">
+                            <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
+                            <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
+                              <span className="font-semibold text-blue-700">Individual Documents</span>
+                              <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                {organizedRequirements.documents.individual.length}
+                              </span>
+                            </TableCell>
+                            {filteredGroupedTasks.map((group, groupIndex) => {
+                              const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+
+                              return Array.from({ length: columnsCount }, (_, idx) => (
+                                <TableCell
+                                  key={`individual-doc-header-${groupIndex}-${idx}`}
+                                  className="bg-blue-100 border-r text-center"
+                                >
+                                  -
+                                </TableCell>
+                              ));
+                            })}
+                          </TableRow>
+
+                          {/* Individual Document Items - Same pattern as company documents */}
+                          {organizedRequirements.documents.individual
+                            .slice()
+                            .sort((a, b) => (a.document.custom_order || 0) - (b.document.custom_order || 0))
+                            .map((docItem, docIndex) => {
+                              const isExpanded = expandedDocuments.has(docItem.document.id);
+                              const displayText = docItem.document.custom_order ? `${docItem.document.custom_order}` : `${docIndex + 1}.`;
+
+                              return (
+                                <React.Fragment key={`individual-doc-${docItem.document.id}`}>
+                                  {/* Document Row */}
+                                  <TableRow className="group bg-blue-50 hover:bg-blue-100">
+                                    <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
+                                      {displayText}
+                                    </TableCell>
+                                    <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
+                                      <div className="flex items-center px-2">
+                                        <span className="text-sm font-semibold text-gray-800">
+                                          {docItem.document.display_name}
+                                        </span>
+                                        {docItem.fields.length > 0 && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 w-6 p-0 ml-2"
+                                            onClick={() => toggleDocumentExpansion(docItem.document.id)}
+                                          >
+                                            {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                                          </Button>
+                                        )}
+                                      </div>
+                                    </TableCell>
+                                    {filteredGroupedTasks.map((group, groupIndex) => {
+                                      const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                                      const referenceTask = group.tasks[0];
+
+                                      const columns = [
+                                        <TableCell key={`${docItem.document.id}-${groupIndex}-principal`} className="text-center border p-1">
+                                          {renderDocumentStatus(referenceTask, docItem.document, 'principal')}
+                                        </TableCell>
+                                      ];
+
+                                      // Add columns for each dependant
+                                      group.dependantIds.forEach((dependantId) => {
+                                        columns.push(
+                                          <TableCell key={`${docItem.document.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
+                                            {renderDocumentStatus(referenceTask, docItem.document, 'dependant', dependantId)}
+                                          </TableCell>
+                                        );
+                                      });
+
+                                      if (hasClassD) {
+                                        columns.push(
+                                          <TableCell key={`${docItem.document.id}-${groupIndex}-understudy`} className="text-center border p-1">
+                                            {renderDocumentStatus(referenceTask, docItem.document, 'understudy')}
+                                          </TableCell>
+                                        );
+                                      }
+
+                                      return columns;
+                                    })}
+                                  </TableRow>
+
+                                  {/* Document Fields (if expanded) - Same pattern */}
+                                  {isExpanded && docItem.fields.map((field, fieldIndex) => (
+                                    <TableRow key={`individual-field-${field.id}`} className="group bg-blue-25 hover:bg-blue-50">
+                                      <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] text-center text-sm text-gray-500">
+                                        {docIndex + 1}.{fieldIndex + 1}
+                                      </TableCell>
+                                      <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5]">
+                                        <div className="flex items-center px-2 pl-8">
+                                          <span className="text-sm text-gray-700">{field.name}</span>
+                                          <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700">
+                                            Field
+                                          </Badge>
+                                          {field.type && (
+                                            <span className="text-xs text-gray-400 ml-2">
+                                              ({field.type})
+                                            </span>
+                                          )}
+                                        </div>
+                                      </TableCell>
+                                      {filteredGroupedTasks.map((group, groupIndex) => {
+                                        const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                                        const referenceTask = group.tasks[0];
+
+                                        const columns = [
+                                          <TableCell key={`${field.id}-${groupIndex}-principal`} className="text-center border p-1">
+                                            {renderDocumentStatus(referenceTask, field, 'principal')}
+                                          </TableCell>
+                                        ];
+
+                                        // Add columns for each dependant
+                                        group.dependantIds.forEach((dependantId) => {
+                                          columns.push(
+                                            <TableCell key={`${field.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
+                                              {renderDocumentStatus(referenceTask, field, 'dependant', dependantId)}
+                                            </TableCell>
+                                          );
+                                        });
+
+                                        if (hasClassD) {
+                                          columns.push(
+                                            <TableCell key={`${field.id}-${groupIndex}-understudy`} className="text-center border p-1">
+                                              {renderDocumentStatus(referenceTask, field, 'understudy')}
+                                            </TableCell>
+                                          );
+                                        }
+
+                                        return columns;
+                                      })}
+                                    </TableRow>
+                                  ))}
+                                </React.Fragment>
+                              );
+                            })}
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {/* BCL Workings Section - NEW */}
+                  {(organizedRequirements.bclTemplates.company.length > 0 || organizedRequirements.bclTemplates.individual.length > 0) && (
+                    <>
+                      {/* Main BCL Workings Header */}
+                      <TableRow className="bg-gradient-to-r from-blue-100 to-blue-50 border-y-2 border-blue-300">
+                        <TableCell className="sticky left-0 bg-gradient-to-r from-blue-100 to-blue-50 border-r z-[5] text-center font-bold text-gray-700">
+                          <Briefcase className="h-4 w-4 mx-auto" />
+                        </TableCell>
+                        <TableCell className="sticky left-16 bg-gradient-to-r from-blue-100 to-blue-50 border-r z-[5]">
+                          <div className="flex items-center gap-2 px-2 py-2">
+                            <span className="font-bold text-gray-700 text-lg">BCL Workings</span>
+                            <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                              {organizedRequirements.bclTemplates.company.length + organizedRequirements.bclTemplates.individual.length}
+                            </span>
+                          </div>
+                        </TableCell>
+                        {filteredGroupedTasks.map((group, groupIndex) => {
+                          const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                          const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+
+                          return Array.from({ length: columnsCount }, (_, idx) => (
+                            <TableCell
+                              key={`bcl-section-${groupIndex}-${idx}`}
+                              className="bg-gradient-to-r from-blue-100 to-blue-50 border-r text-center"
+                            >
+                              <div className="h-px bg-blue-300 w-full"></div>
+                            </TableCell>
+                          ));
+                        })}
+                      </TableRow>
+
+                      {/* Company BCL Templates Subsection */}
+                      {organizedRequirements.bclTemplates.company.length > 0 && (
+                        <>
+                          <TableRow className="bg-blue-100">
+                            <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
+                            <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
+                              <span className="font-semibold text-blue-700">Company BCL Templates</span>
+                              <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                {organizedRequirements.bclTemplates.company.length}
+                              </span>
+                            </TableCell>
+                            {filteredGroupedTasks.map((group, groupIndex) => {
+                              const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+
+                              return Array.from({ length: columnsCount }, (_, idx) => (
+                                <TableCell
+                                  key={`company-bcl-header-${groupIndex}-${idx}`}
+                                  className="bg-blue-100 border-r text-center"
+                                >
+                                  -
+                                </TableCell>
+                              ));
+                            })}
+                          </TableRow>
+
+                          {/* Company BCL Template Items */}
+                          {organizedRequirements.bclTemplates.company
+                            .slice()
+                            .sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0))
+                            .map((template, templateIndex) => {
+                              const displayText = template.custom_order ? `${template.custom_order}` : `BCL-${templateIndex + 1}`;
+
+                              return (
+                                <TableRow key={`company-bcl-${template.id}`} className="group bg-blue-50 hover:bg-blue-100">
+                                  <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
+                                    {displayText}
+                                  </TableCell>
+                                  <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
+                                    <div className="flex items-center px-2">
+                                      <span className="text-sm font-semibold text-gray-800">
+                                        {template.display_name}
+                                      </span>
+                                      <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700">
+                                        Template
+                                      </Badge>
+                                    </div>
+                                  </TableCell>
+                                  {filteredGroupedTasks.map((group, groupIndex) => {
+                                    const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                                    const referenceTask = group.tasks[0];
+
+                                    const columns = [
+                                      <TableCell key={`${template.id}-${groupIndex}-principal`} className="text-center border p-1">
+                                        {renderDocumentStatus(referenceTask, template, 'principal')}
+                                      </TableCell>
+                                    ];
+
+                                    // Add columns for each dependant
+                                    group.dependantIds.forEach((dependantId) => {
+                                      columns.push(
+                                        <TableCell key={`${template.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
+                                          {renderDocumentStatus(referenceTask, template, 'dependant', dependantId)}
+                                        </TableCell>
+                                      );
+                                    });
+
+                                    if (hasClassD) {
+                                      columns.push(
+                                        <TableCell key={`${template.id}-${groupIndex}-understudy`} className="text-center border p-1">
+                                          {renderDocumentStatus(referenceTask, template, 'understudy')}
+                                        </TableCell>
+                                      );
+                                    }
+
+                                    return columns;
+                                  })}
+                                </TableRow>
+                              );
+                            })}
+                        </>
+                      )}
+
+                      {/* Individual BCL Templates Subsection */}
+                      {organizedRequirements.bclTemplates.individual.length > 0 && (
+                        <>
+                          <TableRow className="bg-blue-100">
+                            <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
+                            <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
+                              <span className="font-semibold text-blue-700">Individual BCL Templates</span>
+                              <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                {organizedRequirements.bclTemplates.individual.length}
+                              </span>
+                            </TableCell>
+                            {filteredGroupedTasks.map((group, groupIndex) => {
+                              const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+
+                              return Array.from({ length: columnsCount }, (_, idx) => (
+                                <TableCell
+                                  key={`individual-bcl-header-${groupIndex}-${idx}`}
+                                  className="bg-blue-100 border-r text-center"
+                                >
+                                  -
+                                </TableCell>
+                              ));
+                            })}
+                          </TableRow>
+
+                          {/* Individual BCL Template Items */}
+                          {organizedRequirements.bclTemplates.individual
+                            .slice()
+                            .sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0))
+                            .map((template, templateIndex) => {
+                              const displayText = template.custom_order ? `${template.custom_order}` : `BCL-${templateIndex + 1}`;
+
+                              return (
+                                <TableRow key={`individual-bcl-${template.id}`} className="group bg-blue-50 hover:bg-blue-100">
+                                  <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
+                                    {displayText}
+                                  </TableCell>
+                                  <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
+                                    <div className="flex items-center px-2">
+                                      <span className="text-sm font-semibold text-gray-800">
+                                        {template.display_name}
+                                      </span>
+                                      <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700">
+                                        Template
+                                      </Badge>
+                                    </div>
+                                  </TableCell>
+                                  {filteredGroupedTasks.map((group, groupIndex) => {
+                                    const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                                    const referenceTask = group.tasks[0];
+
+                                    const columns = [
+                                      <TableCell key={`${template.id}-${groupIndex}-principal`} className="text-center border p-1">
+                                        {renderDocumentStatus(referenceTask, template, 'principal')}
+                                      </TableCell>
+                                    ];
+
+                                    // Add columns for each dependant
+                                    group.dependantIds.forEach((dependantId) => {
+                                      columns.push(
+                                        <TableCell key={`${template.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
+                                          {renderDocumentStatus(referenceTask, template, 'dependant', dependantId)}
+                                        </TableCell>
+                                      );
+                                    });
+
+                                    if (hasClassD) {
+                                      columns.push(
+                                        <TableCell key={`${template.id}-${groupIndex}-understudy`} className="text-center border p-1">
+                                          {renderDocumentStatus(referenceTask, template, 'understudy')}
+                                        </TableCell>
+                                      );
+                                    }
+
+                                    return columns;
+                                  })}
+                                </TableRow>
+                              );
+                            })}
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {/* Post Application Section - NEW */}
+                  {(organizedRequirements.postApplication.company.length > 0 || organizedRequirements.postApplication.individual.length > 0) && (
+                    <>
+                      {/* Main Post Application Header */}
+                      <TableRow className="bg-gradient-to-r from-blue-100 to-blue-50 border-y-2 border-blue-300">
+                        <TableCell className="sticky left-0 bg-gradient-to-r from-blue-100 to-blue-50 border-r z-[5] text-center font-bold text-gray-700">
+                          <FileText className="h-4 w-4 mx-auto" />
+                        </TableCell>
+                        <TableCell className="sticky left-16 bg-gradient-to-r from-blue-100 to-blue-50 border-r z-[5]">
+                          <div className="flex items-center gap-2 px-2 py-2">
+                            <span className="font-bold text-gray-700 text-lg">Post Application</span>
+                            <span className="text-sm bg-blue-200 text-gray-700 px-2 py-1 rounded-full ml-2">
+                              {organizedRequirements.postApplication.company.length + organizedRequirements.postApplication.individual.length}
+                            </span>
+                          </div>
+                        </TableCell>
+                        {filteredGroupedTasks.map((group, groupIndex) => {
+                          const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                          const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+
+                          return Array.from({ length: columnsCount }, (_, idx) => (
+                            <TableCell
+                              key={`post-app-section-${groupIndex}-${idx}`}
+                              className="bg-gradient-to-r from-blue-100 to-blue-50 border-r text-center"
+                            >
+                              <div className="h-px bg-blue-300 w-full"></div>
+                            </TableCell>
+                          ));
+                        })}
+                      </TableRow>
+
+                      {/* Company Post Application Documents Subsection */}
+                      {organizedRequirements.postApplication.company.length > 0 && (
+                        <>
+                          <TableRow className="bg-blue-100">
+                            <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
+                            <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
+                              <span className="font-semibold text-blue-700">Company Stage Documents</span>
+                              <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                {organizedRequirements.postApplication.company.length}
+                              </span>
+                            </TableCell>
+                            {filteredGroupedTasks.map((group, groupIndex) => {
+                              const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+
+                              return Array.from({ length: columnsCount }, (_, idx) => (
+                                <TableCell
+                                  key={`company-post-app-header-${groupIndex}-${idx}`}
+                                  className="bg-blue-100 border-r text-center"
+                                >
+                                  -
+                                </TableCell>
+                              ));
+                            })}
+                          </TableRow>
+
+                          {/* Company Post Application Document Items */}
+                          {organizedRequirements.postApplication.company.map((stageDoc, docIndex) => {
+                            const displayText = `S${stageDoc.stageOrder || docIndex + 1}`;
+
+                            return (
+                              <TableRow key={`company-post-app-${stageDoc.id}`} className="group bg-blue-50 hover:bg-blue-100">
+                                <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
+                                  {displayText}
+                                </TableCell>
+                                <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
+                                  <div className="flex flex-col px-2">
+                                    <div className="flex items-center">
+                                      <span className="text-sm font-semibold text-gray-800">
+                                        {stageDoc.display_name}
+                                      </span>
+                                      <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700">
+                                        {stageDoc.stageName}
+                                      </Badge>
+                                    </div>
+                                    {stageDoc.stageDocumentConfig?.description && (
+                                      <span className="text-xs text-gray-500 mt-1">
+                                        {stageDoc.stageDocumentConfig.description}
+                                      </span>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                {filteredGroupedTasks.map((group, groupIndex) => {
+                                  const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                                  const referenceTask = group.tasks[0];
+
+                                  const columns = [
+                                    <TableCell key={`${stageDoc.id}-${groupIndex}-principal`} className="text-center border p-1">
+                                      {renderDocumentStatus(referenceTask, stageDoc, 'principal')}
+                                    </TableCell>
+                                  ];
+
+                                  // Add columns for each dependant
+                                  group.dependantIds.forEach((dependantId) => {
+                                    columns.push(
+                                      <TableCell key={`${stageDoc.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
+                                        {renderDocumentStatus(referenceTask, stageDoc, 'dependant', dependantId)}
+                                      </TableCell>
+                                    );
+                                  });
+
+                                  if (hasClassD) {
+                                    columns.push(
+                                      <TableCell key={`${stageDoc.id}-${groupIndex}-understudy`} className="text-center border p-1">
+                                        {renderDocumentStatus(referenceTask, stageDoc, 'understudy')}
+                                      </TableCell>
+                                    );
+                                  }
+
+                                  return columns;
+                                })}
+                              </TableRow>
+                            );
+                          })}
+                        </>
+                      )}
+
+                      {/* Individual Post Application Documents Subsection */}
+                      {organizedRequirements.postApplication.individual.length > 0 && (
+                        <>
+                          <TableRow className="bg-blue-100">
+                            <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
+                            <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
+                              <span className="font-semibold text-blue-700">Individual Stage Documents</span>
+                              <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                {organizedRequirements.postApplication.individual.length}
+                              </span>
+                            </TableCell>
+                            {filteredGroupedTasks.map((group, groupIndex) => {
+                              const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+
+                              return Array.from({ length: columnsCount }, (_, idx) => (
+                                <TableCell
+                                  key={`individual-post-app-header-${groupIndex}-${idx}`}
+                                  className="bg-blue-100 border-r text-center"
+                                >
+                                  -
+                                </TableCell>
+                              ));
+                            })}
+                          </TableRow>
+
+                          {/* Individual Post Application Document Items */}
+                          {organizedRequirements.postApplication.individual.map((stageDoc, docIndex) => {
+                            const displayText = `S${stageDoc.stageOrder || docIndex + 1}`;
+
+                            return (
+                              <TableRow key={`individual-post-app-${stageDoc.id}`} className="group bg-blue-50 hover:bg-blue-100">
+                                <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
+                                  {displayText}
+                                </TableCell>
+                                <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
+                                  <div className="flex flex-col px-2">
+                                    <div className="flex items-center">
+                                      <span className="text-sm font-semibold text-gray-800">
+                                        {stageDoc.display_name}
+                                      </span>
+                                      <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700">
+                                        {stageDoc.stageName}
+                                      </Badge>
+                                    </div>
+                                    {stageDoc.stageDocumentConfig?.description && (
+                                      <span className="text-xs text-gray-500 mt-1">
+                                        {stageDoc.stageDocumentConfig.description}
+                                      </span>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                {filteredGroupedTasks.map((group, groupIndex) => {
+                                  const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                                  const referenceTask = group.tasks[0];
+
+                                  const columns = [
+                                    <TableCell key={`${stageDoc.id}-${groupIndex}-principal`} className="text-center border p-1">
+                                      {renderDocumentStatus(referenceTask, stageDoc, 'principal')}
+                                    </TableCell>
+                                  ];
+
+                                  // Add columns for each dependant
+                                  group.dependantIds.forEach((dependantId) => {
+                                    columns.push(
+                                      <TableCell key={`${stageDoc.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
+                                        {renderDocumentStatus(referenceTask, stageDoc, 'dependant', dependantId)}
+                                      </TableCell>
+                                    );
+                                  });
+
+                                  if (hasClassD) {
+                                    columns.push(
+                                      <TableCell key={`${stageDoc.id}-${groupIndex}-understudy`} className="text-center border p-1">
+                                        {renderDocumentStatus(referenceTask, stageDoc, 'understudy')}
+                                      </TableCell>
+                                    );
+                                  }
+
+                                  return columns;
+                                })}
+                              </TableRow>
+                            );
+                          })}
+                        </>
+                      )}
+                    </>
+                  )}
+                  {/* Client Form Fields Section */}
+                  {(organizedRequirements.clientFields.company.length > 0 || organizedRequirements.clientFields.individual.length > 0) && (
+                    <>
+                      {/* Main Client Form Fields Header */}
+                      <TableRow className="bg-gradient-to-r from-slate-100 to-slate-50 border-y-2 border-slate-300">
+                        <TableCell className="sticky left-0 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5] text-center font-bold text-slate-700">
+                          <Users className="h-4 w-4 mx-auto" />
+                        </TableCell>
+                        <TableCell className="sticky left-16 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5]">
+                          <div className="flex items-center gap-2 px-2 py-2">
+                            <span className="font-bold text-slate-700 text-lg">Client Form Fields</span>
+                            <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">
+                              {organizedRequirements.clientFields.company.length + organizedRequirements.clientFields.individual.length}
+                            </span>
+                          </div>
+                        </TableCell>
+                        {filteredGroupedTasks.map((group, groupIndex) => {
+                          const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                          const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+
+                          return Array.from({ length: columnsCount }, (_, idx) => (
+                            <TableCell
+                              key={`client-section-${groupIndex}-${idx}`}
+                              className="bg-gradient-to-r from-slate-100 to-slate-50 border-r text-center"
+                            >
+                              <div className="h-px bg-slate-300 w-full"></div>
+                            </TableCell>
+                          ));
+                        })}
+                      </TableRow>
+
+                      {/* Individual Client Fields Subsection */}
+                      {organizedRequirements.clientFields.individual.length > 0 && (
+                        <>
+                          <TableRow className="bg-blue-100">
+                            <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-gray-700"></TableCell>
+                            <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
+                              <span className="font-semibold text-blue-700">Individual Fields</span>
+                              <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                {organizedRequirements.clientFields.individual.length}
+                              </span>
+                            </TableCell>
+                            {filteredGroupedTasks.map((group, groupIndex) => {
+                              const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                              const columnsCount = hasClassD ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length;
+
+                              return Array.from({ length: columnsCount }, (_, idx) => (
+                                <TableCell
+                                  key={`individual-field-header-${groupIndex}-${idx}`}
+                                  className="bg-blue-100 border-r text-center"
+                                >
+                                  -
+                                </TableCell>
+                              ));
+                            })}
+                          </TableRow>
+
+                          {/* Individual Client Field Items */}
+                          {organizedRequirements.clientFields.individual.map((fieldItem, fieldIndex) => (
+                            <TableRow key={`individual-field-${fieldItem.field.selectionId}`} className="group bg-blue-50 hover:bg-blue-100">
+                              <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
+                                {fieldIndex + 1}
+                              </TableCell>
+                              <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
+                                <div className="flex items-center px-2">
+                                  <span className="text-sm font-medium text-gray-700">
+                                    {fieldItem.field.tableHeader || fieldItem.field.label}
+                                  </span>
+                                  {fieldItem.field.type && (
+                                    <span className="text-xs text-gray-400 ml-2">
+                                      ({fieldItem.field.type})
+                                    </span>
+                                  )}
+                                </div>
+                              </TableCell>
+                              {filteredGroupedTasks.map((group, groupIndex) => {
+                                const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                                const principalTask = group.tasks.find(task => task.applicant_type === 'principal');
+                                const understudyTask = group.tasks.find(task => task.applicant_type === 'understudy');
+
+                                const columns = [
+                                  <TableCell key={`${fieldItem.field.selectionId}-${groupIndex}-principal`} className="text-center border p-1">
+                                    {principalTask ? renderClientFieldData(principalTask, fieldItem) :
+                                      <span className="text-gray-400 text-xs">N/A</span>}
+                                  </TableCell>
+                                ];
+
+                                // Add columns for each dependant
+                                group.dependantIds.forEach((dependantId) => {
+                                  // Find a task that has this dependant ID in their dependant_member array
+                                  const dependantTask = group.tasks.find(task =>
+                                    task.dependant_member &&
+                                    Array.isArray(task.dependant_member) &&
+                                    task.dependant_member.some((dep: any) => dep.id === dependantId)
+                                  );
+
+                                  columns.push(
+                                    <TableCell key={`${fieldItem.field.selectionId}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
+                                      {dependantTask ? renderClientFieldData(dependantTask, fieldItem) :
+                                        <span className="text-gray-400 text-xs">N/A</span>}
+                                    </TableCell>
+                                  );
+                                });
+
+                                if (hasClassD) {
+                                  columns.push(
+                                    <TableCell key={`${fieldItem.field.selectionId}-${groupIndex}-understudy`} className="text-center border p-1">
+                                      {understudyTask ? renderClientFieldData(understudyTask, fieldItem) :
+                                        <span className="text-gray-400 text-xs">N/A</span>}
+                                    </TableCell>
+                                  );
+                                }
+
+                                return columns;
+                              })}
+                            </TableRow>
+                          ))}
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {/* Empty state */}
+                  {organizedRequirements.documents.company.length === 0 &&
+                    organizedRequirements.documents.individual.length === 0 &&
+                    organizedRequirements.bclTemplates.company.length === 0 &&
+                    organizedRequirements.bclTemplates.individual.length === 0 &&
+                    organizedRequirements.postApplication.company.length === 0 &&
+                    organizedRequirements.postApplication.individual.length === 0 &&
+                    organizedRequirements.clientFields.company.length === 0 &&
+                    organizedRequirements.clientFields.individual.length === 0 && (
+                      <TableRow>
+                        <TableCell
+                          colSpan={2 + groupedTasks.reduce((acc, group) => acc + (group.tasks.some(task => task.class_id === CLASS_D_ID) ? 2 + group.dependantIds.length + 1 : 1 + group.dependantIds.length), 0)}
+                          className="text-center p-8 text-muted-foreground bg-gray-50"
+                        >
+                          <div className="flex flex-col items-center space-y-2">
+                            <FileText className="h-8 w-8 text-muted-foreground/50" />
+                            <p className="font-medium">No requirements found</p>
+                            <p className="text-sm text-muted-foreground">
+                              No selected documents, BCL templates, stage documents, or client fields to display for {documentTab} applications
+                            </p>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                </>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        {/* Footer with summary information */}
+        <div className="border-t bg-gray-50 p-3">
+          <div className="flex items-center justify-between text-sm text-gray-600">
+            <div className="flex items-center gap-4">
+              <span>
+                <strong>{filteredTasks.length}</strong> {activeTab === 'completed' ? 'completed' : 'active'} applications
+              </span>
+              <span>
+                <strong>{groupedTasks.length}</strong> applicant{groupedTasks.length !== 1 ? 's' : ''}
+              </span>
+              <span>
+                <strong>{organizedRequirements.documents.company.length + organizedRequirements.documents.individual.length}</strong> document items
+              </span>
+              <span>
+                <strong>{organizedRequirements.bclTemplates.company.length + organizedRequirements.bclTemplates.individual.length}</strong> BCL templates
+              </span>
+              <span>
+                <strong>{organizedRequirements.clientFields.company.length + organizedRequirements.clientFields.individual.length}</strong> client fields
+              </span>
+              <span>
+                <strong>{organizedRequirements.postApplication.company.length + organizedRequirements.postApplication.individual.length}</strong> stage documents
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 bg-green-500 rounded"></div>
+                <span className="text-xs">Uploaded ({calculateStats.uploaded})</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 bg-orange-500 rounded"></div>
+                <span className="text-xs">Missing ({calculateStats.missing})</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 bg-gray-400 rounded"></div>
+                <span className="text-xs">N/A ({calculateStats.na})</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Document Preview Dialog */}
+      {selectedDocumentForPreview && (
+        <Dialog open={documentPreviewOpen} onOpenChange={setDocumentPreviewOpen}>
+          <DialogContent className="max-w-6xl max-h-[98vh] p-0">
+            <div className="h-[98vh] flex flex-col">
+              {/* Header with document info and navigation */}
+              <div className="p-4 border-b flex items-center justify-between">
+                <div className="flex flex-col">
+                  <DialogTitle className="flex items-center gap-2">
+                    {selectedDocumentForPreview.documentName}
+                    {selectedDocumentForPreview.documentStatus && (
+                      <Badge
+                        variant={selectedDocumentForPreview.documentStatus === 'valid' ? 'default' : 'secondary'}
+                        className="text-xs"
+                      >
+                        {selectedDocumentForPreview.documentStatus}
+                      </Badge>
+                    )}
+                    {selectedDocumentForPreview.allDocuments?.length > 1 && (
+                      <span className="text-sm font-normal text-gray-500">
+                        ({selectedDocumentForPreview.currentIndex + 1} of {selectedDocumentForPreview.allDocuments.length})
+                      </span>
+                    )}
+                  </DialogTitle>
+                  {selectedDocumentForPreview.uploadDate && (
+                    <p className="text-sm text-gray-500 mt-1">
+                      Uploaded: {format(parseISO(selectedDocumentForPreview.uploadDate), 'MMM dd, yyyy HH:mm')}
+                      {selectedDocumentForPreview.columnType && (
+                        <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">
+                          {selectedDocumentForPreview.columnType}
+                          {selectedDocumentForPreview.dependantId && ` - ${individualNames[selectedDocumentForPreview.dependantId]}`}
+                        </span>
+                      )}
+                    </p>
+                  )}
+                </div>
+
+                {/* Navigation buttons for multiple documents */}
+                {selectedDocumentForPreview.allDocuments?.length > 1 && (
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const newIndex = selectedDocumentForPreview.currentIndex > 0
+                          ? selectedDocumentForPreview.currentIndex - 1
+                          : selectedDocumentForPreview.allDocuments.length - 1;
+
+                        const document = selectedDocumentForPreview.allDocuments[newIndex];
+
+                        try {
+                          const { data: signedUrl, error } = await supabase.storage
+                            .from('kyc-documents')
+                            .createSignedUrl(document.file_path, 3600)
+
+                          if (error) throw error;
+
+                          setSelectedDocumentForPreview({
+                            ...selectedDocumentForPreview,
+                            extractedData: document.extracted_details || {},
+                            fileUrl: signedUrl.signedUrl,
+                            fileName: document.file_path?.split('/').pop() || '',
+                            currentIndex: newIndex,
+                            uploadDate: document.created_at,
+                            documentStatus: document.status
+                          });
+                        } catch (error) {
+                          console.error('Error loading previous document:', error);
+                        }
+                      }}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const newIndex = selectedDocumentForPreview.currentIndex < selectedDocumentForPreview.allDocuments.length - 1
+                          ? selectedDocumentForPreview.currentIndex + 1
+                          : 0;
+
+                        const document = selectedDocumentForPreview.allDocuments[newIndex];
+
+                        try {
+                          const { data: signedUrl, error } = await supabase.storage
+                            .from('kyc-documents')
+                            .createSignedUrl(document.file_path, 3600)
+
+                          if (error) throw error;
+
+                          setSelectedDocumentForPreview({
+                            ...selectedDocumentForPreview,
+                            extractedData: document.extracted_details || {},
+                            fileUrl: signedUrl.signedUrl,
+                            fileName: document.file_path?.split('/').pop() || '',
+                            currentIndex: newIndex,
+                            uploadDate: document.created_at,
+                            documentStatus: document.status
+                          });
+                        } catch (error) {
+                          console.error('Error loading next document:', error);
+                        }
+                      }}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Document content and extraction preview */}
+              <div className="flex-1 overflow-auto">
+                <ExtractionPreview
+                  documentName={selectedDocumentForPreview.documentName}
+                  extractedData={selectedDocumentForPreview.extractedData || {}}
+                  fields={selectedDocumentForPreview.fields || []}
+                  fileUrl={selectedDocumentForPreview.fileUrl}
+                  fileName={selectedDocumentForPreview.fileName}
+                  expanded={true}
+                  showSaveButton={false}
+                  type={selectedDocumentForPreview.columnType}
+                  viewMode={true} // Set to true for view-only mode
+                  onDataChange={() => { }} // Empty callback since we're in view mode
+                />
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+      <FileUploadComponent
+        open={uploadDialogOpen}
+        onOpenChange={setUploadDialogOpen}
+        task={selectedUploadData?.task}
+        document={selectedUploadData?.document}
+        columnType={selectedUploadData?.columnType || 'principal'}
+        onUploadComplete={handleUploadComplete}
+      />
+    </div>
+  );
 }
