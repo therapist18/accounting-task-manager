@@ -265,60 +265,6 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
     }
   ], [columnVisibility])
 
-  // Generate entity visibility options based on current department
-  const entityVisibilityOptions: EntityVisibilityOption[] = useMemo(() => {
-    const processedDepts = getProcessedDepartments()
-    const currentDept = processedDepts.find(d => d.id === selectedDepartment)
-    if (!currentDept) return []
-
-    const entities: EntityVisibilityOption[] = []
-
-    currentDept.tm_subdepartments?.forEach((subdept) => {
-      const subdeptId = `subdept-${subdept.id}`
-      entities.push({
-        id: subdeptId,
-        name: subdept.name,
-        type: 'subdepartment',
-        visible: entityVisibility[subdeptId] !== false,
-        level: 0,
-        path: subdept.name,
-        hasChildren: !!(subdept.classes && subdept.classes.length > 0),
-        default_display: subdept.default_display
-      })
-
-      subdept.classes?.forEach((cls, clsIndex) => {
-        const classId = `class-${subdept.id}-${cls.id || clsIndex}`
-        entities.push({
-          id: classId,
-          name: cls.name,
-          type: 'class',
-          parentId: subdeptId,
-          visible: entityVisibility[classId] !== false,
-          level: 1,
-          path: `${subdept.name} → ${cls.name}`,
-          hasChildren: !!(cls.subClasses && cls.subClasses.length > 0),
-          default_display: cls.default_display
-        })
-
-        cls.subClasses?.forEach((subCls, subClsIndex) => {
-          const subclassId = `subclass-${subdept.id}-${cls.id || clsIndex}-${subCls.id || subClsIndex}`
-          entities.push({
-            id: subclassId,
-            name: subCls.name,
-            type: 'subclass',
-            parentId: classId,
-            visible: entityVisibility[subclassId] !== false,
-            level: 2,
-            path: `${subdept.name} → ${cls.name} → ${subCls.name}`,
-            default_display: subCls.default_display
-          })
-        })
-      })
-    })
-
-    return entities
-  }, [departments, selectedDepartment, entityVisibility])
-
   const handleColumnVisibilityChange = (columnId: string, visible: boolean) => {
     setColumnVisibility(prev => ({
       ...prev,
@@ -452,6 +398,60 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
     }))
   }
 
+   // Generate entity visibility options based on current department
+   const entityVisibilityOptions: EntityVisibilityOption[] = useMemo(() => {
+    const processedDepts = getProcessedDepartments()
+    const currentDept = processedDepts.find(d => d.id === selectedDepartment)
+    if (!currentDept) return []
+
+    const entities: EntityVisibilityOption[] = []
+
+    currentDept.tm_subdepartments?.forEach((subdept) => {
+      const subdeptId = `subdept-${subdept.id}`
+      entities.push({
+        id: subdeptId,
+        name: subdept.name,
+        type: 'subdepartment',
+        visible: entityVisibility[subdeptId] !== false,
+        level: 0,
+        path: subdept.name,
+        hasChildren: !!(subdept.classes && subdept.classes.length > 0),
+        default_display: subdept.default_display
+      })
+
+      subdept.classes?.forEach((cls, clsIndex) => {
+        const classId = `class-${subdept.id}-${cls.id || clsIndex}`
+        entities.push({
+          id: classId,
+          name: cls.name,
+          type: 'class',
+          parentId: subdeptId,
+          visible: entityVisibility[classId] !== false,
+          level: 1,
+          path: `${subdept.name} → ${cls.name}`,
+          hasChildren: !!(cls.subClasses && cls.subClasses.length > 0),
+          default_display: cls.default_display
+        })
+
+        cls.subClasses?.forEach((subCls, subClsIndex) => {
+          const subclassId = `subclass-${subdept.id}-${cls.id || clsIndex}-${subCls.id || subClsIndex}`
+          entities.push({
+            id: subclassId,
+            name: subCls.name,
+            type: 'subclass',
+            parentId: classId,
+            visible: entityVisibility[subclassId] !== false,
+            level: 2,
+            path: `${subdept.name} → ${cls.name} → ${subCls.name}`,
+            default_display: subCls.default_display
+          })
+        })
+      })
+    })
+
+    return entities
+  }, [departments, selectedDepartment, entityVisibility])
+  
   // Get grouped entries based on processed data and entity visibility
   const getGroupedEntries = (dept: Department) => {
     return currentPeriod.data
