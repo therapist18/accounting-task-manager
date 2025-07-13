@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { ArrowUp, ArrowDown, Pencil, X, Info, Minus, Plus, Clock, FileText, User, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Download, FileSpreadsheet } from "lucide-react"
+import { ArrowUp, ArrowDown, Pencil, X, Info, Minus, Plus, Clock, FileText, User, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Eye, EyeOff, Settings, ChevronDown, ChevronUp } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
@@ -18,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Badge } from "@/components/ui/badge"
 import { format } from "date-fns"
 import type { Department, Stage, Subdepartment, DepartmentOption } from "./stagesdb"
+import ColumnVisibilityControl, { ColumnVisibilityOption } from "../main-shared-components/column-visibility"
 
 // Simple UUID generator for client-side use
 const generateId = () => { 
@@ -70,6 +71,17 @@ const getTimeFromMinutes = (minutes: number | null) => {
   return { days, hours, minutes: mins }
 }
 
+// Utility function to sort items by order field
+const sortByOrder = <T extends { order?: number }>(items: T[]): T[] => {
+  return [...items].sort((a, b) => (a.order || 0) - (b.order || 0))
+}
+
+// Utility function to filter items by default display
+const filterByDefaultDisplay = <T extends { default_display?: boolean }>(items: T[], showDefaultOnly: boolean): T[] => {
+  if (!showDefaultOnly) return items
+  return items.filter(item => item.default_display !== false)
+}
+
 export default function Stages() {
   const [departments, setDepartments] = useState<Department[]>([])
   const [activeTab, setActiveTab] = useState<string>("")
@@ -79,7 +91,106 @@ export default function Stages() {
   const [editingStage, setEditingStage] = useState<Stage | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false)
   const { toast } = useToast()
+
+  // Column visibility state
+  const [columnVisibility, setColumnVisibility] = useState({
+    index: true,
+    entity: true,
+    stageName: true,
+    duration: true,
+    followUp: true,
+    controls: true,
+  })
+
+  // Memoized column visibility options
+  const columnVisibilityOptions: ColumnVisibilityOption[] = useMemo(() => [
+    {
+      id: 'index',
+      label: 'Index (#)',
+      visible: columnVisibility.index,
+      disabled: true, // Always show index
+      isDefault: true,
+      group: 'Basic'
+    },
+    {
+      id: 'entity',
+      label: 'Department / Entity',
+      visible: columnVisibility.entity,
+      disabled: true, // Always show entity
+      isDefault: true,
+      group: 'Basic'
+    },
+    {
+      id: 'stageName',
+      label: 'Stage Names',
+      visible: columnVisibility.stageName,
+      isDefault: true,
+      group: 'Stage Info'
+    },
+    {
+      id: 'duration',
+      label: 'Duration',
+      visible: columnVisibility.duration,
+      isDefault: true,
+      group: 'Stage Info'
+    },
+    {
+      id: 'followUp',
+      label: 'Follow Up',
+      visible: columnVisibility.followUp,
+      isDefault: true,
+      group: 'Stage Info'
+    },
+    {
+      id: 'controls',
+      label: 'Controls (Applicable/Display)',
+      visible: columnVisibility.controls,
+      isDefault: true,
+      group: 'Controls'
+    }
+  ], [columnVisibility])
+
+  const handleColumnVisibilityChange = (columnId: string, visible: boolean) => {
+    setColumnVisibility(prev => ({
+      ...prev,
+      [columnId]: visible
+    }))
+  }
+
+  const handleShowAllColumns = () => {
+    setColumnVisibility({
+      index: true,
+      entity: true,
+      stageName: true,
+      duration: true,
+      followUp: true,
+      controls: true,
+    })
+  }
+
+  const handleHideAllColumns = () => {
+    setColumnVisibility({
+      index: true, // Keep required columns
+      entity: true, // Keep required columns
+      stageName: false,
+      duration: false,
+      followUp: false,
+      controls: false,
+    })
+  }
+
+  const handleResetToDefault = () => {
+    setColumnVisibility({
+      index: true,
+      entity: true,
+      stageName: true,
+      duration: true,
+      followUp: true,
+      controls: true,
+    })
+  }
 
   const handleKeyDown = (e: React.KeyboardEvent, subdeptId: number, stageId: string, shouldAllocate: boolean) => {
     if (e.key === 'Enter') {
@@ -99,6 +210,87 @@ export default function Stages() {
       return newSet
     })
   }
+  const getCurrentDepartment = () => {
+    return departments.find(d => d.id === activeTab)
+  }
+  // Process subdepartments based on display settings
+  const getProcessedSubdepartments = (dept: Department) => {
+    let subdepartments = dept.subdepartments || []
+    
+    // Filter by default display if needed
+    subdepartments = filterByDefaultDisplay(subdepartments, showDefaultDisplayOnly)
+    
+    // Process classes and subclasses within each subdepartment
+    return subdepartments.map(subdept => ({
+      ...subdept,
+      classes: filterByDefaultDisplay(
+        subdept.classes?.map(cls => ({
+          ...cls,
+          subClasses: filterByDefaultDisplay(cls.subClasses || [], showDefaultDisplayOnly)
+        })) || [],
+        showDefaultDisplayOnly
+      )
+    }))
+  }
+
+  const expandAllRows = () => {
+    const currentDept = getCurrentDepartment()
+    if (!currentDept) return
+
+    const rowIds = new Set<string>()
+    
+    // Get all potential row IDs
+    const processedSubdepartments = getProcessedSubdepartments(currentDept)
+    processedSubdepartments.forEach((subdept, subdeptIndex) => {
+      const subdeptRowId = `subdept-${subdept.id}`
+      rowIds.add(subdeptRowId)
+      
+      if (subdept.classes && subdept.classes.length > 0) {
+        subdept.classes.forEach((cls, clsIndex) => {
+          const classRowId = `class-${subdept.id}-${cls.id || clsIndex}`
+          rowIds.add(classRowId)
+        })
+      }
+    })
+    
+    setExpandedRows(rowIds)
+  }
+
+  const collapseAllRows = () => {
+    setExpandedRows(new Set())
+  }
+
+  // Check if all expandable rows are expanded
+  const areAllRowsExpanded = useMemo(() => {
+    const currentDept = getCurrentDepartment()
+    if (!currentDept) return false
+
+    const processedSubdepartments = getProcessedSubdepartments(currentDept)
+    let totalExpandableRows = 0
+    let expandedCount = 0
+
+    processedSubdepartments.forEach((subdept) => {
+      if (subdept.classes && subdept.classes.length > 0) {
+        const subdeptRowId = `subdept-${subdept.id}`
+        totalExpandableRows++
+        if (expandedRows.has(subdeptRowId)) {
+          expandedCount++
+        }
+
+        subdept.classes.forEach((cls, clsIndex) => {
+          if (cls.subClasses && cls.subClasses.length > 0) {
+            const classRowId = `class-${subdept.id}-${cls.id || clsIndex}`
+            totalExpandableRows++
+            if (expandedRows.has(classRowId)) {
+              expandedCount++
+            }
+          }
+        })
+      }
+    })
+
+    return totalExpandableRows > 0 && expandedCount === totalExpandableRows
+  }, [expandedRows, departments, activeTab, showDefaultDisplayOnly])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -118,21 +310,27 @@ export default function Stages() {
 
         if (deptsError) throw deptsError
 
+        // Transform and sort the data properly
         const transformedDepartments = (deptsData || []).map(dept => ({
           ...dept,
           stages: dept.stages ? (Array.isArray(dept.stages) ? dept.stages : []) : [],
-          subdepartments: (dept.tm_subdepartments || []).map((subdept: any) => ({
+          subdepartments: sortByOrder((dept.tm_subdepartments || []).map((subdept: any) => ({
             ...subdept,
             stages: Array.isArray(subdept.stages) ? subdept.stages : [],
-            classes: Array.isArray(subdept.classes) ? subdept.classes : [],
+            classes: sortByOrder(Array.isArray(subdept.classes) ? subdept.classes.map((cls: any) => ({
+              ...cls,
+              subClasses: sortByOrder(Array.isArray(cls.subClasses) ? cls.subClasses : [])
+            })) : []),
             hasClasses: (subdept.classes && Array.isArray(subdept.classes) && subdept.classes.length > 0)
-          }))
+          })))
         }))
 
-        setDepartments(transformedDepartments)
+        // Sort departments by order
+        const sortedDepartments = sortByOrder(transformedDepartments)
+        setDepartments(sortedDepartments)
 
-        if (transformedDepartments.length > 0) {
-          setActiveTab(transformedDepartments[0].id)
+        if (sortedDepartments.length > 0) {
+          setActiveTab(sortedDepartments[0].id)
         }
       } catch (err) {
         console.error('Error fetching data:', err)
@@ -144,10 +342,6 @@ export default function Stages() {
 
     fetchData()
   }, [])
-
-  const getCurrentDepartment = () => {
-    return departments.find(d => d.id === activeTab)
-  }
 
   const departmentList = useMemo((): DepartmentOption[] =>
     departments.map(dept => ({
@@ -912,8 +1106,9 @@ export default function Stages() {
     )
   }
  
-  const normalizedSubdepartments = currentDept.subdepartments && currentDept.subdepartments.length > 0
-    ? currentDept.subdepartments
+  const processedSubdepartments = getProcessedSubdepartments(currentDept)
+  const normalizedSubdepartments = processedSubdepartments.length > 0
+    ? processedSubdepartments
     : [{
       id: -1,
       name: 'No Subdepartments',
@@ -932,6 +1127,46 @@ export default function Stages() {
             <p className="text-gray-600 mt-1">Configure workflow stages and their allocations</p>
           </div>
           <div className="flex items-center gap-3">
+            {/* Default Display Toggle */}
+            <Button
+              variant={showDefaultDisplayOnly ? "default" : "outline"}
+              onClick={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
+              className="flex items-center gap-2"
+            >
+              {showDefaultDisplayOnly ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+              {showDefaultDisplayOnly ? 'Default Display' : 'Show All'}
+            </Button>
+
+            {/* Expand/Collapse All Buttons */}
+            <Button
+              variant="outline"
+              onClick={areAllRowsExpanded ? collapseAllRows : expandAllRows}
+              className="flex items-center gap-2"
+            >
+              {areAllRowsExpanded ? (
+                <>
+                  <ChevronUp className="h-4 w-4" />
+                  Collapse All
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-4 w-4" />
+                  Expand All
+                </>
+              )}
+            </Button>
+
+            {/* Column Visibility Control */}
+            <ColumnVisibilityControl
+              columns={columnVisibilityOptions}
+              onVisibilityChange={handleColumnVisibilityChange}
+              onShowAll={handleShowAllColumns}
+              onHideAll={handleHideAllColumns}
+              onResetToDefault={handleResetToDefault}
+              title="Column Visibility"
+              description="Toggle stage table columns"
+            />
+
             <ExportStages
               currentDept={currentDept}
               disabled={!currentDept || !currentDept.stages || currentDept.stages.length === 0}
@@ -977,16 +1212,31 @@ export default function Stages() {
                       <TableHeader className="sticky top-0 z-10">
                         {/* Stage Names Row */}
                         <TableRow className="bg-blue-600">
-                          <TableHead className="sticky left-0 bg-blue-600 border-r-2 border-blue-400 font-bold w-16 z-20 text-center text-white" rowSpan={4}>
-                            #
-                          </TableHead>
-                          <TableHead className="sticky left-16 bg-blue-600 border-r-2 border-blue-400 font-bold w-64 z-20 text-white" rowSpan={4}>
-                            <div className="flex items-center gap-2">
-                              <FileText className="h-4 w-4" />
-                              Department / Entity
-                            </div>
-                          </TableHead>
-                          <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-400 z-20 text-white">Stage Name</TableHead>
+                          {columnVisibility.index && (
+                            <TableHead className="sticky left-0 bg-blue-600 border-r-2 border-blue-400 font-bold w-16 z-30 text-center text-white" rowSpan={4}>
+                              #
+                            </TableHead>
+                          )}
+                          {columnVisibility.entity && (
+                            <TableHead className={cn(
+                              "sticky bg-blue-600 border-r-2 border-blue-400 font-bold w-64 z-20 text-white",
+                              columnVisibility.index ? "left-16" : "left-0"
+                            )} rowSpan={4}>
+                              <div className="flex items-center gap-2">
+                                <FileText className="h-4 w-4" />
+                                Department / Entity
+                              </div>
+                            </TableHead>
+                          )}
+                          {columnVisibility.stageName && (
+                            <TableHead className={cn(
+                              "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
+                              columnVisibility.index && columnVisibility.entity ? "left-80" :
+                              columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                            )}>
+                              Stage Name
+                            </TableHead>
+                          )}
  
                           {dept.stages.map((stage, index) => (
                             <TableHead
@@ -1174,60 +1424,88 @@ export default function Stages() {
                         </TableRow>
  
                         {/* Duration Row */}
-                        <TableRow className="bg-blue-600">
-                          <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-400 z-20 text-white">Duration</TableHead>
-                          {dept.stages.map((stage, index) => {
-                            const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
-                            return (
-                              <TableHead
-                                key={`duration-${stage.id}`}
-                                className="border-r border-blue-400 text-center bg-blue-600"
-                              >
-                                <div className="font-mono font-bold text-sm text-white">
-                                  {days > 0 && `${days}d `}
-                                  {hours > 0 && `${hours}h `}
-                                  {minutes > 0 ? `${minutes}m` : ''}
-                                  {!days && !hours && !minutes && '0m'}
-                                </div>
+                        {columnVisibility.duration && (
+                          <TableRow className="bg-blue-600">
+                            {columnVisibility.stageName && (
+                              <TableHead className={cn(
+                                "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
+                                columnVisibility.index && columnVisibility.entity ? "left-80" :
+                                columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                              )}>
+                                Duration
                               </TableHead>
-                            )
-                          })}
-                        </TableRow>
+                            )}
+                            {dept.stages.map((stage, index) => {
+                              const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
+                              return (
+                                <TableHead
+                                  key={`duration-${stage.id}`}
+                                  className="border-r border-blue-400 text-center bg-blue-600"
+                                >
+                                  <div className="font-mono font-bold text-sm text-white">
+                                    {days > 0 && `${days}d `}
+                                    {hours > 0 && `${hours}h `}
+                                    {minutes > 0 ? `${minutes}m` : ''}
+                                    {!days && !hours && !minutes && '0m'}
+                                  </div>
+                                </TableHead>
+                              )
+                            })}
+                          </TableRow>
+                        )}
  
                         {/* Follow Up Row */}
-                        <TableRow className="bg-blue-600">
-                          <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-400 z-20 text-white">Follow Up</TableHead>
-                          {dept.stages.map((stage, index) => (
-                            <TableHead
-                              key={`followup-${stage.id}`}
-                              className="border-r border-blue-400 text-center bg-blue-600"
-                            >
-                              <div className="font-bold text-sm text-white">
-                                {stage.follow_up || '-'}
-                              </div>
-                            </TableHead>
-                          ))}
-                        </TableRow>
+                        {columnVisibility.followUp && (
+                          <TableRow className="bg-blue-600">
+                            {columnVisibility.stageName && (
+                              <TableHead className={cn(
+                                "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
+                                columnVisibility.index && columnVisibility.entity ? "left-80" :
+                                columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                              )}>
+                                Follow Up
+                              </TableHead>
+                            )}
+                            {dept.stages.map((stage, index) => (
+                              <TableHead
+                                key={`followup-${stage.id}`}
+                                className="border-r border-blue-400 text-center bg-blue-600"
+                              >
+                                <div className="font-bold text-sm text-white">
+                                  {stage.follow_up || '-'}
+                                </div>
+                              </TableHead>
+                            ))}
+                          </TableRow>
+                        )}
  
                         {/* Applicable/Display Headers Row */}
-                        <TableRow className="bg-blue-600">
-                          <TableHead className="sticky left-80 bg-blue-600 border-r-2 border-blue-400 z-20"></TableHead>
-                          {dept.stages.map((stage, index) => (
-                            <TableHead
-                              key={`controls-${stage.id}`}
-                              className="border-r border-blue-400 bg-blue-600"
-                            >
-                              <div className="grid grid-cols-2 gap-1 p-1">
-                                <div className="text-center text-xs font-medium text-white">
-                                  Applicable
+                        {columnVisibility.controls && (
+                          <TableRow className="bg-blue-600">
+                            {columnVisibility.stageName && (
+                              <TableHead className={cn(
+                                "sticky bg-blue-600 border-r-2 border-blue-400 z-20",
+                                columnVisibility.index && columnVisibility.entity ? "left-80" :
+                                columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                              )}></TableHead>
+                            )}
+                            {dept.stages.map((stage, index) => (
+                              <TableHead
+                                key={`controls-${stage.id}`}
+                                className="border-r border-blue-400 bg-blue-600"
+                              >
+                                <div className="grid grid-cols-2 gap-1 p-1">
+                                  <div className="text-center text-xs font-medium text-white">
+                                    Applicable
+                                  </div>
+                                  <div className="text-center text-xs font-medium text-white">
+                                    Display
+                                  </div>
                                 </div>
-                                <div className="text-center text-xs font-medium text-white">
-                                  Display
-                                </div>
-                              </div>
-                            </TableHead>
-                          ))}
-                        </TableRow>
+                              </TableHead>
+                            ))}
+                          </TableRow>
+                        )}
                       </TableHeader>
  
                       <TableBody>
@@ -1241,29 +1519,42 @@ export default function Stages() {
  
                           rows.push(
                             <TableRow key={subdeptRowId} className="hover:bg-blue-25 bg-blue-100 transition-colors">
-                              <TableCell className="sticky left-0 bg-blue-100 border-r-2 border-gray-200 text-center font-mono text-sm z-1 font-semibold">
-                                {rowIndex}
-                              </TableCell>
-                              <TableCell className="sticky left-16 bg-blue-100 border-r-2 border-gray-200 font-medium z-1">
-                                <div className="flex justify-between items-center gap-2">
-                                  <span className="font-semibold text-gray-900">{subdept.name}</span>
-                                  {hasClasses && (
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-6 w-6 hover:bg-blue-100"
-                                      onClick={() => toggleRowExpansion(subdeptRowId)}
-                                    >
-                                      {isExpanded ? (
-                                        <Minus className="h-4 w-4 text-blue-600" />
-                                      ) : (
-                                        <Plus className="h-4 w-4 text-blue-600" />
-                                      )}
-                                    </Button>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell className="sticky left-80 bg-blue-100 border-r-2 border-gray-200 text-center font-mono text-sm z-1"></TableCell>
+                              {columnVisibility.index && (
+                                <TableCell className="sticky left-0 bg-blue-100 border-r-2 border-gray-200 text-center font-mono text-sm z-1 font-semibold">
+                                  {rowIndex}
+                                </TableCell>
+                              )}
+                              {columnVisibility.entity && (
+                                <TableCell className={cn(
+                                  "sticky bg-blue-100 border-r-2 border-gray-200 font-medium z-1",
+                                  columnVisibility.index ? "left-16" : "left-0"
+                                )}>
+                                  <div className="flex justify-between items-center gap-2">
+                                    <span className="font-semibold text-gray-900">{subdept.name}</span>
+                                    {hasClasses && (
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 hover:bg-blue-100"
+                                        onClick={() => toggleRowExpansion(subdeptRowId)}
+                                      >
+                                        {isExpanded ? (
+                                          <Minus className="h-4 w-4 text-blue-600" />
+                                        ) : (
+                                          <Plus className="h-4 w-4 text-blue-600" />
+                                        )}
+                                      </Button>
+                                    )}
+                                  </div>
+                                </TableCell>
+                              )}
+                              {columnVisibility.stageName && (
+                                <TableCell className={cn(
+                                  "sticky bg-blue-100 border-r-2 border-gray-200 text-center font-mono text-sm z-1",
+                                  columnVisibility.index && columnVisibility.entity ? "left-80" :
+                                  columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                                )}></TableCell>
+                              )}
                               {dept.stages.map((stage, stageIndex) => {
                                 const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id)
                                 const hasAllocation = stageAllocation?.applicable ?? true
@@ -1275,89 +1566,91 @@ export default function Stages() {
                                     className="border-r border-l border-gray-200 p-0"
                                   >
                                     {!hasClasses ? (
-                                      <div className="grid grid-cols-2 gap-1 p-1">
-                                        <div className="flex justify-center">
-                                          <div
-                                            className="w-full"
-                                            data-subdept-id={subdept.id}
-                                            data-stage-id={stage.id}
-                                            onKeyDown={(e) => handleKeyDown(e, subdept.id, stage.id, !hasAllocation)}
-                                          >
-                                            <Select
-                                              value={hasAllocation ? 'applicable' : 'not-applicable'}
-                                              onValueChange={async (value) => {
-                                                const newValue = value === 'applicable';
-                                                setDepartments(prevDepartments => {
-                                                  return prevDepartments.map(dept => {
-                                                    if (dept.id !== activeTab) return dept;
- 
-                                                    return {
-                                                      ...dept,
-                                                      subdepartments: dept.subdepartments?.map(sd => {
-                                                        if (sd.id !== subdept.id) return sd;
- 
-                                                        const updatedStages = [...(sd.stages || [])];
-                                                        let stageAlloc = updatedStages.find(s => s.stage_id === stage.id);
- 
-                                                        if (!stageAlloc) {
-                                                          stageAlloc = { stage_id: stage.id, applicable: newValue, display: newValue };
-                                                          updatedStages.push(stageAlloc);
-                                                        } else {
-                                                          stageAlloc.applicable = newValue;
-                                                          if (!newValue) stageAlloc.display = false;
-                                                        }
- 
-                                                        return {
-                                                          ...sd,
-                                                          stages: updatedStages
-                                                        };
-                                                      }) || []
-                                                    };
-                                                  });
-                                                });
- 
-                                                await handleAllocationChangeInternal(subdept.id, stage.id, newValue);
-                                              }}
+                                      columnVisibility.controls && (
+                                        <div className="grid grid-cols-2 gap-1 p-1">
+                                          <div className="flex justify-center">
+                                            <div
+                                              className="w-full"
+                                              data-subdept-id={subdept.id}
+                                              data-stage-id={stage.id}
+                                              onKeyDown={(e) => handleKeyDown(e, subdept.id, stage.id, !hasAllocation)}
                                             >
-                                              <SelectTrigger
-                                                className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50"
-                                                onClick={(e) => e.stopPropagation()}
+                                              <Select
+                                                value={hasAllocation ? 'applicable' : 'not-applicable'}
+                                                onValueChange={async (value) => {
+                                                  const newValue = value === 'applicable';
+                                                  setDepartments(prevDepartments => {
+                                                    return prevDepartments.map(dept => {
+                                                      if (dept.id !== activeTab) return dept;
+ 
+                                                      return {
+                                                        ...dept,
+                                                        subdepartments: dept.subdepartments?.map(sd => {
+                                                          if (sd.id !== subdept.id) return sd;
+ 
+                                                          const updatedStages = [...(sd.stages || [])];
+                                                          let stageAlloc = updatedStages.find(s => s.stage_id === stage.id);
+ 
+                                                          if (!stageAlloc) {
+                                                            stageAlloc = { stage_id: stage.id, applicable: newValue, display: newValue };
+                                                            updatedStages.push(stageAlloc);
+                                                          } else {
+                                                            stageAlloc.applicable = newValue;
+                                                            if (!newValue) stageAlloc.display = false;
+                                                          }
+ 
+                                                          return {
+                                                            ...sd,
+                                                            stages: updatedStages
+                                                          };
+                                                        }) || []
+                                                      };
+                                                    });
+                                                  });
+ 
+                                                  await handleAllocationChangeInternal(subdept.id, stage.id, newValue);
+                                                }}
                                               >
-                                                <SelectValue>
-                                                  <div className="flex items-center gap-1">
-                                                    <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                                    <span className="ml-1 font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
-                                                  </div>
-                                                </SelectValue>
-                                              </SelectTrigger>
-                                              <SelectContent>
-                                                <SelectItem value="applicable">
-                                                  <div className="flex items-center gap-2">
-                                                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                                    <span>Applicable</span>
-                                                  </div>
-                                                </SelectItem>
-                                                <SelectItem value="not-applicable">
-                                                  <div className="flex items-center gap-2">
-                                                    <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                                    <span>Not Applicable</span>
-                                                  </div>
-                                                </SelectItem>
-                                              </SelectContent>
-                                            </Select>
+                                                <SelectTrigger
+                                                  className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50"
+                                                  onClick={(e) => e.stopPropagation()}
+                                                >
+                                                  <SelectValue>
+                                                    <div className="flex items-center gap-1">
+                                                      <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                                      <span className="ml-1 font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
+                                                    </div>
+                                                  </SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                  <SelectItem value="applicable">
+                                                    <div className="flex items-center gap-2">
+                                                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                                      <span>Applicable</span>
+                                                    </div>
+                                                  </SelectItem>
+                                                  <SelectItem value="not-applicable">
+                                                    <div className="flex items-center gap-2">
+                                                      <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                                      <span>Not Applicable</span>
+                                                    </div>
+                                                  </SelectItem>
+                                                </SelectContent>
+                                              </Select>
+                                            </div>
+                                          </div>
+                                          <div className="flex justify-center items-center">
+                                            <Checkbox
+                                              checked={hasDisplay}
+                                              onCheckedChange={(checked) =>
+                                                handleDisplayToggle(subdept.id, stage.id, checked as boolean)
+                                              }
+                                              disabled={!hasAllocation}
+                                              className="h-4 w-4 text-blue-500"
+                                            />
                                           </div>
                                         </div>
-                                        <div className="flex justify-center items-center">
-                                          <Checkbox
-                                            checked={hasDisplay}
-                                            onCheckedChange={(checked) =>
-                                              handleDisplayToggle(subdept.id, stage.id, checked as boolean)
-                                            }
-                                            disabled={!hasAllocation}
-                                            className="h-4 w-4 text-blue-500"
-                                          />
-                                        </div>
-                                      </div>
+                                      )
                                     ) : (
                                       <div className="flex items-center justify-center p-2 text-gray-500">
                                         -
@@ -1378,32 +1671,45 @@ export default function Stages() {
  
                               rows.push(
                                 <TableRow key={classRowId} className="bg-blue-25 hover:bg-blue-50 transition-colors">
-                                  <TableCell className="sticky left-0 bg-blue-25 border-r-2 border-gray-200 text-center font-mono text-sm z-30 font-semibold">
-                                    {rowIndex}.{clsIndex + 1}
-                                  </TableCell>
-                                  <TableCell className="sticky left-16 bg-blue-25 border-r-2 border-gray-200 pl-8 z-1">
-                                    <div className="flex justify-between items-center gap-2">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-sm font-medium">{cls.name}</span>
+                                  {columnVisibility.index && (
+                                    <TableCell className="sticky left-0 bg-blue-25 border-r-2 border-gray-200 text-center font-mono text-sm z-30 font-semibold">
+                                      {rowIndex}.{clsIndex + 1}
+                                    </TableCell>
+                                  )}
+                                  {columnVisibility.entity && (
+                                    <TableCell className={cn(
+                                      "sticky bg-blue-25 border-r-2 border-gray-200 pl-8 z-1",
+                                      columnVisibility.index ? "left-16" : "left-0"
+                                    )}>
+                                      <div className="flex justify-between items-center gap-2">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm font-medium">{cls.name}</span>
+                                        </div>
+                                        {hasSubClasses && (
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-5 w-5 hover:bg-blue-200"
+                                            onClick={() => toggleRowExpansion(classRowId)}
+                                          >
+                                            {isClassExpanded ? (
+                                              <Minus className="h-3 w-3 text-blue-600" />
+                                            ) : (
+                                              <Plus className="h-3 w-3 text-blue-600" />
+                                            )}
+                                          </Button>
+                                        )}
                                       </div>
-                                      {hasSubClasses && (
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="h-5 w-5 hover:bg-blue-200"
-                                          onClick={() => toggleRowExpansion(classRowId)}
-                                        >
-                                          {isClassExpanded ? (
-                                            <Minus className="h-3 w-3 text-blue-600" />
-                                          ) : (
-                                            <Plus className="h-3 w-3 text-blue-600" />
-                                          )}
-                                        </Button>
-                                      )}
-                                    </div>
-                                  </TableCell>
+                                    </TableCell>
+                                  )}
  
-                                  <TableCell className="sticky left-80 bg-blue-25 border-r-2 border-gray-200 text-center font-mono text-sm z-30"></TableCell>
+                                  {columnVisibility.stageName && (
+                                    <TableCell className={cn(
+                                      "sticky bg-blue-25 border-r-2 border-gray-200 text-center font-mono text-sm z-30",
+                                      columnVisibility.index && columnVisibility.entity ? "left-80" :
+                                      columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                                    )}></TableCell>
+                                  )}
                                   {dept.stages.map((stage, stageIndex) => {
                                     const stageAllocation = cls.stages?.find(s => s.stage_id === stage.id)
                                     const hasAllocation = stageAllocation?.applicable ?? true
@@ -1415,49 +1721,51 @@ export default function Stages() {
                                         className="border-r border-l border-gray-200 p-0 z-30"
                                       >
                                         {!hasSubClasses ? (
-                                          <div className="grid grid-cols-2 gap-1 p-1">
-                                            <div className="flex justify-center">
-                                              <Select
-                                                value={hasAllocation ? 'applicable' : 'not-applicable'}
-                                                onValueChange={(value) =>
-                                                  handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex)
-                                                }
-                                              >
-                                                <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50">
-                                                  <SelectValue>
-                                                    <div className="flex items-center gap-1">
-                                                      <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                                      <span className="font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
-                                                    </div>
-                                                  </SelectValue>
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                  <SelectItem value="applicable">
-                                                    <div className="flex items-center gap-2">
-                                                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                                      Applicable
-                                                    </div>
-                                                  </SelectItem>
-                                                  <SelectItem value="not-applicable">
-                                                    <div className="flex items-center gap-2">
-                                                      <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                                      Not Applicable
-                                                    </div>
-                                                  </SelectItem>
-                                                </SelectContent>
-                                              </Select>
-                                            </div>
-                                            <div className="flex justify-center items-center">
-                                             <Checkbox
-                                               checked={hasDisplay}
-                                               onCheckedChange={(checked) =>
-                                                 handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex)
-                                               }
-                                               disabled={!hasAllocation}
-                                               className="h-4 w-4 text-blue-500"
-                                             />
+                                          columnVisibility.controls && (
+                                            <div className="grid grid-cols-2 gap-1 p-1">
+                                              <div className="flex justify-center">
+                                                <Select
+                                                  value={hasAllocation ? 'applicable' : 'not-applicable'}
+                                                  onValueChange={(value) =>
+                                                    handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex)
+                                                  }
+                                                >
+                                                  <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50">
+                                                    <SelectValue>
+                                                      <div className="flex items-center gap-1">
+                                                        <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                                        <span className="font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
+                                                      </div>
+                                                    </SelectValue>
+                                                  </SelectTrigger>
+                                                  <SelectContent>
+                                                    <SelectItem value="applicable">
+                                                      <div className="flex items-center gap-2">
+                                                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                                        Applicable
+                                                      </div>
+                                                    </SelectItem>
+                                                    <SelectItem value="not-applicable">
+                                                      <div className="flex items-center gap-2">
+                                                        <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                                        Not Applicable
+                                                      </div>
+                                                    </SelectItem>
+                                                  </SelectContent>
+                                                </Select>
+                                              </div>
+                                              <div className="flex justify-center items-center">
+                                               <Checkbox
+                                                 checked={hasDisplay}
+                                                 onCheckedChange={(checked) =>
+                                                   handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex)
+                                                 }
+                                                 disabled={!hasAllocation}
+                                                 className="h-4 w-4 text-blue-500"
+                                               />
+                                             </div>
                                            </div>
-                                         </div>
+                                         )
                                        ) : (
                                          <div className="flex items-center justify-center p-2 text-gray-500">
                                            -
@@ -1474,17 +1782,30 @@ export default function Stages() {
                                cls.subClasses?.forEach((subCls, subClsIndex) => {
                                  rows.push(
                                    <TableRow key={`subclass-${subdept.id}-${cls.id}-${subCls.id}`} className="bg-blue-50 hover:bg-blue-100 transition-colors">
-                                     <TableCell className="sticky left-0 bg-blue-50 border-r-2 border-gray-200 text-center font-mono text-sm z-30 font-semibold">
-                                       {rowIndex}.{clsIndex + 1}.{subClsIndex + 1}
-                                     </TableCell>
-                                     <TableCell className="sticky left-16 bg-blue-50 border-r-2 border-gray-200 pl-16 z-30">
-                                       <div className="flex items-center gap-2">
-                                         <ChevronRight className="h-3 w-3 text-blue-500" />
-                                         <span className="text-blue-700 text-sm font-medium">{subCls.name}</span>
-                                       </div>
-                                     </TableCell>
+                                     {columnVisibility.index && (
+                                       <TableCell className="sticky left-0 bg-blue-50 border-r-2 border-gray-200 text-center font-mono text-sm z-30 font-semibold">
+                                         {rowIndex}.{clsIndex + 1}.{subClsIndex + 1}
+                                       </TableCell>
+                                     )}
+                                     {columnVisibility.entity && (
+                                       <TableCell className={cn(
+                                         "sticky bg-blue-50 border-r-2 border-gray-200 pl-16 z-30",
+                                         columnVisibility.index ? "left-16" : "left-0"
+                                       )}>
+                                         <div className="flex items-center gap-2">
+                                           <ChevronRight className="h-3 w-3 text-blue-500" />
+                                           <span className="text-blue-700 text-sm font-medium">{subCls.name}</span>
+                                         </div>
+                                       </TableCell>
+                                     )}
 
-                                     <TableCell className="sticky left-80 bg-blue-50 border-r-2 border-gray-200 text-center font-mono text-sm z-30"></TableCell>
+                                     {columnVisibility.stageName && (
+                                       <TableCell className={cn(
+                                         "sticky bg-blue-50 border-r-2 border-gray-200 text-center font-mono text-sm z-30",
+                                         columnVisibility.index && columnVisibility.entity ? "left-80" :
+                                         columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                                       )}></TableCell>
+                                     )}
                                      {dept.stages.map((stage, stageIndex) => {
                                        const stageAllocation = subCls.stages?.find(s => s.stage_id === stage.id)
                                        const hasAllocation = stageAllocation?.applicable ?? true
@@ -1495,49 +1816,51 @@ export default function Stages() {
                                            key={`subclass-${subdept.id}-${cls.id}-${subCls.id}-${stage.id}`}
                                            className="border-r border-l border-gray-200 p-0"
                                          >
-                                           <div className="grid grid-cols-2 gap-1 p-1">
-                                             <div className="flex justify-center">
-                                               <Select
-                                                 value={hasAllocation ? 'applicable' : 'not-applicable'}
-                                                 onValueChange={(value) =>
-                                                   handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex, subClsIndex)
-                                                 }
-                                               >
-                                                 <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50">
-                                                   <SelectValue>
-                                                     <div className="flex items-center gap-1">
-                                                       <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                                       <span className="font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
-                                                     </div>
-                                                   </SelectValue>
-                                                 </SelectTrigger>
-                                                 <SelectContent>
-                                                   <SelectItem value="applicable">
-                                                     <div className="flex items-center gap-2">
-                                                       <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                                       Applicable
-                                                     </div>
-                                                   </SelectItem>
-                                                   <SelectItem value="not-applicable">
-                                                     <div className="flex items-center gap-2">
-                                                       <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                                       Not Applicable
-                                                     </div>
-                                                   </SelectItem>
-                                                 </SelectContent>
-                                               </Select>
+                                           {columnVisibility.controls && (
+                                             <div className="grid grid-cols-2 gap-1 p-1">
+                                               <div className="flex justify-center">
+                                                 <Select
+                                                   value={hasAllocation ? 'applicable' : 'not-applicable'}
+                                                   onValueChange={(value) =>
+                                                     handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex, subClsIndex)
+                                                   }
+                                                 >
+                                                   <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50">
+                                                     <SelectValue>
+                                                       <div className="flex items-center gap-1">
+                                                         <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                                         <span className="font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
+                                                       </div>
+                                                     </SelectValue>
+                                                   </SelectTrigger>
+                                                   <SelectContent>
+                                                     <SelectItem value="applicable">
+                                                       <div className="flex items-center gap-2">
+                                                         <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                                         Applicable
+                                                       </div>
+                                                     </SelectItem>
+                                                     <SelectItem value="not-applicable">
+                                                       <div className="flex items-center gap-2">
+                                                         <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                                         Not Applicable
+                                                       </div>
+                                                     </SelectItem>
+                                                   </SelectContent>
+                                                 </Select>
+                                               </div>
+                                               <div className="flex justify-center items-center">
+                                                 <Checkbox
+                                                   checked={hasDisplay}
+                                                   onCheckedChange={(checked) =>
+                                                     handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex, subClsIndex)
+                                                   }
+                                                   disabled={!hasAllocation}
+                                                   className="h-4 w-4 text-blue-500"
+                                                 />
+                                               </div>
                                              </div>
-                                             <div className="flex justify-center items-center">
-                                               <Checkbox
-                                                 checked={hasDisplay}
-                                                 onCheckedChange={(checked) =>
-                                                   handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex, subClsIndex)
-                                                 }
-                                                 disabled={!hasAllocation}
-                                                 className="h-4 w-4 text-blue-500"
-                                               />
-                                             </div>
-                                           </div>
+                                           )}
                                          </TableCell>
                                        )
                                      })}

@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { User, Users, Phone, Mail, MapPin, Building2, Loader2, Info, FileText, Briefcase, UserPlus } from "lucide-react"
+import { User, Users, Phone, Mail, MapPin, Building2, Loader2, Info, FileText, Briefcase, UserPlus, UserCheck } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 import { fetchDepartments } from "../../departments/departments/database"
@@ -53,7 +53,7 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
     // Use a ref to maintain the selected individual across re-renders
     const selectedIndividualRef = useRef<Individual | null>(null);
     const [selectedIndividual, setSelectedIndividualState] = useState<Individual | null>(null);
-    
+
     // Update both the state and ref when selected individual changes
     const setSelectedIndividual = useCallback((individual: Individual | null) => {
         selectedIndividualRef.current = individual;
@@ -66,6 +66,9 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
     const [includeDependants, setIncludeDependants] = useState(false)
     const [availableDependants, setAvailableDependants] = useState<Individual[]>([])
     const [selectedDependants, setSelectedDependants] = useState<string[]>([])
+    const [includeReferences, setIncludeReferences] = useState(false)
+    const [availableReferences, setAvailableReferences] = useState<Individual[]>([])
+    const [selectedReferences, setSelectedReferences] = useState<string[]>([])
     const [companies, setCompanies] = useState<any[]>([])
     const [selectedCompany, setSelectedCompany] = useState<string>('')
     const [understudies, setUnderstudies] = useState<any[]>([])
@@ -160,6 +163,7 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
                     individual_type,
                     r_number,
                     relationships, 
+                    references,
                     employment_history
                 `)
                 .eq('individual_type', type)
@@ -168,12 +172,6 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             if (error) throw error
 
             setIndividuals(data || [])
-
-            // If searching for principals, show their dependants in the include section
-            if (type === 'principal' && selectedIndividual?.individual_type === 'principal') {
-                const dependants = await fetchDependants(selectedIndividual.id)
-                setAvailableDependants(dependants)
-            }
         } catch (error) {
             console.error('Error searching individuals:', error)
             toast({
@@ -184,64 +182,113 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         } finally {
             setSearchLoading(false)
         }
-    }, [selectedIndividual])
+    }, [])
 
-    // Fetch family members for a principal
-    const fetchDependants = async (principalId: number) => {
-        try {
-            // First, get the principal with their relationships
-            const { data: principal, error: principalError } = await supabase
-                .from('registry_individuals')
-                .select(`
-                    id,
-                    relationships
-                `)
-                .eq('id', principalId)
-                .single()
+// Fetch family members for a principal
+const fetchDependants = async (principalId: number) => {
+    try {
+        // First, get the principal with their relationships
+        const { data: principal, error: principalError } = await supabase
+            .from('registry_individuals')
+            .select(`
+                id,
+                relationships
+            `)
+            .eq('id', principalId)
+            .single()
 
-            if (principalError) throw principalError
-            if (!principal?.relationships?.length) return []
+        if (principalError) throw principalError
+        if (!principal?.relationships?.length) return []
 
-            // Extract all related individual IDs from relationships
-            const relatedIds = principal.relationships
-                .filter((rel: any) => rel.individual_id && rel.individual_id !== principalId)
-                .map((rel: any) => rel.individual_id)
+        // Extract all related individual IDs from relationships (excluding self)
+        const relatedIds = principal.relationships
+            .map((rel: any) => rel.individual_id)
+            .filter((id: number) => id && id !== principalId)
 
-            if (relatedIds.length === 0) return []
+        if (relatedIds.length === 0) return []
 
-            // Fetch all related individuals
-            const { data: familyMembers, error } = await supabase
-                .from('registry_individuals')
-                .select(`
-                    id,
-                    full_name,
-                    first_name,
-                    last_name,
-                    contact_details,
-                    individual_type,
-                    r_number,
-                    relationships
-                `)
-                .in('id', relatedIds)
-                .order('full_name')
+        // Fetch all related individuals
+        const { data: familyMembers, error } = await supabase
+            .from('registry_individuals')
+            .select(`
+                id,
+                full_name,
+                first_name,
+                last_name,
+                contact_details,
+                individual_type,
+                r_number
+            `)
+            .in('id', relatedIds)
+            .order('full_name')
 
-            if (error) throw error
+        if (error) throw error
 
-            // Map relationships to include the relationship type
-            return (familyMembers || []).map(member => {
-                const relationship = principal.relationships.find(
-                    (rel: any) => rel.individual_id === member.id
-                )
-                return {
-                    ...member,
-                    relationship_type: relationship?.relationship || 'family member'
-                }
-            })
-        } catch (error) {
-            console.error('Error fetching dependants:', error)
-            return []
-        }
+        // Map relationships to include the relationship type
+        return (familyMembers || []).map(member => {
+            const relationship = principal.relationships.find(
+                (rel: any) => rel.individual_id === member.id
+            )
+            return {
+                ...member,
+                relationship_type: relationship?.relationship || 'family member'
+            }
+        })
+    } catch (error) {
+        console.error('Error fetching dependants:', error)
+        return []
     }
+}
+
+// Fetch references for an individual
+const fetchReferences = async (individualId: number) => {
+    try {
+        // Get the individual with their references array
+        const { data: individual, error } = await supabase
+            .from('registry_individuals')
+            .select(`
+                id,
+                references
+            `)
+            .eq('id', individualId)
+            .single()
+
+        if (error) throw error
+        if (!individual?.references?.length) return []
+
+        // Extract reference IDs from the references array
+        const referenceIds = individual.references
+            .map((ref: any) => ref.id)
+            .filter((id: number) => id && id !== individualId)
+
+        if (referenceIds.length === 0) return []
+
+        // Fetch all reference individuals
+        const { data: referenceMembers, error: refError } = await supabase
+            .from('registry_individuals')
+            .select(`
+                id,
+                full_name,
+                first_name,
+                last_name,
+                contact_details,
+                individual_type,
+                r_number
+            `)
+            .in('id', referenceIds)
+            .order('full_name')
+
+        if (refError) throw refError
+
+        return (referenceMembers || []).map(member => ({
+            ...member,
+            relationship_type: 'reference'
+        }))
+    } catch (error) {
+        console.error('Error fetching references:', error)
+        return []
+    }
+}
 
     const fetchCompanies = async (individualId: number) => {
         if (!individualId) return;
@@ -415,6 +462,13 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
                 ...prev,
                 principal_member_id: ''
             }));
+            // Clear references and dependants when dialog opens
+            setIncludeReferences(false);
+            setAvailableReferences([]);
+            setSelectedReferences([]);
+            setIncludeDependants(false);
+            setAvailableDependants([]);
+            setSelectedDependants([]);
         }
     }, [applicantType, open, searchIndividuals]);
 
@@ -464,11 +518,11 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             if (!currentSelectedIndividual && formData.full_name) {
                 // Try to find the individual in the loaded list
                 const foundIndividual = individuals.find(
-                    ind => ind.full_name === formData.full_name && 
-                    (ind.contact_details?.phone?.kenyan?.primary === formData.mobile_number ||
-                     ind.contact_details?.personal_mobile_num_kenyan_1 === formData.mobile_number)
+                    ind => ind.full_name === formData.full_name &&
+                        (ind.contact_details?.phone?.kenyan?.primary === formData.mobile_number ||
+                            ind.contact_details?.personal_mobile_num_kenyan_1 === formData.mobile_number)
                 );
-                
+
                 if (foundIndividual) {
                     console.log('Found matching individual:', foundIndividual);
                     setSelectedIndividual(foundIndividual);
@@ -479,18 +533,18 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
 
             // Get the current selected individual after potential updates
             const individualToUse = selectedIndividualRef.current;
-            
+
             if (!individualToUse) {
                 throw new Error('No individual selected. Please select an individual from the dropdown.');
             }
 
             const individualId = individualToUse.id;
-            
+
             if (!individualId) {
                 throw new Error('Selected individual does not have a valid ID');
             }
 
-            // Prepare dependant data with full details
+            // Prepare dependant and reference data with full details
             const dependantsToSave = includeDependants
                 ? selectedDependants.map(id => {
                     const dependant = availableDependants.find(d => d.id.toString() === id);
@@ -498,6 +552,17 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
                         id: dependant.id,
                         name: dependant.full_name,
                         relationship: dependant.relationship_type || 'family member'
+                    } : null;
+                }).filter(Boolean)
+                : [];
+
+            const referencesToSave = includeReferences
+                ? selectedReferences.map(id => {
+                    const reference = availableReferences.find(r => r.id.toString() === id);
+                    return reference ? {
+                        id: reference.id,
+                        name: reference.full_name,
+                        relationship: reference.relationship_type || 'reference'
                     } : null;
                 }).filter(Boolean)
                 : [];
@@ -528,6 +593,7 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
                 applicant_name: selectedIndividual ? selectedIndividual.full_name : formData.full_name,
                 stages: initialStages,
                 dependant_member: dependantsToSave,
+                references: referencesToSave,
                 understudy: selectedUnderstudy || null,
                 company_id: selectedCompany || null,
             };
@@ -536,7 +602,7 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             if (applicantType === 'principal') {
                 taskData.principal_member = individualId;
             }
-            
+
             console.log('Submitting task with individual_id:', individualId, 'and data:', taskData);
 
             // Insert the task into the database
@@ -578,22 +644,7 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             onEnquiryCreated(fullTask || data);
 
             // Reset form
-            setFormData({
-                full_name: '',
-                mobile_number: '',
-                job_description: '',
-                department_id: '',
-                subdepartment_id: '',
-                class_id: '',
-                subclass_id: '',
-                principal_member_id: '',
-                enquiry_date: new Date().toISOString().split('T')[0]
-            });
-            setSelectedIndividual(null);
-            setSelectedCompany('');
-            setSelectedUnderstudy('');
-            setSelectedDependants([]);
-            setIncludeDependants(false);
+            resetForm();
 
             // Close the dialog
             onOpenChange(false);
@@ -615,6 +666,7 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             setLoading(false);
         }
     };
+    
     const resetForm = () => {
         setFormData({
             full_name: '',
@@ -633,7 +685,15 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         setIncludeDependants(false)
         setSelectedDependants([])
         setAvailableDependants([])
+        setIncludeReferences(false)
+        setSelectedReferences([])
+        setAvailableReferences([])
+        setSelectedCompany('')
+        setSelectedUnderstudy('')
+        setCompanies([])
+        setUnderstudies([])
     }
+    
     const handleChange = useCallback((field: keyof FormData, value: any) => {
         setFormData(prev => {
             // If changing applicant type, reset related fields
@@ -720,6 +780,7 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             return newState;
         });
     }, [subdepartments, departments]);
+    
     // Get principal member details for dependants
     const principalMemberDetails = useMemo(() => {
         if (applicantType !== 'dependant' || !selectedIndividual?.relationships?.length) return null
@@ -775,7 +836,7 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
     const handleIndividualSelect = async (individual: Individual) => {
         // Update the selected individual in state
         setSelectedIndividual(individual);
-        
+
         // Reset related states
         setSelectedCompany('');
         setUnderstudies([]);
@@ -796,13 +857,18 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             principal_member_id: ''
         };
 
+        // Fetch dependants and references for any individual (not just principals)
+        const [familyMembers, references] = await Promise.all([
+            individual.individual_type === 'principal' ? fetchDependants(individual.id) : Promise.resolve([]),
+            fetchReferences(individual.id)
+        ]);
+        
+        setAvailableDependants(familyMembers);
+        setAvailableReferences(references);
+
         if (individual.individual_type === 'principal') {
-            // If selecting a principal, fetch their family members and companies
-            const [familyMembers] = await Promise.all([
-                fetchDependants(individual.id),
-                fetchCompanies(individual.id)
-            ]);
-            setAvailableDependants(familyMembers);
+            // If selecting a principal, fetch their companies
+            await fetchCompanies(individual.id);
         } else if (individual.individual_type === 'dependant' && individual.relationships?.length) {
             // For dependants, find the principal from relationships
             const principalRelation = individual.relationships.find(
@@ -993,7 +1059,6 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
                                             setSelectedCompany(value);
                                             fetchUnderstudies(value);
                                         }}
-                                    // Temporarily removed disabled prop for testing
                                     >
                                         <SelectTrigger className="w-full">
                                             <SelectValue placeholder="Select company...">
@@ -1025,13 +1090,6 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
                                                                         </span>
                                                                     )}
                                                                 </div>
-                                                                {/* {isBillTo && (
-                                                                        <div className="text-xs text-gray-500 mt-1 space-y-1">
-                                                                            <div>Billing Company</div>
-                                                                            <div>Name: {companyName}</div>
-                                                                            <div>ID: {companyId}</div>
-                                                                        </div>
-                                                                    )} */}
                                                             </div>
                                                         </SelectItem>
                                                     );
@@ -1068,7 +1126,6 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
                                                     understudies.map((understudy) => {
                                                         if (!understudy) return null;
                                                         const understudyId = understudy.id?.toString() || '';
-                                                        const understudyName = understudy.name || understudy.company_name || 'Unnamed Company';
                                                         return (
                                                             <SelectItem
                                                                 key={understudyId}
@@ -1088,6 +1145,7 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
                                         </Select>
                                     </CardContent>
                                 </Card>)}
+                            
                             {/* Dependants Selection */}
                             {availableDependants.length > 0 && (
                                 <Card className="border border-gray-200 rounded-lg">
@@ -1143,6 +1201,72 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
                                                                 <span>{dependant.full_name}</span>
                                                                 <span className="text-xs text-gray-500 capitalize">
                                                                     {dependant.relationship_type || 'family member'}
+                                                                </span>
+                                                            </label>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            )}
+
+                            {/* References Selection */}
+                            {availableReferences.length > 0 && (
+                                <Card className="border border-gray-200 rounded-lg">
+                                    <CardHeader className="pb-3">
+                                        <CardTitle className="text-base font-semibold flex items-center gap-2">
+                                            <UserCheck className="h-4 w-4" />
+                                            Include References
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="space-y-2">
+                                            <div className="flex items-center space-x-2">
+                                                <input
+                                                    type="checkbox"
+                                                    id="include-references"
+                                                    checked={includeReferences}
+                                                    onChange={(e) => {
+                                                        setIncludeReferences(e.target.checked);
+                                                        if (!e.target.checked) {
+                                                            setSelectedReferences([]);
+                                                        }
+                                                    }}
+                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                />
+                                                <label htmlFor="include-references" className="text-sm font-medium">
+                                                    Include references in this enquiry
+                                                </label>
+                                            </div>
+
+                                            {includeReferences && (
+                                                <div className="mt-2 space-y-2 max-h-60 overflow-y-auto border rounded-md p-2">
+                                                    {availableReferences.map((reference) => (
+                                                        <div key={reference.id} className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded">
+                                                            <input
+                                                                type="checkbox"
+                                                                id={`reference-${reference.id}`}
+                                                                checked={selectedReferences.includes(reference.id.toString())}
+                                                                onChange={(e) => {
+                                                                    if (e.target.checked) {
+                                                                        setSelectedReferences(prev => [...prev, reference.id.toString()]);
+                                                                    } else {
+                                                                        setSelectedReferences(prev =>
+                                                                            prev.filter(id => id !== reference.id.toString())
+                                                                        );
+                                                                    }
+                                                                }}
+                                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                            />
+                                                            <label
+                                                                htmlFor={`reference-${reference.id}`}
+                                                                className="text-sm flex-1 flex justify-between items-center"
+                                                            >
+                                                                <span>{reference.full_name}</span>
+                                                                <span className="text-xs text-gray-500 capitalize">
+                                                                    {reference.relationship_type || 'reference'}
                                                                 </span>
                                                             </label>
                                                         </div>
@@ -1403,4 +1527,3 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         </Dialog>
     )
 }
-

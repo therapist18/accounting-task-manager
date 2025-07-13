@@ -15,16 +15,17 @@ import { toast } from "@/hooks/use-toast"
 import { getTableFields, getGroupedFields, FormField } from "./formFields"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "@/app/(dashboard)/dashboard/departments/main-shared-components/column-visibility"
 import { DocumentType, Subdepartment, DocumentField, ClientData, Department, GroupedDocuments, SubdepartmentClass, TruncatedText, SectionHeader, OptimizedCheckbox } from "./types"
-import { CATEGORY_MAPPING, CLASS_D_ID, CACHE_DURATION, DEBOUNCE_DELAY, cache, getCachedData, setCachedData, debounce } from "./config"
-import { 
-  formatFieldValue as formatFieldValueUtil, 
-  processDocumentFields, 
-  groupDocumentsByCategory, 
-  filterAndSortDocuments, 
-  getAllocationStatus as getAllocationStatusUtil, 
-  getColumnKey as getColumnKeyUtil, 
-  shouldShowUnderstudy as shouldShowUnderstudyUtil, 
+import { CATEGORY_MAPPING, CLASS_D_ID, REFERENCE_SUBDEPARTMENT_IDS, CACHE_DURATION, DEBOUNCE_DELAY, cache, getCachedData, setCachedData, debounce } from "./config"
+import {
+  formatFieldValue as formatFieldValueUtil,
+  processDocumentFields,
+  groupDocumentsByCategory,
+  filterAndSortDocuments,
+  getAllocationStatus as getAllocationStatusUtil,
+  getColumnKey as getColumnKeyUtil,
   toggleSetItem,
+  shouldShowUnderstudy as shouldShowUnderstudyUtil,
+  shouldShowReferences as shouldShowReferencesUtil,
   getClientFieldAllocationStatus as getClientFieldAllocationStatusUtil
 } from "./utils"
 
@@ -40,12 +41,14 @@ export default function DocumentsFields() {
     ap: boolean
     dp: boolean
     understudy: boolean
+    references: boolean
     kycdocumentid: string | null
   }>>({})
   const [clientFieldAllocations, setClientFieldAllocations] = useState<Record<string, {
     ap: boolean
     dp: boolean
     understudy: boolean
+    references: boolean
   }>>({})
   const [activeTab, setActiveTab] = useState<string>("")
   const [documentTab, setDocumentTab] = useState<"company" | "individual">("company")
@@ -59,8 +62,8 @@ export default function DocumentsFields() {
   const [availableColumns, setAvailableColumns] = useState<ColumnVisibilityOption[]>([])
   const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({})
   const [pendingChanges, setPendingChanges] = useState<{
-    documents: Record<string, { ap: boolean; dp: boolean; understudy: boolean }>;
-    clientFields: Record<string, { ap: boolean; dp: boolean; understudy: boolean }>;
+    documents: Record<string, { ap: boolean; dp: boolean; understudy: boolean; references: boolean }>;
+    clientFields: Record<string, { ap: boolean; dp: boolean; understudy: boolean; references: boolean }>;
   }>({
     documents: {},
     clientFields: {}
@@ -80,10 +83,14 @@ export default function DocumentsFields() {
     return shouldShowUnderstudyUtil(subdept, clsIndex)
   }, [])
 
+  const shouldShowReferences = useCallback((subdept: Subdepartment) => {
+    return shouldShowReferencesUtil(subdept)
+  }, [])
+
   const formatFieldValue = useCallback(formatFieldValueUtil, [])
 
   // Optimized current department memoization
-  const currentDepartment = useMemo(() => 
+  const currentDepartment = useMemo(() =>
     departments.find(d => d.id === activeTab) || null,
     [departments, activeTab]
   )
@@ -131,6 +138,7 @@ export default function DocumentsFields() {
       columnKey: string;
       isExpanded: boolean;
       hasUnderstudy: boolean;
+      hasReferences: boolean;
       width: number;
     }> = []
 
@@ -143,6 +151,8 @@ export default function DocumentsFields() {
               if (columnVisibility[columnKey] === true) {
                 const isExpanded = expandedColumns.has(columnKey)
                 const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+                const hasReferences = shouldShowReferences(subdept)
+                const colCount = 2 + (hasUnderstudy ? 1 : 0) + (hasReferences ? 1 : 0)
                 visibleColumns.push({
                   subdept,
                   clsIndex,
@@ -150,7 +160,8 @@ export default function DocumentsFields() {
                   columnKey,
                   isExpanded,
                   hasUnderstudy,
-                  width: isExpanded ? (hasUnderstudy ? 360 : 240) : 120
+                  hasReferences,
+                  width: isExpanded ? (colCount * 120) : 120
                 })
               }
             })
@@ -159,6 +170,8 @@ export default function DocumentsFields() {
             if (columnVisibility[columnKey] === true) {
               const isExpanded = expandedColumns.has(columnKey)
               const hasUnderstudy = shouldShowUnderstudy(subdept, clsIndex)
+              const hasReferences = shouldShowReferences(subdept)
+              const colCount = 2 + (hasUnderstudy ? 1 : 0) + (hasReferences ? 1 : 0)
               visibleColumns.push({
                 subdept,
                 clsIndex,
@@ -166,7 +179,8 @@ export default function DocumentsFields() {
                 columnKey,
                 isExpanded,
                 hasUnderstudy,
-                width: isExpanded ? (hasUnderstudy ? 360 : 240) : 120
+                hasReferences,
+                width: isExpanded ? (colCount * 120) : 120
               })
             }
           }
@@ -175,6 +189,8 @@ export default function DocumentsFields() {
         const columnKey = getColumnKey(subdept.id, null)
         if (columnVisibility[columnKey] === true) {
           const isExpanded = expandedColumns.has(columnKey)
+          const hasReferences = shouldShowReferences(subdept)
+          const colCount = 2 + (hasReferences ? 1 : 0)
           visibleColumns.push({
             subdept,
             clsIndex: null,
@@ -182,14 +198,15 @@ export default function DocumentsFields() {
             columnKey,
             isExpanded,
             hasUnderstudy: false,
-            width: isExpanded ? 240 : 120
+            hasReferences,
+            width: isExpanded ? (colCount * 120) : 120
           })
         }
       }
     })
 
     return visibleColumns
-  }, [normalizedSubdepartments, columnVisibility, expandedColumns, getColumnKey, shouldShowUnderstudy])
+  }, [normalizedSubdepartments, columnVisibility, expandedColumns, getColumnKey, shouldShowUnderstudy, shouldShowReferences])
 
   // Memoize visible columns to prevent recalculation
   const visibleColumns = useMemo(() => getVisibleColumns(), [getVisibleColumns])
@@ -300,6 +317,7 @@ export default function DocumentsFields() {
                 ap: Boolean(item.ap || item.display),
                 dp: Boolean(item.dp),
                 understudy: Boolean(item.understudy),
+                references: Boolean(item.references),
                 kycdocumentid: item.kycdocumentid || null
               }
             }
@@ -312,7 +330,8 @@ export default function DocumentsFields() {
               clientFieldSettings[item.id] = {
                 ap: Boolean(item.ap || item.display),
                 dp: Boolean(item.dp),
-                understudy: Boolean(item.understudy)
+                understudy: Boolean(item.understudy),
+                references: Boolean(item.references)
               }
             }
           })
@@ -367,7 +386,7 @@ export default function DocumentsFields() {
         setDocumentAllocations(documentSettings)
         setClientFieldAllocations(clientFieldSettings)
         setAvailableColumns(columns)
-        
+
         if (transformedDepartments.length > 0) {
           setActiveTab(transformedDepartments[0].id)
         }
@@ -412,6 +431,7 @@ export default function DocumentsFields() {
                   ap: Boolean(item.ap || item.display),
                   dp: Boolean(item.dp),
                   understudy: Boolean(item.understudy),
+                  references: Boolean(item.references),
                   kycdocumentid: item.kycdocumentid || null
                 }
               }
@@ -424,7 +444,8 @@ export default function DocumentsFields() {
                 clientFieldSettings[item.id] = {
                   ap: Boolean(item.ap || item.display),
                   dp: Boolean(item.dp),
-                  understudy: Boolean(item.understudy)
+                  understudy: Boolean(item.understudy),
+                  references: Boolean(item.references)
                 }
               }
             })
@@ -453,7 +474,6 @@ export default function DocumentsFields() {
     }
   }, [availableColumns, columnVisibility])
 
-
   useEffect(() => {
     fetchData()
   }, [fetchData])
@@ -464,7 +484,7 @@ export default function DocumentsFields() {
     subdeptId: number,
     classIndex: number | null,
     subclassIndex: number | null,
-    columnType: 'ap' | 'dp' | 'understudy'
+    columnType: 'ap' | 'dp' | 'understudy' | 'references'
   ) => {
     const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId)
     const allocationKey = !subdept?.hasClasses && classIndex === null
@@ -491,7 +511,7 @@ export default function DocumentsFields() {
     subdeptId: number,
     classIndex: number | null,
     subclassIndex: number | null,
-    columnType: 'ap' | 'dp' | 'understudy'
+    columnType: 'ap' | 'dp' | 'understudy' | 'references'
   ) => {
     const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId)
     const allocationKey = !subdept?.hasClasses && classIndex === null
@@ -519,7 +539,7 @@ export default function DocumentsFields() {
     subdeptId: number,
     classIndex: number | null,
     subclassIndex: number | null = null,
-    columnType: 'ap' | 'dp' | 'understudy',
+    columnType: 'ap' | 'dp' | 'understudy' | 'references',
     checked: boolean = false
   ) => {
     const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId)
@@ -545,7 +565,7 @@ export default function DocumentsFields() {
     subdeptId: number,
     classIndex: number | null,
     subclassIndex: number | null = null,
-    columnType: 'ap' | 'dp' | 'understudy',
+    columnType: 'ap' | 'dp' | 'understudy' | 'references',
     checked: boolean = false
   ) => {
     const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === subdeptId)
@@ -566,11 +586,11 @@ export default function DocumentsFields() {
     setHasUnsavedChanges(true)
   }, [currentDepartment])
 
-  // Optimized rendering functions
+  // FIXED: Updated renderColumnHeaders to include REF column
   const renderColumnHeaders = useCallback(() => {
     return visibleColumns.map(column => {
-      const { subdept, clsIndex, subclsIndex, columnKey, isExpanded, hasUnderstudy } = column
-      
+      const { subdept, clsIndex, subclsIndex, columnKey, isExpanded, hasUnderstudy, hasReferences } = column
+
       if (!isExpanded) {
         return (
           <TableHead
@@ -593,9 +613,10 @@ export default function DocumentsFields() {
         )
       }
 
-      // Expanded state
+      // Expanded state - FIXED: Include REF column
       const columns = ['AP', 'DP']
       if (hasUnderstudy) columns.push('US')
+      if (hasReferences) columns.push('REF') // THIS WAS MISSING!
 
       return columns.map((columnName, colIdx) => (
         <TableHead
@@ -625,14 +646,14 @@ export default function DocumentsFields() {
     doc: DocumentType,
     columnInfo: typeof visibleColumns[0]
   ) => {
-    const { subdept, clsIndex, subclsIndex, columnKey, isExpanded, hasUnderstudy } = columnInfo
+    const { subdept, clsIndex, subclsIndex, columnKey, isExpanded, hasUnderstudy, hasReferences } = columnInfo
     const getSubmittingStatus = (allocationId: string, subdeptId: number, classIndex: number | null, subclassIndex: number | null) => {
       const keyParts = [allocationId, subdeptId]
       if (classIndex !== null) keyParts.push(String(classIndex))
       if (subclassIndex !== null) keyParts.push(String(subclassIndex))
       return submittingIds.has(keyParts.join('_'))
     }
-    
+
     const isSubmitting = getSubmittingStatus(doc.id, subdept.id, clsIndex, subclsIndex)
 
     if (!isExpanded) {
@@ -660,6 +681,9 @@ export default function DocumentsFields() {
     if (hasUnderstudy) {
       columns.push({ type: 'understudy' as const, key: `us-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}` })
     }
+    if (hasReferences) {
+      columns.push({ type: 'references' as const, key: `ref-${doc.id}-${subdept.id}-${clsIndex}-${subclsIndex}` })
+    }
 
     return columns.map(column => (
       <TableCell
@@ -682,8 +706,13 @@ export default function DocumentsFields() {
     doc: DocumentType,
     columnInfo: typeof visibleColumns[0]
   ) => {
-    const getEffectiveCols = (colInfo) => colInfo.isExpanded ? (colInfo.hasUnderstudy ? 3 : 2) : 1;
-    
+    const getEffectiveCols = (colInfo) => {
+      let cols = colInfo.isExpanded ? 2 : 1
+      if (colInfo.isExpanded && colInfo.hasUnderstudy) cols++
+      if (colInfo.isExpanded && colInfo.hasReferences) cols++
+      return cols
+    }
+
     if (field.type === 'array' || field.type === 'array-container' || field.isArrayItem || field.type === 'object') {
       return (
         <TableCell
@@ -696,7 +725,7 @@ export default function DocumentsFields() {
       )
     }
 
-    const { subdept, clsIndex, subclsIndex, columnKey, isExpanded, hasUnderstudy } = columnInfo
+    const { subdept, clsIndex, subclsIndex, columnKey, isExpanded, hasUnderstudy, hasReferences } = columnInfo
     const fieldId = `${doc.id}-${field.id}`
     const getSubmittingStatus = (allocationId: string, subdeptId: number, classIndex: number | null, subclassIndex: number | null) => {
       const keyParts = [allocationId, subdeptId]
@@ -704,7 +733,7 @@ export default function DocumentsFields() {
       if (subclassIndex !== null) keyParts.push(String(subclassIndex))
       return submittingIds.has(keyParts.join('_'))
     }
-    
+
     const isSubmitting = getSubmittingStatus(fieldId, subdept.id, clsIndex, subclsIndex)
 
     if (!isExpanded) {
@@ -732,6 +761,9 @@ export default function DocumentsFields() {
     if (hasUnderstudy) {
       columns.push({ type: 'understudy' as const, key: `us-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}` })
     }
+    if (hasReferences) {
+      columns.push({ type: 'references' as const, key: `ref-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}` })
+    }
 
     return columns.map(column => (
       <TableCell
@@ -749,19 +781,18 @@ export default function DocumentsFields() {
     ))
   }, [getAllocationStatus, handleDisplayToggle, submittingIds])
 
-
   const renderClientFieldCheckboxes = useCallback((
     fieldId: string,
     columnInfo: typeof visibleColumns[0]
   ) => {
-    const { subdept, clsIndex, subclsIndex, columnKey, isExpanded, hasUnderstudy } = columnInfo
+    const { subdept, clsIndex, subclsIndex, columnKey, isExpanded, hasUnderstudy, hasReferences } = columnInfo
     const getSubmittingStatus = (allocationId: string, subdeptId: number, classIndex: number | null, subclassIndex: number | null) => {
       const keyParts = [allocationId, subdeptId]
       if (classIndex !== null) keyParts.push(String(classIndex))
       if (subclassIndex !== null) keyParts.push(String(subclassIndex))
       return submittingIds.has(keyParts.join('_'))
     }
-    
+
     const isSubmitting = getSubmittingStatus(fieldId, subdept.id, clsIndex, subclsIndex)
 
     if (!isExpanded) {
@@ -788,6 +819,9 @@ export default function DocumentsFields() {
     ]
     if (hasUnderstudy) {
       columns.push({ type: 'understudy' as const, key: `us-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}` })
+    }
+    if (hasReferences) {
+      columns.push({ type: 'references' as const, key: `ref-${fieldId}-${subdept.id}-${clsIndex}-${subclsIndex}` })
     }
 
     return columns.map(column => (
@@ -879,29 +913,29 @@ export default function DocumentsFields() {
 
   const handleSaveAllChanges = useCallback(async () => {
     if (!hasUnsavedChanges) return
-  
+
     setIsSaving(true)
-  
+
     try {
       // Group changes by class_id for batch processing
       const changesByClassId: Record<string, {
         documents: Record<string, any>;
         clientFields: Record<string, any>;
       }> = {}
-  
+
       // Process document changes
       Object.entries(pendingChanges.documents).forEach(([allocationKey, changes]) => {
         const [allocationId, subdeptId, ...rest] = allocationKey.split('_')
-        
+
         const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === parseInt(subdeptId))
-        
+
         let classId: string
         if (!subdept?.hasClasses) {
           classId = subdeptId
         } else {
           const [classIndex, subclassIndex] = rest.map(r => r === 'direct' ? null : parseInt(r))
           const classItem = classIndex !== null ? subdept?.classes?.[classIndex] : null
-          
+
           const idParts = [subdeptId]
           if (classItem?.id) {
             idParts.push(String(classItem.id))
@@ -909,32 +943,32 @@ export default function DocumentsFields() {
             // Fallback to using the index if id is not available
             idParts.push(String(classIndex))
           }
-          
+
           // Only add subclassIndex if it's defined and not null
           if (subclassIndex !== null && subclassIndex !== undefined) {
             idParts.push(String(subclassIndex))
           }
-          
+
           classId = idParts.join('_')
         }
-  
+
         if (!changesByClassId[classId]) {
           changesByClassId[classId] = { documents: {}, clientFields: {} }
         }
-  
+
         changesByClassId[classId].documents[allocationKey] = {
           id: allocationKey,
           ...changes,
           updated_at: new Date().toISOString()
         }
       })
-  
+
       // Process client field changes
       Object.entries(pendingChanges.clientFields).forEach(([allocationKey, changes]) => {
         const [fieldId, subdeptId, ...rest] = allocationKey.split('_')
-  
+
         const subdept = currentDepartment?.subdepartments?.find(sd => sd.id === parseInt(subdeptId))
-  
+
         let classId: string
         if (!subdept?.hasClasses) {
           classId = subdeptId
@@ -946,18 +980,18 @@ export default function DocumentsFields() {
           if (subclassIndex !== null && subclassIndex !== undefined) idParts.push(String(subclassIndex))
           classId = idParts.join('_')
         }
-  
+
         if (!changesByClassId[classId]) {
           changesByClassId[classId] = { documents: {}, clientFields: {} }
         }
-  
+
         changesByClassId[classId].clientFields[allocationKey] = {
           id: allocationKey,
           ...changes,
           updated_at: new Date().toISOString()
         }
       })
-  
+
       // Save each class_id's changes
       const savePromises = Object.entries(changesByClassId).map(async ([classId, classChanges]) => {
         // Get existing data
@@ -966,15 +1000,15 @@ export default function DocumentsFields() {
           .select('documents_and_fields, client_fields')
           .eq('class_id', classId)
           .maybeSingle()
-  
+
         if (fetchError && fetchError.code !== 'PGRST116') {
           throw fetchError
         }
-  
+
         // Merge with existing data
         const existingDocuments = Array.isArray(existingData?.documents_and_fields) ? existingData.documents_and_fields : []
         const existingClientFields = Array.isArray(existingData?.client_fields) ? existingData.client_fields : []
-  
+
         // Update documents
         const updatedDocuments = [...existingDocuments]
         Object.values(classChanges.documents).forEach(newDoc => {
@@ -985,7 +1019,7 @@ export default function DocumentsFields() {
             updatedDocuments.push(newDoc)
           }
         })
-  
+
         // Update client fields
         const updatedClientFields = [...existingClientFields]
         Object.values(classChanges.clientFields).forEach(newField => {
@@ -996,7 +1030,7 @@ export default function DocumentsFields() {
             updatedClientFields.push(newField)
           }
         })
-  
+
         // Save to database
         const recordData = {
           class_id: classId,
@@ -1005,27 +1039,27 @@ export default function DocumentsFields() {
           updated_at: new Date().toISOString(),
           ...((!existingData) && { created_at: new Date().toISOString() })
         }
-  
+
         const { error: upsertError } = await supabase
           .from('tm_class_requirements')
           .upsert(recordData, { onConflict: 'class_id' })
-  
+
         if (upsertError) throw upsertError
       })
-  
+
       await Promise.all(savePromises)
-  
+
       // Clear pending changes and refresh data
       setPendingChanges({ documents: {}, clientFields: {} })
       setHasUnsavedChanges(false)
       await refreshData()
-  
+
       toast({
         title: "Success",
         description: `Saved ${Object.keys(pendingChanges.documents).length + Object.keys(pendingChanges.clientFields).length} changes successfully`,
         variant: "default",
       })
-  
+
     } catch (error) {
       console.error('Error saving changes:', error)
       toast({
@@ -1183,8 +1217,16 @@ export default function DocumentsFields() {
                                   if (!prevCol || prevCol.subdept.id !== col.subdept.id) {
                                     const subdeptColumns = visibleColumns.filter(c => c.subdept.id === col.subdept.id)
                                     const totalWidth = subdeptColumns.reduce((sum, c) => sum + c.width, 0)
-                                    // CORRECTED: Calculate colSpan based on expansion
-                                    const colSpan = subdeptColumns.reduce((sum, c) => sum + (c.isExpanded ? (c.hasUnderstudy ? 3 : 2) : 1), 0)
+
+                                    // UPDATED: Calculate colSpan based on expansion including references
+                                    const colSpan = subdeptColumns.reduce((sum, c) => {
+                                      if (!c.isExpanded) return sum + 1
+                                      let cols = 2 // AP + DP
+                                      if (c.hasUnderstudy) cols++
+                                      if (c.hasReferences) cols++
+                                      return sum + cols
+                                    }, 0)
+
                                     acc.push(
                                       <TableHead
                                         key={`subdept-${col.subdept.id}`}
@@ -1208,14 +1250,16 @@ export default function DocumentsFields() {
                               <TableRow>
                                 {visibleColumns.reduce((acc, col, index) => {
                                   const prevCol = visibleColumns[index - 1]
-                                  const needsClassHeader = !prevCol || 
-                                    prevCol.subdept.id !== col.subdept.id || 
+                                  const needsClassHeader = !prevCol ||
+                                    prevCol.subdept.id !== col.subdept.id ||
                                     prevCol.clsIndex !== col.clsIndex
-                                  
+
                                   if (needsClassHeader) {
                                     if (col.clsIndex === null) {
-                                      // CORRECTED: Calculate colSpan for direct columns
-                                      const colSpan = col.isExpanded ? 2 : 1 // Direct has no understudy
+                                      // UPDATED: Calculate colSpan for direct columns including references
+                                      let colSpan = col.isExpanded ? 2 : 1 // AP + DP or just AP
+                                      if (col.isExpanded && col.hasReferences) colSpan++ // + REF (no understudy for direct)
+
                                       acc.push(
                                         <TableHead
                                           key={`class-direct-${col.subdept.id}`}
@@ -1226,11 +1270,19 @@ export default function DocumentsFields() {
                                         </TableHead>
                                       )
                                     } else {
-                                      const classColumns = visibleColumns.filter(c => 
+                                      const classColumns = visibleColumns.filter(c =>
                                         c.subdept.id === col.subdept.id && c.clsIndex === col.clsIndex
                                       )
-                                      // CORRECTED: Calculate colSpan based on expansion
-                                      const colSpan = classColumns.reduce((sum, c) => sum + (c.isExpanded ? (c.hasUnderstudy ? 3 : 2) : 1), 0)
+
+                                      // UPDATED: Calculate colSpan based on expansion including references
+                                      const colSpan = classColumns.reduce((sum, c) => {
+                                        if (!c.isExpanded) return sum + 1
+                                        let cols = 2 // AP + DP
+                                        if (c.hasUnderstudy) cols++
+                                        if (c.hasReferences) cols++
+                                        return sum + cols
+                                      }, 0)
+
                                       const className = col.subdept.classes?.[col.clsIndex]?.name || ''
                                       acc.push(
                                         <TableHead
@@ -1254,9 +1306,11 @@ export default function DocumentsFields() {
                               {/* Subclass Header Row */}
                               <TableRow>
                                 {visibleColumns.map(col => {
-                                  // CORRECTED: Calculate colSpan for each subclass header to span over AP/DP/US
-                                  const colSpan = col.isExpanded ? (col.hasUnderstudy ? 3 : 2) : 1;
-                                  
+                                  // UPDATED: Calculate colSpan for each subclass header to span over AP/DP/US/REF
+                                  let colSpan = col.isExpanded ? 2 : 1 // AP + DP or just AP
+                                  if (col.isExpanded && col.hasUnderstudy) colSpan++ // + US
+                                  if (col.isExpanded && col.hasReferences) colSpan++ // + REF
+
                                   if (col.subclsIndex !== null) {
                                     const subclassName = col.subdept.classes?.[col.clsIndex!]?.subclasses?.[col.subclsIndex]?.name || ''
                                     return (
@@ -1287,7 +1341,7 @@ export default function DocumentsFields() {
                                 })}
                               </TableRow>
 
-                              {/* Column Headers (AP/DP/US) */}
+                              {/* Column Headers (AP/DP/US/REF) */}
                               <TableRow>
                                 {renderColumnHeaders()}
                               </TableRow>
@@ -1334,12 +1388,20 @@ export default function DocumentsFields() {
                                               </div>
                                             </TableCell>
                                             {visibleColumns.map(col => {
-                                               const colSpan = col.isExpanded ? (col.hasUnderstudy ? 3 : 2) : 1
-                                               return (
-                                                <TableCell key={col.columnKey} colSpan={colSpan} className="border-r border-l text-center">
+                                              // UPDATED: Calculate colSpan including references
+                                              let colSpan = col.isExpanded ? 2 : 1 // AP + DP or just AP
+                                              if (col.isExpanded && col.hasUnderstudy) colSpan++ // + US
+                                              if (col.isExpanded && col.hasReferences) colSpan++ // + REF
+
+                                              return (
+                                                <TableCell
+                                                  key={col.columnKey}
+                                                  colSpan={colSpan}
+                                                  className="border-r border-l text-center"
+                                                >
                                                   -
                                                 </TableCell>
-                                               )
+                                              )
                                             })}
                                           </TableRow>
 
@@ -1472,15 +1534,19 @@ export default function DocumentsFields() {
                                         </div>
                                       </TableCell>
                                       {visibleColumns.map(col => {
-                                        const colSpan = col.isExpanded ? (col.hasUnderstudy ? 3 : 2) : 1
+                                        // UPDATED: Calculate colSpan including references
+                                        let colSpan = col.isExpanded ? 2 : 1 // AP + DP or just AP
+                                        if (col.isExpanded && col.hasUnderstudy) colSpan++ // + US
+                                        if (col.isExpanded && col.hasReferences) colSpan++ // + REF
+                                        
                                         return (
-                                            <TableCell
+                                          <TableCell
                                             key={`form-section-cell-${sectionKey}-${col.columnKey}`}
                                             colSpan={colSpan}
                                             className="text-center border bg-blue-100"
-                                            >
+                                          >
                                             -
-                                            </TableCell>
+                                          </TableCell>
                                         )
                                       })}
                                     </TableRow>,
@@ -1541,17 +1607,21 @@ export default function DocumentsFields() {
                                         </div>
                                       </TableCell>
                                       {visibleColumns.map(col => {
-                                        const colSpan = col.isExpanded ? (col.hasUnderstudy ? 3 : 2) : 1
+                                        // UPDATED: Calculate colSpan including references
+                                        let colSpan = col.isExpanded ? 2 : 1 // AP + DP or just AP
+                                        if (col.isExpanded && col.hasUnderstudy) colSpan++ // + US
+                                        if (col.isExpanded && col.hasReferences) colSpan++ // + REF
+                                        
                                         return (
-                                            <TableCell
+                                          <TableCell
                                             key={`platform-cell-${platformKey}-${col.columnKey}`}
                                             colSpan={colSpan}
                                             className="text-center border bg-blue-100"
-                                            >
+                                          >
                                             -
-                                            </TableCell>
+                                          </TableCell>
                                         )
-                                    })}
+                                      })}
                                     </TableRow>,
 
                                     // Platform Field Rows
@@ -1600,7 +1670,13 @@ export default function DocumentsFields() {
                               {/* Empty states */}
                               {Object.keys(groupedDocuments).length === 0 && clientFormFields.length === 0 && clientData.length === 0 && (
                                 <TableRow>
-                                  <TableCell colSpan={100} className="text-center py-12 text-gray-500">
+                                  <TableCell colSpan={2 + visibleColumns.reduce((sum, col) => {
+                                    // UPDATED: Calculate total columns including references
+                                    let cols = col.isExpanded ? 2 : 1 // AP + DP or just AP
+                                    if (col.isExpanded && col.hasUnderstudy) cols++ // + US
+                                    if (col.isExpanded && col.hasReferences) cols++ // + REF
+                                    return sum + cols
+                                  }, 0)} className="text-center py-12 text-gray-500">
                                     <div className="flex flex-col items-center gap-4">
                                       <FileText className="h-12 w-12 text-gray-300" />
                                       <div>

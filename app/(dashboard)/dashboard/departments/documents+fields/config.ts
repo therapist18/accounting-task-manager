@@ -5,6 +5,10 @@ export const CATEGORY_MAPPING = {
 
 // Class D ID for understudy column
 export const CLASS_D_ID = 1750687058159
+
+// Subdepartment IDs that require references column
+export const REFERENCE_SUBDEPARTMENT_IDS = [10, 5]
+
 export const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes cache
 export const DEBOUNCE_DELAY = 300
 
@@ -34,6 +38,7 @@ export const debounce = (func: Function, delay: number) => {
 export default {
   CATEGORY_MAPPING,
   CLASS_D_ID,
+  REFERENCE_SUBDEPARTMENT_IDS,
   CACHE_DURATION,
   DEBOUNCE_DELAY,
   cache,
