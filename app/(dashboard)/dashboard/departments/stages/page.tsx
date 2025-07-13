@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge"
 import { format } from "date-fns"
 import type { Department, Stage, Subdepartment, DepartmentOption } from "./stagesdb"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "../main-shared-components/column-visibility"
+import EntityVisibilityControl, { EntityVisibilityOption } from "../main-shared-components/entity-visibility"
 
 // Simple UUID generator for client-side use
 const generateId = () => { 
@@ -104,6 +105,9 @@ export default function Stages() {
     controls: true,
   })
 
+  // Entity visibility state
+  const [entityVisibility, setEntityVisibility] = useState<Record<string, boolean>>({})
+
   // Memoized column visibility options
   const columnVisibilityOptions: ColumnVisibilityOption[] = useMemo(() => [
     {
@@ -152,6 +156,59 @@ export default function Stages() {
     }
   ], [columnVisibility])
 
+  // Generate entity visibility options
+  const entityVisibilityOptions: EntityVisibilityOption[] = useMemo(() => {
+    const currentDept = departments.find(d => d.id === activeTab)
+    if (!currentDept) return []
+
+    const entities: EntityVisibilityOption[] = []
+
+    currentDept.subdepartments?.forEach((subdept) => {
+      const subdeptId = `subdept-${subdept.id}`
+      entities.push({
+        id: subdeptId,
+        name: subdept.name,
+        type: 'subdepartment',
+        visible: entityVisibility[subdeptId] !== false,
+        level: 0,
+        path: subdept.name,
+        hasChildren: !!(subdept.classes && subdept.classes.length > 0),
+        default_display: subdept.default_display
+      })
+
+      subdept.classes?.forEach((cls, clsIndex) => {
+        const classId = `class-${subdept.id}-${cls.id || clsIndex}`
+        entities.push({
+          id: classId,
+          name: cls.name,
+          type: 'class',
+          parentId: subdeptId,
+          visible: entityVisibility[classId] !== false,
+          level: 1,
+          path: `${subdept.name} → ${cls.name}`,
+          hasChildren: !!(cls.subClasses && cls.subClasses.length > 0),
+          default_display: cls.default_display
+        })
+
+        cls.subClasses?.forEach((subCls, subClsIndex) => {
+          const subclassId = `subclass-${subdept.id}-${cls.id || clsIndex}-${subCls.id || subClsIndex}`
+          entities.push({
+            id: subclassId,
+            name: subCls.name,
+            type: 'subclass',
+            parentId: classId,
+            visible: entityVisibility[subclassId] !== false,
+            level: 2,
+            path: `${subdept.name} → ${cls.name} → ${subCls.name}`,
+            default_display: subCls.default_display
+          })
+        })
+      })
+    })
+
+    return entities
+  }, [departments, activeTab, entityVisibility])
+
   const handleColumnVisibilityChange = (columnId: string, visible: boolean) => {
     setColumnVisibility(prev => ({
       ...prev,
@@ -192,6 +249,37 @@ export default function Stages() {
     })
   }
 
+  const handleEntityVisibilityChange = (entityId: string, visible: boolean) => {
+    setEntityVisibility(prev => ({
+      ...prev,
+      [entityId]: visible
+    }))
+  }
+
+  const handleShowAllEntities = () => {
+    const newVisibility: Record<string, boolean> = {}
+    entityVisibilityOptions.forEach(entity => {
+      newVisibility[entity.id] = true
+    })
+    setEntityVisibility(newVisibility)
+  }
+
+  const handleHideAllEntities = () => {
+    const newVisibility: Record<string, boolean> = {}
+    entityVisibilityOptions.forEach(entity => {
+      newVisibility[entity.id] = false
+    })
+    setEntityVisibility(newVisibility)
+  }
+
+  const handleResetEntitiesToDefault = () => {
+    const newVisibility: Record<string, boolean> = {}
+    entityVisibilityOptions.forEach(entity => {
+      newVisibility[entity.id] = entity.default_display !== false
+    })
+    setEntityVisibility(newVisibility)
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent, subdeptId: number, stageId: string, shouldAllocate: boolean) => {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -210,24 +298,43 @@ export default function Stages() {
       return newSet
     })
   }
+
   const getCurrentDepartment = () => {
     return departments.find(d => d.id === activeTab)
   }
-  // Process subdepartments based on display settings
+
+  // Process subdepartments based on display settings and entity visibility
   const getProcessedSubdepartments = (dept: Department) => {
     let subdepartments = dept.subdepartments || []
     
     // Filter by default display if needed
     subdepartments = filterByDefaultDisplay(subdepartments, showDefaultDisplayOnly)
     
+    // Filter by entity visibility
+    subdepartments = subdepartments.filter(subdept => {
+      const subdeptId = `subdept-${subdept.id}`
+      return entityVisibility[subdeptId] !== false
+    })
+    
     // Process classes and subclasses within each subdepartment
     return subdepartments.map(subdept => ({
       ...subdept,
       classes: filterByDefaultDisplay(
-        subdept.classes?.map(cls => ({
-          ...cls,
-          subClasses: filterByDefaultDisplay(cls.subClasses || [], showDefaultDisplayOnly)
-        })) || [],
+        (subdept.classes || [])
+          .filter(cls => {
+            const classId = `class-${subdept.id}-${cls.id}`
+            return entityVisibility[classId] !== false
+          })
+          .map(cls => ({
+            ...cls,
+            subClasses: filterByDefaultDisplay(
+              (cls.subClasses || []).filter(subCls => {
+                const subclassId = `subclass-${subdept.id}-${cls.id}-${subCls.id}`
+                return entityVisibility[subclassId] !== false
+              }),
+              showDefaultDisplayOnly
+            )
+          })),
         showDefaultDisplayOnly
       )
     }))
@@ -290,7 +397,7 @@ export default function Stages() {
     })
 
     return totalExpandableRows > 0 && expandedCount === totalExpandableRows
-  }, [expandedRows, departments, activeTab, showDefaultDisplayOnly])
+  }, [expandedRows, departments, activeTab, showDefaultDisplayOnly, entityVisibility])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -1155,6 +1262,19 @@ export default function Stages() {
                 </>
               )}
             </Button>
+
+            {/* Entity Visibility Control */}
+            <EntityVisibilityControl
+              entities={entityVisibilityOptions}
+              onVisibilityChange={handleEntityVisibilityChange}
+              onShowAll={handleShowAllEntities}
+              onHideAll={handleHideAllEntities}
+              onResetToDefault={handleResetEntitiesToDefault}
+              showDefaultDisplayOnly={showDefaultDisplayOnly}
+              onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
+              title="Entity Visibility"
+              description="Control which departments, classes, and subclasses are visible"
+            />
 
             {/* Column Visibility Control */}
             <ColumnVisibilityControl

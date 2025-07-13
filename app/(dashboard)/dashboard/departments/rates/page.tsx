@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -15,28 +15,13 @@ import { Calendar } from "@/components/ui/calendar"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
-import {
-  CalendarIcon,
-  Calculator,
-  Minus,
-  Plus,
-  Save,
-  DollarSign,
-  Clock,
-  ChevronDown,
-  History,
-  Copy,
-  Eye,
-  ChevronRight,
-  Info,
-  Download,
-  FileSpreadsheet,
-  DownloadCloud
-} from "lucide-react"
+import { CalendarIcon, Calculator, Minus, Plus, Save, DollarSign, Clock, ChevronDown, History, Copy, Eye, ChevronRight, Info, Download, FileSpreadsheet, DownloadCloud, EyeOff, ChevronUp, Settings } from "lucide-react"
 import { HistoricalRatesDialog, NewPeriodDialog, ExchangeRatesDialog } from "./components/dialogs"
 import { toast } from "@/hooks/use-toast"
 import { fetchDepartments } from "../departments/database"
 import { supabase } from "@/lib/supabase/client"
+import ColumnVisibilityControl, { ColumnVisibilityOption } from "../main-shared-components/column-visibility"
+import EntityVisibilityControl, { EntityVisibilityOption } from "../main-shared-components/entity-visibility"
 
 interface RateData {
   usd: number
@@ -126,14 +111,20 @@ interface Subdepartment {
   id: number
   name: string
   description?: string
+  order?: number
+  default_display?: boolean
   classes?: Array<{
     id: number | string
     name: string
     description: string | null
+    order?: number
+    default_display?: boolean
     subClasses?: Array<{
       id: number | string
       name: string
       description: string | null
+      order?: number
+      default_display?: boolean
     }>
   }>
 }
@@ -142,6 +133,8 @@ interface Department {
   id: string
   name: string
   description?: string
+  order?: number
+  default_display?: boolean
   tm_subdepartments?: Subdepartment[]
 }
 
@@ -149,21 +142,32 @@ interface RatesPageProps {
   departments?: Department[]
 }
 
+// Utility function to sort items by order field
+const sortByOrder = <T extends { order?: number }>(items: T[]): T[] => {
+  return [...items].sort((a, b) => (a.order || 0) - (b.order || 0))
+}
+
+// Utility function to filter items by default display
+const filterByDefaultDisplay = <T extends { default_display?: boolean }>(items: T[], showDefaultOnly: boolean): T[] => {
+  if (!showDefaultOnly) return items
+  return items.filter(item => item.default_display !== false)
+}
+
 // Helper function to get alternating blue colors like in stages
 const getColumnColor = (index: number) => {
   const colors = [
     'bg-blue-50/30',
-    'bg-green-50/30', 
-    'bg-purple-50/30',
-    'bg-orange-50/30',
-    'bg-red-50/30',
+    'bg-blue-50/30', 
+    'bg-blue-50/30',
+    'bg-blue-50/30',
+    'bg-blue-50/30',
     'bg-indigo-50/30'
   ]
   return colors[index % colors.length]
 }
 
 const getHeaderColor = (index: number) => {
-  return index % 2 === 0 ? 'bg-blue-700' : 'bg-blue-600'
+  return index % 2 === 0 ? 'bg-blue-700' : 'bg-blue-700'
 }
 
 export default function RatesPage({ departments: initialDepartments }: RatesPageProps) {
@@ -182,6 +186,215 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [density, setDensity] = useState<'comfortable' | 'compact' | 'spacious'>('comfortable')
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false)
+
+  // Column visibility state
+  const [columnVisibility, setColumnVisibility] = useState({
+    index: true,
+    entity: true,
+    processingFee: true,
+    issuanceFee: true,
+    bclConsultancy: true,
+    officer: true,
+    extraConsideration: true,
+    convenienceFee: true,
+  })
+
+  // Entity visibility state
+  const [entityVisibility, setEntityVisibility] = useState<Record<string, boolean>>({})
+
+  // Memoized column visibility options
+  const columnVisibilityOptions: ColumnVisibilityOption[] = useMemo(() => [
+    {
+      id: 'index',
+      label: 'Index (#)',
+      visible: columnVisibility.index,
+      disabled: true, // Always show index
+      isDefault: true,
+      group: 'Basic'
+    },
+    {
+      id: 'entity',
+      label: 'Entity',
+      visible: columnVisibility.entity,
+      disabled: true, // Always show entity
+      isDefault: true,
+      group: 'Basic'
+    },
+    {
+      id: 'processingFee',
+      label: 'Processing Fee',
+      visible: columnVisibility.processingFee,
+      isDefault: true,
+      group: 'Fees'
+    },
+    {
+      id: 'issuanceFee',
+      label: 'Issuance Fee',
+      visible: columnVisibility.issuanceFee,
+      isDefault: true,
+      group: 'Fees'
+    },
+    {
+      id: 'bclConsultancy',
+      label: 'BCL Consultancy',
+      visible: columnVisibility.bclConsultancy,
+      isDefault: true,
+      group: 'Services'
+    },
+    {
+      id: 'officer',
+      label: 'Officer',
+      visible: columnVisibility.officer,
+      isDefault: true,
+      group: 'Services'
+    },
+    {
+      id: 'extraConsideration',
+      label: 'Extra Consideration',
+      visible: columnVisibility.extraConsideration,
+      isDefault: false,
+      group: 'Additional'
+    },
+    {
+      id: 'convenienceFee',
+      label: 'Convenience Fee',
+      visible: columnVisibility.convenienceFee,
+      isDefault: false,
+      group: 'Additional'
+    }
+  ], [columnVisibility])
+
+  // Generate entity visibility options based on current department
+  const entityVisibilityOptions: EntityVisibilityOption[] = useMemo(() => {
+    const processedDepts = getProcessedDepartments()
+    const currentDept = processedDepts.find(d => d.id === selectedDepartment)
+    if (!currentDept) return []
+
+    const entities: EntityVisibilityOption[] = []
+
+    currentDept.tm_subdepartments?.forEach((subdept) => {
+      const subdeptId = `subdept-${subdept.id}`
+      entities.push({
+        id: subdeptId,
+        name: subdept.name,
+        type: 'subdepartment',
+        visible: entityVisibility[subdeptId] !== false,
+        level: 0,
+        path: subdept.name,
+        hasChildren: !!(subdept.classes && subdept.classes.length > 0),
+        default_display: subdept.default_display
+      })
+
+      subdept.classes?.forEach((cls, clsIndex) => {
+        const classId = `class-${subdept.id}-${cls.id || clsIndex}`
+        entities.push({
+          id: classId,
+          name: cls.name,
+          type: 'class',
+          parentId: subdeptId,
+          visible: entityVisibility[classId] !== false,
+          level: 1,
+          path: `${subdept.name} → ${cls.name}`,
+          hasChildren: !!(cls.subClasses && cls.subClasses.length > 0),
+          default_display: cls.default_display
+        })
+
+        cls.subClasses?.forEach((subCls, subClsIndex) => {
+          const subclassId = `subclass-${subdept.id}-${cls.id || clsIndex}-${subCls.id || subClsIndex}`
+          entities.push({
+            id: subclassId,
+            name: subCls.name,
+            type: 'subclass',
+            parentId: classId,
+            visible: entityVisibility[subclassId] !== false,
+            level: 2,
+            path: `${subdept.name} → ${cls.name} → ${subCls.name}`,
+            default_display: subCls.default_display
+          })
+        })
+      })
+    })
+
+    return entities
+  }, [departments, selectedDepartment, entityVisibility])
+
+  const handleColumnVisibilityChange = (columnId: string, visible: boolean) => {
+    setColumnVisibility(prev => ({
+      ...prev,
+      [columnId]: visible
+    }))
+  }
+
+  const handleShowAllColumns = () => {
+    setColumnVisibility({
+      index: true,
+      entity: true,
+      processingFee: true,
+      issuanceFee: true,
+      bclConsultancy: true,
+      officer: true,
+      extraConsideration: true,
+      convenienceFee: true,
+    })
+  }
+
+  const handleHideAllColumns = () => {
+    setColumnVisibility({
+      index: true, // Keep required columns
+      entity: true, // Keep required columns
+      processingFee: false,
+      issuanceFee: false,
+      bclConsultancy: false,
+      officer: false,
+      extraConsideration: false,
+      convenienceFee: false,
+    })
+  }
+
+  const handleResetToDefault = () => {
+    setColumnVisibility({
+      index: true,
+      entity: true,
+      processingFee: true,
+      issuanceFee: true,
+      bclConsultancy: true,
+      officer: true,
+      extraConsideration: false,
+      convenienceFee: false,
+    })
+  }
+
+  const handleEntityVisibilityChange = (entityId: string, visible: boolean) => {
+    setEntityVisibility(prev => ({
+      ...prev,
+      [entityId]: visible
+    }))
+  }
+
+  const handleShowAllEntities = () => {
+    const newVisibility: Record<string, boolean> = {}
+    entityVisibilityOptions.forEach(entity => {
+      newVisibility[entity.id] = true
+    })
+    setEntityVisibility(newVisibility)
+  }
+
+  const handleHideAllEntities = () => {
+    const newVisibility: Record<string, boolean> = {}
+    entityVisibilityOptions.forEach(entity => {
+      newVisibility[entity.id] = false
+    })
+    setEntityVisibility(newVisibility)
+  }
+
+  const handleResetEntitiesToDefault = () => {
+    const newVisibility: Record<string, boolean> = {}
+    entityVisibilityOptions.forEach(entity => {
+      newVisibility[entity.id] = entity.default_display !== false
+    })
+    setEntityVisibility(newVisibility)
+  }
 
   const [currentPeriod, setCurrentPeriod] = useState<RatePeriod>({
     departmentId: '',
@@ -207,6 +420,184 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
     return Date.now().toString() + Math.random().toString(36).substr(2, 9)
   }
 
+  // Process departments based on display settings
+  const getProcessedDepartments = () => {
+    let processedDepts = [...departments]
+    
+    // Sort departments by order
+    processedDepts = sortByOrder(processedDepts)
+    
+    // Filter by default display if needed
+    processedDepts = filterByDefaultDisplay(processedDepts, showDefaultDisplayOnly)
+    
+    // Process subdepartments, classes, and subclasses within each department
+    return processedDepts.map(dept => ({
+      ...dept,
+      tm_subdepartments: filterByDefaultDisplay(
+        sortByOrder(dept.tm_subdepartments || []).map(subdept => ({
+          ...subdept,
+          classes: filterByDefaultDisplay(
+            sortByOrder(subdept.classes || []).map(cls => ({
+              ...cls,
+              subClasses: filterByDefaultDisplay(
+                sortByOrder(cls.subClasses || []),
+                showDefaultDisplayOnly
+              )
+            })),
+            showDefaultDisplayOnly
+          )
+        })),
+        showDefaultDisplayOnly
+      )
+    }))
+  }
+
+  // Get grouped entries based on processed data and entity visibility
+  const getGroupedEntries = (dept: Department) => {
+    return currentPeriod.data
+      .filter(entry => {
+        // Filter by entity visibility
+        const parts = entry.entityPath.split(' → ')
+        const subdept = parts[0]
+        const cls = parts[1]
+        const subcls = parts[2]
+
+        const subdeptId = `subdept-${entry.entityId.split('-')[0]}`
+        if (entityVisibility[subdeptId] === false) return false
+
+        if (cls) {
+          const classId = `class-${entry.entityId.split('-')[0]}-${entry.entityId.split('-')[1]}`
+          if (entityVisibility[classId] === false) return false
+
+          if (subcls) {
+            const subclassId = `subclass-${entry.entityId}`
+            if (entityVisibility[subclassId] === false) return false
+          }
+        }
+
+        return true
+      })
+      .reduce((acc, entry) => {
+        const parts = entry.entityPath.split(' → ')
+        const subdept = parts[0]
+        const cls = parts[1]
+        const subcls = parts[2]
+   
+        if (!acc[subdept]) {
+          acc[subdept] = { direct: [], classes: {} }
+        }
+   
+        if (cls) {
+          if (!acc[subdept].classes[cls]) {
+            acc[subdept].classes[cls] = { direct: [], subclasses: {} }
+          }
+   
+          if (subcls) {
+            if (!acc[subdept].classes[cls].subclasses[subcls]) {
+              acc[subdept].classes[cls].subclasses[subcls] = []
+            }
+            acc[subdept].classes[cls].subclasses[subcls].push(entry)
+          } else {
+            acc[subdept].classes[cls].direct.push(entry)
+          }
+        } else {
+          acc[subdept].direct.push(entry)
+        }
+   
+        return acc
+      }, {} as Record<string, { direct: RateEntry[], classes: Record<string, { direct: RateEntry[], subclasses: Record<string, RateEntry[]> }> }>)
+  }
+
+  // Expand/Collapse All functionality
+  const expandAllRows = () => {
+    const currentDept = getProcessedDepartments().find(d => d.id === selectedDepartment)
+    if (!currentDept) return
+
+    const rowIds = new Set<string>()
+    
+    // Get all potential row IDs based on processed data
+    const groupedEntries = getGroupedEntries(currentDept)
+    
+    Object.entries(groupedEntries).forEach(([subdeptName, subdeptData]) => {
+      const totalEntries = subdeptData.direct.length + Object.values(subdeptData.classes).reduce((sum, cls) =>
+        sum + cls.direct.length + Object.values(cls.subclasses).reduce((subSum, subEntries) => subSum + subEntries.length, 0), 0
+      )
+
+      if (totalEntries > 1) {
+        const groupRowId = `group-${subdeptName}`
+        rowIds.add(groupRowId)
+
+        Object.entries(subdeptData.classes).forEach(([className, classData]) => {
+          const classEntryCount = classData.direct.length + Object.values(classData.subclasses).reduce((sum, entries) => sum + entries.length, 0)
+          if (classEntryCount > 1 || Object.keys(classData.subclasses).length > 0) {
+            const classRowId = `class-${subdeptName}-${className}`
+            rowIds.add(classRowId)
+
+            Object.entries(classData.subclasses).forEach(([subclassName, subclassEntries]) => {
+              if (subclassEntries.length > 1) {
+                const subclassRowId = `subclass-${subdeptName}-${className}-${subclassName}`
+                rowIds.add(subclassRowId)
+              }
+            })
+          }
+        })
+      }
+    })
+    
+    setExpandedRows(rowIds)
+  }
+
+  const collapseAllRows = () => {
+    setExpandedRows(new Set())
+  }
+
+  // Check if all expandable rows are expanded
+  const areAllRowsExpanded = useMemo(() => {
+    const currentDept = getProcessedDepartments().find(d => d.id === selectedDepartment)
+    if (!currentDept) return false
+
+    const groupedEntries = getGroupedEntries(currentDept)
+    let totalExpandableRows = 0
+    let expandedCount = 0
+
+    Object.entries(groupedEntries).forEach(([subdeptName, subdeptData]) => {
+      const totalEntries = subdeptData.direct.length + Object.values(subdeptData.classes).reduce((sum, cls) =>
+        sum + cls.direct.length + Object.values(cls.subclasses).reduce((subSum, subEntries) => subSum + subEntries.length, 0), 0
+      )
+
+      if (totalEntries > 1) {
+        const groupRowId = `group-${subdeptName}`
+        totalExpandableRows++
+        if (expandedRows.has(groupRowId)) {
+          expandedCount++
+        }
+
+        Object.entries(subdeptData.classes).forEach(([className, classData]) => {
+          const classEntryCount = classData.direct.length + Object.values(classData.subclasses).reduce((sum, entries) => sum + entries.length, 0)
+          if (classEntryCount > 1 || Object.keys(classData.subclasses).length > 0) {
+            const classRowId = `class-${subdeptName}-${className}`
+            totalExpandableRows++
+            if (expandedRows.has(classRowId)) {
+              expandedCount++
+            }
+
+            Object.entries(classData.subclasses).forEach(([subclassName, subclassEntries]) => {
+              if (subclassEntries.length > 1) {
+                const subclassRowId = `subclass-${subdeptName}-${className}-${subclassName}`
+                totalExpandableRows++
+                if (expandedRows.has(subclassRowId)) {
+                  expandedCount++
+                }
+              }
+            })
+          }
+        })
+      }
+    })
+
+    return totalExpandableRows > 0 && expandedCount === totalExpandableRows
+  }, [expandedRows, selectedDepartment, departments, showDefaultDisplayOnly, entityVisibility])
+
   // Helper function to safely access extraConsideration fields
   const getExtraConsiderationField = (entry: RateEntry, fieldKey: string) => {
     const field = entry.extraConsideration?.[fieldKey as keyof typeof entry.extraConsideration];
@@ -221,7 +612,38 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
 
   // Calculate totals for each column - FIXED VERSION
   const calculateTotals = () => {
-    return currentPeriod.data.reduce((totals, entry) => {
+    // Only calculate totals for visible entries
+    const currentDept = getProcessedDepartments().find(d => d.id === selectedDepartment)
+    if (!currentDept) return {
+      processingFeeRate: 0, issuanceFeeRate: 0, bclTier1: 0, bclTier2: 0, bclTier3: 0,
+      officerBossFixed: 0, officerPaTier1: 0, officerPaEditable: 0,
+      extraTccCompany: 0, extraTccIndividual: 0, extraAuditorsFee: 0, extraDegree: 0, extraTfFile: 0,
+      convenienceAlienAssistance: 0, convenienceReEntryApproval: 0, conveniencePassportEndorsement: 0,
+    }
+
+    const visibleEntries = currentPeriod.data.filter(entry => {
+      const parts = entry.entityPath.split(' → ')
+      const subdept = parts[0]
+      const cls = parts[1]
+      const subcls = parts[2]
+
+      const subdeptId = `subdept-${entry.entityId.split('-')[0]}`
+      if (entityVisibility[subdeptId] === false) return false
+
+      if (cls) {
+        const classId = `class-${entry.entityId.split('-')[0]}-${entry.entityId.split('-')[1]}`
+        if (entityVisibility[classId] === false) return false
+
+        if (subcls) {
+          const subclassId = `subclass-${entry.entityId}`
+          if (entityVisibility[subclassId] === false) return false
+        }
+      }
+
+      return true
+    })
+
+    return visibleEntries.reduce((totals, entry) => {
       // Safe access to nested properties
       const processingFee = entry.processingFee || { rate: 0 }
       const issuanceFee = entry.issuanceFee || { rate: 0 }
@@ -366,7 +788,8 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
 
   // Export function
   const exportToCSV = () => {
-    const currentDept = departments.find(d => d.id === selectedDepartment)
+    const processedDepts = getProcessedDepartments()
+    const currentDept = processedDepts.find(d => d.id === selectedDepartment)
     if (!currentDept || currentPeriod.data.length === 0) {
       toast({
         title: "No data to export",
@@ -415,7 +838,30 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
 
     const totals = calculateTotals()
 
-    const csvData = currentPeriod.data.map((entry, index) => [
+    // Only export visible entries
+    const visibleEntries = currentPeriod.data.filter(entry => {
+      const parts = entry.entityPath.split(' → ')
+      const subdept = parts[0]
+      const cls = parts[1]
+      const subcls = parts[2]
+
+      const subdeptId = `subdept-${entry.entityId.split('-')[0]}`
+      if (entityVisibility[subdeptId] === false) return false
+
+      if (cls) {
+        const classId = `class-${entry.entityId.split('-')[0]}-${entry.entityId.split('-')[1]}`
+        if (entityVisibility[classId] === false) return false
+
+        if (subcls) {
+          const subclassId = `subclass-${entry.entityId}`
+          if (entityVisibility[subclassId] === false) return false
+        }
+      }
+
+      return true
+    })
+
+    const csvData = visibleEntries.map((entry, index) => [
       index + 1,
       entry.entityName,
       entry.processingFee?.amount || 0,
@@ -437,7 +883,6 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
       getExtraConsiderationField(entry, 'tccCompany').value,
       getExtraConsiderationField(entry, 'tccIndividual').applicable ? 'Yes' : 'No',
       getExtraConsiderationField(entry, 'tccIndividual').value,
-      getExtraConsiderationField(entry, 'auditorsFee').applicable ? 'Yes' : 'No',
       getExtraConsiderationField(entry, 'auditorsFee').value,
       getExtraConsiderationField(entry, 'degree').applicable ? 'Yes' : 'No',
       getExtraConsiderationField(entry, 'degree').value,
@@ -504,7 +949,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
 
     toast({
       title: "Export Successful",
-      description: `Exported ${currentPeriod.data.length} rate entries with totals to CSV`,
+      description: `Exported ${visibleEntries.length} visible rate entries with totals to CSV`,
     })
   }
 
@@ -525,14 +970,21 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
             id: dept.id,
             name: dept.name,
             description: dept.description,
-            tm_subdepartments: dept.subdepartments?.map(subdept => ({
+            order: dept.order,
+            default_display: dept.default_display,
+            tm_subdepartments: sortByOrder((dept.subdepartments || []).map(subdept => ({
               id: typeof subdept.id === 'string' ? parseInt(subdept.id) : subdept.id,
               name: subdept.name,
               description: subdept.description,
-              classes: (subdept as any).classes || []
-            }))
+              order: subdept.order,
+              default_display: subdept.default_display,
+              classes: sortByOrder(((subdept as any).classes || []).map((cls: any) => ({
+                ...cls,
+                subClasses: sortByOrder(cls.subClasses || [])
+              })))
+            })))
           }))
-          setDepartments(transformedDepartments)
+          setDepartments(sortByOrder(transformedDepartments))
           if (transformedDepartments.length > 0) {
             setSelectedDepartment(transformedDepartments[0].id)
           }
@@ -638,7 +1090,8 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
   }
 
   const generateDefaultRates = (departmentId: string) => {
-    const currentDepartment = departments.find(dept => dept.id === departmentId)
+    const processedDepts = getProcessedDepartments()
+    const currentDepartment = processedDepts.find(dept => dept.id === departmentId)
     if (!currentDepartment) return
 
     const defaultRates: RateEntry[] = []
@@ -957,361 +1410,361 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
       <TableRow
         key={entry.id}
         className={cn(
-          isChild ? (depth === 1 ? 'bg-slate-50/50' : depth === 2 ? 'bg-purple-50/30' : 'bg-slate-100/50') : '',
+          isChild ? (depth === 1 ? 'bg-slate-50/50' : depth === 2 ? 'bg-blue-50/30' : 'bg-slate-100/50') : '',
           'hover:bg-muted/50',
           rowHeight,
           'transition-colors duration-150 ease-in-out',
-          depth > 0 ? `border-l-2 ${depth === 1 ? 'border-l-blue-200' : 'border-l-purple-200'}` : ''
+          depth > 0 ? `border-l-2 ${depth === 1 ? 'border-l-blue-200' : 'border-l-blue-200'}` : ''
         )}
       >
-        <TableCell className={cn("sticky left-0 bg-background border-r text-center font-mono z-30 px-2", fontSize, "font-medium")}>
-          <div className="flex items-center justify-center">
-            {index}
-          </div>
-        </TableCell>
- 
-        <TableCell className="sticky left-16 bg-background border-r font-medium z-30 px-3">
-          <div className={cn("flex items-center gap-2", paddingLeft)}>
-            {isChild && (
-              <div className="flex items-center text-muted-foreground">
-                <div className="w-4 h-4 flex items-center justify-center">
-                  <ChevronRight className={cn("h-3 w-3", depth === 2 ? 'text-purple-500' : 'text-blue-500')} />
-                </div>
-              </div>
-            )}
-            <div className="flex flex-col gap-1 min-w-0">
-              <span className={cn("font-medium truncate", fontSize, depth === 2 ? 'text-purple-700' : depth === 1 ? 'text-blue-700' : '')}>
-                {entry.entityName}
-              </span>
-              <span className={cn("text-xs text-muted-foreground truncate", isChild ? 'opacity-75' : '')}>
-                {entry.entityPath}
-              </span>
+        {columnVisibility.index && (
+          <TableCell className={cn("sticky left-0 bg-background border-r text-center font-mono z-30 px-2", fontSize, "font-medium")}>
+            <div className="flex items-center justify-center">
+              {index}
             </div>
-          </div>
-        </TableCell>
+          </TableCell>
+        )}
+ 
+        {columnVisibility.entity && (
+          <TableCell className={cn(
+            "sticky bg-background border-r font-medium z-30 px-3",
+            columnVisibility.index ? "left-16" : "left-0"
+          )}>
+            <div className={cn("flex items-center gap-2", paddingLeft)}>
+              {isChild && (
+                <div className="flex items-center text-muted-foreground">
+                  <div className="w-4 h-4 flex items-center justify-center">
+                    <ChevronRight className={cn("h-3 w-3", depth === 2 ? 'text-blue-500' : 'text-blue-500')} />
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-col gap-1 min-w-0">
+                <span className={cn("font-medium truncate", fontSize, depth === 2 ? 'text-blue-700' : depth === 1 ? 'text-blue-700' : '')}>
+                  {entry.entityName}
+                </span>
+                <span className={cn("text-xs text-muted-foreground truncate", isChild ? 'opacity-75' : '')}>
+                  {entry.entityPath}
+                </span>
+              </div>
+            </div>
+          </TableCell>
+        )}
  
         {/* Processing Fee Section */}
-        <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
-          <Input
-            type="number"
-            value={entry.processingFee?.amount || 0}
-            onChange={(e) => updateRateEntry(entry.id, {
-              processingFee: {
-                ...entry.processingFee,
-                amount: parseFloat(e.target.value) || 0,
-                rate: entry.processingFee?.currency === 'USD'
-                  ? (parseFloat(e.target.value) || 0) * rates.usd
-                  : parseFloat(e.target.value) || 0
-              }
-            })}
-            onKeyDown={handleKeyDown}
-            className={cn(inputHeight, "text-center", fontSize, "border-0 bg-white/70 focus:bg-white transition-colors")}
-            disabled={isReadOnly}
-          />
-        </TableCell>
-        <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
-          <Select
-            value={entry.processingFee?.currency || 'KSH'}
-            onValueChange={(value: 'USD' | 'KSH') => updateCurrency(entry.id, 'processingFee', value)}
-            disabled={isReadOnly}
-          >
-            <SelectTrigger className={cn(inputHeight, "border-0 bg-white/70 focus:bg-white", fontSize, "transition-colors")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="USD">USD</SelectItem>
-              <SelectItem value="KSH">KSH</SelectItem>
-            </SelectContent>
-          </Select>
-        </TableCell>
-        <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
-          <div className={cn(inputHeight, fontSize, "bg-blue-100/50 rounded px-2 flex items-center justify-center font-mono text-blue-800 font-semibold")}>
-            {(entry.processingFee?.rate || 0).toLocaleString()}
-          </div>
-        </TableCell>
+        {columnVisibility.processingFee && (
+          <>
+            <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
+              <Input
+                type="number"
+                value={entry.processingFee?.amount || 0}
+                onChange={(e) => updateRateEntry(entry.id, {
+                  processingFee: {
+                    ...entry.processingFee,
+                    amount: parseFloat(e.target.value) || 0,
+                    rate: entry.processingFee?.currency === 'USD'
+                      ? (parseFloat(e.target.value) || 0) * rates.usd
+                      : parseFloat(e.target.value) || 0
+                  }
+                })}
+                onKeyDown={handleKeyDown}
+                className={cn(inputHeight, "text-center", fontSize, "border-0 bg-white/70 focus:bg-white transition-colors")}
+                disabled={isReadOnly}
+              />
+            </TableCell>
+            <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
+              <Select
+                value={entry.processingFee?.currency || 'KSH'}
+                onValueChange={(value: 'USD' | 'KSH') => updateCurrency(entry.id, 'processingFee', value)}
+                disabled={isReadOnly}
+              >
+                <SelectTrigger className={cn(inputHeight, "border-0 bg-white/70 focus:bg-white", fontSize, "transition-colors")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="USD">USD</SelectItem>
+                  <SelectItem value="KSH">KSH</SelectItem>
+                </SelectContent>
+              </Select>
+            </TableCell>
+            <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
+              <div className={cn(inputHeight, fontSize, "bg-blue-100/50 rounded px-2 flex items-center justify-center font-mono text-blue-800 font-semibold")}>
+                {(entry.processingFee?.rate || 0).toLocaleString()}
+              </div>
+            </TableCell>
+          </>
+        )}
  
         {/* Issuance Fee Section */}
-        <TableCell className="border-r border-gray-200 bg-green-50/30 p-2">
-          <Input
-            type="number"
-            value={entry.issuanceFee?.amount || 0}
-            onChange={(e) => updateRateEntry(entry.id, {
-              issuanceFee: {
-                ...entry.issuanceFee,
-                amount: parseFloat(e.target.value) || 0,
-                rate: entry.issuanceFee?.currency === 'USD'
-                  ? (parseFloat(e.target.value) || 0) * rates.usd
-                  : parseFloat(e.target.value) || 0
-              }
-            })}
-            onKeyDown={handleKeyDown}
-            className={cn(inputHeight, "text-center", fontSize, "border-0 bg-white/70 focus:bg-white transition-colors")}
-            disabled={isReadOnly}
-          />
-        </TableCell>
-        <TableCell className="border-r border-gray-200 bg-green-50/30 p-2">
-          <Select
-            value={entry.issuanceFee?.currency || 'KSH'}
-            onValueChange={(value: 'USD' | 'KSH') => updateCurrency(entry.id, 'issuanceFee', value)}
-            disabled={isReadOnly}
-          >
-            <SelectTrigger className={cn(inputHeight, "border-0 bg-white/70 focus:bg-white", fontSize, "transition-colors")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="USD">USD</SelectItem>
-              <SelectItem value="KSH">KSH</SelectItem>
-            </SelectContent>
-          </Select>
-        </TableCell>
-        <TableCell className="border-r border-gray-200 bg-green-50/30 p-2">
-          <div className={cn(inputHeight, fontSize, "bg-green-100/50 rounded px-2 flex items-center justify-center font-mono text-green-800 font-semibold")}>
-            {(entry.issuanceFee?.rate || 0).toLocaleString()}
-          </div>
-        </TableCell>
-        <TableCell className="border-r border-gray-200 bg-green-50/30 p-2">
-          <MultiSelectPopover
-            entryId={entry.id}
-            field="periodType"
-            options={periodOptions}
-            values={entry.issuanceFee?.periodType || []}
-            placeholder="Types"
-          />
-        </TableCell>
-        <TableCell className="border-r border-gray-200 bg-green-50/30 p-2">
-          <MultiSelectPopover
-            entryId={entry.id}
-            field="periodCount"
-            options={countOptions}
-            values={entry.issuanceFee?.periodCount || []}
-            placeholder="Counts"
-          />
-        </TableCell>
+        {columnVisibility.issuanceFee && (
+          <>
+            <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
+              <Input
+                type="number"
+                value={entry.issuanceFee?.amount || 0}
+                onChange={(e) => updateRateEntry(entry.id, {
+                  issuanceFee: {
+                    ...entry.issuanceFee,
+                    amount: parseFloat(e.target.value) || 0,
+                    rate: entry.issuanceFee?.currency === 'USD'
+                      ? (parseFloat(e.target.value) || 0) * rates.usd
+                      : parseFloat(e.target.value) || 0
+                  }
+                })}
+                onKeyDown={handleKeyDown}
+                className={cn(inputHeight, "text-center", fontSize, "border-0 bg-white/70 focus:bg-white transition-colors")}
+                disabled={isReadOnly}
+              />
+            </TableCell>
+            <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
+              <Select
+                value={entry.issuanceFee?.currency || 'KSH'}
+                onValueChange={(value: 'USD' | 'KSH') => updateCurrency(entry.id, 'issuanceFee', value)}
+                disabled={isReadOnly}
+              >
+                <SelectTrigger className={cn(inputHeight, "border-0 bg-white/70 focus:bg-white", fontSize, "transition-colors")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="USD">USD</SelectItem>
+                  <SelectItem value="KSH">KSH</SelectItem>
+                </SelectContent>
+              </Select>
+            </TableCell>
+            <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
+              <div className={cn(inputHeight, fontSize, "bg-blue-100/50 rounded px-2 flex items-center justify-center font-mono text-green-800 font-semibold")}>
+                {(entry.issuanceFee?.rate || 0).toLocaleString()}
+              </div>
+            </TableCell>
+            <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
+              <MultiSelectPopover
+                entryId={entry.id}
+                field="periodType"
+                options={periodOptions}
+                values={entry.issuanceFee?.periodType || []}
+                placeholder="Types"
+              />
+            </TableCell>
+            <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
+              <MultiSelectPopover
+                entryId={entry.id}
+                field="periodCount"
+                options={countOptions}
+                values={entry.issuanceFee?.periodCount || []}
+                placeholder="Counts"
+              />
+            </TableCell>
+          </>
+        )}
  
         {/* BCL Consultancy Section */}
-        {['tier1', 'tier2', 'tier3'].map((tier, idx) => (
-          <TableCell key={tier} className={cn("border-r border-gray-200 bg-purple-50/30 p-2", idx === 2 ? 'border-r-gray-200' : '')}>
-            <Input
-              type="number"
-              value={entry.bclConsultancy?.[tier as keyof typeof entry.bclConsultancy] || 0}
-              onChange={(e) => updateRateEntry(entry.id, {
-                bclConsultancy: {
-                  ...entry.bclConsultancy,
-                  [tier]: parseFloat(e.target.value) || 0
-                }
-              })}
-              onKeyDown={handleKeyDown}
-              className={cn(inputHeight, "text-center", fontSize, "border-gray-200 bg-white/70 focus:bg-white transition-colors")}
-              disabled={isReadOnly}
-            />
-          </TableCell>
-        ))}
+        {columnVisibility.bclConsultancy && (
+          <>
+            {['tier1', 'tier2', 'tier3'].map((tier, idx) => (
+              <TableCell key={tier} className={cn("border-r border-gray-200 bg-blue-50/30 p-2", idx === 2 ? 'border-r-gray-200' : '')}>
+                <Input
+                  type="number"
+                  value={entry.bclConsultancy?.[tier as keyof typeof entry.bclConsultancy] || 0}
+                  onChange={(e) => updateRateEntry(entry.id, {
+                    bclConsultancy: {
+                      ...entry.bclConsultancy,
+                      [tier]: parseFloat(e.target.value) || 0
+                    }
+                  })}
+                  onKeyDown={handleKeyDown}
+                  className={cn(inputHeight, "text-center", fontSize, "border-gray-200 bg-white/70 focus:bg-white transition-colors")}
+                  disabled={isReadOnly}
+                />
+              </TableCell>
+            ))}
+          </>
+        )}
  
         {/* Officer Section */}
-        {['bossFixed', 'paTier1', 'paEditable'].map((field, idx) => (
-          <TableCell key={field} className={cn("border-r border-gray-200 bg-orange-50/30 p-2", idx === 2 ? 'border-r-gray-200' : '')}>
-            <Input
-              type="number"
-              value={entry.officer?.[field as keyof typeof entry.officer] || 0}
-              onChange={(e) => updateRateEntry(entry.id, {
-                officer: {
-                  ...entry.officer,
-                  [field]: parseFloat(e.target.value) || 0
-                }
-              })}
-              onKeyDown={handleKeyDown}
-              className={cn(inputHeight, "text-center", fontSize, "border-gray-200 bg-white/70 focus:bg-white transition-colors")}
-              disabled={isReadOnly}
-            />
-          </TableCell>
-        ))}
+        {columnVisibility.officer && (
+          <>
+            {['bossFixed', 'paTier1', 'paEditable'].map((field, idx) => (
+              <TableCell key={field} className={cn("border-r border-gray-200 bg-blue-50/30 p-2", idx === 2 ? 'border-r-gray-200' : '')}>
+                <Input
+                  type="number"
+                  value={entry.officer?.[field as keyof typeof entry.officer] || 0}
+                  onChange={(e) => updateRateEntry(entry.id, {
+                    officer: {
+                      ...entry.officer,
+                      [field]: parseFloat(e.target.value) || 0
+                    }
+                  })}
+                  onKeyDown={handleKeyDown}
+                  className={cn(inputHeight, "text-center", fontSize, "border-gray-200 bg-white/70 focus:bg-white transition-colors")}
+                  disabled={isReadOnly}
+                />
+              </TableCell>
+            ))}
+          </>
+        )}
  
         {/* Extra Consideration Section */}
-        {[
-          { key: 'tccCompany', label: 'TCC Company' },
-          { key: 'tccIndividual', label: 'TCC Individual' },
-          { key: 'auditorsFee', label: 'Auditors Fee' },
-          { key: 'degree', label: 'Degree' },
-          { key: 'tfFile', label: 'TF File' }
-        ].map((field, idx) => (
-          <TableCell key={field.key} className={cn("border-r border-gray-400 bg-red-50/30 p-2", idx === 4 ? 'border-r-gray-200' : '')}>
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-1">
-                <Select
-                  value={getExtraConsiderationField(entry, field.key).applicable ? "applicable" : "not-applicable"}
-                  onValueChange={(value) => {
-                    const newValue = value === "applicable";
-                    updateRateEntry(entry.id, {
-                      extraConsideration: {
-                        ...entry.extraConsideration,
-                        [field.key]: {
-                          ...getExtraConsiderationField(entry, field.key),
-                          applicable: newValue
-                        }
-                      }
-                    });
-                  }}
-                  disabled={isReadOnly}
-                >
-                  <SelectTrigger className="h-6 w-full border-gray-200 focus:border-gray-200 focus:bg-white shadow-none text-xs">
-                    <SelectValue>
-                      <div className="flex items-center gap-1">
-                        <div className={cn("w-2 h-2 rounded-full", getExtraConsiderationField(entry, field.key).applicable
-                          ? 'bg-green-500'
-                          : 'bg-red-500'
-                        )}></div>
-                        {getExtraConsiderationField(entry, field.key).applicable ? 'Applicable' : 'Not Applicable'}
-                      </div>
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="applicable">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                        Applicable
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="not-applicable">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                        Not Applicable
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input
-                  type="number"
-                  value={getExtraConsiderationField(entry, field.key).value}
-                  onChange={(e) => {
-                    const newValue = parseFloat(e.target.value) || 0;
-                    updateRateEntry(entry.id, {
-                      extraConsideration: {
-                        ...entry.extraConsideration,
-                        [field.key]: {
-                          ...getExtraConsiderationField(entry, field.key),
-                          value: newValue
-                        }
-                      }
-                    });
-                  }}
-                  onKeyDown={handleKeyDown}
-                  className="h-6 w-full text-center text-xs border-gray-200 focus:border-gray-200 focus:bg-white transition-colors"
-                  disabled={isReadOnly || !getExtraConsiderationField(entry, field.key).applicable}
-                />
-              </div>
-            </div>
-          </TableCell>
-        ))}
+        {columnVisibility.extraConsideration && (
+          <>
+            {[
+              { key: 'tccCompany', label: 'TCC Company' },
+              { key: 'tccIndividual', label: 'TCC Individual' },
+              { key: 'auditorsFee', label: 'Auditors Fee' },
+              { key: 'degree', label: 'Degree' },
+              { key: 'tfFile', label: 'TF File' }
+            ].map((field, idx) => (
+              <TableCell key={field.key} className={cn("border-r border-gray-400 bg-blue-50/30 p-2", idx === 4 ? 'border-r-gray-200' : '')}>
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1">
+                    <Select
+                      value={getExtraConsiderationField(entry, field.key).applicable ? "applicable" : "not-applicable"}
+                      onValueChange={(value) => {
+                        const newValue = value === "applicable";
+                        updateRateEntry(entry.id, {
+                          extraConsideration: {
+                            ...entry.extraConsideration,
+                            [field.key]: {
+                              ...getExtraConsiderationField(entry, field.key),
+                              applicable: newValue
+                            }
+                          }
+                        });
+                      }}
+                      disabled={isReadOnly}
+                    >
+                      <SelectTrigger className="h-6 w-full border-gray-200 focus:border-gray-200 focus:bg-white shadow-none text-xs">
+                        <SelectValue>
+                          <div className="flex items-center gap-1">
+                            <div className={cn("w-2 h-2 rounded-full", getExtraConsiderationField(entry, field.key).applicable
+                              ? 'bg-blue-500'
+                              : 'bg-blue-500'
+                            )}></div>
+                            {getExtraConsiderationField(entry, field.key).applicable ? 'Applicable' : 'Not Applicable'}
+                          </div>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="applicable">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                            Applicable
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="not-applicable">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                            Not Applicable
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="number"
+                      value={getExtraConsiderationField(entry, field.key).value}
+                      onChange={(e) => {
+                        const newValue = parseFloat(e.target.value) || 0;
+                        updateRateEntry(entry.id, {
+                          extraConsideration: {
+                            ...entry.extraConsideration,
+                            [field.key]: {
+                              ...getExtraConsiderationField(entry, field.key),
+                              value: newValue
+                            }
+                          }
+                        });
+                      }}
+                      onKeyDown={handleKeyDown}
+                      className="h-6 w-full text-center text-xs border-gray-200 focus:border-gray-200 focus:bg-white transition-colors"
+                      disabled={isReadOnly || !getExtraConsiderationField(entry, field.key).applicable}
+                    />
+                  </div>
+                </div>
+              </TableCell>
+            ))}
+          </>
+        )}
  
         {/* Convenience Fee Section */}
-        {[
-          { key: 'alienAssistance', label: 'Alien Assistance' },
-          { key: 'reEntryApproval', label: 'Re-Entry Approval' },
-          { key: 'passportEndorsement', label: 'Passport Endorsement' }
-        ].map((field, idx) => (
-          <TableCell key={field.key} className={cn("p-2 bg-indigo-50/30", idx < 2 ? 'border-r border-gray-200' : '')}>
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-1">
-                <Select
-                  value={getConvenienceFeeField(entry, field.key).applicable ? "applicable" : "not-applicable"}
-                  onValueChange={(value) => {
-                    const newValue = value === "applicable";
-                    updateRateEntry(entry.id, {
-                      convenienceFee: {
-                        ...entry.convenienceFee,
-                        [field.key]: {
-                          ...getConvenienceFeeField(entry, field.key),
-                          applicable: newValue
-                        }
-                      }
-                    });
-                  }}
-                  disabled={isReadOnly}
-                >
-                  <SelectTrigger className="h-6 w-full border-gray-200 bg-white/70 focus:border-gray-200 focus:bg-white shadow-none text-xs">
-                    <SelectValue>
-                      <div className="flex items-center gap-1">
-                        <div className={cn("w-2 h-2 rounded-full", getConvenienceFeeField(entry, field.key).applicable
-                          ? 'bg-green-500'
-                          : 'bg-red-500'
-                        )}></div>
-                        {getConvenienceFeeField(entry, field.key).applicable ? 'Applicable' : 'Not Applicable'}
-                      </div>
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="applicable">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                        Applicable
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="not-applicable">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                        Not Applicable
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input
-                  type="number"
-                  value={getConvenienceFeeField(entry, field.key).value}
-                  onChange={(e) => {
-                    const newValue = parseFloat(e.target.value) || 0;
-                    updateRateEntry(entry.id, {
-                      convenienceFee: {
-                        ...entry.convenienceFee,
-                        [field.key]: {
-                          ...getConvenienceFeeField(entry, field.key),
-                          value: newValue
-                        }
-                      }
-                    });
-                  }}
-                  onKeyDown={handleKeyDown}
-                  className="h-6 w-full text-center text-xs border-gray-200 focus:border-gray-200 focus:bg-white transition-colors"
-                  disabled={isReadOnly || !getConvenienceFeeField(entry, field.key).applicable}
-                />
-              </div>
-            </div>
-          </TableCell>
-        ))}
+        {columnVisibility.convenienceFee && (
+          <>
+            {[
+              { key: 'alienAssistance', label: 'Alien Assistance' },
+              { key: 'reEntryApproval', label: 'Re-Entry Approval' },
+              { key: 'passportEndorsement', label: 'Passport Endorsement' }
+            ].map((field, idx) => (
+              <TableCell key={field.key} className={cn("p-2 bg-indigo-50/30", idx < 2 ? 'border-r border-gray-200' : '')}>
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1">
+                    <Select
+                      value={getConvenienceFeeField(entry, field.key).applicable ? "applicable" : "not-applicable"}
+                      onValueChange={(value) => {
+                        const newValue = value === "applicable";
+                        updateRateEntry(entry.id, {
+                          convenienceFee: {
+                            ...entry.convenienceFee,
+                            [field.key]: {
+                              ...getConvenienceFeeField(entry, field.key),
+                              applicable: newValue
+                            }
+                          }
+                        });
+                      }}
+                      disabled={isReadOnly}
+                    >
+                      <SelectTrigger className="h-6 w-full border-gray-200 bg-white/70 focus:border-gray-200 focus:bg-white shadow-none text-xs">
+                        <SelectValue>
+                          <div className="flex items-center gap-1">
+                            <div className={cn("w-2 h-2 rounded-full", getConvenienceFeeField(entry, field.key).applicable
+                              ? 'bg-blue-500'
+                              : 'bg-red-500'
+                            )}></div>
+                            {getConvenienceFeeField(entry, field.key).applicable ? 'Applicable' : 'Not Applicable'}
+                          </div>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="applicable">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                            Applicable
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="not-applicable">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                            Not Applicable
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="number"
+                      value={getConvenienceFeeField(entry, field.key).value}
+                      onChange={(e) => {
+                        const newValue = parseFloat(e.target.value) || 0;
+                        updateRateEntry(entry.id, {
+                          convenienceFee: {
+                            ...entry.convenienceFee,
+                            [field.key]: {
+                              ...getConvenienceFeeField(entry, field.key),
+                              value: newValue
+                            }
+                          }
+                        });
+                      }}
+                      onKeyDown={handleKeyDown}
+                      className="h-6 w-full text-center text-xs border-gray-200 focus:border-gray-200 focus:bg-white transition-colors"
+                      disabled={isReadOnly || !getConvenienceFeeField(entry, field.key).applicable}
+                    />
+                  </div>
+                </div>
+              </TableCell>
+            ))}
+          </>
+        )}
       </TableRow>
     )
   }
- 
-  // Enhanced grouping for nested structure
-  const groupedEntries = currentPeriod.data.reduce((acc, entry) => {
-    const parts = entry.entityPath.split(' → ')
-    const subdept = parts[0]
-    const cls = parts[1]
-    const subcls = parts[2]
- 
-    if (!acc[subdept]) {
-      acc[subdept] = { direct: [], classes: {} }
-    }
- 
-    if (cls) {
-      if (!acc[subdept].classes[cls]) {
-        acc[subdept].classes[cls] = { direct: [], subclasses: {} }
-      }
- 
-      if (subcls) {
-        if (!acc[subdept].classes[cls].subclasses[subcls]) {
-          acc[subdept].classes[cls].subclasses[subcls] = []
-        }
-        acc[subdept].classes[cls].subclasses[subcls].push(entry)
-      } else {
-        acc[subdept].classes[cls].direct.push(entry)
-      }
-    } else {
-      acc[subdept].direct.push(entry)
-    }
- 
-    return acc
-  }, {} as Record<string, { direct: RateEntry[], classes: Record<string, { direct: RateEntry[], subclasses: Record<string, RateEntry[]> }> }>)
- 
+
   const totals = calculateTotals()
  
   if (isLoading) {
@@ -1334,6 +1787,8 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
       </div>
     )
   }
+
+  const processedDepartments = getProcessedDepartments()
  
   return (
     <div className="w-full space-y-6">
@@ -1350,7 +1805,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
               </Badge>
             )}
             {hasUnsavedChanges && !isReadOnly && (
-              <Badge variant="outline" className="text-orange-600 border-orange-200">
+              <Badge variant="outline" className="text-blue-600 border-blue-200">
                 <Clock className="h-3 w-3 mr-1" />
                 Auto-saving changes...
               </Badge>
@@ -1366,6 +1821,59 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
  
         {/* Enhanced Control Panel */}
         <div className="flex items-center gap-2">
+          {/* Default Display Toggle */}
+          <Button
+            variant={showDefaultDisplayOnly ? "default" : "outline"}
+            onClick={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
+            className="flex items-center gap-2"
+          >
+            {showDefaultDisplayOnly ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            {showDefaultDisplayOnly ? 'Default Display' : 'Show All'}
+          </Button>
+
+          {/* Expand/Collapse All Buttons */}
+          <Button
+            variant="outline"
+            onClick={areAllRowsExpanded ? collapseAllRows : expandAllRows}
+            className="flex items-center gap-2"
+          >
+            {areAllRowsExpanded ? (
+              <>
+                <ChevronUp className="h-4 w-4" />
+                Collapse All
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-4 w-4" />
+                Expand All
+              </>
+            )}
+          </Button>
+
+          {/* Entity Visibility Control */}
+          <EntityVisibilityControl
+            entities={entityVisibilityOptions}
+            onVisibilityChange={handleEntityVisibilityChange}
+            onShowAll={handleShowAllEntities}
+            onHideAll={handleHideAllEntities}
+            onResetToDefault={handleResetEntitiesToDefault}
+            showDefaultDisplayOnly={showDefaultDisplayOnly}
+            onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
+            title="Entity Visibility"
+            description="Control which departments, classes, and subclasses are visible in the rates table"
+          />
+
+          {/* Column Visibility Control */}
+          <ColumnVisibilityControl
+            columns={columnVisibilityOptions}
+            onVisibilityChange={handleColumnVisibilityChange}
+            onShowAll={handleShowAllColumns}
+            onHideAll={handleHideAllColumns}
+            onResetToDefault={handleResetToDefault}
+            title="Column Visibility"
+            description="Toggle rate table columns"
+          />
+
           {/* Export Button */}
           <Button
             variant="outline"
@@ -1381,7 +1889,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
           <HistoricalRatesDialog
             isOpen={isHistoryDialogOpen}
             onOpenChange={setIsHistoryDialogOpen}
-            departments={departments}
+            departments={processedDepartments}
             selectedDepartment={selectedDepartment}
             historicalPeriods={historicalPeriods}
             loadingHistory={loadingHistory}
@@ -1493,19 +2001,14 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
       <Tabs value={selectedDepartment} onValueChange={setSelectedDepartment} className="w-full">
         <div className="flex justify-between items-start gap-4 mb-6">
           <TabsList className="gap-1 bg-muted/50 p-1">
-            {departments.map((dept) => (
+            {processedDepartments.map((dept) => (
               <TabsTrigger
                 key={dept.id}
                 value={dept.id}
-                className="whitespace-nowrap data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
+                className="whitespace-nowrap data-[state=active]:bg-blue-700 data-[state=active]:text-white data-[state=active]:shadow-sm"
               >
                <div className="flex items-center gap-2">
                  <span>{dept.name}</span>
-                 {/* {dept.tm_subdepartments && (
-                   <Badge variant="secondary" className="text-xs">
-                     {dept.tm_subdepartments.length}
-                   </Badge>
-                 )} */}
                </div>
              </TabsTrigger>
            ))}
@@ -1538,7 +2041,7 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
          )}
        </div>
 
-       {departments.map((dept) => (
+       {processedDepartments.map((dept) => (
          <TabsContent key={dept.id} value={dept.id}>
            <Card className="overflow-hidden">
              <div className="relative overflow-auto max-h-[calc(100vh-300px)] border-0">
@@ -1546,127 +2049,177 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                  {/* Sticky Headers */}
                  <TableHeader className="sticky top-0 z-50">
                    {/* Main Headers Row */}
-                   <TableRow className="bg-blue-600 text-white border-b border-slate-300">
-                     <TableHead className="sticky left-0 bg-blue-600 border-r-2 border-white/20 w-16 z-50 text-center text-white font-semibold p-2">
-                       #
-                     </TableHead>
-                     <TableHead className="sticky left-16 bg-blue-600 border-r-2 border-white/20 w-64 z-50 text-white font-semibold p-2">
-                       Entity
-                     </TableHead>
+                   <TableRow className="bg-blue-700 text-white border-b border-slate-300">
+                     {columnVisibility.index && (
+                       <TableHead className="sticky left-0 bg-blue-700 border-r-2 border-white/20 w-16 z-50 text-center text-white font-semibold p-2">
+                         #
+                       </TableHead>
+                     )}
+                     {columnVisibility.entity && (
+                       <TableHead className={cn(
+                         "sticky bg-blue-700 border-r-2 border-white/20 w-64 z-50 text-white font-semibold p-2",
+                         columnVisibility.index ? "left-16" : "left-0"
+                       )}>
+                         Entity
+                       </TableHead>
+                     )}
 
                      {/* Processing Fee - Blue background */}
-                     <TableHead colSpan={3} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-700 p-2">
-                       Processing Fee
-                     </TableHead>
+                     {columnVisibility.processingFee && (
+                       <TableHead colSpan={3} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-700 p-2">
+                         Processing Fee
+                       </TableHead>
+                     )}
                      {/* Issuance Fee - Green background */}
-                     <TableHead colSpan={5} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-600 p-2">
-                       Issuance Fee
-                     </TableHead>
+                     {columnVisibility.issuanceFee && (
+                       <TableHead colSpan={5} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-700 p-2">
+                         Issuance Fee
+                       </TableHead>
+                     )}
                      {/* BCL Consultancy - Purple background */}
-                     <TableHead colSpan={3} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-700 p-2">
-                       BCL Consultancy
-                     </TableHead>
+                     {columnVisibility.bclConsultancy && (
+                       <TableHead colSpan={3} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-700 p-2">
+                         BCL Consultancy
+                       </TableHead>
+                     )}
                      {/* Officer - Orange background */}
-                     <TableHead colSpan={3} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-600 p-2">
-                       Officer
-                     </TableHead>
+                     {columnVisibility.officer && (
+                       <TableHead colSpan={3} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-700 p-2">
+                         Officer
+                       </TableHead>
+                     )}
                      {/* Extra Consideration - Red background */}
-                     <TableHead colSpan={5} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-700 p-2">
-                       Extra Consideration
-                     </TableHead>
+                     {columnVisibility.extraConsideration && (
+                       <TableHead colSpan={5} className="border-r-4 border-slate-300 text-center text-white font-semibold bg-blue-700 p-2">
+                         Extra Consideration
+                       </TableHead>
+                     )}
                      {/* Convenience Fee - Indigo background */}
-                     <TableHead colSpan={3} className="text-center text-white font-semibold bg-blue-600 p-2">
-                       Convenience Fee
-                     </TableHead>
+                     {columnVisibility.convenienceFee && (
+                       <TableHead colSpan={3} className="text-center text-white font-semibold bg-blue-700 p-2">
+                         Convenience Fee
+                       </TableHead>
+                     )}
                    </TableRow>
 
                    {/* Sub Headers Row */}
-                   <TableRow className="bg-slate-50 border-b border-slate-200">
-                     <TableHead className="sticky left-0 bg-slate-50 border-r z-50 p-2"></TableHead>
-                     <TableHead className="sticky left-16 bg-slate-50 border-r z-50 p-2"></TableHead>
+                   <TableRow className="bg-blue-500 border-b border-slate-200">
+                     {columnVisibility.index && (
+                       <TableHead className="sticky left-0 bg-blue-500 border-r z-50 p-2"></TableHead>
+                     )}
+                     {columnVisibility.entity && (
+                       <TableHead className={cn(
+                         "sticky bg-blue-500 border-r z-50 p-2",
+                         columnVisibility.index ? "left-16" : "left-0"
+                       )}></TableHead>
+                     )}
 
                      {/* Processing Fee Sub-headers */}
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-blue-50/50 p-2">
-                       Amount
-                     </TableHead>
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-blue-50/50 p-2">
-                       Currency
-                     </TableHead>
-                     <TableHead className="border-r-4 border-slate-300 text-center text-xs text-slate-900 font-semibold bg-blue-50/50 p-2">
-                       Fee (KSH)
-                     </TableHead>
+                     {columnVisibility.processingFee && (
+                       <>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Amount
+                         </TableHead>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Currency
+                         </TableHead>
+                         <TableHead className="border-r-4 border-slate-300 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Fee (KSH)
+                         </TableHead>
+                       </>
+                     )}
 
                      {/* Issuance Fee Sub-headers */}
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-green-50/50 p-2">
-                       Amount
-                     </TableHead>
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-green-50/50 p-2">
-                       Currency
-                     </TableHead>
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-green-50/50 p-2">
-                       Fee (KSH)
-                     </TableHead>
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-green-50/50 p-2">
-                       Period Type
-                     </TableHead>
-                     <TableHead className="border-r-4 border-slate-300 text-center text-xs text-slate-900 font-semibold bg-green-50/50 p-2">
-                       Period Count
-                     </TableHead>
+                     {columnVisibility.issuanceFee && (
+                       <>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Amount
+                         </TableHead>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Currency
+                         </TableHead>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Fee (KSH)
+                         </TableHead>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Period Type
+                         </TableHead>
+                         <TableHead className="border-r-4 border-slate-300 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Period Count
+                         </TableHead>
+                       </>
+                     )}
 
                      {/* BCL Consultancy Sub-headers */}
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-purple-50/50 p-2">
-                       Tier 1
-                     </TableHead>
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-purple-50/50 p-2">
-                       Tier 2
-                     </TableHead>
-                     <TableHead className="border-r-4 border-slate-300 text-center text-xs text-slate-900 font-semibold bg-purple-50/50 p-2">
-                       Tier 3
-                     </TableHead>
+                     {columnVisibility.bclConsultancy && (
+                       <>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Tier 1
+                         </TableHead>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Tier 2
+                         </TableHead>
+                         <TableHead className="border-r-4 border-slate-300 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Tier 3
+                         </TableHead>
+                       </>
+                     )}
 
                      {/* Officer Sub-headers */}
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-orange-50/50 p-2">
-                       Boss Fixed
-                     </TableHead>
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-orange-50/50 p-2">
-                       PA Tier 1
-                     </TableHead>
-                     <TableHead className="border-r-4 border-slate-300 text-center text-xs text-slate-900 font-semibold bg-orange-50/50 p-2">
-                       PA Editable
-                     </TableHead>
+                     {columnVisibility.officer && (
+                       <>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Boss Fixed
+                         </TableHead>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           PA Tier 1
+                         </TableHead>
+                         <TableHead className="border-r-4 border-slate-300 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           PA Editable
+                         </TableHead>
+                       </>
+                     )}
 
                      {/* Extra Consideration Sub-headers */}
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-red-50/50 p-2">
-                       TCC Company
-                     </TableHead>
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-red-50/50 p-2">
-                       TCC Individual
-                     </TableHead>
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-red-50/50 p-2">
-                       Auditors Fee
-                     </TableHead>
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-red-50/50 p-2">
-                       Degree
-                     </TableHead>
-                     <TableHead className="border-r-4 border-slate-300 text-center text-xs text-slate-900 font-semibold bg-red-50/50 p-2">
-                       TF File
-                     </TableHead>
+                     {columnVisibility.extraConsideration && (
+                       <>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           TCC Company
+                         </TableHead>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           TCC Individual
+                         </TableHead>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Auditors Fee
+                         </TableHead>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Degree
+                         </TableHead>
+                         <TableHead className="border-r-4 border-slate-300 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           TF File
+                         </TableHead>
+                       </>
+                     )}
 
                      {/* Convenience Fee Sub-headers */}
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-indigo-50/50 p-2">
-                       Alien Assistance
-                     </TableHead>
-                     <TableHead className="border-r border-slate-200 text-center text-xs text-slate-900 font-semibold bg-indigo-50/50 p-2">
-                       Re-Entry
-                     </TableHead>
-                     <TableHead className="text-center text-xs text-slate-900 font-semibold bg-indigo-50/50 p-2">
-                       Passport Endorsement
-                     </TableHead>
+                     {columnVisibility.convenienceFee && (
+                       <>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Alien Assistance
+                         </TableHead>
+                         <TableHead className="border-r border-slate-200 text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Re-Entry
+                         </TableHead>
+                         <TableHead className="text-center text-xs text-white font-semibold bg-blue-500 p-2">
+                           Passport Endorsement
+                         </TableHead>
+                       </>
+                     )}
                    </TableRow>
                  </TableHeader>
 
                  <TableBody>
-                   {Object.entries(groupedEntries).flatMap(([subdeptName, subdeptData], groupIndex) => {
+                   {Object.entries(getGroupedEntries(dept)).flatMap(([subdeptName, subdeptData], groupIndex) => {
                      const rows = []
                      const totalEntries = subdeptData.direct.length + Object.values(subdeptData.classes).reduce((sum, cls) =>
                        sum + cls.direct.length + Object.values(cls.subclasses).reduce((subSum, subEntries) => subSum + subEntries.length, 0), 0
@@ -1680,35 +2233,40 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
 
                        // Subdepartment group header
                        rows.push(
-                         <TableRow key={groupRowId} className="bg-gradient-to-r from-slate-100 to-slate-50 border-b-2 border-slate-200 hover:from-slate-150 hover:to-slate-100 transition-all duration-200">
-                           <TableCell className="sticky left-0 bg-slate-100 border-r text-center font-semibold text-sm z-30 px-3 p-2">
-                             <Badge variant="outline" className="bg-white">
-                               {groupIndex + 1}
-                             </Badge>
-                           </TableCell>
-                           <TableCell className="sticky left-16 bg-slate-100 border-r font-semibold z-30 px-3 p-2">
-                             <div className="flex justify-between items-center gap-3">
-                               <div className="flex items-center gap-2">
-                                 <span className="text-sm font-semibold text-slate-800">{subdeptName}</span>
+                         <TableRow key={groupRowId} className="bg-blue-50 hover:bg-blue-50/80 transition-colors">
+                           {columnVisibility.index && (
+                             <TableCell className="sticky left-0 bg-blue-100 border-r text-center font-semibold text-sm z-30 px-3 p-2">
+                                 {groupIndex + 1}
+                             </TableCell>
+                           )}
+                           {columnVisibility.entity && (
+                             <TableCell className={cn(
+                               "sticky bg-blue-100 border-r font-semibold z-30 px-3 p-2",
+                               columnVisibility.index ? "left-16" : "left-0"
+                             )}>
+                               <div className="flex justify-between items-center gap-3">
+                                 <div className="flex items-center gap-2">
+                                   <span className="text-sm font-semibold text-slate-800">{subdeptName}</span>
+                                 </div>
+                                 <div className="flex items-center gap-2">
+                                   <Badge variant="outline" className="text-xs ">
+                                     {totalEntries}
+                                   </Badge>
+                                   <Button
+                                     variant="ghost"
+                                     size="sm"
+                                     className="h-6 w-6 p-0 hover:bg-white/50"
+                                     onClick={() => toggleRowExpansion(groupRowId)}
+                                   >
+                                     {isExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                                   </Button>
+                                 </div>
                                </div>
-                               <div className="flex items-center gap-2">
-                                 <Badge variant="secondary" className="text-xs">
-                                   {totalEntries} entries
-                                 </Badge>
-                                 <Button
-                                   variant="ghost"
-                                   size="sm"
-                                   className="h-6 w-6 p-0 hover:bg-white/50"
-                                   onClick={() => toggleRowExpansion(groupRowId)}
-                                 >
-                                   {isExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-                                 </Button>
-                               </div>
-                             </div>
-                           </TableCell>
+                             </TableCell>
+                           )}
                            <TableCell colSpan={22} className="text-slate-600 italic text-sm px-3 p-2">
                              <div className="flex items-center gap-2">
-                               Click to {isExpanded ? 'collapse' : 'expand'} and view rate entries
+                               {/* Click to {isExpanded ? 'collapse' : 'expand'} and view rate entries */}
                              </div>
                            </TableCell>
                          </TableRow>
@@ -1735,35 +2293,42 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                                // Class group header
                                entryCount++
                                rows.push(
-                                 <TableRow key={classRowId} className="bg-gradient-to-r from-blue-50 to-blue-25 border-b border-blue-100">
-                                   <TableCell className="sticky left-0 bg-blue-50 border-r text-center font-semibold text-sm z-30 px-3 p-2">
-                                     <Badge variant="outline" className="bg-white border-blue-300">
-                                       {groupIndex + 1}.{entryCount}
-                                     </Badge>
-                                   </TableCell>
-                                   <TableCell className="sticky left-16 bg-blue-50 border-r font-semibold z-30 px-3 pl-8 p-2">
-                                     <div className="flex justify-between items-center gap-3">
+                                 <TableRow key={classRowId} className="bg-blue-50 hover:bg-blue-50/80 transition-colors">
+                                   {columnVisibility.index && (
+                                     <TableCell className="sticky left-0 bg-blue-50 border-r text-center font-semibold text-sm z-30 px-3 p-2">
+                                       <Badge variant="outline" className="bg-white border-blue-300">
+                                         {groupIndex + 1}.{entryCount}
+                                       </Badge>
+                                     </TableCell>
+                                   )}
+                                   {columnVisibility.entity && (
+                                     <TableCell className={cn(
+                                       "sticky bg-blue-50 border-r font-semibold z-30 px-3 pl-8 p-2",
+                                       columnVisibility.index ? "left-16" : "left-0"
+                                     )}>
+                                       <div className="flex justify-between items-center gap-3">
                                        <div className="flex items-center gap-2">
-                                         <span className="text-sm font-semibold text-blue-800">{className}</span>
+                                           <span className="text-sm font-semibold text-blue-800">{className}</span>
+                                         </div>
+                                         <div className="flex items-center gap-2">
+                                           <Badge variant="secondary" className="text-xs bg-blue-100">
+                                             {classEntryCount}
+                                           </Badge>
+                                           <Button
+                                             variant="ghost"
+                                             size="sm"
+                                             className="h-5 w-5 p-0 hover:bg-white/50"
+                                             onClick={() => toggleRowExpansion(classRowId)}
+                                           >
+                                             {isClassExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                                           </Button>
+                                         </div>
                                        </div>
-                                       <div className="flex items-center gap-2">
-                                         <Badge variant="secondary" className="text-xs bg-blue-100">
-                                           {classEntryCount} entries
-                                         </Badge>
-                                         <Button
-                                           variant="ghost"
-                                           size="sm"
-                                           className="h-5 w-5 p-0 hover:bg-white/50"
-                                           onClick={() => toggleRowExpansion(classRowId)}
-                                         >
-                                           {isClassExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-                                         </Button>
-                                       </div>
-                                     </div>
-                                   </TableCell>
+                                     </TableCell>
+                                   )}
                                    <TableCell colSpan={22} className="text-blue-600 italic text-sm px-3 p-2">
                                      <div className="flex items-center gap-2">
-                                       Click to {isClassExpanded ? 'collapse' : 'expand'} and view {hasSubclasses ? 'subclass' : 'class'} entries
+                                       {/* Click to {isClassExpanded ? 'collapse' : 'expand'} and view {hasSubclasses ? 'subclass' : 'class'} entries */}
                                      </div>
                                    </TableCell>
                                  </TableRow>
@@ -1787,35 +2352,42 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                                      const isSubclassExpanded = expandedRows.has(subclassRowId)
 
                                      rows.push(
-                                       <TableRow key={subclassRowId} className="bg-gradient-to-r from-purple-50 to-purple-25 border-b border-purple-100">
-                                         <TableCell className="sticky left-0 bg-purple-50 border-r text-center font-semibold text-sm z-30 px-3 p-2">
-                                           <Badge variant="outline" className="bg-white border-purple-300">
-                                             {groupIndex + 1}.{entryCount}.{subCount}
-                                           </Badge>
-                                         </TableCell>
-                                         <TableCell className="sticky left-16 bg-purple-50 border-r font-semibold z-30 px-3 pl-12 p-2">
-                                           <div className="flex justify-between items-center gap-3">
-                                             <div className="flex items-center gap-2">
-                                               <span className="text-sm font-semibold text-purple-800">{subclassName}</span>
+                                       <TableRow key={subclassRowId} className="bg-blue-50 hover:bg-blue-50/80 transition-colors">
+                                         {columnVisibility.index && (
+                                           <TableCell className="sticky left-0 bg-blue-50 border-r text-center font-semibold text-sm z-30 px-3 p-2">
+                                             <Badge variant="outline" className="bg-white border-blue-300">
+                                               {groupIndex + 1}.{entryCount}.{subCount}
+                                             </Badge>
+                                           </TableCell>
+                                         )}
+                                         {columnVisibility.entity && (
+                                           <TableCell className={cn(
+                                             "sticky bg-blue-50 border-r font-semibold z-30 px-3 pl-12 p-2",
+                                             columnVisibility.index ? "left-16" : "left-0"
+                                           )}>
+                                             <div className="flex justify-between items-center gap-3">
+                                               <div className="flex items-center gap-2">
+                                                 <span className="text-sm font-semibold text-blue-800">{subclassName}</span>
+                                               </div>
+                                               <div className="flex items-center gap-2">
+                                                 <Badge variant="secondary" className="text-xs bg-blue-100">
+                                                   {subclassEntries.length}
+                                                 </Badge>
+                                                 <Button
+                                                   variant="ghost"
+                                                   size="sm"
+                                                   className="h-5 w-5 p-0 hover:bg-white/50"
+                                                   onClick={() => toggleRowExpansion(subclassRowId)}
+                                                 >
+                                                   {isSubclassExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                                                 </Button>
+                                               </div>
                                              </div>
-                                             <div className="flex items-center gap-2">
-                                               <Badge variant="secondary" className="text-xs bg-purple-100">
-                                                 {subclassEntries.length} entries
-                                               </Badge>
-                                               <Button
-                                                 variant="ghost"
-                                                 size="sm"
-                                                 className="h-5 w-5 p-0 hover:bg-white/50"
-                                                 onClick={() => toggleRowExpansion(subclassRowId)}
-                                               >
-                                                 {isSubclassExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-                                               </Button>
-                                             </div>
-                                           </div>
-                                         </TableCell>
-                                         <TableCell colSpan={22} className="text-purple-600 italic text-sm px-3 p-2">
+                                           </TableCell>
+                                         )}
+                                         <TableCell colSpan={22} className="text-blue-600 italic text-sm px-3 p-2">
                                            <div className="flex items-center gap-2">
-                                             Click to {isSubclassExpanded ? 'collapse' : 'expand'} and view subclass entries
+                                             {/* Click to {isSubclassExpanded ? 'collapse' : 'expand'} and view subclass entries */}
                                            </div>
                                          </TableCell>
                                        </TableRow>
@@ -1856,84 +2428,118 @@ export default function RatesPage({ departments: initialDepartments }: RatesPage
                    })}
 
                    {/* Totals Row */}
-                   {currentPeriod.data.length > 0 && (
-                     <TableRow className="bg-gradient-to-r from-yellow-100 to-yellow-50 border-t-4 border-yellow-300 font-bold text-sm">
-                       <TableCell className="sticky left-0 bg-yellow-100 border-r text-center font-bold text-sm z-30 px-2 p-3">
-                         <Badge variant="outline" className="bg-yellow-200 border-yellow-400 text-yellow-800 font-bold">
-                           TOTALS
-                         </Badge>
-                       </TableCell>
-                       <TableCell className="sticky left-16 bg-yellow-100 border-r font-bold z-30 px-3 p-3">
-                         <span className="text-sm font-bold text-yellow-800">
-                           Summary ({currentPeriod.data.length} entries)
-                         </span>
-                       </TableCell>
+                   {Object.keys(getGroupedEntries(dept)).length > 0 && (
+                     <TableRow className="bg-gradient-to-r from-blue-100 to-blue-50 border-t-4 border-blue-300 font-bold text-sm">
+                       {columnVisibility.index && (
+                         <TableCell className="sticky left-0 bg-blue-100 border-r text-center font-bold text-sm z-30 px-2 p-3">
+                           <Badge variant="outline" className="bg-blue-200 border-blue-400 text-blue-800 font-bold">
+                             TOTALS
+                           </Badge>
+                         </TableCell>
+                       )}
+                       {columnVisibility.entity && (
+                         <TableCell className={cn(
+                           "sticky bg-blue-100 border-r font-bold z-30 px-3 p-3",
+                           columnVisibility.index ? "left-16" : "left-0"
+                         )}>
+                           <span className="text-sm font-bold text-blue-800">
+                             Summary ({Object.values(getGroupedEntries(dept)).reduce((sum, subdeptData) =>
+                               sum + subdeptData.direct.length + Object.values(subdeptData.classes).reduce((classSum, cls) =>
+                                 classSum + cls.direct.length + Object.values(cls.subclasses).reduce((subSum, subEntries) => subSum + subEntries.length, 0), 0), 0
+                             )} visible entries)
+                           </span>
+                         </TableCell>
+                       )}
 
                        {/* Processing Fee Totals */}
-                       <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">-</TableCell>
-                       <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">-</TableCell>
-                       <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
-                         {totals.processingFeeRate.toLocaleString()}
-                       </TableCell>
+                       {columnVisibility.processingFee && (
+                         <>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">-</TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">-</TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
+                             {totals.processingFeeRate.toLocaleString()}
+                           </TableCell>
+                         </>
+                       )}
 
                        {/* Issuance Fee Totals */}
-                       <TableCell className="border-r border-gray-200 bg-green-100/70 p-3 text-center font-bold text-green-800">-</TableCell>
-                       <TableCell className="border-r border-gray-200 bg-green-100/70 p-3 text-center font-bold text-green-800">-</TableCell>
-                       <TableCell className="border-r border-gray-200 bg-green-100/70 p-3 text-center font-bold text-green-800">
-                         {totals.issuanceFeeRate.toLocaleString()}
-                       </TableCell>
-                       <TableCell className="border-r border-gray-200 bg-green-100/70 p-3 text-center font-bold text-green-800">-</TableCell>
-                       <TableCell className="border-r border-gray-200 bg-green-100/70 p-3 text-center font-bold text-green-800">-</TableCell>
+                       {columnVisibility.issuanceFee && (
+                         <>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-green-800">-</TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-green-800">-</TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-green-800">
+                             {totals.issuanceFeeRate.toLocaleString()}
+                           </TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-green-800">-</TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-green-800">-</TableCell>
+                         </>
+                       )}
 
                        {/* BCL Consultancy Totals */}
-                       <TableCell className="border-r border-gray-200 bg-purple-100/70 p-3 text-center font-bold text-purple-800">
-                         {totals.bclTier1.toLocaleString()}
-                       </TableCell>
-                       <TableCell className="border-r border-gray-200 bg-purple-100/70 p-3 text-center font-bold text-purple-800">
-                         {totals.bclTier2.toLocaleString()}
-                       </TableCell>
-                       <TableCell className="border-r border-gray-200 bg-purple-100/70 p-3 text-center font-bold text-purple-800">
-                         {totals.bclTier3.toLocaleString()}
-                       </TableCell>
+                       {columnVisibility.bclConsultancy && (
+                         <>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
+                             {totals.bclTier1.toLocaleString()}
+                           </TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
+                             {totals.bclTier2.toLocaleString()}
+                           </TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
+                             {totals.bclTier3.toLocaleString()}
+                           </TableCell>
+                         </>
+                       )}
 
                        {/* Officer Totals */}
-                       <TableCell className="border-r border-gray-200 bg-orange-100/70 p-3 text-center font-bold text-orange-800">
-                         {totals.officerBossFixed.toLocaleString()}
-                       </TableCell>
-                       <TableCell className="border-r border-gray-200 bg-orange-100/70 p-3 text-center font-bold text-orange-800">
-                         {totals.officerPaTier1.toLocaleString()}
-                       </TableCell>
-                       <TableCell className="border-r border-gray-200 bg-orange-100/70 p-3 text-center font-bold text-orange-800">
-                         {totals.officerPaEditable.toLocaleString()}
-                       </TableCell>
+                       {columnVisibility.officer && (
+                         <>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
+                             {totals.officerBossFixed.toLocaleString()}
+                           </TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
+                             {totals.officerPaTier1.toLocaleString()}
+                           </TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
+                             {totals.officerPaEditable.toLocaleString()}
+                           </TableCell>
+                         </>
+                       )}
 
                        {/* Extra Consideration Totals */}
-                       <TableCell className="border-r border-gray-200 bg-red-100/70 p-3 text-center font-bold text-red-800">
-                         {totals.extraTccCompany.toLocaleString()}
-                       </TableCell>
-                       <TableCell className="border-r border-gray-200 bg-red-100/70 p-3 text-center font-bold text-red-800">
-                         {totals.extraTccIndividual.toLocaleString()}
-                       </TableCell>
-                       <TableCell className="border-r border-gray-200 bg-red-100/70 p-3 text-center font-bold text-red-800">
-                         {totals.extraAuditorsFee.toLocaleString()}
-                       </TableCell>
-                       <TableCell className="border-r border-gray-200 bg-red-100/70 p-3 text-center font-bold text-red-800">
-                         {totals.extraDegree.toLocaleString()}
-                       </TableCell>
-                       <TableCell className="border-r border-gray-200 bg-red-100/70 p-3 text-center font-bold text-red-800">
-                         {totals.extraTfFile.toLocaleString()}
-                       </TableCell>
+                       {columnVisibility.extraConsideration && (
+                         <>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
+                             {totals.extraTccCompany.toLocaleString()}
+                           </TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
+                             {totals.extraTccIndividual.toLocaleString()}
+                           </TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
+                             {totals.extraAuditorsFee.toLocaleString()}
+                           </TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
+                             {totals.extraDegree.toLocaleString()}
+                           </TableCell>
+                           <TableCell className="border-r border-gray-200 bg-blue-100/70 p-3 text-center font-bold text-blue-800">
+                             {totals.extraTfFile.toLocaleString()}
+                           </TableCell>
+                         </>
+                       )}
 
                        {/* Convenience Fee Totals */}
-                       <TableCell className="border-r border-gray-200 bg-indigo-100/70 p-3 text-center font-bold text-indigo-800">
-                         {totals.convenienceAlienAssistance.toLocaleString()}
-                       </TableCell>
-                       <TableCell className="border-r border-gray-200 bg-indigo-100/70 p-3 text-center font-bold text-indigo-800">
-                         {totals.convenienceReEntryApproval.toLocaleString()}
-                       </TableCell>
-                       <TableCell className="bg-indigo-100/70 p-3 text-center font-bold text-indigo-800">
-                         {totals.conveniencePassportEndorsement.toLocaleString()}
-                       </TableCell>
+                       {columnVisibility.convenienceFee && (
+                         <>
+                           <TableCell className="border-r border-gray-200 bg-indigo-100/70 p-3 text-center font-bold text-indigo-800">
+                             {totals.convenienceAlienAssistance.toLocaleString()}
+                           </TableCell>
+                           <TableCell className="border-r border-gray-200 bg-indigo-100/70 p-3 text-center font-bold text-indigo-800">
+                             {totals.convenienceReEntryApproval.toLocaleString()}
+                           </TableCell>
+                           <TableCell className="bg-indigo-100/70 p-3 text-center font-bold text-indigo-800">
+                             {totals.conveniencePassportEndorsement.toLocaleString()}
+                           </TableCell>
+                         </>
+                       )}
                      </TableRow>
                    )}
                  </TableBody>
