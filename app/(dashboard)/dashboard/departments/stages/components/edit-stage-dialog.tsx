@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
 import type { Stage, TimeConfig, StageDocument, DocumentExtraction } from "../types"
-import { createKYCDocument } from "../kycDocuments"   
+import { createKYCDocument, updateKYCDocument } from "../kycDocuments"   
 
 // Simple UUID generator
 const generateId = () => {

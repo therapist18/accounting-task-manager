@@ -18,6 +18,7 @@ import { CalendarIcon, Calculator, Minus, Plus, Save, DollarSign, Clock, Chevron
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "../main-shared-components/column-visibility"
+import ChargeCalculatorDialog from "./components/ChargeCalculatorDialog"
 
 interface MPesaRateRange {
   id: string
@@ -154,21 +155,33 @@ const defaultMPesaRates: MPesaTransactionType[] = [
 
 // Helper function to get category color and icon
 const getCategoryInfo = (category: string) => {
+  let icon;
   switch (category) {
     case 'send':
-      return { color: 'bg-blue-50', headerColor: 'bg-blue-600', icon: <Smartphone className="h-4 w-4" /> }
+      icon = <Smartphone className="h-4 w-4" />;
+      break;
     case 'till':
-      return { color: 'bg-green-50', headerColor: 'bg-green-600', icon: <Calculator className="h-4 w-4" /> }
+      icon = <Calculator className="h-4 w-4" />;
+      break;
     case 'paybill':
-      return { color: 'bg-purple-50', headerColor: 'bg-purple-600', icon: <FileSpreadsheet className="h-4 w-4" /> }
+      icon = <FileSpreadsheet className="h-4 w-4" />;
+      break;
     case 'withdraw':
-      return { color: 'bg-orange-50', headerColor: 'bg-orange-600', icon: <CreditCard className="h-4 w-4" /> }
     case 'atm':
-      return { color: 'bg-red-50', headerColor: 'bg-red-600', icon: <CreditCard className="h-4 w-4" /> }
+      icon = <CreditCard className="h-4 w-4" />;
+      break;
     default:
-      return { color: 'bg-gray-50', headerColor: 'bg-gray-600', icon: <Calculator className="h-4 w-4" /> }
+      icon = <Calculator className="h-4 w-4" />;
+      break;
   }
-}
+
+  // Return a unified blue theme, keeping distinct icons for clarity.
+  return {
+    color: 'bg-blue-50',          // Lighter blue for rate rows
+    headerRowColor: 'bg-blue-100', // Slightly darker blue for category headers
+    icon
+  };
+};
 
 interface MPesaRatesProps {
   onChargeCalculated?: (amount: number, transactionType: string, charge: number) => void
@@ -191,6 +204,8 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set())
   const [chargeCalculator, setChargeCalculator] = useState({ amount: '', type: '' })
+  const [calculatorDialogOpen, setCalculatorDialogOpen] = useState(false)
+  const [isCalculatorOpen, setIsCalculatorOpen] = useState(false)
 
   // Column visibility state
   const [columnVisibility, setColumnVisibility] = useState({
@@ -291,7 +306,7 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
   // Handle calculator
   const handleCalculatorAmountChange = (amount: string) => {
     setChargeCalculator(prev => ({ ...prev, amount }))
-    
+
     if (amount && chargeCalculator.type) {
       const numAmount = parseFloat(amount)
       const charge = calculateCharge(numAmount, chargeCalculator.type)
@@ -301,7 +316,7 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
 
   const handleCalculatorTypeChange = (type: string) => {
     setChargeCalculator(prev => ({ ...prev, type }))
-    
+
     if (chargeCalculator.amount && type) {
       const numAmount = parseFloat(chargeCalculator.amount)
       const charge = calculateCharge(numAmount, type)
@@ -342,11 +357,11 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
       transactionTypes: prev.transactionTypes.map(type =>
         type.id === typeId
           ? {
-              ...type,
-              ranges: type.ranges.map(range =>
-                range.id === rangeId ? { ...range, ...updates } : range
-              )
-            }
+            ...type,
+            ranges: type.ranges.map(range =>
+              range.id === rangeId ? { ...range, ...updates } : range
+            )
+          }
           : type
       )
     }))
@@ -510,52 +525,12 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
 
         {/* Control Panel */}
         <div className="flex items-center gap-2">
-          {/* Calculator Card */}
-          <Card className="w-80">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Calculator className="h-4 w-4" />
-                Charge Calculator
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label htmlFor="calc-amount" className="text-xs">Amount (KSh)</Label>
-                  <Input
-                    id="calc-amount"
-                    type="number"
-                    placeholder="Enter amount"
-                    value={chargeCalculator.amount}
-                    onChange={(e) => handleCalculatorAmountChange(e.target.value)}
-                    className="h-8 text-xs"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="calc-type" className="text-xs">Transaction Type</Label>
-                  <Select value={chargeCalculator.type} onValueChange={handleCalculatorTypeChange}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {currentPeriod.transactionTypes.map((type) => (
-                        <SelectItem key={type.id} value={type.id}>
-                          {type.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              {chargeCalculator.amount && chargeCalculator.type && (
-                <div className="bg-blue-50 p-2 rounded text-center">
-                  <span className="text-xs text-blue-700">
-                    Charge: <strong>KSh {calculateCharge(parseFloat(chargeCalculator.amount), chargeCalculator.type)}</strong>
-                  </span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {/* Charge Calculator Dialog Trigger */}
+                   {/* Calculator Dialog */}
+          <ChargeCalculatorDialog
+            transactionTypes={currentPeriod.transactionTypes}
+            onChargeCalculated={onChargeCalculated}
+          />
 
           {/* Expand/Collapse All */}
           <Button
@@ -593,6 +568,7 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
             size="sm"
             onClick={exportToCSV}
             disabled={currentPeriod.transactionTypes.length === 0}
+            className="ml-auto"
           >
             <DownloadCloud className="h-4 w-4 mr-2" />
             Export to Excel
@@ -678,10 +654,10 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
                 return (
                   <React.Fragment key={transactionType.id}>
                     {/* Transaction Type Header Row */}
-                    <TableRow 
+                    <TableRow
                       className={cn(
-                        "cursor-pointer transition-colors hover:bg-muted/50",
-                        categoryInfo.color
+                        "cursor-pointer transition-colors hover:bg-blue-200/50",
+                        categoryInfo.headerRowColor
                       )}
                       onClick={() => toggleTypeExpansion(transactionType.id)}
                     >
@@ -698,8 +674,14 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
                           <div className="flex items-center gap-3">
                             {categoryInfo.icon}
                             <div>
-                              <div className="font-semibold text-sm">{transactionType.name}</div>
-                              <div className="text-xs text-muted-foreground">{transactionType.description}</div>
+                              <div className="font-semibold text-sm relative group">
+                                {transactionType.name}
+                                <span className="absolute bottom-0 left-0 w-full h-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                                  <div className="absolute bottom-full left-0 mb-2 bg-white border border-gray-200 rounded-md p-2 shadow-md text-xs whitespace-pre-wrap">
+                                    {transactionType.description}
+                                  </div>
+                                </span>
+                              </div>
                               {transactionType.userType && (
                                 <Badge variant="secondary" className="text-xs mt-1">
                                   {transactionType.userType}
@@ -731,7 +713,7 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
                       <TableRow
                         key={range.id}
                         className={cn(
-                          "hover:bg-muted/50 transition-colors",
+                          "hover:bg-blue-100/60 transition-colors",
                           categoryInfo.color,
                           "border-l-2 border-l-blue-200"
                         )}
@@ -759,8 +741,8 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
                               <Input
                                 type="number"
                                 value={range.amountFrom}
-                                onChange={(e) => updateRange(transactionType.id, range.id, { 
-                                  amountFrom: parseFloat(e.target.value) || 0 
+                                onChange={(e) => updateRange(transactionType.id, range.id, {
+                                  amountFrom: parseFloat(e.target.value) || 0
                                 })}
                                 className="h-7 w-20 text-center text-xs border-gray-200 bg-white/70 focus:bg-white"
                                 disabled={isReadOnly}
@@ -769,8 +751,8 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
                               <Input
                                 type="number"
                                 value={range.amountTo}
-                                onChange={(e) => updateRange(transactionType.id, range.id, { 
-                                  amountTo: parseFloat(e.target.value) || 0 
+                                onChange={(e) => updateRange(transactionType.id, range.id, {
+                                  amountTo: parseFloat(e.target.value) || 0
                                 })}
                                 className="h-7 w-20 text-center text-xs border-gray-200 bg-white/70 focus:bg-white"
                                 disabled={isReadOnly}
@@ -784,8 +766,8 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
                             <Input
                               type="number"
                               value={range.charge}
-                              onChange={(e) => updateRange(transactionType.id, range.id, { 
-                                charge: parseFloat(e.target.value) || 0 
+                              onChange={(e) => updateRange(transactionType.id, range.id, {
+                                charge: parseFloat(e.target.value) || 0
                               })}
                               className="h-7 text-center text-xs border-gray-200 bg-white/70 focus:bg-white"
                               disabled={isReadOnly}
@@ -798,8 +780,8 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
                             <Input
                               type="text"
                               value={range.description || ''}
-                              onChange={(e) => updateRange(transactionType.id, range.id, { 
-                                description: e.target.value 
+                              onChange={(e) => updateRange(transactionType.id, range.id, {
+                                description: e.target.value
                               })}
                               placeholder="Optional description"
                               className="h-7 text-xs border-gray-200 bg-white/70 focus:bg-white"
@@ -818,6 +800,7 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
                                   amount: ((range.amountFrom + range.amountTo) / 2).toString(),
                                   type: transactionType.id
                                 })
+                                setIsCalculatorOpen(true)
                               }}
                               className="h-7 text-xs"
                             >
@@ -856,7 +839,7 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
               </ul>
             </div>
             <div>
-              <h4 className="font-semibold text-orange-700 mb-2">Transaction Types</h4>
+              <h4 className="font-semibold text-blue-700 mb-2">Transaction Types</h4>
               <ul className="space-y-1 text-muted-foreground">
                 <li>• Send Money (M-Pesa, Airtel, T-Kash)</li>
                 <li>• Till Number Payments</li>
@@ -866,7 +849,7 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
               </ul>
             </div>
             <div>
-              <h4 className="font-semibold text-green-700 mb-2">Key Features</h4>
+              <h4 className="font-semibold text-blue-700 mb-2">Key Features</h4>
               <ul className="space-y-1 text-muted-foreground">
                 <li>• Real-time charge calculation</li>
                 <li>• Historical rate periods</li>

@@ -1011,7 +1011,7 @@ export default function RequirementsTableCombined({
                             const columns = [
                               // Principal Documents
                               <TableCell key={`${stageDoc.id}-${groupIndex}-principal-docs`} className="text-center border p-1">
-                                {referenceTask.applicant_type === 'applicant' ? 
+                                {referenceTask.applicant_type === 'dependant' || referenceTask.applicant_type === 'principal' ? 
                                   renderDocumentStatus(referenceTask, stageDoc, 'principal', undefined, true) : 
                                   <span className="text-muted-foreground">N/A</span>
                                 }
@@ -1122,9 +1122,9 @@ export default function RequirementsTableCombined({
                                 <span className="text-sm font-semibold text-gray-800">
                                   {stageDoc.display_name}
                                 </span>
-                                <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700">
+                                {/* <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700">
                                   {stageDoc.stageName}
-                                </Badge>
+                                </Badge> */}
                               </div>
                               {stageDoc.stageDocumentConfig?.description && (
                                 <span className="text-xs text-gray-500 mt-1">
@@ -1140,7 +1140,7 @@ export default function RequirementsTableCombined({
                             const columns = [
                               // Principal Documents
                               <TableCell key={`${stageDoc.id}-${groupIndex}-principal-docs`} className="text-center border p-1">
-                                {referenceTask.applicant_type === 'applicant' ? 
+                                {referenceTask.applicant_type === 'dependant' || referenceTask.applicant_type === 'principal' ? 
                                   renderDocumentStatus(referenceTask, stageDoc, 'principal', undefined, true) : 
                                   <span className="text-muted-foreground">N/A</span>
                                 }
