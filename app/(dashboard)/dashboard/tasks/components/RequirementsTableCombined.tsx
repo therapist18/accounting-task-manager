@@ -46,7 +46,7 @@ export default function RequirementsTableCombined({
   // State for managing section expansions
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set([
     'documents-fields',
-    'company-documents', 
+    'company-documents',
     'individual-documents',
     'bcl-workings',
     'company-bcl',
@@ -75,7 +75,7 @@ export default function RequirementsTableCombined({
   const expandAllSections = useCallback(() => {
     setExpandedSections(new Set([
       'documents-fields',
-      'company-documents', 
+      'company-documents',
       'individual-documents',
       'bcl-workings',
       'company-bcl',
@@ -421,21 +421,21 @@ export default function RequirementsTableCombined({
                     </TableCell>
                     <TableCell className="sticky left-16 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5]">
                       <div className="flex items-center gap-2 px-2 py-2">
+                        <span className="font-bold text-slate-700 text-lg">Documents & Fields</span>
+                        <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">
+                          {organizedRequirements.documents.company.length + organizedRequirements.documents.individual.length}
+                        </span>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0"
                           onClick={() => toggleSectionExpansion('documents-fields')}
                         >
-                          {expandedSections.has('documents-fields') ? 
-                            <Minus className="h-4 w-4" /> : 
+                          {expandedSections.has('documents-fields') ?
+                            <Minus className="h-4 w-4" /> :
                             <Plus className="h-4 w-4" />
                           }
                         </Button>
-                        <span className="font-bold text-slate-700 text-lg">Documents & Fields</span>
-                        <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">
-                          {organizedRequirements.documents.company.length + organizedRequirements.documents.individual.length}
-                        </span>
                       </div>
                     </TableCell>
                     {filteredGroupedTasks.map((group, groupIndex) => {
@@ -472,22 +472,24 @@ export default function RequirementsTableCombined({
                           <TableRow className="bg-blue-100">
                             <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
                             <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center justify-between px-2 py-2">
+                                <div className="flex gap-2">
+                                <span className="font-semibold text-blue-700">Company Documents</span>
+                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                  {organizedRequirements.documents.company.length}
+                                </span>
+                                </div>
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   className="h-5 w-5 p-0"
                                   onClick={() => toggleSectionExpansion('company-documents')}
                                 >
-                                  {expandedSections.has('company-documents') ? 
-                                    <Minus className="h-3 w-3" /> : 
+                                  {expandedSections.has('company-documents') ?
+                                    <Minus className="h-3 w-3" /> :
                                     <Plus className="h-3 w-3" />
                                   }
                                 </Button>
-                                <span className="font-semibold text-blue-700">Company Documents</span>
-                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
-                                  {organizedRequirements.documents.company.length}
-                                </span>
                               </div>
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {
@@ -658,22 +660,24 @@ export default function RequirementsTableCombined({
                           <TableRow className="bg-blue-100">
                             <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
                             <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center justify-between px-2 py-2">
+                                <div className="flex gap-2">
+                                <span className="font-semibold text-blue-700">Individual Documents</span>
+                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                  {organizedRequirements.documents.individual.length}
+                                </span>
+                                </div>
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   className="h-5 w-5 p-0"
                                   onClick={() => toggleSectionExpansion('individual-documents')}
                                 >
-                                  {expandedSections.has('individual-documents') ? 
-                                    <Minus className="h-3 w-3" /> : 
+                                  {expandedSections.has('individual-documents') ?
+                                    <Minus className="h-3 w-3" /> :
                                     <Plus className="h-3 w-3" />
                                   }
                                 </Button>
-                                <span className="font-semibold text-blue-700">Individual Documents</span>
-                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
-                                  {organizedRequirements.documents.individual.length}
-                                </span>
                               </div>
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {
@@ -851,22 +855,24 @@ export default function RequirementsTableCombined({
                       <Briefcase className="h-4 w-4 mx-auto" />
                     </TableCell>
                     <TableCell className="sticky left-16 bg-gradient-to-r from-blue-100 to-blue-50 border-r z-[5]">
-                      <div className="flex items-center gap-2 px-2 py-2">
+                      <div className="flex items-center justify-between px-2 py-2">
+                        <div className="flex gap-2">
+                        <span className="font-bold text-gray-700 text-lg">BCL Workings</span>
+                        <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                          {organizedRequirements.bclTemplates.company.length + organizedRequirements.bclTemplates.individual.length}
+                        </span>
+                        </div>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0"
                           onClick={() => toggleSectionExpansion('bcl-workings')}
                         >
-                          {expandedSections.has('bcl-workings') ? 
-                            <Minus className="h-4 w-4" /> : 
+                          {expandedSections.has('bcl-workings') ?
+                            <Minus className="h-4 w-4" /> :
                             <Plus className="h-4 w-4" />
                           }
                         </Button>
-                        <span className="font-bold text-gray-700 text-lg">BCL Workings</span>
-                        <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
-                          {organizedRequirements.bclTemplates.company.length + organizedRequirements.bclTemplates.individual.length}
-                        </span>
                       </div>
                     </TableCell>
                     {filteredGroupedTasks.map((group, groupIndex) => {
@@ -903,22 +909,24 @@ export default function RequirementsTableCombined({
                           <TableRow className="bg-blue-100">
                             <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
                             <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex gap-2">
+                                <span className="font-semibold text-blue-700">Company BCL Templates</span>
+                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                  {organizedRequirements.bclTemplates.company.length}
+                                </span>
+                                </div>
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   className="h-5 w-5 p-0"
                                   onClick={() => toggleSectionExpansion('company-bcl')}
                                 >
-                                  {expandedSections.has('company-bcl') ? 
-                                    <Minus className="h-3 w-3" /> : 
+                                  {expandedSections.has('company-bcl') ?
+                                    <Minus className="h-3 w-3" /> :
                                     <Plus className="h-3 w-3" />
                                   }
                                 </Button>
-                                <span className="font-semibold text-blue-700">Company BCL Templates</span>
-                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
-                                  {organizedRequirements.bclTemplates.company.length}
-                                </span>
                               </div>
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {
@@ -1018,22 +1026,24 @@ export default function RequirementsTableCombined({
                           <TableRow className="bg-blue-100">
                             <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
                             <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex gap-2">
+                                <span className="font-semibold text-blue-700">Individual BCL Templates</span>
+                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                  {organizedRequirements.bclTemplates.individual.length}
+                                </span>
+                                </div>
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   className="h-5 w-5 p-0"
                                   onClick={() => toggleSectionExpansion('individual-bcl')}
                                 >
-                                  {expandedSections.has('individual-bcl') ? 
-                                    <Minus className="h-3 w-3" /> : 
+                                  {expandedSections.has('individual-bcl') ?
+                                    <Minus className="h-3 w-3" /> :
                                     <Plus className="h-3 w-3" />
                                   }
                                 </Button>
-                                <span className="font-semibold text-blue-700">Individual BCL Templates</span>
-                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
-                                  {organizedRequirements.bclTemplates.individual.length}
-                                </span>
                               </div>
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {
@@ -1137,22 +1147,24 @@ export default function RequirementsTableCombined({
                       <FileText className="h-4 w-4 mx-auto" />
                     </TableCell>
                     <TableCell className="sticky left-16 bg-gradient-to-r from-blue-100 to-blue-50 border-r z-[5]">
-                      <div className="flex items-center gap-2 px-2 py-2">
+                      <div className="flex items-center justify-between px-2 py-2">
+                        <div className="flex gap-2">
+                        <span className="font-bold text-gray-700 text-lg">Post Application</span>
+                        <span className="text-sm bg-blue-200 text-gray-700 px-2 py-1 rounded-full ml-2">
+                          {organizedRequirements.postApplication.company.length + organizedRequirements.postApplication.individual.length}
+                        </span>
+                        </div>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0"
                           onClick={() => toggleSectionExpansion('post-application')}
                         >
-                          {expandedSections.has('post-application') ? 
-                            <Minus className="h-4 w-4" /> : 
+                          {expandedSections.has('post-application') ?
+                            <Minus className="h-4 w-4" /> :
                             <Plus className="h-4 w-4" />
                           }
                         </Button>
-                        <span className="font-bold text-gray-700 text-lg">Post Application</span>
-                        <span className="text-sm bg-blue-200 text-gray-700 px-2 py-1 rounded-full ml-2">
-                          {organizedRequirements.postApplication.company.length + organizedRequirements.postApplication.individual.length}
-                        </span>
                       </div>
                     </TableCell>
                     {filteredGroupedTasks.map((group, groupIndex) => {
@@ -1189,22 +1201,24 @@ export default function RequirementsTableCombined({
                           <TableRow className="bg-blue-100">
                             <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
                             <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center justify-between">
+                               <div className="flex gap-2">
+                               <span className="font-semibold text-blue-700">Company Stage Documents</span>
+                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                  {organizedRequirements.postApplication.company.length}
+                                </span>
+                               </div>
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   className="h-5 w-5 p-0"
                                   onClick={() => toggleSectionExpansion('company-post-app')}
                                 >
-                                  {expandedSections.has('company-post-app') ? 
-                                    <Minus className="h-3 w-3" /> : 
+                                  {expandedSections.has('company-post-app') ?
+                                    <Minus className="h-3 w-3" /> :
                                     <Plus className="h-3 w-3" />
                                   }
                                 </Button>
-                                <span className="font-semibold text-blue-700">Company Stage Documents</span>
-                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
-                                  {organizedRequirements.postApplication.company.length}
-                                </span>
                               </div>
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {
@@ -1320,22 +1334,24 @@ export default function RequirementsTableCombined({
                           <TableRow className="bg-blue-100">
                             <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
                             <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center justify-between px-2 py-2">
+                                <div className="flex gap-2">
+                                  <span className="font-semibold text-blue-700">Individual Stage Documents</span>
+                                  <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                    {organizedRequirements.postApplication.individual.length}
+                                  </span>
+                                </div>
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   className="h-5 w-5 p-0"
                                   onClick={() => toggleSectionExpansion('individual-post-app')}
                                 >
-                                  {expandedSections.has('individual-post-app') ? 
-                                    <Minus className="h-3 w-3" /> : 
+                                  {expandedSections.has('individual-post-app') ?
+                                    <Minus className="h-3 w-3" /> :
                                     <Plus className="h-3 w-3" />
                                   }
                                 </Button>
-                                <span className="font-semibold text-blue-700">Individual Stage Documents</span>
-                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
-                                  {organizedRequirements.postApplication.individual.length}
-                                </span>
                               </div>
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {
@@ -1455,22 +1471,24 @@ export default function RequirementsTableCombined({
                       <Users className="h-4 w-4 mx-auto" />
                     </TableCell>
                     <TableCell className="sticky left-16 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5]">
-                      <div className="flex items-center gap-2 px-2 py-2">
+                      <div className="flex items-center justify-between px-2 py-2">
+                        <div className="flex gap-2">
+                          <span className="font-bold text-slate-700 text-lg">Client Form Fields</span>
+                          <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">
+                            {organizedRequirements.clientFields.company.length + organizedRequirements.clientFields.individual.length}
+                          </span>
+                        </div>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0"
                           onClick={() => toggleSectionExpansion('client-fields')}
                         >
-                          {expandedSections.has('client-fields') ? 
-                            <Minus className="h-4 w-4" /> : 
+                          {expandedSections.has('client-fields') ?
+                            <Minus className="h-4 w-4" /> :
                             <Plus className="h-4 w-4" />
                           }
                         </Button>
-                        <span className="font-bold text-slate-700 text-lg">Client Form Fields</span>
-                        <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">
-                          {organizedRequirements.clientFields.company.length + organizedRequirements.clientFields.individual.length}
-                        </span>
                       </div>
                     </TableCell>
                     {filteredGroupedTasks.map((group, groupIndex) => {
@@ -1507,22 +1525,24 @@ export default function RequirementsTableCombined({
                           <TableRow className="bg-blue-100">
                             <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-gray-700"></TableCell>
                             <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex gap-2">
+                                  <span className="font-semibold text-blue-700">Individual Fields</span>
+                                  <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                                    {organizedRequirements.clientFields.individual.length}
+                                  </span>
+                                </div>
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   className="h-5 w-5 p-0"
                                   onClick={() => toggleSectionExpansion('individual-client-fields')}
                                 >
-                                  {expandedSections.has('individual-client-fields') ? 
-                                    <Minus className="h-3 w-3" /> : 
+                                  {expandedSections.has('individual-client-fields') ?
+                                    <Minus className="h-3 w-3" /> :
                                     <Plus className="h-3 w-3" />
                                   }
                                 </Button>
-                                <span className="font-semibold text-blue-700">Individual Fields</span>
-                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
-                                  {organizedRequirements.clientFields.individual.length}
-                                </span>
                               </div>
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {

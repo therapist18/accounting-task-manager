@@ -204,8 +204,8 @@ const ExtractionPreview = ({
 
   const renderField = (field: Field, docIndex: number) => {
     const isArrayField = field.type === 'array' || field.isArray;
-    const fieldKey = field.name.trim();
-    const displayName = toTitleCase(field.name);
+    const fieldKey = field.name?.trim() || '';
+    const displayName = toTitleCase(field.name || '');
 
     if (isArrayField && field.arrayConfig?.fields) {
       const arrayValue = getNestedValue(documents[docIndex]?.extractedData || {}, fieldKey, []);

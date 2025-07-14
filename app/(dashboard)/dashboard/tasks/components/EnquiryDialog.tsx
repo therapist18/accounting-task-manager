@@ -899,32 +899,37 @@ const dependantsToSave = includeDependants
                                 </CardContent>
                             </Card>
 
-                            {/* Understudy Selection */}
-                            {selectedCompany && (
-                                <Card className="border border-gray-200 rounded-lg">
-                                    <CardHeader className="pb-3">
-                                        <CardTitle className="text-base font-semibold flex items-center gap-2">
-                                            <UserPlus className="h-4 w-4" />
-                                            Select Understudy
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <Select value={selectedUnderstudy} onValueChange={setSelectedUnderstudy}>
-                                            <SelectTrigger><SelectValue placeholder="Select understudy..." /></SelectTrigger>
-                                            <SelectContent>
-                                                {understudies.length > 0 ? (
-                                                    understudies.map((understudy) => (
-                                                        <SelectItem key={understudy.id} value={understudy.id}>
+                            <Card className="border border-gray-200 rounded-lg">
+                                <CardHeader className="pb-3">
+                                    <CardTitle className="text-base font-semibold flex items-center gap-2">
+                                        <UserPlus className="h-4 w-4" />
+                                        Select Understudy
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <Select
+                                        value={selectedUnderstudy}
+                                        onValueChange={setSelectedUnderstudy}
+                                    >
+                                        <SelectTrigger className="w-full">
+                                            <SelectValue placeholder="Select understudy..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {understudies && understudies.length > 0 ? (
+                                                <>
+                                                    {understudies.map((understudy) => (
+                                                        <SelectItem key={understudy.id} value={understudy.id.toString()}>
                                                             {understudy.full_name}
                                                         </SelectItem>
-                                                    ))
-                                                ) : (
-                                                    <div className="px-3 py-2 text-sm text-muted-foreground">No understudies found</div>
-                                                )}
-                                            </SelectContent>
-                                        </Select>
-                                    </CardContent>
-                                </Card>)}
+                                                    ))}
+                                                </>
+                                            ) : (
+                                                <div className="px-3 py-2 text-sm text-muted-foreground">No understudies found</div>
+                                            )}
+                                        </SelectContent>
+                                    </Select>
+                                </CardContent>
+                            </Card>
 
                             {/* Dependants Selection */}
                             {availableDependants.length > 0 && (

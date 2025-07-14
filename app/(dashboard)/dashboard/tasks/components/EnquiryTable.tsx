@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AlertTriangle, FileText, ChevronDown, Edit, Trash2, Eye, Upload, Users } from "lucide-react"
-import { format, parseISO } from "date-fns"
+import { format, parseISO, parse } from "date-fns"
 import { StageTimer } from "@/components/stage-timer"
 import { EditableStageCell } from "./EditableStageCell"
 
@@ -144,11 +144,35 @@ export function EnquiryTable({
 
   const formatTaskData = useCallback((task: any, index: number) => {
     const formatDate = (dateString?: string | null) => {
-      if (!dateString) return '';
+      if (!dateString || dateString === 'NaN/NaN/NaN') return '';
+      
       try {
-        return format(parseISO(dateString), 'yyyy-MM-dd');
+        // First try to parse as ISO format (YYYY-MM-DD)
+        const date = parse(dateString, 'yyyy-MM-dd', new Date());
+        if (!isNaN(date.getTime())) {
+          return format(date, 'dd/MM/yyyy');
+        }
+
+        // Then try to parse as DD/MM/YYYY
+        const dateParts = dateString.split('/');
+        if (dateParts.length === 3) {
+          const [day, month, year] = dateParts;
+          // Validate the parts are numbers
+          if (isNaN(Number(day)) || isNaN(Number(month)) || isNaN(Number(year))) {
+            return '';
+          }
+          // Validate the date is valid
+          const dateObj = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+          if (!isNaN(dateObj.getTime()) && 
+              dateObj.getDate() === Number(day) && 
+              dateObj.getMonth() === Number(month) - 1) {
+            return format(dateObj, 'dd/MM/yyyy');
+          }
+        }
+        return '';
       } catch (e) {
-        return dateString;
+        console.warn('Error parsing date:', e);
+        return '';
       }
     };
 

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Upload, Calendar, Check, X, Clock, CheckCircle, FileText } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
-import { format, parse } from "date-fns"
+import { format, parse, isValid } from "date-fns"
 
 interface EditableStageCellProps {
   stage: any
@@ -64,67 +64,88 @@ export function EditableStageCell({
 
   useEffect(() => {
     // Set initial edit value when stageDate changes
-    if (stageDate) {
-      // Check if the date is already in ISO format (YYYY-MM-DD)
-      if (/^\d{4}-\d{2}-\d{2}$/.test(stageDate)) {
-        setEditValue(stageDate);
-      } else {
-        // Convert DD/MM/YYYY to YYYY-MM-DD for the date input
-        const dateParts = stageDate.split('/');
-        if (dateParts.length === 3) {
-          const [day, month, year] = dateParts;
+    if (stageDate && stageDate !== 'NaN/NaN/NaN') {
+      // Convert DD/MM/YYYY to YYYY-MM-DD for the date input
+      const dateParts = stageDate.split('/');
+      if (dateParts.length === 3) {
+        const [day, month, year] = dateParts;
+        if (!isNaN(Number(day)) && !isNaN(Number(month)) && !isNaN(Number(year))) {
           const isoDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
           setEditValue(isoDate);
         } else {
-          setEditValue(stageDate);
+          setEditValue('');
         }
+      } else {
+        setEditValue('');
       }
     } else {
       setEditValue('');
     }
   }, [stageDate]);
 
-  // Rest of the component remains the same...
-  const parseDateString = (dateStr: string): Date | null => {
-    if (!dateStr) return null;
+  // Create a timezone-neutral date from YYYY-MM-DD input
+  const createDateFromInput = (dateString: string): Date | null => {
+    if (!dateString || !/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      return null;
+    }
+
+    const [year, month, day] = dateString.split('-').map(Number);
     
-    // Handle DD/MM/YYYY format
-    if (dateStr.includes('/')) {
-      try {
-        const [day, month, year] = dateStr.split('/').map(Number);
-        if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 1900 && year < 2100) {
+    // Validate date components
+    if (year < 1000 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) {
+      return null;
+    }
+
+    // Create date in local timezone to avoid UTC conversion issues
+    const date = new Date(year, month - 1, day);
+    
+    // Verify the date is valid and matches what we expected
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+      return null;
+    }
+
+    return date;
+  };
+
+  const parseDateString = (dateStr: string): Date | null => {
+    if (!dateStr || dateStr === 'NaN/NaN/NaN') return null;
+    
+    try {
+      // Try DD/MM/YYYY format first
+      const dateParts = dateStr.split('/');
+      if (dateParts.length === 3) {
+        const [day, month, year] = dateParts.map(Number);
+        if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
           const date = new Date(year, month - 1, day);
-          if (date.getDate() === day && date.getMonth() === month - 1 && date.getFullYear() === year) {
+          if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) {
             return date;
           }
         }
-      } catch (e) {
-        console.warn('Error parsing date:', e);
       }
-    }
-    
-    // Fallback to native Date parsing for YYYY-MM-DD format
-    try {
-      const date = new Date(dateStr);
-      return !isNaN(date.getTime()) ? date : null;
+
+      // Try ISO format (YYYY-MM-DD)
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        return createDateFromInput(dateStr);
+      }
+
+      return null;
     } catch (e) {
-      console.warn('Error parsing date with native parser:', e);
+      console.warn('Error parsing date:', e);
       return null;
     }
   };
 
   const formatDateDisplay = (dateStr: string): string => {
-    if (!dateStr) return '';
+    if (!dateStr || dateStr === 'NaN/NaN/NaN') return '';
     
     const date = parseDateString(dateStr);
-    if (date) {
+    if (date && isValid(date)) {
       return format(date, 'dd/MM/yyyy');
     }
     
     return dateStr;
   };
 
-  // In EditableStageCell.tsx, update the handleSave function:
   const handleSave = async () => {
     if (!editValue.trim()) {
       toast({
@@ -134,36 +155,26 @@ export function EditableStageCell({
       });
       return;
     }
-
     try {
-      // First try to parse the date using date-fns
-      let dateObj;
-      try {
-        // Try to parse both YYYY-MM-DD and DD/MM/YYYY formats
-        dateObj = parse(editValue, 'yyyy-MM-dd', new Date());
-        if (isNaN(dateObj.getTime())) {
-          dateObj = parse(editValue, 'dd/MM/yyyy', new Date());
-        }
-      } catch (e) {
-        throw new Error('Invalid date format. Please use DD/MM/YYYY');
+      const dateObj = createDateFromInput(editValue);
+      
+      if (!dateObj || !isValid(dateObj)) {
+        throw new Error('Invalid date format');
       }
-
-      // Validate the parsed date
-      const day = dateObj.getDate();
-      const month = dateObj.getMonth() + 1;
-      const year = dateObj.getFullYear();
-
-      if (day < 1 || day > 31 || month < 1 || month > 12 || year < 1000) {
-        throw new Error('Invalid date values');
-      }
-
-      // Format the date as DD/MM/YYYY
+  
       const formattedDate = format(dateObj, 'dd/MM/yyyy');
-
-      console.log('Date conversion:', { input: editValue, parsed: dateObj.toISOString(), formatted: formattedDate });
-
+  
+      console.log('About to save stage:', {
+        stageId: stage.id,
+        stageName: stage.name,
+        taskId: task.id,
+        formattedDate,
+        editValue
+      });
+  
       setIsLoading(true);
-      await onSave(stage.id, task.id, formattedDate);
+      const saveResult = await onSave(stage.id, task.id, formattedDate);
+      console.log('Save completed:', saveResult);
       setIsEditing(false);
       
       toast({
@@ -176,7 +187,7 @@ export function EditableStageCell({
       console.error('Date save error:', error);
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Please enter a valid date in DD/MM/YYYY format",
+        description: error instanceof Error ? error.message : "Please enter a valid date",
         variant: "destructive"
       });
     } finally {
@@ -186,20 +197,19 @@ export function EditableStageCell({
 
   const handleCancel = () => {
     // Reset to original stage date
-    if (stageDate) {
-      // Check if the date is already in ISO format (YYYY-MM-DD)
-      if (/^\d{4}-\d{2}-\d{2}$/.test(stageDate)) {
-        setEditValue(stageDate);
-      } else {
-        // Convert DD/MM/YYYY to YYYY-MM-DD for the input field
-        const dateParts = stageDate.split('/');
-        if (dateParts.length === 3) {
-          const [day, month, year] = dateParts;
+    if (stageDate && stageDate !== 'NaN/NaN/NaN') {
+      // Convert DD/MM/YYYY to YYYY-MM-DD for the input field
+      const dateParts = stageDate.split('/');
+      if (dateParts.length === 3) {
+        const [day, month, year] = dateParts;
+        if (!isNaN(Number(day)) && !isNaN(Number(month)) && !isNaN(Number(year))) {
           const isoDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
           setEditValue(isoDate);
         } else {
-          setEditValue(stageDate);
+          setEditValue('');
         }
+      } else {
+        setEditValue('');
       }
     } else {
       setEditValue('');
@@ -226,8 +236,8 @@ export function EditableStageCell({
     }
   }
 
-   const getStatusDisplay = () => {
-    if (stageDate) {
+  const getStatusDisplay = () => {
+    if (stageDate && stageDate !== 'NaN/NaN/NaN') {
       return (
         <Badge variant="default" className="bg-green-100 text-green-800 hover:bg-green-100">
           <Check className="h-3 w-3 mr-1" />
@@ -290,7 +300,8 @@ export function EditableStageCell({
       </div>
     )
   }
-  if (isEnquiryStage && stageDate) {
+
+  if (isEnquiryStage && stageDate && stageDate !== 'NaN/NaN/NaN') {
     return (
       <div className="flex items-center justify-center">
         <Badge variant="default" className="bg-green-100 text-green-800 hover:bg-green-100">
@@ -300,6 +311,7 @@ export function EditableStageCell({
       </div>
     )
   }
+
   return (
     <div 
       className={`flex items-center justify-center min-h-[32px] cursor-pointer hover:bg-gray-50 rounded p-1 ${
@@ -317,7 +329,7 @@ export function EditableStageCell({
         </Button>
       ) : (
         <div className="flex items-center gap-2">
-          {stageDate ? (
+          {stageDate && stageDate !== 'NaN/NaN/NaN' ? (
             <Badge variant="default" className="bg-green-100 text-green-800 hover:bg-green-100">
               <Check className="h-3 w-3 mr-1" />
               {formatDateDisplay(stageDate)}

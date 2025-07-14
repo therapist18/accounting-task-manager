@@ -429,6 +429,7 @@ export default function TasksPage() {
   }
  
   const handleStageStatusSave = async (stageId: string, taskId: string, date: string) => {
+    console.log('handleStageStatusSave called with:', { stageId, taskId, date });
     try {
       // Get current task data
       const { data: currentTask, error: fetchError } = await supabase
@@ -436,18 +437,15 @@ export default function TasksPage() {
         .select('stages')
         .eq('id', taskId)
         .single()
- 
+  
       if (fetchError) throw fetchError
- 
+  
       // Parse existing stages or create new object
       const existingStages = currentTask.stages || {}
- 
-      // Format date as DD/MM/YYYY for consistency
-      const parsedDate = new Date(date);
-      const formattedDate = `${String(parsedDate.getDate()).padStart(2, '0')}/` +
-        `${String(parsedDate.getMonth() + 1).padStart(2, '0')}/` +
-        `${parsedDate.getFullYear()}`;
- 
+  
+      // The date is already in DD/MM/YYYY format, so use it directly
+      const formattedDate = date; // No need to re-parse!
+  
       // Update stages object
       const updatedStages = {
         ...existingStages,
@@ -457,11 +455,11 @@ export default function TasksPage() {
           completedAt: new Date().toISOString()
         }
       }
- 
+  
       // Check if this is confirmation stage
       const confirmationStageId = "a19b270e-6d1e-4e6d-b2bc-f21db72cde08"
       const shouldMoveToProgress = stageId === confirmationStageId
- 
+  
       // Update task with new stages data and potentially new status
       const { error: updateError } = await supabase
         .from('tm_tasks')
@@ -471,24 +469,21 @@ export default function TasksPage() {
           updated_at: new Date().toISOString()
         })
         .eq('id', taskId)
- 
+  
       if (updateError) throw updateError
- 
+  
       // Refresh tasks if status changed
       if (shouldMoveToProgress) {
         const [tasksData] = await Promise.all([getTasks()])
         setTasks(tasksData)
       }
- 
+  
       return Promise.resolve()
     } catch (error) {
       console.error('Error saving stage status:', error)
       throw error
     }
-  }
- 
-
- 
+  } 
   // Helper function to check if IDs match
   const idsMatch = (id1: any, id2: any): boolean => {
     if (id1 === undefined || id2 === undefined) return false;
@@ -739,7 +734,7 @@ export default function TasksPage() {
                 {dept?.name} {subdept && `> ${subdept.name}`} {cls && `> ${cls.name}`} {subcls && `> ${subcls.name}`}
               </p>
             </div>
-            <div className="flex items-center space-x-2">
+            {/* <div className="flex items-center space-x-2">
               <Button
                 onClick={() => setNewTaskDialogOpen(true)}
                 className="flex items-center gap-2"
@@ -747,7 +742,7 @@ export default function TasksPage() {
                 <Plus className="h-4 w-4" />
                 New Task
               </Button>
-            </div>
+            </div> */}
           </div>
 
           {/* Content based on selection */}
