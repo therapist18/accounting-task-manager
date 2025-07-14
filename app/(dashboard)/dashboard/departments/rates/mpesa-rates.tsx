@@ -12,13 +12,16 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Calendar } from "@/components/ui/calendar"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
-import { CalendarIcon, Calculator, Minus, Plus, Save, DollarSign, Clock, ChevronDown, History, Copy, Eye, ChevronRight, Info, Download, FileSpreadsheet, DownloadCloud, EyeOff, ChevronUp, Settings, CreditCard, Smartphone } from "lucide-react"
+import { CalendarIcon, Calculator, Minus, Plus, Save, DollarSign, Clock, ChevronDown, History, Copy, Eye, ChevronRight, Info, Download, FileSpreadsheet, DownloadCloud, EyeOff, ChevronUp, Settings, CreditCard, Smartphone, Trash2 } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "../main-shared-components/column-visibility"
 import ChargeCalculatorDialog from "./components/ChargeCalculatorDialog"
+import SummaryDialog from "./components/SummaryDialog"
 
 interface MPesaRateRange {
   id: string
@@ -175,13 +178,230 @@ const getCategoryInfo = (category: string) => {
       break;
   }
 
-  // Return a unified blue theme, keeping distinct icons for clarity.
   return {
-    color: 'bg-blue-50',          // Lighter blue for rate rows
-    headerRowColor: 'bg-blue-100', // Slightly darker blue for category headers
+    color: 'bg-blue-50',
+    headerRowColor: 'bg-blue-100',
     icon
   };
 };
+
+// Historical Periods Dialog Component
+const HistoricalPeriodsDialog = ({ 
+  isOpen, 
+  onOpenChange, 
+  historicalPeriods, 
+  loadingHistory, 
+  onViewHistoricalPeriod 
+}: {
+  isOpen: boolean
+  onOpenChange: (open: boolean) => void
+  historicalPeriods: MPesaRatePeriod[]
+  loadingHistory: boolean
+  onViewHistoricalPeriod: (period: MPesaRatePeriod) => void
+}) => (
+  <Dialog open={isOpen} onOpenChange={onOpenChange}>
+    <DialogTrigger asChild>
+      <Button variant="outline" size="sm">
+        <History className="h-4 w-4 mr-2" />
+        History
+      </Button>
+    </DialogTrigger>
+    <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+      <DialogHeader>
+        <DialogTitle>M-Pesa Rates History</DialogTitle>
+      </DialogHeader>
+      
+      {loadingHistory ? (
+        <div className="flex items-center justify-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {historicalPeriods.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8">No historical periods found.</p>
+          ) : (
+            <div className="space-y-2">
+              {historicalPeriods.map((period) => (
+                <Card key={period.id} className={cn(
+                  "cursor-pointer transition-colors hover:bg-muted/50",
+                  period.isActive ? "border-blue-500 bg-blue-50/30" : ""
+                )}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">
+                            {format(period.effectiveFrom, "PPP")}
+                            {period.effectiveTo && ` - ${format(period.effectiveTo, "PPP")}`}
+                          </span>
+                          {period.isActive && (
+                            <Badge variant="default" className="bg-blue-600">
+                              Active
+                            </Badge>
+                          )}
+                        </div>
+                        {period.description && (
+                          <p className="text-sm text-muted-foreground">{period.description}</p>
+                        )}
+                        <div className="text-xs text-muted-foreground">
+                          Created: {period.createdAt ? format(period.createdAt, "PPp") : 'Unknown'} 
+                          {period.createdBy && ` by ${period.createdBy}`}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">
+                          {period.transactionTypes.reduce((total, type) => total + type.ranges.length, 0)} ranges
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onViewHistoricalPeriod(period)}
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          View
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </DialogContent>
+  </Dialog>
+)
+
+// New Period Dialog Component
+const NewPeriodDialog = ({ 
+  isOpen, 
+  onOpenChange, 
+  historicalPeriods, 
+  onCreatePeriod, 
+  saving 
+}: {
+  isOpen: boolean
+  onOpenChange: (open: boolean) => void
+  historicalPeriods: MPesaRatePeriod[]
+  onCreatePeriod: (formData: any) => Promise<void>
+  saving: boolean
+}) => {
+  const [formData, setFormData] = useState({
+    effectiveFrom: new Date(),
+    effectiveTo: null as Date | null,
+    description: '',
+    copyFromPeriod: null as number | null
+  })
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Plus className="h-4 w-4 mr-2" />
+          New Period
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create New Rate Period</DialogTitle>
+        </DialogHeader>
+        
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>Effective From</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-full justify-start text-left font-normal">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {format(formData.effectiveFrom, "PPP")}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0">
+                <Calendar
+                  mode="single"
+                  selected={formData.effectiveFrom}
+                  onSelect={(date) => date && setFormData(prev => ({ ...prev, effectiveFrom: date }))}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Effective To (Optional)</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-full justify-start text-left font-normal">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {formData.effectiveTo ? format(formData.effectiveTo, "PPP") : "No end date"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0">
+                <Calendar
+                  mode="single"
+                  selected={formData.effectiveTo}
+                  onSelect={(date) => setFormData(prev => ({ ...prev, effectiveTo: date }))}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <Input
+              placeholder="Optional description for this period"
+              value={formData.description}
+              onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Copy From Period (Optional)</Label>
+            <Select 
+              value={formData.copyFromPeriod?.toString() || ""} 
+              onValueChange={(value) => setFormData(prev => ({ 
+                ...prev, 
+                copyFromPeriod: value ? parseInt(value) : null 
+              }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select period to copy from" />
+              </SelectTrigger>
+              <SelectContent>
+                {historicalPeriods.map((period) => (
+                  <SelectItem key={period.id} value={period.id!.toString()}>
+                    {format(period.effectiveFrom, "PPP")}
+                    {period.description && ` - ${period.description}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex gap-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              className="flex-1"
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => onCreatePeriod(formData)}
+              className="flex-1"
+              disabled={saving}
+            >
+              {saving ? "Creating..." : "Create Period"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 interface MPesaRatesProps {
   onChargeCalculated?: (amount: number, transactionType: string, charge: number) => void
@@ -204,8 +424,7 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set())
   const [chargeCalculator, setChargeCalculator] = useState({ amount: '', type: '' })
-  const [calculatorDialogOpen, setCalculatorDialogOpen] = useState(false)
-  const [isCalculatorOpen, setIsCalculatorOpen] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(false)
 
   // Column visibility state
   const [columnVisibility, setColumnVisibility] = useState({
@@ -213,7 +432,7 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
     amountRange: true,
     charge: true,
     description: true,
-    calculator: true,
+    actions: true,
   })
 
   // Column visibility options
@@ -249,9 +468,9 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
       group: 'Additional'
     },
     {
-      id: 'calculator',
-      label: 'Calculator',
-      visible: columnVisibility.calculator,
+      id: 'actions',
+      label: 'Actions',
+      visible: columnVisibility.actions,
       isDefault: true,
       group: 'Tools'
     }
@@ -270,7 +489,7 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
       amountRange: true,
       charge: true,
       description: true,
-      calculator: true,
+      actions: true,
     })
   }
 
@@ -280,7 +499,7 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
       amountRange: true,
       charge: false,
       description: false,
-      calculator: false,
+      actions: false,
     })
   }
 
@@ -290,8 +509,13 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
       amountRange: true,
       charge: true,
       description: false,
-      calculator: true,
+      actions: true,
     })
+  }
+
+  // Generate unique ID for new ranges
+  const generateRangeId = () => {
+    return Date.now().toString() + Math.random().toString(36).substr(2, 9)
   }
 
   // Calculate charge for a given amount and transaction type
@@ -301,27 +525,6 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
 
     const range = transactionType.ranges.find(r => amount >= r.amountFrom && amount <= r.amountTo)
     return range ? range.charge : 0
-  }
-
-  // Handle calculator
-  const handleCalculatorAmountChange = (amount: string) => {
-    setChargeCalculator(prev => ({ ...prev, amount }))
-
-    if (amount && chargeCalculator.type) {
-      const numAmount = parseFloat(amount)
-      const charge = calculateCharge(numAmount, chargeCalculator.type)
-      onChargeCalculated?.(numAmount, chargeCalculator.type, charge)
-    }
-  }
-
-  const handleCalculatorTypeChange = (type: string) => {
-    setChargeCalculator(prev => ({ ...prev, type }))
-
-    if (chargeCalculator.amount && type) {
-      const numAmount = parseFloat(chargeCalculator.amount)
-      const charge = calculateCharge(numAmount, type)
-      onChargeCalculated?.(numAmount, type, charge)
-    }
   }
 
   // Toggle transaction type expansion
@@ -368,64 +571,237 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
     setHasUnsavedChanges(true)
   }
 
-  // Export to CSV functionality
-  const exportToCSV = () => {
-    if (currentPeriod.transactionTypes.length === 0) {
-      toast({
-        title: "No data to export",
-        description: "Please ensure there are M-Pesa rates to export",
-        variant: "destructive"
-      })
-      return
+  // Add new range to transaction type
+  const addNewRange = (typeId: string) => {
+    if (isReadOnly) return
+
+    const transactionType = currentPeriod.transactionTypes.find(t => t.id === typeId)
+    if (!transactionType) return
+
+    // Get the last range to determine the next amount range
+    const lastRange = transactionType.ranges[transactionType.ranges.length - 1]
+    const newAmountFrom = lastRange ? lastRange.amountTo + 1 : 1
+    const newAmountTo = newAmountFrom + 999
+
+    const newRange: MPesaRateRange = {
+      id: generateRangeId(),
+      amountFrom: newAmountFrom,
+      amountTo: newAmountTo,
+      charge: 0,
+      description: ''
     }
 
-    const headers = [
-      'Transaction Type',
-      'Category',
-      'User Type',
-      'Amount From',
-      'Amount To',
-      'Charge (KSh)',
-      'Description'
-    ]
-
-    const csvData: string[][] = []
-
-    currentPeriod.transactionTypes.forEach(type => {
-      type.ranges.forEach(range => {
-        csvData.push([
-          type.name,
-          type.category,
-          type.userType || 'all',
-          range.amountFrom.toString(),
-          range.amountTo.toString(),
-          range.charge.toString(),
-          range.description || ''
-        ])
-      })
-    })
-
-    const csvContent = [headers, ...csvData]
-      .map(row => row.map(cell => `"${cell}"`).join(','))
-      .join('\n')
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    link.setAttribute('href', url)
-    link.setAttribute('download', `mpesa_transaction_rates_${format(new Date(), 'yyyy-MM-dd')}.csv`)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    setCurrentPeriod(prev => ({
+      ...prev,
+      transactionTypes: prev.transactionTypes.map(type =>
+        type.id === typeId
+          ? { ...type, ranges: [...type.ranges, newRange] }
+          : type
+      )
+    }))
+    setHasUnsavedChanges(true)
 
     toast({
-      title: "Export Successful",
-      description: `Exported M-Pesa transaction rates to CSV`,
+      title: "Range Added",
+      description: `New range added to ${transactionType.name}`,
     })
   }
 
-  // Auto-save functionality (similar to the original rates page)
+  // Delete range from transaction type
+  const deleteRange = (typeId: string, rangeId: string) => {
+    if (isReadOnly) return
+
+    setCurrentPeriod(prev => ({
+      ...prev,
+      transactionTypes: prev.transactionTypes.map(type =>
+        type.id === typeId
+          ? { ...type, ranges: type.ranges.filter(range => range.id !== rangeId) }
+          : type
+      )
+    }))
+    setHasUnsavedChanges(true)
+
+    toast({
+      title: "Range Deleted",
+      description: "Transaction range has been removed",
+    })
+  }
+
+  // Load current M-Pesa rates
+  const loadCurrentRates = async () => {
+    try {
+      const { data: rateHistory, error } = await supabase
+        .from('mpesa_rates_history')
+        .select('*')
+        .eq('is_active', true)
+        .order('effective_from', { ascending: false })
+        .limit(1)
+
+      if (error) throw error
+
+      if (rateHistory && rateHistory.length > 0) {
+        const latestRates = rateHistory[0]
+        const period: MPesaRatePeriod = {
+          id: latestRates.id,
+          effectiveFrom: new Date(latestRates.effective_from),
+          effectiveTo: latestRates.effective_to ? new Date(latestRates.effective_to) : null,
+          transactionTypes: latestRates.transaction_types || defaultMPesaRates,
+          description: latestRates.description || '',
+          isActive: true
+        }
+        setCurrentPeriod(period)
+        setIsReadOnly(false)
+        setHasUnsavedChanges(false)
+      } else {
+        // Create initial period if none exists
+        const { data, error } = await supabase
+          .from('mpesa_rates_history')
+          .insert({
+            effective_from: new Date().toISOString().split('T')[0],
+            transaction_types: defaultMPesaRates,
+            description: 'Current M-Pesa Rates 2025',
+            is_active: true,
+            created_by: 'current_user'
+          })
+          .select()
+          .single()
+
+        if (error) throw error
+
+        const period: MPesaRatePeriod = {
+          id: data.id,
+          effectiveFrom: new Date(data.effective_from),
+          effectiveTo: null,
+          transactionTypes: data.transaction_types || defaultMPesaRates,
+          description: data.description || '',
+          isActive: true
+        }
+        setCurrentPeriod(period)
+        setIsReadOnly(false)
+        setHasUnsavedChanges(false)
+      }
+    } catch (error) {
+      console.error('Error loading M-Pesa rates:', error)
+      toast({
+        title: "Error",
+        description: "Failed to load M-Pesa rates. Using defaults.",
+        variant: "destructive"
+      })
+    }
+  }
+
+  // Load historical periods
+  const loadHistoricalPeriods = async () => {
+    try {
+      setLoadingHistory(true)
+      const { data: history, error } = await supabase
+        .from('mpesa_rates_history')
+        .select('*')
+        .order('effective_from', { ascending: false })
+
+      if (error) throw error
+
+      const periods: MPesaRatePeriod[] = (history || []).map(record => ({
+        id: record.id,
+        effectiveFrom: new Date(record.effective_from),
+        effectiveTo: record.effective_to ? new Date(record.effective_to) : null,
+        transactionTypes: record.transaction_types || [],
+        description: record.description || '',
+        isActive: record.is_active,
+        createdAt: new Date(record.created_at),
+        createdBy: record.created_by
+      }))
+
+      setHistoricalPeriods(periods)
+    } catch (error) {
+      console.error('Error loading historical periods:', error)
+      toast({
+        title: "Error",
+        description: "Failed to load historical data.",
+        variant: "destructive"
+      })
+    } finally {
+      setLoadingHistory(false)
+    }
+  }
+
+  // Handle viewing historical period
+  const handleViewHistoricalPeriod = (period: MPesaRatePeriod) => {
+    setCurrentPeriod(period)
+    setIsReadOnly(!period.isActive)
+    setIsHistoryDialogOpen(false)
+    setHasUnsavedChanges(false)
+
+    toast({
+      title: "Historical Period Loaded",
+      description: `Viewing rates from ${format(period.effectiveFrom, "PPP")}${period.isActive ? " (Active)" : " (Historical)"}`,
+    })
+  }
+
+  // Handle updating period
+  const handleUpdatePeriod = async (formData: any) => {
+    setSaving(true)
+    try {
+      // Get the current active period
+      const { data: activePeriod, error: activeError } = await supabase
+        .from('mpesa_rates_history')
+        .select('*')
+        .eq('is_active', true)
+        .single()
+
+      if (activeError) throw activeError
+
+      // If no active period exists, create a new one
+      if (!activePeriod) {
+        const { error } = await supabase
+          .from('mpesa_rates_history')
+          .insert({
+            effective_from: formData.effectiveFrom.toISOString().split('T')[0],
+            effective_to: formData.effectiveTo?.toISOString().split('T')[0] || null,
+            transaction_types: currentPeriod.transactionTypes,
+            description: formData.description,
+            is_active: true,
+            created_by: 'current_user'
+          })
+
+        if (error) throw error
+      } else {
+        // Update the existing active period's transaction_types only
+        const { error } = await supabase
+          .from('mpesa_rates_history')
+          .update({
+            transaction_types: currentPeriod.transactionTypes,
+            description: formData.description,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', activePeriod.id)
+
+        if (error) throw error
+      }
+
+      toast({
+        title: "Success",
+        description: "M-Pesa rate period updated successfully.",
+      })
+
+      setIsNewPeriodDialogOpen(false)
+
+      // Reload current rates and history
+      await loadCurrentRates()
+      await loadHistoricalPeriods()
+    } catch (error) {
+      console.error('Error updating period:', error)
+      toast({
+        title: "Error",
+        description: "Failed to update period. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Auto-save functionality
   const debouncedSave = useCallback(
     debounce(async () => {
       if (currentPeriod.transactionTypes.length === 0 || isReadOnly) {
@@ -487,6 +863,63 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
     }
   }
 
+  // Export to CSV functionality
+  const exportToCSV = () => {
+    if (currentPeriod.transactionTypes.length === 0) {
+      toast({
+        title: "No data to export",
+        description: "Please ensure there are M-Pesa rates to export",
+        variant: "destructive"
+      })
+      return
+    }
+
+    const headers = [
+      'Transaction Type',
+      'Category',
+      'User Type',
+      'Amount From',
+      'Amount To',
+      'Charge (KSh)',
+      'Description'
+    ]
+
+    const csvData: string[][] = []
+
+    currentPeriod.transactionTypes.forEach(type => {
+      type.ranges.forEach(range => {
+        csvData.push([
+          type.name,
+          type.category,
+          type.userType || 'all',
+          range.amountFrom.toString(),
+          range.amountTo.toString(),
+          range.charge.toString(),
+          range.description || ''
+        ])
+      })
+    })
+
+    const csvContent = [headers, ...csvData]
+      .map(row => row.map(cell => `"${cell}"`).join(','))
+      .join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', `mpesa_transaction_rates_${format(new Date(), 'yyyy-MM-dd')}.csv`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    toast({
+      title: "Export Successful",
+      description: `Exported M-Pesa transaction rates to CSV`,
+    })
+  }
+
   // Auto-save when data changes
   useEffect(() => {
     if (hasUnsavedChanges && !isReadOnly) {
@@ -494,12 +927,21 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
     }
   }, [currentPeriod.transactionTypes, hasUnsavedChanges, debouncedSave, isReadOnly])
 
+  // Load data on component mount
+  useEffect(() => {
+    loadCurrentRates()
+    loadHistoricalPeriods()
+  }, [])
+
   return (
     <div className="w-full space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">M-Pesa Transaction Rates</h2>
+          <h2 className="text-2xl font-bold flex items-center gap-4">
+            M-Pesa Transaction Rates
+            <SummaryDialog currentPeriod={currentPeriod} />
+          </h2>
           <p className="text-muted-foreground">Manage M-Pesa transaction charges and fees for petty cash calculations</p>
           <div className="flex items-center gap-2 mt-2">
             {isReadOnly && (
@@ -525,11 +967,28 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
 
         {/* Control Panel */}
         <div className="flex items-center gap-2">
-          {/* Charge Calculator Dialog Trigger */}
-                   {/* Calculator Dialog */}
+          {/* Charge Calculator Dialog */}
           <ChargeCalculatorDialog
             transactionTypes={currentPeriod.transactionTypes}
             onChargeCalculated={onChargeCalculated}
+          />
+
+          {/* Historical Periods Dialog */}
+          <HistoricalPeriodsDialog
+            isOpen={isHistoryDialogOpen}
+            onOpenChange={setIsHistoryDialogOpen}
+            historicalPeriods={historicalPeriods}
+            loadingHistory={loadingHistory}
+            onViewHistoricalPeriod={handleViewHistoricalPeriod}
+          />
+
+          {/* New Period Dialog */}
+          <NewPeriodDialog
+            isOpen={isNewPeriodDialogOpen}
+            onOpenChange={setIsNewPeriodDialogOpen}
+            historicalPeriods={historicalPeriods}
+            onCreatePeriod={handleUpdatePeriod}
+            saving={saving}
           />
 
           {/* Expand/Collapse All */}
@@ -568,11 +1027,20 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
             size="sm"
             onClick={exportToCSV}
             disabled={currentPeriod.transactionTypes.length === 0}
-            className="ml-auto"
           >
             <DownloadCloud className="h-4 w-4 mr-2" />
             Export to Excel
           </Button>
+
+          {isReadOnly && (
+            <Button
+              onClick={loadCurrentRates}
+              variant="outline"
+              size="sm"
+            >
+              Back to Current
+            </Button>
+          )}
         </div>
       </div>
 
@@ -638,7 +1106,7 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
                     Description
                   </TableHead>
                 )}
-                {columnVisibility.calculator && (
+                {columnVisibility.actions && (
                   <TableHead className="text-center text-white font-semibold bg-blue-700 p-2 min-w-32">
                     Actions
                   </TableHead>
@@ -672,16 +1140,9 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
                       )}>
                         <div className="flex justify-between items-center gap-3">
                           <div className="flex items-center gap-3">
-                            {categoryInfo.icon}
                             <div>
-                              <div className="font-semibold text-sm relative group">
-                                {transactionType.name}
-                                <span className="absolute bottom-0 left-0 w-full h-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
-                                  <div className="absolute bottom-full left-0 mb-2 bg-white border border-gray-200 rounded-md p-2 shadow-md text-xs whitespace-pre-wrap">
-                                    {transactionType.description}
-                                  </div>
-                                </span>
-                              </div>
+                              <div className="font-semibold text-sm">{transactionType.name}</div>
+                              <div className="text-xs text-muted-foreground">{transactionType.description}</div>
                               {transactionType.userType && (
                                 <Badge variant="secondary" className="text-xs mt-1">
                                   {transactionType.userType}
@@ -690,8 +1151,8 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs">
-                              {transactionType.ranges.length} ranges
+                            <Badge variant="outline" className="text-xs bg-blue-200 font-medium">
+                              {transactionType.ranges.length}
                             </Badge>
                             <Button
                               variant="ghost"
@@ -703,163 +1164,161 @@ export default function MPesaRates({ onChargeCalculated }: MPesaRatesProps) {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell colSpan={10} className="text-slate-600 italic text-sm px-3 p-3">
-                        {/* Click to {isExpanded ? 'collapse' : 'expand'} and view rate ranges */}
+                      <TableCell colSpan={10} className="text-slate-600 italic text-sm px-3 p-3 text-center">
+                        {/* Click to {isExpanded ? 'collapse' : 'expand'} and view ranges */}
+                        -
                       </TableCell>
                     </TableRow>
 
                     {/* Rate Ranges */}
-                    {isExpanded && transactionType.ranges.map((range, rangeIndex) => (
-                      <TableRow
-                        key={range.id}
-                        className={cn(
-                          "hover:bg-blue-100/60 transition-colors",
-                          categoryInfo.color,
-                          "border-l-2 border-l-blue-200"
-                        )}
-                      >
-                        {columnVisibility.index && (
-                          <TableCell className="sticky left-0 bg-blue-50 border-r text-center text-sm z-30 px-3 p-2">
-                            <Badge variant="outline" className="bg-white border-blue-300">
-                              {typeIndex + 1}.{rangeIndex + 1}
-                            </Badge>
-                          </TableCell>
-                        )}
-                        <TableCell className={cn(
-                          "sticky bg-blue-50 border-r z-30 px-3 pl-12 p-2",
-                          columnVisibility.index ? "left-16" : "left-0"
-                        )}>
-                          <div className="flex items-center gap-2">
-                            <ChevronRight className="h-3 w-3 text-blue-500" />
-                            <span className="text-sm text-blue-700">Range {rangeIndex + 1}</span>
-                          </div>
-                        </TableCell>
+                    {isExpanded && (
+                      <>
+                        {transactionType.ranges.map((range, rangeIndex) => (
+                          <TableRow
+                            key={range.id}
+                            className={cn(
+                              "hover:bg-blue-100/60 transition-colors",
+                              categoryInfo.color,
+                              "border-l-2 border-l-blue-200"
+                            )}
+                          >
+                            {columnVisibility.index && (
+                              <TableCell className="sticky left-0 bg-blue-50 border-r text-center text-sm z-30 px-3 p-2">
+                                {typeIndex + 1}.{rangeIndex + 1}
+                              </TableCell>
+                            )}
+                            <TableCell className={cn(
+                              "sticky bg-blue-50 border-r z-30 px-3 pl-12 p-2",
+                              columnVisibility.index ? "left-16" : "left-0"
+                            )}>
+                              <div className="flex items-center gap-2">
+                                <ChevronRight className="h-3 w-3 text-blue-500" />
+                                <span className="text-sm text-blue-700">Range {rangeIndex + 1}</span>
+                              </div>
+                            </TableCell>
 
-                        {columnVisibility.amountRange && (
-                          <TableCell className={cn("border-r border-gray-200 p-2", categoryInfo.color)}>
-                            <div className="flex items-center gap-1 text-xs">
-                              <Input
-                                type="number"
-                                value={range.amountFrom}
-                                onChange={(e) => updateRange(transactionType.id, range.id, {
-                                  amountFrom: parseFloat(e.target.value) || 0
-                                })}
-                                className="h-7 w-20 text-center text-xs border-gray-200 bg-white/70 focus:bg-white"
-                                disabled={isReadOnly}
-                              />
-                              <span>-</span>
-                              <Input
-                                type="number"
-                                value={range.amountTo}
-                                onChange={(e) => updateRange(transactionType.id, range.id, {
-                                  amountTo: parseFloat(e.target.value) || 0
-                                })}
-                                className="h-7 w-20 text-center text-xs border-gray-200 bg-white/70 focus:bg-white"
-                                disabled={isReadOnly}
-                              />
-                            </div>
-                          </TableCell>
-                        )}
+                            {columnVisibility.amountRange && (
+                              <TableCell className={cn("border-r border-gray-200 p-2", categoryInfo.color)}>
+                                <div className="flex items-center gap-1 text-xs">
+                                  <Input
+                                    type="number"
+                                    value={range.amountFrom}
+                                    onChange={(e) => updateRange(transactionType.id, range.id, {
+                                      amountFrom: parseFloat(e.target.value) || 0
+                                    })}
+                                    className="h-7 w-20 text-center text-xs border-gray-200 bg-white/70 focus:bg-white"
+                                    disabled={isReadOnly}
+                                  />
+                                  <span>-</span>
+                                  <Input
+                                    type="number"
+                                    value={range.amountTo}
+                                    onChange={(e) => updateRange(transactionType.id, range.id, {
+                                      amountTo: parseFloat(e.target.value) || 0
+                                    })}
+                                    className="h-7 w-20 text-center text-xs border-gray-200 bg-white/70 focus:bg-white"
+                                    disabled={isReadOnly}
+                                  />
+                                </div>
+                              </TableCell>
+                            )}
 
-                        {columnVisibility.charge && (
-                          <TableCell className={cn("border-r border-gray-200 p-2", categoryInfo.color)}>
-                            <Input
-                              type="number"
-                              value={range.charge}
-                              onChange={(e) => updateRange(transactionType.id, range.id, {
-                                charge: parseFloat(e.target.value) || 0
-                              })}
-                              className="h-7 text-center text-xs border-gray-200 bg-white/70 focus:bg-white"
-                              disabled={isReadOnly}
-                            />
-                          </TableCell>
-                        )}
+                            {columnVisibility.charge && (
+                              <TableCell className={cn("border-r border-gray-200 p-2", categoryInfo.color)}>
+                                <Input
+                                  type="number"
+                                  value={range.charge}
+                                  onChange={(e) => updateRange(transactionType.id, range.id, {
+                                    charge: parseFloat(e.target.value) || 0
+                                  })}
+                                  className="h-7 text-center text-xs border-gray-200 bg-white/70 focus:bg-white"
+                                  disabled={isReadOnly}
+                                />
+                              </TableCell>
+                            )}
 
-                        {columnVisibility.description && (
-                          <TableCell className={cn("border-r border-gray-200 p-2", categoryInfo.color)}>
-                            <Input
-                              type="text"
-                              value={range.description || ''}
-                              onChange={(e) => updateRange(transactionType.id, range.id, {
-                                description: e.target.value
-                              })}
-                              placeholder="Optional description"
-                              className="h-7 text-xs border-gray-200 bg-white/70 focus:bg-white"
-                              disabled={isReadOnly}
-                            />
-                          </TableCell>
-                        )}
+                            {columnVisibility.description && (
+                              <TableCell className={cn("border-r border-gray-200 p-2", categoryInfo.color)}>
+                                <Input
+                                  type="text"
+                                  value={range.description || ''}
+                                  onChange={(e) => updateRange(transactionType.id, range.id, {
+                                    description: e.target.value
+                                  })}
+                                  placeholder="Optional description"
+                                  className="h-7 text-xs border-gray-200 bg-white/70 focus:bg-white"
+                                  disabled={isReadOnly}
+                                />
+                              </TableCell>
+                            )}
 
-                        {columnVisibility.calculator && (
-                          <TableCell className={cn("p-2", categoryInfo.color)}>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setChargeCalculator({
-                                  amount: ((range.amountFrom + range.amountTo) / 2).toString(),
-                                  type: transactionType.id
-                                })
-                                setIsCalculatorOpen(true)
-                              }}
-                              className="h-7 text-xs"
+                            {columnVisibility.actions && (
+                              <TableCell className={cn("p-2", categoryInfo.color)}>
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      setChargeCalculator({
+                                        amount: ((range.amountFrom + range.amountTo) / 2).toString(),
+                                        type: transactionType.id
+                                      })
+                                    }}
+                                    className="h-7 text-xs"
+                                  >
+                                    Test
+                                  </Button>
+                                  {!isReadOnly && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => deleteRange(transactionType.id, range.id)}
+                                      className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  )}
+                                </div>
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        ))}
+
+                        {/* Add New Range Row */}
+                        {!isReadOnly && (
+                          <TableRow className={cn("border-l-2 border-l-blue-200", categoryInfo.color)}>
+                            {columnVisibility.index && (
+                              <TableCell className="sticky left-0 bg-blue-50 border-r text-center text-sm z-30 px-3 p-2">
+                                <Plus className="h-3 w-3 text-blue-500" />
+                              </TableCell>
+                            )}
+                            <TableCell 
+                              className={cn(
+                                "sticky bg-blue-50 border-r z-30 px-3 pl-12 p-2",
+                                columnVisibility.index ? "left-16" : "left-0"
+                              )}
+                              colSpan={10}
                             >
-                              Test
-                            </Button>
-                          </TableCell>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => addNewRange(transactionType.id)}
+                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-100"
+                              >
+                                <Plus className="h-3 w-3 mr-2" />
+                                Add New Range
+                              </Button>
+                            </TableCell>
+                          </TableRow>
                         )}
-                      </TableRow>
-                    ))}
+                      </>
+                    )}
                   </React.Fragment>
                 )
               })}
             </TableBody>
           </Table>
         </div>
-      </Card>
-
-      {/* Summary Card */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Info className="h-5 w-5" />
-            M-Pesa Transaction Summary
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div>
-              <h4 className="font-semibold text-blue-700 mb-2">Current Changes (2025)</h4>
-              <ul className="space-y-1 text-muted-foreground">
-                <li>• Standardized fees across all networks</li>
-                <li>• Transfers to unregistered users discontinued </li>
-                <li>• Free transactions for amounts KSh 1-100 </li>
-                <li>• Maximum transaction: KSh 250,000 </li>
-                <li>• Daily limit: KSh 500,000 </li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold text-blue-700 mb-2">Transaction Types</h4>
-              <ul className="space-y-1 text-muted-foreground">
-                <li>• Send Money (M-Pesa, Airtel, T-Kash)</li>
-                <li>• Till Number Payments</li>
-                <li>• Paybill Payments</li>
-                <li>• Agent Withdrawals</li>
-                <li>• ATM Withdrawals</li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold text-blue-700 mb-2">Key Features</h4>
-              <ul className="space-y-1 text-muted-foreground">
-                <li>• Real-time charge calculation</li>
-                <li>• Historical rate periods</li>
-                <li>• Editable transaction rates</li>
-                <li>• Export to Excel functionality</li>
-                <li>• Auto-save capabilities</li>
-              </ul>
-            </div>
-          </div>
-        </CardContent>
       </Card>
     </div>
   )

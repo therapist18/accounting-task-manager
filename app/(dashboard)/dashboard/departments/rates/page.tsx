@@ -5,7 +5,7 @@ import MPesaRates from "./mpesa-rates"
 export default function RatesPage() {
   return (
     <div>
-      <Tabs>
+      <Tabs defaultValue="department-rates">
         <TabsList>
           <TabsTrigger value="department-rates">Department Rates</TabsTrigger>
           <TabsTrigger value="mpesa-rates">MPesa Rates</TabsTrigger>

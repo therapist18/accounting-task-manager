@@ -25,7 +25,6 @@ interface Individual {
     contact_details?: {
         phone?: {
             kenyan?: { primary?: string }
-            whatsapp?: string
         }
         email?: { primary?: string }
     }
@@ -75,6 +74,7 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
     const [selectedUnderstudy, setSelectedUnderstudy] = useState<string>('')
     const [loadingCompanies, setLoadingCompanies] = useState(false)
     const [loadingUnderstudies, setLoadingUnderstudies] = useState(false)
+    const [principalForDependant, setPrincipalForDependant] = useState<Individual | null>(null);
     const [subdepartments, setSubdepartments] = useState<Array<Subdepartment & {
         taskManager?: {
             id: string;
@@ -184,33 +184,33 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         }
     }, [])
 
-// Fetch family members for a principal
-const fetchDependants = async (principalId: number) => {
-    try {
-        // First, get the principal with their relationships
-        const { data: principal, error: principalError } = await supabase
-            .from('registry_individuals')
-            .select(`
+    // Fetch family members for a principal
+    const fetchDependants = async (principalId: number) => {
+        try {
+            // First, get the principal with their relationships
+            const { data: principal, error: principalError } = await supabase
+                .from('registry_individuals')
+                .select(`
                 id,
                 relationships
             `)
-            .eq('id', principalId)
-            .single()
+                .eq('id', principalId)
+                .single()
 
-        if (principalError) throw principalError
-        if (!principal?.relationships?.length) return []
+            if (principalError) throw principalError
+            if (!principal?.relationships?.length) return []
 
-        // Extract all related individual IDs from relationships (excluding self)
-        const relatedIds = principal.relationships
-            .map((rel: any) => rel.individual_id)
-            .filter((id: number) => id && id !== principalId)
+            // Extract all related individual IDs from relationships (excluding self)
+            const relatedIds = principal.relationships
+                .map((rel: any) => rel.individual_id)
+                .filter((id: number) => id && id !== principalId)
 
-        if (relatedIds.length === 0) return []
+            if (relatedIds.length === 0) return []
 
-        // Fetch all related individuals
-        const { data: familyMembers, error } = await supabase
-            .from('registry_individuals')
-            .select(`
+            // Fetch all related individuals
+            const { data: familyMembers, error } = await supabase
+                .from('registry_individuals')
+                .select(`
                 id,
                 full_name,
                 first_name,
@@ -219,54 +219,54 @@ const fetchDependants = async (principalId: number) => {
                 individual_type,
                 r_number
             `)
-            .in('id', relatedIds)
-            .order('full_name')
+                .in('id', relatedIds)
+                .order('full_name')
 
-        if (error) throw error
+            if (error) throw error
 
-        // Map relationships to include the relationship type
-        return (familyMembers || []).map(member => {
-            const relationship = principal.relationships.find(
-                (rel: any) => rel.individual_id === member.id
-            )
-            return {
-                ...member,
-                relationship_type: relationship?.relationship || 'family member'
-            }
-        })
-    } catch (error) {
-        console.error('Error fetching dependants:', error)
-        return []
+            // Map relationships to include the relationship type
+            return (familyMembers || []).map(member => {
+                const relationship = principal.relationships.find(
+                    (rel: any) => rel.individual_id === member.id
+                )
+                return {
+                    ...member,
+                    relationship_type: relationship?.relationship || 'family member'
+                }
+            })
+        } catch (error) {
+            console.error('Error fetching dependants:', error)
+            return []
+        }
     }
-}
 
-// Fetch references for an individual
-const fetchReferences = async (individualId: number) => {
-    try {
-        // Get the individual with their references array
-        const { data: individual, error } = await supabase
-            .from('registry_individuals')
-            .select(`
+    // Fetch references for an individual
+    const fetchReferences = async (individualId: number) => {
+        try {
+            // Get the individual with their references array
+            const { data: individual, error } = await supabase
+                .from('registry_individuals')
+                .select(`
                 id,
                 references
             `)
-            .eq('id', individualId)
-            .single()
+                .eq('id', individualId)
+                .single()
 
-        if (error) throw error
-        if (!individual?.references?.length) return []
+            if (error) throw error
+            if (!individual?.references?.length) return []
 
-        // Extract reference IDs from the references array
-        const referenceIds = individual.references
-            .map((ref: any) => ref.id)
-            .filter((id: number) => id && id !== individualId)
+            // Extract reference IDs from the references array
+            const referenceIds = individual.references
+                .map((ref: any) => ref.id)
+                .filter((id: number) => id && id !== individualId)
 
-        if (referenceIds.length === 0) return []
+            if (referenceIds.length === 0) return []
 
-        // Fetch all reference individuals
-        const { data: referenceMembers, error: refError } = await supabase
-            .from('registry_individuals')
-            .select(`
+            // Fetch all reference individuals
+            const { data: referenceMembers, error: refError } = await supabase
+                .from('registry_individuals')
+                .select(`
                 id,
                 full_name,
                 first_name,
@@ -275,20 +275,20 @@ const fetchReferences = async (individualId: number) => {
                 individual_type,
                 r_number
             `)
-            .in('id', referenceIds)
-            .order('full_name')
+                .in('id', referenceIds)
+                .order('full_name')
 
-        if (refError) throw refError
+            if (refError) throw refError
 
-        return (referenceMembers || []).map(member => ({
-            ...member,
-            relationship_type: 'reference'
-        }))
-    } catch (error) {
-        console.error('Error fetching references:', error)
-        return []
+            return (referenceMembers || []).map(member => ({
+                ...member,
+                relationship_type: 'reference'
+            }))
+        } catch (error) {
+            console.error('Error fetching references:', error)
+            return []
+        }
     }
-}
 
     const fetchCompanies = async (individualId: number) => {
         if (!individualId) return;
@@ -350,6 +350,8 @@ const fetchReferences = async (individualId: number) => {
 
             if (companiesError) throw companiesError;
 
+            console.log('Raw companies data from database:', companiesData);
+
             // Create a map of company IDs to their data for easy lookup
             const companyMap = new Map();
 
@@ -358,12 +360,14 @@ const fetchReferences = async (individualId: number) => {
                 const companyId = company.id?.toString();
                 if (!companyId) return;
 
-                companyMap.set(companyId, {
+                const mappedCompany = {
                     ...company,
                     id: companyId,
-                    name: company.company_name || 'Unnamed Company',
+                    company_name: company.company_name || 'Unnamed Company',
                     is_bill_to: companyId === billToCompanyId
-                });
+                };
+                companyMap.set(companyId, mappedCompany);
+                console.log('Mapped company:', mappedCompany);
             });
 
             const companiesWithDetails = Array.from(companyMap.values())
@@ -373,7 +377,10 @@ const fetchReferences = async (individualId: number) => {
                     return uniqueCompanyIdsStr.includes(companyId) ||
                         (billToCompanyId === companyId && !uniqueCompanyIdsStr.includes(companyId));
                 });
+
+            console.log('Filtered companies:', companiesWithDetails);
             setCompanies(companiesWithDetails);
+            console.log('Companies state after setting:', companiesWithDetails);
 
             // Auto-select the first company if only one exists
             if (companiesWithDetails.length === 1) {
@@ -454,6 +461,7 @@ const fetchReferences = async (individualId: number) => {
         if (open) {
             searchIndividuals(applicantType);
             setSelectedIndividual(null);
+            setPrincipalForDependant(null);
             setCompanies([]);
             setSelectedCompany('');
             setUnderstudies([]);
@@ -509,37 +517,14 @@ const fetchReferences = async (individualId: number) => {
         setLoading(true);
 
         try {
-            // Use the ref to get the current selected individual
-            const currentSelectedIndividual = selectedIndividualRef.current;
-            console.log('Form submitted with selectedIndividual (from ref):', currentSelectedIndividual);
-            console.log('Form data:', formData);
-
-            // If we don't have a selected individual, try to find it from form data
-            if (!currentSelectedIndividual && formData.full_name) {
-                // Try to find the individual in the loaded list
-                const foundIndividual = individuals.find(
-                    ind => ind.full_name === formData.full_name &&
-                        (ind.contact_details?.phone?.kenyan?.primary === formData.mobile_number ||
-                            ind.contact_details?.personal_mobile_num_kenyan_1 === formData.mobile_number)
-                );
-
-                if (foundIndividual) {
-                    console.log('Found matching individual:', foundIndividual);
-                    setSelectedIndividual(foundIndividual);
-                } else {
-                    throw new Error('Please select an individual from the dropdown');
-                }
-            }
-
-            // Get the current selected individual after potential updates
             const individualToUse = selectedIndividualRef.current;
 
             if (!individualToUse) {
+                // Logic to handle newly created individual can be added here if needed
                 throw new Error('No individual selected. Please select an individual from the dropdown.');
             }
 
             const individualId = individualToUse.id;
-
             if (!individualId) {
                 throw new Error('Selected individual does not have a valid ID');
             }
@@ -551,7 +536,7 @@ const fetchReferences = async (individualId: number) => {
                     return dependant ? {
                         id: dependant.id,
                         name: dependant.full_name,
-                        relationship: dependant.relationship_type || 'family member'
+                        relationship: dependant.relationship_type === 'Principal Member' ? 'Principal' : (dependant.relationship_type || 'Family Member')
                     } : null;
                 }).filter(Boolean)
                 : [];
@@ -567,10 +552,10 @@ const fetchReferences = async (individualId: number) => {
                 }).filter(Boolean)
                 : [];
 
-            // Prepare the initial stage data for the "Enquiry" stage
-            const enquiryStageId = '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'; // Hardcoded as per request
+            // Prepare the initial stage data
+            const enquiryStageId = '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa';
             const now = new Date();
-            const formattedDate = format(now, 'dd/MM/yyyy'); // e.g., "09/07/2024"
+            const formattedDate = format(now, 'dd/MM/yyyy');
             const initialStages = {
                 [enquiryStageId]: {
                     date: formattedDate,
@@ -590,7 +575,7 @@ const fetchReferences = async (individualId: number) => {
                 class_id: formData.class_id || null,
                 subclass_id: formData.subclass_id || null,
                 date_initiated: now,
-                applicant_name: selectedIndividual ? selectedIndividual.full_name : formData.full_name,
+                applicant_name: individualToUse.full_name,
                 stages: initialStages,
                 dependant_member: dependantsToSave,
                 references: referencesToSave,
@@ -598,12 +583,16 @@ const fetchReferences = async (individualId: number) => {
                 company_id: selectedCompany || null,
             };
 
-            // If applicant is principal, include their ID as principal_member
+            // Assign principal member based on applicant type
             if (applicantType === 'principal') {
                 taskData.principal_member = individualId;
+            } else if (applicantType === 'dependant') {
+                const principalId = formData.principal_member_id;
+                if (!principalId) {
+                    throw new Error("Principal member could not be identified for the selected dependant. Cannot create enquiry.");
+                }
+                taskData.principal_member = principalId;
             }
-
-            console.log('Submitting task with individual_id:', individualId, 'and data:', taskData);
 
             // Insert the task into the database
             const { data, error } = await supabase
@@ -614,46 +603,17 @@ const fetchReferences = async (individualId: number) => {
 
             if (error) throw error;
 
-            // Notify parent component with the full task data
-            const { data: fullTask, error: fetchError } = await supabase
-                .from('tm_tasks')
-                .select(`
-                    *,
-                    department:department_id(
-                        name
-                    ),
-                    subdepartment:subdepartment_id(
-                        name
-                    ),
-                    individual:individual_id(
-                        full_name
-                    )
-                `)
-                .eq('id', data.id)
-                .single();
-
-            if (fetchError) {
-                console.error('Error fetching task details:', fetchError);
-                toast({
-                    title: 'Error',
-                    description: 'Failed to fetch task details',
-                    variant: 'destructive'
-                });
-            }
+            // Notify parent component
+            const { data: fullTask, error: fetchError } = await supabase.from('tm_tasks').select(`*,department:department_id(name),subdepartment:subdepartment_id(name),individual:individual_id(full_name)`).eq('id', data.id).single();
+            if (fetchError) console.error('Error fetching task details:', fetchError);
 
             onEnquiryCreated(fullTask || data);
-
-            // Reset form
             resetForm();
-
-            // Close the dialog
             onOpenChange(false);
 
-            // Show success message
             toast({
                 title: 'Success',
                 description: 'Enquiry created successfully',
-                variant: 'default'
             });
         } catch (error) {
             console.error('Error creating enquiry:', error);
@@ -666,7 +626,7 @@ const fetchReferences = async (individualId: number) => {
             setLoading(false);
         }
     };
-    
+
     const resetForm = () => {
         setFormData({
             full_name: '',
@@ -680,12 +640,13 @@ const fetchReferences = async (individualId: number) => {
             enquiry_date: new Date().toISOString().split('T')[0]
         })
         setSelectedIndividual(null)
+        setPrincipalForDependant(null);
         setApplicantType('principal')
         setTaskType('new')
-        setIncludeDependants(false)
+        includeDependants && setIncludeDependants(false)
         setSelectedDependants([])
         setAvailableDependants([])
-        setIncludeReferences(false)
+        includeReferences && setIncludeReferences(false)
         setSelectedReferences([])
         setAvailableReferences([])
         setSelectedCompany('')
@@ -693,138 +654,27 @@ const fetchReferences = async (individualId: number) => {
         setCompanies([])
         setUnderstudies([])
     }
-    
+
     const handleChange = useCallback((field: keyof FormData, value: any) => {
         setFormData(prev => {
-            // If changing applicant type, reset related fields
-            if (field === 'applicant_type') {
-                return {
-                    ...prev,
-                    applicant_type: value,
-                    client_name: '',
-                    principal_member_id: '',
-                    principal_member_name: '',
-                };
-            }
-
-            // If changing department, reset subdepartment and its dependant fields
             if (field === 'department_id') {
-                const selectedDept = departments.find(d => d.id === value);
                 return {
                     ...prev,
                     department_id: value,
-                    department_name: selectedDept?.name || '',
                     subdepartment_id: '',
-                    subdepartment_name: '',
-                    task_manager_id: '',
-                    task_manager_name: '',
-                    task_assistant_id: '',
-                    task_assistant_name: '',
                     class_id: '',
-                    class_name: ''
-                };
-            }
-
-            // If changing subdepartment, reset dependant fields but auto-populate task manager/assistant
-            if (field === 'subdepartment_id') {
-                const selectedSubdept = subdepartments.find(s => s.id.toString() === value.toString());
-
-                return {
-                    ...prev,
-                    subdepartment_id: value,
-                    subdepartment_name: selectedSubdept?.name || '',
-                    task_manager_id: selectedSubdept?.taskManager?.id?.toString() || '',
-                    task_manager_name: selectedSubdept?.taskManager?.name || '',
-                    task_assistant_id: selectedSubdept?.taskAssistant?.id?.toString() || '',
-                    task_assistant_name: selectedSubdept?.taskAssistant?.name || '',
-                    class_id: '',
-                    class_name: ''
-                };
-            }
-            // If changing class
-            if (field === 'class_id') {
-                const selectedSubdept = subdepartments.find(s => s.id.toString() === prev.subdepartment_id.toString());
-                const selectedClass = selectedSubdept?.classes?.find(c => c.id.toString() === value);
-                return {
-                    ...prev,
-                    class_id: value,
-                    class_name: selectedClass?.name || '',
-                    class_description: selectedClass?.description || null,
                     subclass_id: '',
-                    subclass_name: '',
-                    subclass_description: null
                 };
             }
-
-            // If changing subclass
-            if (field === 'subclass_id') {
-                const selectedSubdept = subdepartments.find(s => s.id.toString() === prev.subdepartment_id.toString());
-                const selectedClass = selectedSubdept?.classes?.find(c => c.id.toString() === prev.class_id);
-                const selectedSubclass = selectedClass?.subClasses?.find(sc => sc.id.toString() === value);
-
-                return {
-                    ...prev,
-                    subclass_id: value,
-                    subclass_name: selectedSubclass?.name || '',
-                    subclass_description: selectedSubclass?.description || null
-                };
+            if (field === 'subdepartment_id') {
+                return { ...prev, subdepartment_id: value, class_id: '', subclass_id: '' };
             }
-
-            // For all other fields, update normally
-            const newState = {
-                ...prev,
-                [field]: value
-            };
-
-            console.log('Updated form data:', newState);
-            return newState;
+            if (field === 'class_id') {
+                return { ...prev, class_id: value, subclass_id: '' };
+            }
+            return { ...prev, [field]: value };
         });
-    }, [subdepartments, departments]);
-    
-    // Get principal member details for dependants
-    const principalMemberDetails = useMemo(() => {
-        if (applicantType !== 'dependant' || !selectedIndividual?.relationships?.length) return null
-
-        // Find the principal relationship
-        const principalRelation = selectedIndividual.relationships.find(
-            (rel: any) => rel.isPrincipal === 'Yes' ||
-                rel.relationship === 'principal' ||
-                rel.relationship === 'spouse' ||
-                rel.relationship === 'husband' ||
-                rel.relationship === 'wife'
-        )
-
-        if (!principalRelation) return null
-
-        // If we have the principal's details in the relationship, use them
-        if (principalRelation.full_name) {
-            return {
-                id: principalRelation.individual_id,
-                full_name: principalRelation.full_name,
-                relationship_type: principalRelation.relationship
-            }
-        }
-
-        // Otherwise, we need to fetch the principal's details
-        const fetchPrincipal = async () => {
-            const { data, error } = await supabase
-                .from('registry_individuals')
-                .select('id, full_name')
-                .eq('id', principalRelation.individual_id)
-                .single()
-
-            if (error || !data) return null
-
-            return {
-                id: data.id,
-                full_name: data.full_name,
-                relationship_type: principalRelation.relationship
-            }
-        }
-
-        // Return a promise that will be handled by the component
-        return fetchPrincipal()
-    }, [applicantType, selectedIndividual])
+    }, []);
 
     const handleFormChange = (field: string, value: any) => {
         setFormData(prev => ({
@@ -834,70 +684,78 @@ const fetchReferences = async (individualId: number) => {
     }
 
     const handleIndividualSelect = async (individual: Individual) => {
-        // Update the selected individual in state
         setSelectedIndividual(individual);
-
-        // Reset related states
+        setPrincipalForDependant(null);
         setSelectedCompany('');
+        setCompanies([]);
         setUnderstudies([]);
         setSelectedUnderstudy('');
+        setAvailableDependants([]);
+        setSelectedDependants([]);
+        setIncludeDependants(false);
+        setAvailableReferences([]);
+        setSelectedReferences([]);
+        setIncludeReferences(false);
 
-        // Get the primary phone number from contact details
-        const primaryPhone = individual.contact_details?.phone?.kenyan?.primary ||
-            individual.contact_details?.personal_mobile_num_kenyan_1 ||
-            individual.contact_details?.personal_mobile_num_kenyan_2 ||
-            individual.contact_details?.office_phone_number ||
-            individual.contact_details?.broadcast_whatsapp_number ||
-            '';
-
-        // Update form data with individual details
+        const primaryPhone = individual.contact_details?.phone?.kenyan?.primary || '';
         const formUpdate: any = {
             full_name: individual.full_name,
             mobile_number: primaryPhone,
             principal_member_id: ''
         };
 
-        // Fetch dependants and references for any individual (not just principals)
-        const [familyMembers, references] = await Promise.all([
-            individual.individual_type === 'principal' ? fetchDependants(individual.id) : Promise.resolve([]),
-            fetchReferences(individual.id)
-        ]);
-        
-        setAvailableDependants(familyMembers);
+        const references = await fetchReferences(individual.id);
         setAvailableReferences(references);
 
+        // Fetch family members for the selected individual
+        const familyMembers = await fetchDependants(individual.id);
+
         if (individual.individual_type === 'principal') {
-            // If selecting a principal, fetch their companies
-            await fetchCompanies(individual.id);
-        } else if (individual.individual_type === 'dependant' && individual.relationships?.length) {
-            // For dependants, find the principal from relationships
-            const principalRelation = individual.relationships.find(
-                (rel: any) => rel.isPrincipal === 'Yes' ||
-                    rel.relationship === 'principal' ||
-                    rel.relationship === 'spouse' ||
-                    rel.relationship === 'husband' ||
-                    rel.relationship === 'wife'
+            setAvailableDependants(familyMembers);
+        } else if (individual.individual_type === 'dependant') {
+            const principalRelation = individual.relationships?.find(
+                (rel: any) => rel.isPrincipal === 'Yes' || ['principal', 'spouse', 'husband', 'wife'].includes(rel.relationship?.toLowerCase())
             );
 
-            if (principalRelation) {
-                formUpdate.principal_member_id = principalRelation.individual_id.toString();
+            if (principalRelation && principalRelation.individual_id) {
+                const principalId = principalRelation.individual_id;
+                formUpdate.principal_member_id = principalId.toString();
 
-                // If we have the principal's details in the relationship, update the form
-                if (principalRelation.full_name) {
-                    formUpdate.principal_member_name = principalRelation.full_name;
+                // Fetch principal details and their companies
+                const [principalResult, companiesResult] = await Promise.all([
+                    supabase.from('registry_individuals').select('id, full_name').eq('id', principalId).single(),
+                    fetchCompanies(principalId)
+                ]);
+
+                if (principalResult.error) {
+                    console.error("Error fetching principal details:", principalResult.error);
+                    toast({ title: "Error", description: "Could not load principal member's details.", variant: "destructive" });
+                    return;
                 }
 
-                // Fetch companies for the principal
-                if (principalRelation.individual_id) {
-                    await fetchCompanies(principalRelation.individual_id);
-                }
+                const principalData = principalResult.data;
+                setPrincipalForDependant(principalData);
+
+                // Include principal in selection but exclude selected individual
+                const allFamilyForSelection = [
+                    { ...principalData, relationship_type: 'Principal Member' },
+                    ...familyMembers.filter(fm => fm.id !== individual.id)
+                ];
+
+                // Only show family members of the selected applicant
+                setAvailableDependants([
+                    ...familyMembers.filter(fm => fm.id !== individual.id)
+                ]);
+
+                // Set companies linked to the principal member
+                setCompanies(companiesResult);
+                setSelectedCompany('');
+            } else {
+                toast({ title: "Info", description: "No principal member found for this dependant.", variant: "default" });
             }
         }
 
-        setFormData(prev => ({
-            ...prev,
-            ...formUpdate
-        }));
+        setFormData(prev => ({ ...prev, ...formUpdate }));
     };
 
     return (
@@ -963,83 +821,25 @@ const fetchReferences = async (individualId: number) => {
                                             value={selectedIndividual?.id?.toString() || ''}
                                             onValueChange={(value) => {
                                                 const individual = individuals.find(i => i.id.toString() === value);
-                                                console.log('Selected individual:', individual);
-                                                if (individual) {
-                                                    handleIndividualSelect(individual);
-                                                }
+                                                if (individual) handleIndividualSelect(individual);
                                             }}
                                         >
                                             <SelectTrigger>
                                                 <SelectValue placeholder={`Select ${applicantType}...`}>
-                                                    {selectedIndividual && (
-                                                        <div className="flex flex-col">
-                                                            <span>{selectedIndividual.full_name}</span>
-                                                            {selectedIndividual.contact_details?.phone?.kenyan?.primary && (
-                                                                <span className="text-xs text-gray-500">
-                                                                    {selectedIndividual.contact_details.phone.kenyan.primary}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    )}
+                                                    {selectedIndividual && <span>{selectedIndividual.full_name}</span>}
                                                 </SelectValue>
                                             </SelectTrigger>
                                             <SelectContent className="max-h-60">
                                                 {individuals.map((individual) => (
                                                     <SelectItem key={individual.id} value={individual.id.toString()}>
-                                                        <div className="flex flex-col">
-                                                            <span>{individual.full_name}</span>
-                                                            {individual.contact_details?.phone?.kenyan?.primary && (
-                                                                <span className="text-xs text-gray-500">
-                                                                    {individual.contact_details.phone.kenyan.primary}
-                                                                </span>
-                                                            )}
-                                                        </div>
+                                                        {individual.full_name}
                                                     </SelectItem>
                                                 ))}
                                             </SelectContent>
                                         </Select>
                                     )}
 
-                                    <div className="space-y-3">
-                                        <div className="relative">
-                                            <div className="absolute inset-0 flex items-center">
-                                                <span className="w-full border-t" />
-                                            </div>
-                                            <div className="relative flex justify-center text-xs uppercase">
-                                                <span className="bg-background px-2 text-muted-foreground">Or create new</span>
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-3">
-                                            <div>
-                                                <Label htmlFor="full-name" className="text-sm font-medium">
-                                                    Full Name <span className="text-red-500">*</span>
-                                                </Label>
-                                                <Input
-                                                    id="full-name"
-                                                    value={formData.full_name}
-                                                    onChange={(e) => handleFormChange('full_name', e.target.value)}
-                                                    placeholder="Enter full name"
-                                                    required={!selectedIndividual}
-                                                    className="mt-1"
-                                                />
-                                            </div>
-                                            <div>
-                                                <Label htmlFor="mobile" className="text-sm font-medium">
-                                                    Mobile Number <span className="text-red-500">*</span>
-                                                </Label>
-                                                <Input
-                                                    id="mobile"
-                                                    type="tel"
-                                                    value={formData.mobile_number}
-                                                    onChange={(e) => handleFormChange('mobile_number', e.target.value)}
-                                                    placeholder="Enter mobile number"
-                                                    required={!selectedIndividual}
-                                                    className="mt-1"
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
+                                    {/* OR Create New section remains for manual entry */}
                                 </CardContent>
                             </Card>
 
@@ -1048,56 +848,36 @@ const fetchReferences = async (individualId: number) => {
                                 <CardHeader className="pb-3">
                                     <CardTitle className="text-base font-semibold flex items-center gap-2">
                                         <Building2 className="h-4 w-4" />
-                                        Select Company
+                                        {applicantType === 'dependant' && principalForDependant
+                                            ? 'Company (Linked to Principal)'
+                                            : 'Select Company'}
                                     </CardTitle>
+                                    {applicantType === 'dependant' && principalForDependant && (
+                                        <CardDescription>
+                                            Showing companies for: {principalForDependant.full_name}
+                                        </CardDescription>
+                                    )}
                                 </CardHeader>
                                 <CardContent>
                                     <Select
                                         value={selectedCompany}
-                                        onValueChange={(value: string) => {
-                                            console.log('Selected company:', value);
-                                            setSelectedCompany(value);
-                                            fetchUnderstudies(value);
-                                        }}
+                                        onValueChange={setSelectedCompany}
+                                        disabled={loadingCompanies || !selectedIndividual}
                                     >
                                         <SelectTrigger className="w-full">
-                                            <SelectValue placeholder="Select company...">
-                                                {selectedCompany ? (
-                                                    <span>{companies.find(c => c.id === selectedCompany)?.name || 'Select...'}</span>
-                                                ) : 'Select company...'}
-                                            </SelectValue>
+                                            <SelectValue placeholder={loadingCompanies ? "Loading..." : "Select company..."} />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {companies.length > 0 ? (
-                                                companies.map((company) => {
-                                                    if (!company) return null;
-                                                    const companyId = company.id?.toString() || '';
-                                                    const companyName = company.name || company.company_name || 'Unnamed Company';
-                                                    const isBillTo = company.is_bill_to || false;
-
-                                                    return (
-                                                        <SelectItem
-                                                            key={companyId}
-                                                            value={companyId}
-                                                            className="cursor-pointer"
-                                                        >
-                                                            <div className="flex flex-col">
-                                                                <div className="flex items-center gap-2">
-                                                                    <span>{companyName}</span>
-                                                                    {isBillTo && (
-                                                                        <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
-                                                                            Bill To
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                            </div>
+                                            {companies && companies.length > 0 ? (
+                                                <>
+                                                    {companies.map((company) => (
+                                                        <SelectItem key={company.id} value={company.id.toString()}>
+                                                            {company.company_name} {company.is_bill_to && "(Bill To)"}
                                                         </SelectItem>
-                                                    );
-                                                })
+                                                    ))}
+                                                </>
                                             ) : (
-                                                <div className="px-3 py-2 text-sm text-muted-foreground">
-                                                    No companies found
-                                                </div>
+                                                <div className="px-3 py-2 text-sm text-muted-foreground">No companies found</div>
                                             )}
                                         </SelectContent>
                                     </Select>
@@ -1114,38 +894,23 @@ const fetchReferences = async (individualId: number) => {
                                         </CardTitle>
                                     </CardHeader>
                                     <CardContent>
-                                        <Select
-                                            value={selectedUnderstudy}
-                                            onValueChange={setSelectedUnderstudy}
-                                        >
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Select understudy..." />
-                                            </SelectTrigger>
+                                        <Select value={selectedUnderstudy} onValueChange={setSelectedUnderstudy}>
+                                            <SelectTrigger><SelectValue placeholder="Select understudy..." /></SelectTrigger>
                                             <SelectContent>
                                                 {understudies.length > 0 ? (
-                                                    understudies.map((understudy) => {
-                                                        if (!understudy) return null;
-                                                        const understudyId = understudy.id?.toString() || '';
-                                                        return (
-                                                            <SelectItem
-                                                                key={understudyId}
-                                                                value={understudyId}
-                                                                className="cursor-pointer"
-                                                            >
-                                                                {understudy.full_name}
-                                                            </SelectItem>
-                                                        );
-                                                    })
+                                                    understudies.map((understudy) => (
+                                                        <SelectItem key={understudy.id} value={understudy.id}>
+                                                            {understudy.full_name}
+                                                        </SelectItem>
+                                                    ))
                                                 ) : (
-                                                    <div className="px-3 py-2 text-sm text-muted-foreground">
-                                                        No understudies found
-                                                    </div>
+                                                    <div className="px-3 py-2 text-sm text-muted-foreground">No understudies found</div>
                                                 )}
                                             </SelectContent>
                                         </Select>
                                     </CardContent>
                                 </Card>)}
-                            
+
                             {/* Dependants Selection */}
                             {availableDependants.length > 0 && (
                                 <Card className="border border-gray-200 rounded-lg">
@@ -1159,49 +924,39 @@ const fetchReferences = async (individualId: number) => {
                                         <div className="space-y-2">
                                             <div className="flex items-center space-x-2">
                                                 <input
-                                                    type="checkbox"
-                                                    id="include-dependants"
-                                                    checked={includeDependants}
+                                                    type="checkbox" id="include-dependants" checked={includeDependants}
                                                     onChange={(e) => {
                                                         setIncludeDependants(e.target.checked);
-                                                        if (!e.target.checked) {
-                                                            setSelectedDependants([]);
-                                                        }
+                                                        if (!e.target.checked) setSelectedDependants([]);
                                                     }}
                                                     className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                 />
-                                                <label htmlFor="include-dependants" className="text-sm font-medium">
-                                                    Include family members in this enquiry
-                                                </label>
+                                                <label htmlFor="include-dependants" className="text-sm font-medium">Include family members</label>
                                             </div>
-
                                             {includeDependants && (
                                                 <div className="mt-2 space-y-2 max-h-60 overflow-y-auto border rounded-md p-2">
                                                     {availableDependants.map((dependant) => (
                                                         <div key={dependant.id} className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded">
                                                             <input
-                                                                type="checkbox"
-                                                                id={`dependant-${dependant.id}`}
+                                                                type="checkbox" id={`dependant-${dependant.id}`}
                                                                 checked={selectedDependants.includes(dependant.id.toString())}
                                                                 onChange={(e) => {
-                                                                    if (e.target.checked) {
-                                                                        setSelectedDependants(prev => [...prev, dependant.id.toString()]);
-                                                                    } else {
-                                                                        setSelectedDependants(prev =>
-                                                                            prev.filter(id => id !== dependant.id.toString())
-                                                                        );
-                                                                    }
+                                                                    setSelectedDependants(prev => e.target.checked
+                                                                        ? [...prev, dependant.id.toString()]
+                                                                        : prev.filter(id => id !== dependant.id.toString())
+                                                                    );
                                                                 }}
                                                                 className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                             />
-                                                            <label
-                                                                htmlFor={`dependant-${dependant.id}`}
-                                                                className="text-sm flex-1 flex justify-between items-center"
-                                                            >
+                                                            <label htmlFor={`dependant-${dependant.id}`} className="text-sm flex-1 flex justify-between items-center">
                                                                 <span>{dependant.full_name}</span>
-                                                                <span className="text-xs text-gray-500 capitalize">
-                                                                    {dependant.relationship_type || 'family member'}
-                                                                </span>
+                                                                {dependant.relationship_type === 'Principal Member' ? (
+                                                                    <Badge variant="outline">Principal</Badge>
+                                                                ) : (
+                                                                    <span className="text-xs text-gray-500 capitalize">
+                                                                        {dependant.relationship_type || 'Family Member'}
+                                                                    </span>
+                                                                )}
                                                             </label>
                                                         </div>
                                                     ))}
@@ -1225,50 +980,31 @@ const fetchReferences = async (individualId: number) => {
                                         <div className="space-y-2">
                                             <div className="flex items-center space-x-2">
                                                 <input
-                                                    type="checkbox"
-                                                    id="include-references"
-                                                    checked={includeReferences}
+                                                    type="checkbox" id="include-references" checked={includeReferences}
                                                     onChange={(e) => {
                                                         setIncludeReferences(e.target.checked);
-                                                        if (!e.target.checked) {
-                                                            setSelectedReferences([]);
-                                                        }
+                                                        if (!e.target.checked) setSelectedReferences([]);
                                                     }}
                                                     className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                 />
-                                                <label htmlFor="include-references" className="text-sm font-medium">
-                                                    Include references in this enquiry
-                                                </label>
+                                                <label htmlFor="include-references" className="text-sm font-medium">Include references</label>
                                             </div>
-
                                             {includeReferences && (
                                                 <div className="mt-2 space-y-2 max-h-60 overflow-y-auto border rounded-md p-2">
                                                     {availableReferences.map((reference) => (
                                                         <div key={reference.id} className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded">
                                                             <input
-                                                                type="checkbox"
-                                                                id={`reference-${reference.id}`}
+                                                                type="checkbox" id={`reference-${reference.id}`}
                                                                 checked={selectedReferences.includes(reference.id.toString())}
                                                                 onChange={(e) => {
-                                                                    if (e.target.checked) {
-                                                                        setSelectedReferences(prev => [...prev, reference.id.toString()]);
-                                                                    } else {
-                                                                        setSelectedReferences(prev =>
-                                                                            prev.filter(id => id !== reference.id.toString())
-                                                                        );
-                                                                    }
+                                                                    setSelectedReferences(prev => e.target.checked
+                                                                        ? [...prev, reference.id.toString()]
+                                                                        : prev.filter(id => id !== reference.id.toString())
+                                                                    );
                                                                 }}
                                                                 className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                             />
-                                                            <label
-                                                                htmlFor={`reference-${reference.id}`}
-                                                                className="text-sm flex-1 flex justify-between items-center"
-                                                            >
-                                                                <span>{reference.full_name}</span>
-                                                                <span className="text-xs text-gray-500 capitalize">
-                                                                    {reference.relationship_type || 'reference'}
-                                                                </span>
-                                                            </label>
+                                                            <label htmlFor={`reference-${reference.id}`} className="text-sm flex-1">{reference.full_name}</label>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -1277,7 +1013,6 @@ const fetchReferences = async (individualId: number) => {
                                     </CardContent>
                                 </Card>
                             )}
-
                         </div>
 
                         {/* Right Column - Enquiry Details */}

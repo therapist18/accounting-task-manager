@@ -46,7 +46,7 @@ export default function RequirementsTableCombined({
   // Get all unique references across all tasks
   const allReferences = React.useMemo(() => {
     const referencesMap = new Map();
-    
+
     filteredGroupedTasks.forEach(group => {
       group.tasks.forEach(task => {
         if (task.references && Array.isArray(task.references)) {
@@ -63,7 +63,7 @@ export default function RequirementsTableCombined({
         }
       });
     });
-    
+
     return Array.from(referencesMap.values());
   }, [filteredGroupedTasks, individualNames]);
 
@@ -76,10 +76,10 @@ export default function RequirementsTableCombined({
       if (hasClassD) groupColumns += 1; // Understudy
       return acc + groupColumns;
     }, 0);
-    
+
     // Add reference columns (individual columns, not sub-columns)
     const referenceColumns = hasReferencesColumn ? allReferences.length : 0;
-    
+
     return baseColumns + applicantColumns + referenceColumns;
   };
 
@@ -102,13 +102,13 @@ export default function RequirementsTableCombined({
           >
             Requirements
           </TableHead>
-          
+
           {/* Applicants + References */}
           {filteredGroupedTasks.map((group, groupIndex) => {
             const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
             const hasDependant = group.tasks.some(task => task.applicant_type === 'dependant');
             const dependantCount = group.dependantIds.length;
-            
+
             // Calculate columns - principal, dependants, understudy (NO references here)
             let totalColumns = 1; // Principal
             totalColumns += dependantCount; // Each dependant
@@ -235,7 +235,7 @@ export default function RequirementsTableCombined({
 
             return columns;
           })}
-          
+
           {/* Individual Reference Columns */}
           {hasReferencesColumn && allReferences.map((reference, refIndex) => (
             <TableHead
@@ -391,25 +391,25 @@ export default function RequirementsTableCombined({
                               </TableCell>
                               {filteredGroupedTasks.map((group, groupIndex) => {
                                 const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                                const referenceTask = group.tasks[0];
+                                const referenceTask = group.tasks[0]; // Use first task as reference since company docs are shared
 
                                 const columns = [
-                                  // Principal Documents
+                                  // Principal Documents - for company docs, show same status across all columns
                                   <TableCell key={`${docItem.document.id}-${groupIndex}-principal`} className="text-center border p-1">
                                     {renderDocumentStatus(referenceTask, docItem.document, 'principal')}
                                   </TableCell>
                                 ];
 
-                                // Add columns for each dependant
+                                // Add columns for each dependant - for company docs, show same status
                                 group.dependantIds.forEach((dependantId) => {
                                   columns.push(
                                     <TableCell key={`${docItem.document.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
-                                      {renderDocumentStatus(referenceTask, docItem.document, 'dependant', dependantId)}
+                                      {renderDocumentStatus(referenceTask, docItem.document, 'dependant')}
                                     </TableCell>
                                   );
                                 });
 
-                                // Understudy columns
+                                // Understudy columns - for company docs, show same status
                                 if (hasClassD) {
                                   columns.push(
                                     <TableCell key={`${docItem.document.id}-${groupIndex}-understudy`} className="text-center border p-1">
@@ -420,7 +420,7 @@ export default function RequirementsTableCombined({
 
                                 return columns;
                               })}
-                              
+
                               {/* Reference columns */}
                               {hasReferencesColumn && allReferences.map((reference, refIndex) => (
                                 <TableCell key={`${docItem.document.id}-reference-${reference.id}`} className="text-center border p-1">
@@ -479,7 +479,7 @@ export default function RequirementsTableCombined({
 
                                   return columns;
                                 })}
-                                
+
                                 {/* Reference columns */}
                                 {hasReferencesColumn && allReferences.map((reference, refIndex) => (
                                   <TableCell key={`${field.id}-reference-${reference.id}`} className="text-center border p-1">
@@ -593,7 +593,7 @@ export default function RequirementsTableCombined({
 
                                 return columns;
                               })}
-                              
+
                               {/* Reference columns */}
                               {hasReferencesColumn && allReferences.map((reference, refIndex) => (
                                 <TableCell key={`${docItem.document.id}-reference-${reference.id}`} className="text-center border p-1">
@@ -652,7 +652,7 @@ export default function RequirementsTableCombined({
 
                                   return columns;
                                 })}
-                                
+
                                 {/* Reference columns */}
                                 {hasReferencesColumn && allReferences.map((reference, refIndex) => (
                                   <TableCell key={`${field.id}-reference-${reference.id}`} className="text-center border p-1">
@@ -800,7 +800,7 @@ export default function RequirementsTableCombined({
 
                               return columns;
                             })}
-                            
+
                             {/* Reference columns */}
                             {hasReferencesColumn && allReferences.map((reference, refIndex) => (
                               <TableCell key={`${template.id}-reference-${reference.id}`} className="text-center border p-1">
@@ -866,9 +866,6 @@ export default function RequirementsTableCombined({
                                 <span className="text-sm font-semibold text-gray-800">
                                   {template.display_name}
                                 </span>
-                                <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700">
-                                  Template
-                                </Badge>
                               </div>
                             </TableCell>
                             {filteredGroupedTasks.map((group, groupIndex) => {
@@ -902,7 +899,7 @@ export default function RequirementsTableCombined({
 
                               return columns;
                             })}
-                            
+
                             {/* Reference columns */}
                             {hasReferencesColumn && allReferences.map((reference, refIndex) => (
                               <TableCell key={`${template.id}-reference-${reference.id}`} className="text-center border p-1">
@@ -917,8 +914,8 @@ export default function RequirementsTableCombined({
               </>
             )}
 
-          {/* Post Application Section */}
-          {(organizedRequirements.postApplication.company.length > 0 || organizedRequirements.postApplication.individual.length > 0) && (
+            {/* Post Application Section */}
+            {(organizedRequirements.postApplication.company.length > 0 || organizedRequirements.postApplication.individual.length > 0) && (
               <>
                 {/* Main Post Application Header */}
                 <TableRow className="bg-gradient-to-r from-blue-100 to-blue-50 border-y-2 border-blue-300">
@@ -1011,8 +1008,8 @@ export default function RequirementsTableCombined({
                             const columns = [
                               // Principal Documents
                               <TableCell key={`${stageDoc.id}-${groupIndex}-principal-docs`} className="text-center border p-1">
-                                {referenceTask.applicant_type === 'dependant' || referenceTask.applicant_type === 'principal' ? 
-                                  renderDocumentStatus(referenceTask, stageDoc, 'principal', undefined, true) : 
+                                {referenceTask.applicant_type === 'dependant' || referenceTask.applicant_type === 'principal' ?
+                                  renderDocumentStatus(referenceTask, stageDoc, 'principal', undefined, true) :
                                   <span className="text-muted-foreground">N/A</span>
                                 }
                               </TableCell>
@@ -1032,8 +1029,8 @@ export default function RequirementsTableCombined({
                               // Dependant Documents
                               columns.push(
                                 <TableCell key={`${stageDoc.id}-${groupIndex}-dependant-${dependantId}-docs`} className="text-center border p-1">
-                                  {referenceTask.applicant_type === 'applicant' ? 
-                                    renderDocumentStatus(referenceTask, stageDoc, 'dependant', dependantId, true) : 
+                                  {referenceTask.applicant_type === 'applicant' ?
+                                    renderDocumentStatus(referenceTask, stageDoc, 'dependant', dependantId, true) :
                                     <span className="text-muted-foreground">N/A</span>
                                   }
                                 </TableCell>
@@ -1054,8 +1051,8 @@ export default function RequirementsTableCombined({
                               // Understudy Documents
                               columns.push(
                                 <TableCell key={`${stageDoc.id}-${groupIndex}-understudy-docs`} className="text-center border p-1">
-                                  {referenceTask.applicant_type === 'applicant' ? 
-                                    renderDocumentStatus(referenceTask, stageDoc, 'understudy', undefined, true) : 
+                                  {referenceTask.applicant_type === 'applicant' ?
+                                    renderDocumentStatus(referenceTask, stageDoc, 'understudy', undefined, true) :
                                     <span className="text-muted-foreground">N/A</span>
                                   }
                                 </TableCell>
@@ -1140,8 +1137,8 @@ export default function RequirementsTableCombined({
                             const columns = [
                               // Principal Documents
                               <TableCell key={`${stageDoc.id}-${groupIndex}-principal-docs`} className="text-center border p-1">
-                                {referenceTask.applicant_type === 'dependant' || referenceTask.applicant_type === 'principal' ? 
-                                  renderDocumentStatus(referenceTask, stageDoc, 'principal', undefined, true) : 
+                                {referenceTask.applicant_type === 'dependant' || referenceTask.applicant_type === 'principal' ?
+                                  renderDocumentStatus(referenceTask, stageDoc, 'principal', undefined, true) :
                                   <span className="text-muted-foreground">N/A</span>
                                 }
                               </TableCell>
@@ -1151,8 +1148,8 @@ export default function RequirementsTableCombined({
                             if (hasReferencesColumn) {
                               columns.push(
                                 <TableCell key={`${stageDoc.id}-${groupIndex}-principal-refs`} className="text-center border p-1">
-                                  {referenceTask.applicant_type === 'applicant' ? 
-                                    renderReferencesData(referenceTask, 'principal') : 
+                                  {referenceTask.applicant_type === 'applicant' ?
+                                    renderReferencesData(referenceTask, 'principal') :
                                     <span className="text-muted-foreground">N/A</span>
                                   }
                                 </TableCell>
@@ -1164,8 +1161,8 @@ export default function RequirementsTableCombined({
                               // Dependant Documents
                               columns.push(
                                 <TableCell key={`${stageDoc.id}-${groupIndex}-dependant-${dependantId}-docs`} className="text-center border p-1">
-                                  {referenceTask.applicant_type === 'applicant' ? 
-                                    renderDocumentStatus(referenceTask, stageDoc, 'dependant', dependantId, true) : 
+                                  {referenceTask.applicant_type === 'applicant' ?
+                                    renderDocumentStatus(referenceTask, stageDoc, 'dependant', dependantId, true) :
                                     <span className="text-muted-foreground">N/A</span>
                                   }
                                 </TableCell>
@@ -1175,8 +1172,8 @@ export default function RequirementsTableCombined({
                               if (hasReferencesColumn) {
                                 columns.push(
                                   <TableCell key={`${stageDoc.id}-${groupIndex}-dependant-${dependantId}-refs`} className="text-center border p-1">
-                                    {referenceTask.applicant_type === 'applicant' ? 
-                                      renderReferencesData(referenceTask, 'dependant', dependantId) : 
+                                    {referenceTask.applicant_type === 'applicant' ?
+                                      renderReferencesData(referenceTask, 'dependant', dependantId) :
                                       <span className="text-muted-foreground">N/A</span>
                                     }
                                   </TableCell>
@@ -1189,8 +1186,8 @@ export default function RequirementsTableCombined({
                               // Understudy Documents
                               columns.push(
                                 <TableCell key={`${stageDoc.id}-${groupIndex}-understudy-docs`} className="text-center border p-1">
-                                  {referenceTask.applicant_type === 'applicant' ? 
-                                    renderDocumentStatus(referenceTask, stageDoc, 'understudy', undefined, true) : 
+                                  {referenceTask.applicant_type === 'applicant' ?
+                                    renderDocumentStatus(referenceTask, stageDoc, 'understudy', undefined, true) :
                                     <span className="text-muted-foreground">N/A</span>
                                   }
                                 </TableCell>
@@ -1200,8 +1197,8 @@ export default function RequirementsTableCombined({
                               if (hasReferencesColumn) {
                                 columns.push(
                                   <TableCell key={`${stageDoc.id}-${groupIndex}-understudy-refs`} className="text-center border p-1">
-                                    {referenceTask.applicant_type === 'applicant' ? 
-                                      renderReferencesData(referenceTask, 'understudy') : 
+                                    {referenceTask.applicant_type === 'applicant' ?
+                                      renderReferencesData(referenceTask, 'understudy') :
                                       <span className="text-muted-foreground">N/A</span>
                                     }
                                   </TableCell>
@@ -1263,7 +1260,7 @@ export default function RequirementsTableCombined({
                           {organizedRequirements.clientFields.individual.length}
                         </span>
                       </TableCell>
-                      {filteredGroupedTasks.map((group, groupIndex) => {  
+                      {filteredGroupedTasks.map((group, groupIndex) => {
                         const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
                         let columnsCount = 1 + group.dependantIds.length;
                         if (hasClassD) columnsCount += 1;

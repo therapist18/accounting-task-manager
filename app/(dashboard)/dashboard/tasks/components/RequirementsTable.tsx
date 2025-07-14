@@ -108,8 +108,7 @@ export function RequirementsTable({
     documentStatus?: string;
     columnType?: 'principal' | 'dependant' | 'understudy';
   } | null>(null);
-
-  // Document status tracking
+  const [companyData, setCompanyData] = useState<Record<number, any>>({});
   const [documentStatusesMap, setDocumentStatusesMap] = useState<Record<string, {
     status: DocumentStatus;
     loading: boolean;
@@ -240,6 +239,29 @@ export function RequirementsTable({
     }
   }, []);
 
+  const fetchCompanyData = useCallback(async (tasks: any[]) => {
+    const companyIds = [...new Set(tasks.map(t => t.company_id).filter(Boolean))];
+    if (companyIds.length === 0) return;
+
+    try {
+      const { data: companies, error } = await supabase
+        .from('acc_portal_company_duplicate')
+        .select('id, company_name, company_type, registration_number')
+        .in('id', companyIds);
+
+      if (error) throw error;
+
+      const companiesMap = companies?.reduce((acc, company) => {
+        acc[company.id] = company;
+        return acc;
+      }, {} as Record<number, any>);
+
+      setCompanyData(companiesMap || {});
+    } catch (error) {
+      console.error('Error fetching company data:', error);
+    }
+  }, []);
+
   // Fetch references for subdepartments 10 and 5 tasks
   const fetchTaskReferences = useCallback(async (tasks: any[]) => {
     const referenceTasks = tasks.filter(task => {
@@ -253,7 +275,7 @@ export function RequirementsTable({
     try {
       const referencesByTask = referenceTasks.reduce((acc, task) => {
         if (!task.references || !Array.isArray(task.references)) return acc;
-        
+
         if (!acc[task.id]) {
           acc[task.id] = [];
         }
@@ -457,11 +479,11 @@ export function RequirementsTable({
     if (!tasks?.length) {
       return;
     }
-
     fetchAllIndividualData(tasks);
+    fetchCompanyData(tasks);
     fetchTaskReferences(tasks); // Fetch references for subdepartments 10 and 5
 
-  }, [tasks, fetchAllIndividualData, fetchTaskReferences]);
+  }, [tasks, fetchAllIndividualData, fetchTaskReferences, fetchCompanyData]);
 
   // Toggle document field expansion
   const toggleDocumentExpansion = useCallback((documentId: string) => {
@@ -610,24 +632,93 @@ export function RequirementsTable({
     }
   }, [fetchingDocuments])
 
-  // Update the getDocumentStatusForColumn function
-const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy' | 'reference', dependantId?: number, referenceId?: number): DocumentStatus => {
-  const itemId = item.selectionId || item.id;
-  const statusKey = dependantId ? `${task.id}-${itemId}-${columnType}-${dependantId}` : 
-                   referenceId ? `${task.id}-${itemId}-${columnType}-${referenceId}` :
-                   `${task.id}-${itemId}-${columnType}`;
+  const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy' | 'reference', dependantId?: number, referenceId?: number): DocumentStatus => {
+    const itemId = item.selectionId || item.id;
+    const statusKey = dependantId ? `${task.id}-${itemId}-${columnType}-${dependantId}` :
+      referenceId ? `${task.id}-${itemId}-${columnType}-${referenceId}` :
+        `${task.id}-${itemId}-${columnType}`;
 
-  const isApplicableForColumn =
-    (columnType === 'principal' && (item.ap === true || item.display === true)) ||
-    (columnType === 'dependant' && (item.dp === true || item.display === true)) ||
-    (columnType === 'understudy' && (item.understudy === true || item.display === true)) ||
-    (columnType === 'reference' && (item.reference === true || item.display === true));
+    const isApplicableForColumn =
+      (columnType === 'principal' && (item.ap === true || item.display === true)) ||
+      (columnType === 'dependant' && (item.dp === true || item.display === true)) ||
+      (columnType === 'understudy' && (item.understudy === true || item.display === true)) ||
+      (columnType === 'reference' && (item.reference === true || item.display === true));
 
-  if (!isApplicableForColumn) {
+    if (!isApplicableForColumn) {
+      return {
+        type: 'na',
+        documents: [],
+        count: 0,
+        applicantTypes: {
+          principal: item.ap === true || item.display === true,
+          dependant: item.dp === true || item.display === true,
+          understudy: item.understudy === true || item.display === true,
+          reference: item.reference === true || item.display === true
+        }
+      };
+    }
+
+    // Check if this is a company document by looking at the actual document definition
+    let isCompanyDocument = false;
+    const parsedId = parseSelectionId(itemId);
+
+    let documents: any[] = [];
+    if (parsedId.type === 'document') {
+      const documentDef = documents.find(doc => doc.id === parsedId.documentId) ||
+        bclTemplateDocuments.find(doc => doc.id === parsedId.documentId);
+      isCompanyDocument = documentDef?.category === 'company-docs';
+    }
+
+    if (isCompanyDocument) {
+      // Handle company documents
+      if (task.company_id && allCompanyDocuments[task.company_id]) {
+        const baseItemId = itemId.split('_')[0];
+        documents = allCompanyDocuments[task.company_id].filter(doc => {
+          const kycDocId = doc.kyc_document_id;
+          return kycDocId === baseItemId ||
+            kycDocId === itemId ||
+            kycDocId === item.id ||
+            kycDocId === parsedId.documentId;
+        });
+      }
+    } else {
+      // Handle individual documents
+      let individualId: number | null = null;
+
+      if (columnType === 'principal') {
+        individualId = task.principal_member || task.individual_id;
+      } else if (columnType === 'dependant') {
+        individualId = dependantId || task.dependant_member || task.individual_id;
+      } else if (columnType === 'understudy') {
+        individualId = task.understudy_member || task.individual_id;
+      } else if (columnType === 'reference') {
+        individualId = referenceId || task.individual_id;
+      }
+
+      if (individualId && allIndividualDocuments[individualId]) {
+        const baseItemId = itemId.split('_')[0];
+        documents = allIndividualDocuments[individualId].filter(doc => {
+          const docId = doc.document_id || '';
+          const kycId = (doc.acc_portal_kyc?.id || '');
+          return docId === baseItemId ||
+            docId === itemId ||
+            kycId === baseItemId ||
+            kycId === itemId ||
+            docId === item.id ||
+            kycId === item.id;
+        });
+      }
+    }
+
+    const cachedStatus = documentStatusesMap[statusKey];
+    if (cachedStatus && !cachedStatus.loading) {
+      return cachedStatus.status;
+    }
+
     return {
-      type: 'na',
-      documents: [],
-      count: 0,
+      type: documents.length > 0 ? 'view' : 'upload',
+      documents: documents,
+      count: documents.length,
       applicantTypes: {
         principal: item.ap === true || item.display === true,
         dependant: item.dp === true || item.display === true,
@@ -635,73 +726,10 @@ const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType
         reference: item.reference === true || item.display === true
       }
     };
-  }
+  }, [documentStatusesMap, allIndividualDocuments, allCompanyDocuments, documents, bclTemplateDocuments, parseSelectionId]);
 
-  // Check if this is a company document
-  const isCompanyDocument = item.category === 'company-docs' || item.category === 'company';
-
-  let documents: any[] = [];
-
-  if (isCompanyDocument) {
-    // Handle company documents
-    if (task.company_id && allCompanyDocuments[task.company_id]) {
-      const baseItemId = itemId.split('_')[0];
-      documents = allCompanyDocuments[task.company_id].filter(doc => {
-        const kycDocId = doc.kyc_document_id;
-        return kycDocId === baseItemId ||
-               kycDocId === itemId ||
-               kycDocId === item.id;
-      });
-    }
-  } else {
-    // Handle individual documents
-    let individualId: number | null = null;
-
-    if (columnType === 'principal') {
-      individualId = task.principal_member || task.individual_id;
-    } else if (columnType === 'dependant') {
-      individualId = dependantId || task.dependant_member || task.individual_id;
-    } else if (columnType === 'understudy') {
-      individualId = task.understudy_member || task.individual_id;
-    } else if (columnType === 'reference') {
-      individualId = referenceId || task.individual_id;
-    }
-
-    if (individualId && allIndividualDocuments[individualId]) {
-      const baseItemId = itemId.split('_')[0];
-      documents = allIndividualDocuments[individualId].filter(doc => {
-        const docId = doc.document_id || '';
-        const kycId = (doc.acc_portal_kyc?.id || '');
-        return docId === baseItemId ||
-               docId === itemId ||
-               kycId === baseItemId ||
-               kycId === itemId ||
-               docId === item.id ||
-               kycId === item.id;
-      });
-    }
-  }
-
-  const cachedStatus = documentStatusesMap[statusKey];
-  if (cachedStatus && !cachedStatus.loading) {
-    return cachedStatus.status;
-  }
-
-  return {
-    type: documents.length > 0 ? 'view' : 'upload',
-    documents: documents,
-    count: documents.length,
-    applicantTypes: {
-      principal: item.ap === true || item.display === true,
-      dependant: item.dp === true || item.display === true,
-      understudy: item.understudy === true || item.display === true,
-      reference: item.reference === true || item.display === true
-    }
-  };
-}, [documentStatusesMap, allIndividualDocuments, allCompanyDocuments]);
-
-// Calculate statistics
-const calculateStats = useMemo(() => {
+  // Calculate statistics
+  const calculateStats = useMemo(() => {
     const stats = {
       uploaded: 0,
       missing: 0,
@@ -1024,72 +1052,48 @@ const calculateStats = useMemo(() => {
         status: DocumentStatus;
         loading: boolean;
       }> = {};
-  
+
       for (const task of filteredTasks) {
         const classRequirements = taskClassRequirements[task.id];
         if (!classRequirements?.documents_and_fields) continue;
-  
+
         for (const item of classRequirements.documents_and_fields) {
           const itemId = item.selectionId || item.id;
           const baseItemId = itemId.split('_')[0];
-          const isCompanyDocument = item.category === 'company-docs' || item.category === 'company';
-  
+
+          // Check if this is a company document by looking at the actual document definition
+          let isCompanyDocument = false;
+          const parsedId = parseSelectionId(itemId);
+          if (parsedId.type === 'document') {
+            const documentDef = documents.find(doc => doc.id === parsedId.documentId) ||
+              bclTemplateDocuments.find(doc => doc.id === parsedId.documentId);
+            isCompanyDocument = documentDef?.category === 'company-docs';
+          }
           if (item.ap || item.dp || item.understudy || item.display || item.reference) {
             const columnTypes: ('principal' | 'dependant' | 'understudy' | 'reference')[] = [];
             if (item.ap || item.display) columnTypes.push('principal');
             if (item.dp || item.display) columnTypes.push('dependant');
             if (item.understudy || item.display) columnTypes.push('understudy');
             if (item.reference || item.display) columnTypes.push('reference');
-  
+
             for (const columnType of columnTypes) {
-              let documents: any[] = [];
-  
               if (isCompanyDocument) {
-                // Handle company documents
+                // Handle company documents - single status per task/item/column
+                const key = `${task.id}-${itemId}-${columnType}`;
+
+                let documents: any[] = [];
                 if (task.company_id && allCompanyDocuments[task.company_id]) {
                   documents = allCompanyDocuments[task.company_id].filter(doc => {
                     const kycDocId = doc.kyc_document_id;
-                    return kycDocId === baseItemId ||
-                           kycDocId === itemId ||
-                           kycDocId === item.id;
-                  });
-                }
-                
-                // For company documents, we don't need per-applicant status
-                const key = `${task.id}-${itemId}-${columnType}`;
-                const currentStatus = documentStatusesMap[key];
-                const documentCount = documents.length;
-                const currentCount = currentStatus?.status.count || 0;
-  
-                if (!currentStatus || documentCount !== currentCount) {
-                  updates[key] = {
-                    status: {
-                      type: documentCount > 0 ? 'view' : 'upload',
-                      documents: documents,
-                      count: documentCount,
-                      applicantTypes: {
-                        principal: item.ap || item.display || false,
-                        dependant: item.dp || item.display || false,
-                        understudy: item.understudy || item.display || false,
-                        reference: item.reference || item.display || false
-                      }
-                    },
-                    loading: false
-                  };
-                }
-              }  else if (columnType === 'reference' && task.references && Array.isArray(task.references)) {
-              for (const reference of task.references) {
-                const key = `${task.id}-${itemId}-${columnType}-${reference.id}`;
 
-                let documents: any[] = [];
-                if (reference.id && allIndividualDocuments[reference.id]) {
-                  documents = allIndividualDocuments[reference.id].filter(doc => {
-                    const docId = doc.document_id || '';
-                    const kycId = (doc.acc_portal_kyc?.id || '');
-                    return docId === baseItemId ||
-                      docId === itemId ||
-                      kycId === baseItemId ||
-                      kycId === itemId;
+                    // More flexible matching for company documents
+                    const matches = kycDocId === baseItemId ||
+                      kycDocId === itemId ||
+                      kycDocId === item.id ||
+                      kycDocId === parsedId.documentId;
+
+
+                    return matches;
                   });
                 }
 
@@ -1113,225 +1117,301 @@ const calculateStats = useMemo(() => {
                     loading: false
                   };
                 }
-              }
-            } else {
-              const key = `${task.id}-${itemId}-${columnType}`;
+              } else {
+                // Handle individual documents (existing logic)
+                if (columnType === 'dependant' && task.dependant_member && Array.isArray(task.dependant_member)) {
+                  for (const dependant of task.dependant_member) {
+                    const key = `${task.id}-${itemId}-${columnType}-${dependant.id}`;
 
-              let individualId: number | null = null;
-              if (columnType === 'principal') {
-                individualId = task.principal_member || task.individual_id;
-              } else if (columnType === 'understudy') {
-                individualId = task.understudy_member || task.individual_id;
-              }
-
-              let documents: any[] = [];
-              if (individualId && allIndividualDocuments[individualId]) {
-                documents = allIndividualDocuments[individualId].filter(doc => {
-                  const docId = doc.document_id || '';
-                  const kycId = (doc.acc_portal_kyc?.id || '');
-                  return docId === baseItemId ||
-                    docId === itemId ||
-                    kycId === baseItemId ||
-                    kycId === itemId;
-                });
-              }
-
-              const currentStatus = documentStatusesMap[key];
-              const documentCount = documents.length;
-              const currentCount = currentStatus?.status.count || 0;
-
-              if (!currentStatus || documentCount !== currentCount) {
-                updates[key] = {
-                  status: {
-                    type: documentCount > 0 ? 'view' : 'upload',
-                    documents: documents,
-                    count: documentCount,
-                    applicantTypes: {
-                      principal: item.ap || item.display || false,
-                      dependant: item.dp || item.display || false,
-                      understudy: item.understudy || item.display || false,
-                      reference: item.reference || item.display || false
+                    let documents: any[] = [];
+                    if (dependant.id && allIndividualDocuments[dependant.id]) {
+                      documents = allIndividualDocuments[dependant.id].filter(doc => {
+                        const docId = doc.document_id || '';
+                        const kycId = (doc.acc_portal_kyc?.id || '');
+                        return docId === baseItemId ||
+                          docId === itemId ||
+                          kycId === baseItemId ||
+                          kycId === itemId;
+                      });
                     }
-                  },
-                  loading: false
-                };
+
+                    const currentStatus = documentStatusesMap[key];
+                    const documentCount = documents.length;
+                    const currentCount = currentStatus?.status.count || 0;
+
+                    if (!currentStatus || documentCount !== currentCount) {
+                      updates[key] = {
+                        status: {
+                          type: documentCount > 0 ? 'view' : 'upload',
+                          documents: documents,
+                          count: documentCount,
+                          applicantTypes: {
+                            principal: item.ap || item.display || false,
+                            dependant: item.dp || item.display || false,
+                            understudy: item.understudy || item.display || false,
+                            reference: item.reference || item.display || false
+                          }
+                        },
+                        loading: false
+                      };
+                    }
+                  }
+                } else if (columnType === 'reference' && task.references && Array.isArray(task.references)) {
+                  for (const reference of task.references) {
+                    const key = `${task.id}-${itemId}-${columnType}-${reference.id}`;
+
+                    let documents: any[] = [];
+                    if (reference.id && allIndividualDocuments[reference.id]) {
+                      documents = allIndividualDocuments[reference.id].filter(doc => {
+                        const docId = doc.document_id || '';
+                        const kycId = (doc.acc_portal_kyc?.id || '');
+                        return docId === baseItemId ||
+                          docId === itemId ||
+                          kycId === baseItemId ||
+                          kycId === itemId;
+                      });
+                    }
+
+                    const currentStatus = documentStatusesMap[key];
+                    const documentCount = documents.length;
+                    const currentCount = currentStatus?.status.count || 0;
+
+                    if (!currentStatus || documentCount !== currentCount) {
+                      updates[key] = {
+                        status: {
+                          type: documentCount > 0 ? 'view' : 'upload',
+                          documents: documents,
+                          count: documentCount,
+                          applicantTypes: {
+                            principal: item.ap || item.display || false,
+                            dependant: item.dp || item.display || false,
+                            understudy: item.understudy || item.display || false,
+                            reference: item.reference || item.display || false
+                          }
+                        },
+                        loading: false
+                      };
+                    }
+                  }
+                } else {
+                  // Handle principal, understudy (single individual)
+                  const key = `${task.id}-${itemId}-${columnType}`;
+
+                  let individualId: number | null = null;
+                  if (columnType === 'principal') {
+                    individualId = task.principal_member || task.individual_id;
+                  } else if (columnType === 'understudy') {
+                    individualId = task.understudy_member || task.individual_id;
+                  }
+
+                  let documents: any[] = [];
+                  if (individualId && allIndividualDocuments[individualId]) {
+                    documents = allIndividualDocuments[individualId].filter(doc => {
+                      const docId = doc.document_id || '';
+                      const kycId = (doc.acc_portal_kyc?.id || '');
+                      return docId === baseItemId ||
+                        docId === itemId ||
+                        kycId === baseItemId ||
+                        kycId === itemId;
+                    });
+                  }
+
+                  const currentStatus = documentStatusesMap[key];
+                  const documentCount = documents.length;
+                  const currentCount = currentStatus?.status.count || 0;
+
+                  if (!currentStatus || documentCount !== currentCount) {
+                    updates[key] = {
+                      status: {
+                        type: documentCount > 0 ? 'view' : 'upload',
+                        documents: documents,
+                        count: documentCount,
+                        applicantTypes: {
+                          principal: item.ap || item.display || false,
+                          dependant: item.dp || item.display || false,
+                          understudy: item.understudy || item.display || false,
+                          reference: item.reference || item.display || false
+                        }
+                      },
+                      loading: false
+                    };
+                  }
+                }
               }
             }
           }
         }
       }
-    }
 
-    if (Object.keys(updates).length > 0) {
-      setDocumentStatusesMap(prev => ({
-        ...prev,
-        ...updates
-      }));
-    }
-  };
-
-  updateDocumentStatuses();
-}, [filteredTasks, taskClassRequirements, allIndividualDocuments, documentStatusesMap]);
-
-// Updated render function to restrict post application icons to matching applicant types
-const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy' | 'reference', applicantId?: number, referenceId?: number, isPostApplication?: boolean) => {
-  // For post application documents, restrict to matching applicant types only
-  if (isPostApplication) {
-    // Check if this task's applicant_type matches the column type
-    const taskApplicantType = task.applicant_type;
-
-    if (columnType === 'principal' && taskApplicantType !== 'principal') {
-      return (
-        <div className="flex items-center justify-center h-full">
-          <span className="text-gray-400 text-xs">N/A</span>
-        </div>
-      );
-    }
-
-    if (columnType === 'dependant') {
-      if (taskApplicantType !== 'dependant') {
-        return (
-          <div className="flex items-center justify-center h-full">
-            <span className="text-gray-400 text-xs">N/A</span>
-          </div>
-        );
-      }
-      // For dependants, also check if this specific dependant ID matches
-      if (task.dependant_member && Array.isArray(task.dependant_member)) {
-        const hasMatchingDependant = task.dependant_member.some((dep: any) => dep.id === referenceId);
-        if (!hasMatchingDependant) {
-          return (
-            <div className="flex items-center justify-center h-full">
-              <span className="text-gray-400 text-xs">N/A</span>
-            </div>
-          );
-        }
-      }
-    }
-
-    if (columnType === 'understudy' && taskApplicantType !== 'understudy') {
-      return (
-        <div className="flex items-center justify-center h-full">
-          <span className="text-gray-400 text-xs">N/A</span>
-        </div>
-      );
-    }
-
-    if (columnType === 'reference') {
-      if (!task.references || !Array.isArray(task.references)) {
-        return (
-          <div className="flex items-center justify-center h-full">
-            <span className="text-gray-400 text-xs">N/A</span>
-          </div>
-        );
-      }
-      // For references, check if this specific reference ID matches
-      if (referenceId) {
-        const hasMatchingReference = task.references.some((ref: any) => ref.id === referenceId);
-        if (!hasMatchingReference) {
-          return (
-            <div className="flex items-center justify-center h-full">
-              <span className="text-gray-400 text-xs">N/A</span>
-            </div>
-          );
-        }
-      }
-    }
-  }
-
-  const status = getDocumentStatusForColumn(task, item, columnType, applicantId || referenceId);
-  const itemId = item.selectionId || item.id;
-  const key = applicantId ? `${task.id}-${itemId}-${columnType}-${applicantId}` : `${task.id}-${itemId}-${columnType}`;
-  const isLoading = documentStatusesMap[key]?.loading || false;
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    )
-  }
-
-  if (status.type === 'na') {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <span className="text-gray-400 text-xs">N/A</span>
-      </div>
-    )
-  }
-
-  const handleUploadClick = () => {
-    setSelectedUploadData({
-      task,
-      document: item,
-      columnType
-    });
-    setUploadDialogOpen(true);
-  };
-
-  const handleViewClick = async () => {
-    if (status.documents.length > 0) {
-      const document = status.documents[0];
-      
-      try {
-        const { data: signedUrl, error } = await supabase.storage
-          .from('kyc-documents')
-          .createSignedUrl(document.file_path, 3600);
-  
-        if (error) throw error;
-  
-        // Check if this is a company document or individual document
-        const isCompanyDoc = item.category === 'company-docs' || item.category === 'company';
-        
-        let documentDefinition;
-        if (isCompanyDoc) {
-          documentDefinition = documents.find(doc => doc.id === document.kyc_document_id) ||
-            bclTemplateDocuments.find(doc => doc.id === document.kyc_document_id);
-        } else {
-          documentDefinition = documents.find(doc => doc.id === document.document_id) ||
-            bclTemplateDocuments.find(doc => doc.id === document.document_id);
-        }
-  
-        const extractionFields = (documentDefinition?.fields || []).map((field: any) => ({
-          id: field.id,
-          name: field.name,
-          type: field.type || 'text',
-          required: field.required || false
+      if (Object.keys(updates).length > 0) {
+        setDocumentStatusesMap(prev => ({
+          ...prev,
+          ...updates
         }));
-  
-        setSelectedDocumentForPreview({
-          documentName: documentDefinition?.display_name || documentDefinition?.name || document.acc_portal_kyc?.display_name || 'Document',
-          extractedData: document.extracted_details || {},
-          fields: extractionFields,
-          fileUrl: signedUrl.signedUrl,
-          fileName: document.file_path?.split('/').pop() || '',
-          allDocuments: status.documents,
-          currentIndex: 0,
-          task,
-          item,
-          columnType,
-          referenceId,
-          uploadDate: document.created_at,
-          documentStatus: document.status
-        })
-        setDocumentPreviewOpen(true)
-      } catch (error) {
-        console.error('Error getting file URL:', error)
-        toast({
-          title: 'Error',
-          description: 'Failed to load document preview',
-          variant: 'destructive'
-        })
+      }
+    };
+
+    updateDocumentStatuses();
+  }, [filteredTasks, taskClassRequirements, allIndividualDocuments, allCompanyDocuments, documentStatusesMap, documents, bclTemplateDocuments, parseSelectionId]);
+  // Updated render function to restrict post application icons to matching applicant types
+  const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy' | 'reference', applicantId?: number, referenceId?: number, isPostApplication?: boolean) => {
+    // For post application documents, restrict to matching applicant types only
+    if (isPostApplication) {
+      // Check if this task's applicant_type matches the column type
+      const taskApplicantType = task.applicant_type;
+
+      if (columnType === 'principal' && taskApplicantType !== 'principal') {
+        return (
+          <div className="flex items-center justify-center h-full">
+            <span className="text-gray-400 text-xs">N/A</span>
+          </div>
+        );
+      }
+
+      if (columnType === 'dependant') {
+        if (taskApplicantType !== 'dependant') {
+          return (
+            <div className="flex items-center justify-center h-full">
+              <span className="text-gray-400 text-xs">N/A</span>
+            </div>
+          );
+        }
+        // For dependants, also check if this specific dependant ID matches
+        if (task.dependant_member && Array.isArray(task.dependant_member)) {
+          const hasMatchingDependant = task.dependant_member.some((dep: any) => dep.id === referenceId);
+          if (!hasMatchingDependant) {
+            return (
+              <div className="flex items-center justify-center h-full">
+                <span className="text-gray-400 text-xs">N/A</span>
+              </div>
+            );
+          }
+        }
+      }
+
+      if (columnType === 'understudy' && taskApplicantType !== 'understudy') {
+        return (
+          <div className="flex items-center justify-center h-full">
+            <span className="text-gray-400 text-xs">N/A</span>
+          </div>
+        );
+      }
+
+      if (columnType === 'reference') {
+        if (!task.references || !Array.isArray(task.references)) {
+          return (
+            <div className="flex items-center justify-center h-full">
+              <span className="text-gray-400 text-xs">N/A</span>
+            </div>
+          );
+        }
+        // For references, check if this specific reference ID matches
+        if (referenceId) {
+          const hasMatchingReference = task.references.some((ref: any) => ref.id === referenceId);
+          if (!hasMatchingReference) {
+            return (
+              <div className="flex items-center justify-center h-full">
+                <span className="text-gray-400 text-xs">N/A</span>
+              </div>
+            );
+          }
+        }
       }
     }
-  }
-  
-  switch (status.type) {
-    case 'view':
+
+    const status = getDocumentStatusForColumn(task, item, columnType, applicantId || referenceId);
+    const itemId = item.selectionId || item.id;
+    const key = applicantId ? `${task.id}-${itemId}-${columnType}-${applicantId}` : `${task.id}-${itemId}-${columnType}`;
+    const isLoading = documentStatusesMap[key]?.loading || false;
+
+    if (isLoading) {
       return (
-        <div className="flex flex-col items-center justify-center h-full">
-          <div className="flex items-center justify-center gap-1">
-            <Button
+        <div className="flex items-center justify-center h-full">
+          <div className="h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      )
+    }
+
+    if (status.type === 'na') {
+      return (
+        <div className="flex items-center justify-center h-full">
+          <span className="text-gray-400 text-xs">N/A</span>
+        </div>
+      )
+    }
+
+    const handleUploadClick = () => {
+      setSelectedUploadData({
+        task,
+        document: item,
+        columnType
+      });
+      setUploadDialogOpen(true);
+    };
+
+    const handleViewClick = async () => {
+      if (status.documents.length > 0) {
+        const document = status.documents[0];
+
+        try {
+          const { data: signedUrl, error } = await supabase.storage
+            .from('kyc-documents')
+            .createSignedUrl(document.file_path, 3600);
+
+          if (error) throw error;
+
+          // Check if this is a company document or individual document
+          const isCompanyDoc = item.category === 'company-docs' || item.category === 'company';
+
+          let documentDefinition;
+          if (isCompanyDoc) {
+            documentDefinition = documents.find(doc => doc.id === document.kyc_document_id) ||
+              bclTemplateDocuments.find(doc => doc.id === document.kyc_document_id);
+          } else {
+            documentDefinition = documents.find(doc => doc.id === document.document_id) ||
+              bclTemplateDocuments.find(doc => doc.id === document.document_id);
+          }
+
+          const extractionFields = (documentDefinition?.fields || []).map((field: any) => ({
+            id: field.id,
+            name: field.name,
+            type: field.type || 'text',
+            required: field.required || false
+          }));
+
+          setSelectedDocumentForPreview({
+            documentName: documentDefinition?.display_name || documentDefinition?.name || document.acc_portal_kyc?.display_name || 'Document',
+            extractedData: document.extracted_details || {},
+            fields: extractionFields,
+            fileUrl: signedUrl.signedUrl,
+            fileName: document.file_path?.split('/').pop() || '',
+            allDocuments: status.documents,
+            currentIndex: 0,
+            task,
+            item,
+            columnType,
+            referenceId,
+            uploadDate: document.created_at,
+            documentStatus: document.status
+          })
+          setDocumentPreviewOpen(true)
+        } catch (error) {
+          console.error('Error getting file URL:', error)
+          toast({
+            title: 'Error',
+            description: 'Failed to load document preview',
+            variant: 'destructive'
+          })
+        }
+      }
+    }
+
+    switch (status.type) {
+      case 'view':
+        return (
+          <div className="flex flex-col items-center justify-center h-full">
+            <div className="flex items-center justify-center gap-1">
+              <Button
                 variant="ghost"
                 size="sm"
                 className="h-8 w-8 p-0 text-green-600 hover:bg-green-100 hover:text-green-700 transition-colors"
@@ -1380,7 +1460,6 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
     }
   }, [getDocumentStatusForColumn, documentStatusesMap, documents, bclTemplateDocuments, individualNames, handleUploadAction])
 
-  // Add this to handle upload completion and refresh
   const handleUploadComplete = useCallback(() => {
     setDocumentStatusesMap(prev => {
       const updated = { ...prev };
@@ -1393,13 +1472,15 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
       return updated;
     });
 
+    // Clear both individual and company documents
     setAllIndividualDocuments({});
+    setAllCompanyDocuments({});
 
     if (filteredTasks.length > 0) {
       fetchAllIndividualData(filteredTasks);
+      fetchAllCompanyDocuments(filteredTasks); // Add this line
     }
-  }, [filteredTasks, fetchAllIndividualData]);
-
+  }, [filteredTasks, fetchAllIndividualData, fetchAllCompanyDocuments]);
   // Render client field data
   const renderClientFieldData = useCallback((task: any, item: any) => {
     const individualData = taskIndividualData[task.id];
@@ -1849,22 +1930,59 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
         </div>
         <ScrollArea className="h-[calc(100%-60px)]">
           <div className="space-y-1 p-2">
-            {groupedTasks.map((group, index) => (
-              <Button
-                key={index}
-                variant={selectedApplicant === group.applicantName ? "secondary" : "ghost"}
-                className={cn(
-                  "w-full justify-start",
-                  selectedApplicant === group.applicantName ? "bg-muted" : "hover:bg-muted/50"
-                )}
-                onClick={() => handleSelectApplicant(group.applicantName)}
-              >
-                <span className="truncate">{group.applicantName}</span>
-                <Badge variant="outline" className="ml-2">
-                  {group.tasks.length}
-                </Badge>
-              </Button>
-            ))}
+            {/* Company Information Section
+            {Object.keys(companyData).length > 0 && (
+              <div className="mb-4 p-3 bg-blue-50 rounded-lg border">
+                <h3 className="text-sm font-semibold text-blue-900 mb-2 flex items-center gap-2">
+                  <Briefcase className="h-4 w-4" />
+                  Company Information
+                </h3>
+                {Object.values(companyData).map((company: any) => (
+                  <div key={company.id} className="space-y-1">
+                    <div className="text-xs font-medium text-blue-800">
+                      {company.company_name}
+                    </div>
+                    <div className="text-xs text-blue-600">
+                      {company.company_type} • {company.registration_number}
+                    </div>
+                    <div className="text-xs text-blue-500">
+                      ID: {company.id}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )} */}
+
+            {/* Applicants List */}
+            <div className="border-t pt-2">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2 px-2">Applicants</h3>
+              {groupedTasks.map((group, index) => (
+                <Button
+                  key={index}
+                  variant={selectedApplicant === group.applicantName ? "secondary" : "ghost"}
+                  className={cn(
+                    "w-full justify-start mb-1",
+                    selectedApplicant === group.applicantName ? "bg-muted" : "hover:bg-muted/50"
+                  )}
+                  onClick={() => handleSelectApplicant(group.applicantName)}
+                >
+                  <div className="flex flex-col items-start w-full">
+                    <div className="flex items-center justify-between w-full">
+                      <span className="truncate text-left">{group.applicantName}</span>
+                      <Badge variant="outline" className="ml-2">
+                        {group.tasks.length}
+                      </Badge>
+                    </div>
+                    {/* Show company name for this applicant */}
+                    {group.tasks[0]?.company_id && companyData[group.tasks[0].company_id] && (
+                      <span className="text-xs text-muted-foreground truncate w-full text-left">
+                        {companyData[group.tasks[0].company_id].company_name}
+                      </span>
+                    )}
+                  </div>
+                </Button>
+              ))}
+            </div>
           </div>
         </ScrollArea>
       </div>
@@ -1953,6 +2071,11 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
               </span>
               <span>
                 <strong>{organizedRequirements.documents.company.length + organizedRequirements.documents.individual.length}</strong> document items
+                {organizedRequirements.documents.company.length > 0 && (
+                  <span className="text-blue-600 ml-1">
+                    ({organizedRequirements.documents.company.length} company, {organizedRequirements.documents.individual.length} individual)
+                  </span>
+                )}
               </span>
               <span>
                 <strong>{organizedRequirements.bclTemplates.company.length + organizedRequirements.bclTemplates.individual.length}</strong> BCL templates
