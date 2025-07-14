@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AlertTriangle, FileText, Briefcase, Users, Plus, Minus, UserCheck, ChevronDown, ChevronUp } from "lucide-react"
+import { StageUploadDialog } from "./StageUploadDialog"
 
 const CLASS_D_ID = '1750687058159';
 
@@ -24,6 +25,8 @@ interface RequirementsTableCombinedProps {
   activeTab: string
   calculateStats: any
   individualNames: Record<number, string>
+  getCurrentRequirements: () => any[]
+  fuzzyMatch: (str1: string, str2: string, threshold?: number) => boolean
 }
 
 export default function RequirementsTableCombined({
@@ -40,7 +43,9 @@ export default function RequirementsTableCombined({
   documentTab,
   activeTab,
   calculateStats,
-  individualNames
+  individualNames,
+  getCurrentRequirements,
+  fuzzyMatch
 }: RequirementsTableCombinedProps) {
 
   // State for managing section expansions
@@ -57,7 +62,6 @@ export default function RequirementsTableCombined({
     'client-fields',
     'individual-client-fields'
   ]));
-
   // Toggle section expansion
   const toggleSectionExpansion = useCallback((sectionId: string) => {
     setExpandedSections(prev => {
@@ -116,6 +120,9 @@ export default function RequirementsTableCombined({
 
     return Array.from(referencesMap.values());
   }, [filteredGroupedTasks, individualNames]);
+  // State for StageUploadDialog
+  const [isStageDialogOpen, setIsStageDialogOpen] = useState(false);
+  const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null);
 
   // Helper function to calculate total columns
   const getTotalColumns = () => {
@@ -128,7 +135,7 @@ export default function RequirementsTableCombined({
     }, 0);
 
     // Add reference columns (individual columns, not sub-columns)
-    const referenceColumns = hasReferencesColumn ? allReferences.length : 0;
+    const referenceColumns = hasReferencesColumn ? getCurrentRequirements().length : 0;
 
     return baseColumns + applicantColumns + referenceColumns;
   };
@@ -176,6 +183,28 @@ export default function RequirementsTableCombined({
     return false;
   }, []);
 
+  const handlePostApplicationClick = (task: any, stage: any) => {
+    setSelectedStageTask({ task, stage });
+    setIsStageDialogOpen(true);
+  };
+
+  // Update document status rendering for post-application documents
+  const renderPostApplicationStatus = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number) => {
+    if (item.isPostApplication) {
+      return (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => handlePostApplicationClick(task, item)}
+          className="text-xs"
+        >
+          Upload
+        </Button>
+      );
+    }
+    return renderDocumentStatus(task, item, columnType, referenceId, item.isPostApplication);
+  }, [handlePostApplicationClick]);
+
   return (
     <div className="space-y-4">
       {/* Expand/Collapse All Controls */}
@@ -204,6 +233,15 @@ export default function RequirementsTableCombined({
           </Button>
         </div>
       </div>
+
+      {/* StageUploadDialog for Post Application Documents */}
+      <StageUploadDialog
+        open={isStageDialogOpen}
+        onOpenChange={setIsStageDialogOpen}
+        selectedStageTask={selectedStageTask}
+        getCurrentRequirements={getCurrentRequirements}
+        fuzzyMatch={fuzzyMatch}
+      />
 
       <Table className="min-w-full w-full border-collapse">
         <TableHeader className="sticky top-0 z-10">
@@ -752,7 +790,7 @@ export default function RequirementsTableCombined({
                                       group.dependantIds.forEach((dependantId) => {
                                         columns.push(
                                           <TableCell key={`${docItem.document.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
-                                            {renderDocumentStatus(referenceTask, docItem.document, 'dependant', dependantId)}
+                                            {renderPostApplicationStatus(referenceTask, docItem.document, 'dependant', dependantId)}
                                           </TableCell>
                                         );
                                       });

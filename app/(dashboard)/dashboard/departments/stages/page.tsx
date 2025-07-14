@@ -13,13 +13,13 @@ import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { AddStageDialog } from "./components/add-stage-dialog"
 import { EditStageDialog } from "./components/edit-stage-dialog"
-import { ExportStages } from "./components/export-stages"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import { format } from "date-fns"
 import type { Department, Stage, Subdepartment, DepartmentOption } from "./stagesdb"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "../main-shared-components/column-visibility"
 import EntityVisibilityControl, { EntityVisibilityOption } from "../main-shared-components/entity-visibility"
+import * as XLSX from "xlsx"
 
 // Simple UUID generator for client-side use
 const generateId = () => {
@@ -32,7 +32,7 @@ const generateId = () => {
 
 // Utility functions for time conversion
 const minutesToTimeString = (minutes: number | null): string => {
-  if (minutes === null) return '0m'
+  if (minutes === null || minutes === 0) return '0m'
   const days = Math.floor(minutes / (60 * 24))
   const hours = Math.floor((minutes % (60 * 24)) / 60)
   const mins = minutes % 60
@@ -40,9 +40,9 @@ const minutesToTimeString = (minutes: number | null): string => {
   const parts = []
   if (days > 0) parts.push(`${days}d`)
   if (hours > 0) parts.push(`${hours}h`)
-  if (mins > 0 || parts.length === 0) parts.push(`${mins}m`)
+  if (mins > 0) parts.push(`${mins}m`)
 
-  return parts.join(' ')
+  return parts.join(' ') || '0m'
 }
 
 const timeStringToMinutes = (timeString: string): number => {
@@ -73,8 +73,8 @@ const getTimeFromMinutes = (minutes: number | null) => {
 }
 
 // Utility function to sort items by order field
-const sortByOrder = <T extends { order?: number }>(items: T[]): T[] => {
-  return [...items].sort((a, b) => (a.order || 0) - (b.order || 0))
+const sortByOrder = <T extends { order?: number, order_num?: number }>(items: T[]): T[] => {
+  return [...items].sort((a, b) => (a.order || a.order_num || 0) - (b.order || b.order_num || 0))
 }
 
 // Utility function to filter items by default display
@@ -420,7 +420,7 @@ export default function Stages() {
         // Transform and sort the data properly
         const transformedDepartments = (deptsData || []).map(dept => ({
           ...dept,
-          stages: dept.stages ? (Array.isArray(dept.stages) ? dept.stages : []) : [],
+          stages: dept.stages ? (Array.isArray(dept.stages) ? sortByOrder(dept.stages) : []) : [],
           subdepartments: sortByOrder((dept.tm_subdepartments || []).map((subdept: any) => ({
             ...subdept,
             stages: Array.isArray(subdept.stages) ? subdept.stages : [],
@@ -1185,6 +1185,95 @@ export default function Stages() {
 
   const currentDept = getCurrentDepartment()
 
+  const handleExportToExcel = () => {
+    if (!currentDept) return;
+
+    const processedSubdepartments = getProcessedSubdepartments(currentDept);
+    const dataToExport = [];
+
+    const processEntity = (entity, path, type) => {
+      // Determine if this entity is a leaf node (has no children to process)
+      const isLeafNode = type === 'Subdepartment' ? !entity.classes || entity.classes.length === 0 :
+                         type === 'Class' ? !entity.subClasses || entity.subClasses.length === 0 :
+                         true;
+
+      if (isLeafNode) {
+        currentDept.stages.forEach(stage => {
+          const stageAllocation = entity.stages?.find(s => s.stage_id === stage.id);
+          // For leaf nodes, default to true if no specific allocation is set
+          const isApplicable = stageAllocation?.applicable ?? true;
+          const isDisplayed = stageAllocation?.display ?? true;
+
+          dataToExport.push({
+            'Department': currentDept.name,
+            'Entity Path': path,
+            'Entity Type': type,
+            'Stage Order': stage.order_num,
+            'Stage Name': stage.name,
+            'Duration': minutesToTimeString(stage.estimated_time),
+            'Follow Up': stage.follow_up || 'N/A',
+            'Applicable': isApplicable ? 'Yes' : 'No',
+            'Display': isDisplayed ? 'Yes' : 'No',
+          });
+        });
+      }
+    };
+
+    processedSubdepartments.forEach(subdept => {
+      processEntity(subdept, subdept.name, 'Subdepartment');
+      subdept.classes?.forEach(cls => {
+        const classPath = `${subdept.name} → ${cls.name}`;
+        processEntity(cls, classPath, 'Class');
+        cls.subClasses?.forEach(subCls => {
+          const subClassPath = `${classPath} → ${subCls.name}`;
+          processEntity(subCls, subClassPath, 'Subclass');
+        });
+      });
+    });
+
+    if (dataToExport.length === 0) {
+      toast({
+        title: "No Data to Export",
+        description: "There is no applicable stage data for the currently visible entities.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Sort data by entity path then stage order for readability
+    dataToExport.sort((a, b) => {
+      if (a['Entity Path'] < b['Entity Path']) return -1;
+      if (a['Entity Path'] > b['Entity Path']) return 1;
+      return a['Stage Order'] - b['Stage Order'];
+    });
+
+    // Remove the temporary sort key before exporting
+    dataToExport.forEach(item => delete item['Stage Order']);
+
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+
+    // Auto-fit columns for better readability
+    const columnWidths = [];
+    if (dataToExport.length > 0) {
+      const header = Object.keys(dataToExport[0]);
+      header.forEach(key => {
+        const maxLength = Math.max(key.length, ...dataToExport.map(row => row[key]?.toString().length || 0));
+        columnWidths.push({ wch: maxLength + 2 }); // Add a little padding
+      });
+      worksheet['!cols'] = columnWidths;
+    }
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Stages Allocation');
+    XLSX.writeFile(workbook, `${currentDept.name}_Stages_Allocation_${new Date().toISOString().split('T')[0]}.xlsx`);
+
+    toast({
+      title: "Export Successful",
+      description: "The stage data has been exported to an Excel file.",
+    });
+  };
+
   if (loading) {
     return (
       <div className="p-12 text-center">
@@ -1276,11 +1365,16 @@ export default function Stages() {
               title="Column Visibility"
               description="Toggle stage table columns"
             /> */}
-
-            <ExportStages
-              currentDept={currentDept}
+            
+            <Button
+              variant="outline"
+              onClick={handleExportToExcel}
               disabled={!currentDept || !currentDept.stages || currentDept.stages.length === 0}
-            />
+              className="flex items-center gap-2"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              Export to Excel
+            </Button>
 
             <AddStageDialog
               open={isDialogOpen}
@@ -1319,17 +1413,17 @@ export default function Stages() {
                   <div className="relative overflow-auto max-h-[calc(100vh-300px)]">
                     <Table className="min-w-max">
                       {/* Sticky Headers */}
-                      <TableHeader className="sticky top-0 z-10">
+                      <TableHeader className="sticky top-0 z-30">
                         {/* Stage Names Row */}
-                        <TableRow className="bg-blue-600">
+                        <TableRow className="border-b-0">
                           {columnVisibility.index && (
-                            <TableHead className="sticky left-0 bg-blue-600 border-r-2 border-blue-400 font-bold w-16 z-20 text-center text-white" rowSpan={4}>
+                            <TableHead className="sticky left-0 bg-blue-700 border-r-2 border-blue-500 font-bold w-16 z-40 text-center text-white" rowSpan={4}>
                               #
                             </TableHead>
                           )}
                           {columnVisibility.entity && (
                             <TableHead className={cn(
-                              "sticky bg-blue-600 border-r-2 border-blue-400 font-bold w-64 z-20 text-white",
+                              "sticky bg-blue-700 border-r-2 border-blue-500 font-bold w-64 z-40 text-white",
                               columnVisibility.index ? "left-16" : "left-0"
                             )} rowSpan={4}>
                               <div className="flex items-center gap-2">
@@ -1340,7 +1434,7 @@ export default function Stages() {
                           )}
                           {columnVisibility.stageName && (
                             <TableHead className={cn(
-                              "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
+                              "sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white",
                               columnVisibility.index && columnVisibility.entity ? "left-80" :
                                 columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
                             )}>
@@ -1351,7 +1445,7 @@ export default function Stages() {
                           {dept.stages.map((stage, index) => (
                             <TableHead
                               key={stage.id}
-                              className="border-r border-blue-400 text-center font-bold text-white min-w-[200px] bg-blue-600"
+                              className="border-r border-blue-500 text-center font-bold text-white min-w-[200px] bg-blue-700"
                             >
                               <div className="flex flex-col items-center p-2 space-y-2">
                                 <div className="flex items-center gap-2">
@@ -1375,7 +1469,7 @@ export default function Stages() {
                                           </Badge>
                                         </Button>
                                       </PopoverTrigger>
-                                      <PopoverContent className="w-96 max-h-96 overflow-y-auto">
+                                      <PopoverContent className="w-96 max-h-96 overflow-y-auto z-50">
                                         <div className="space-y-3">
                                           <div className="flex items-center justify-between">
                                             <h4 className="font-medium">Stage Documents</h4>
@@ -1474,7 +1568,7 @@ export default function Stages() {
                                           <Clock className="h-3 w-3 text-white" />
                                         </Button>
                                       </PopoverTrigger>
-                                      <PopoverContent className="w-80">
+                                      <PopoverContent className="w-80 z-50">
                                         <div className="space-y-2">
                                           <h4 className="font-medium">Special Time Requirements</h4>
                                           <div className="text-sm text-gray-600">
@@ -1535,41 +1629,36 @@ export default function Stages() {
 
                         {/* Duration Row */}
                         {columnVisibility.duration && (
-                          <TableRow className="bg-blue-600">
+                          <TableRow className="border-b-0">
                             {columnVisibility.stageName && (
                               <TableHead className={cn(
-                                "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
+                                "sticky bg-slate-600 border-r-2 border-slate-400 z-20 text-white",
                                 columnVisibility.index && columnVisibility.entity ? "left-80" :
                                   columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
                               )}>
                                 Duration
                               </TableHead>
                             )}
-                            {dept.stages.map((stage, index) => {
-                              const { days, hours, minutes } = getTimeFromMinutes(stage.estimated_time)
-                              return (
+                            {dept.stages.map((stage, index) => (
                                 <TableHead
                                   key={`duration-${stage.id}`}
-                                  className="border-r border-blue-400 text-center bg-blue-600"
+                                  className="border-r border-slate-400 text-center bg-slate-600"
                                 >
-                                  <div className="font-bold text-sm text-white">
-                                    {days > 0 && `${days}d `}
-                                    {hours > 0 && `${hours}h `}
-                                    {minutes > 0 ? `${minutes}m` : ''}
-                                    {!days && !hours && !minutes && '0m'}
+                                  <div className="font-bold text-sm text-white py-2">
+                                    {minutesToTimeString(stage.estimated_time)}
                                   </div>
                                 </TableHead>
                               )
-                            })}
+                            )}
                           </TableRow>
                         )}
 
                         {/* Follow Up Row */}
                         {columnVisibility.followUp && (
-                          <TableRow className="bg-blue-600">
+                          <TableRow className="border-b-0">
                             {columnVisibility.stageName && (
                               <TableHead className={cn(
-                                "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
+                                "sticky bg-indigo-600 border-r-2 border-indigo-400 z-20 text-white",
                                 columnVisibility.index && columnVisibility.entity ? "left-80" :
                                   columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
                               )}>
@@ -1579,9 +1668,9 @@ export default function Stages() {
                             {dept.stages.map((stage, index) => (
                               <TableHead
                                 key={`followup-${stage.id}`}
-                                className="border-r border-blue-400 text-center bg-blue-600"
+                                className="border-r border-indigo-400 text-center bg-indigo-600"
                               >
-                                <div className="font-bold text-sm text-white">
+                                <div className="font-bold text-sm text-white py-2">
                                   {stage.follow_up || '-'}
                                 </div>
                               </TableHead>
@@ -1591,10 +1680,10 @@ export default function Stages() {
 
                         {/* Applicable/Display Headers Row */}
                         {columnVisibility.controls && (
-                          <TableRow className="bg-blue-600">
+                          <TableRow className="border-b-0">
                             {columnVisibility.stageName && (
                               <TableHead className={cn(
-                                "sticky bg-blue-600 border-r-2 border-blue-400 z-20",
+                                "sticky bg-slate-500 border-r-2 border-slate-300 z-20",
                                 columnVisibility.index && columnVisibility.entity ? "left-80" :
                                   columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
                               )}></TableHead>
@@ -1602,7 +1691,7 @@ export default function Stages() {
                             {dept.stages.map((stage, index) => (
                               <TableHead
                                 key={`controls-${stage.id}`}
-                                className="border-r border-blue-400 bg-blue-600"
+                                className="border-r border-slate-300 bg-slate-500"
                               >
                                 <div className="grid grid-cols-2 gap-1 p-1">
                                   <div className="text-center text-xs font-medium text-white">
@@ -1628,30 +1717,30 @@ export default function Stages() {
                           const hasClasses = subdept.classes && subdept.classes.length > 0
 
                           rows.push(
-                            <TableRow key={subdeptRowId} className="hover:bg-blue-25 bg-blue-100 transition-colors">
+                            <TableRow key={subdeptRowId} className="border-b border-slate-300">
                               {columnVisibility.index && (
-                                <TableCell className="sticky left-0 bg-blue-100 border-r-2 border-gray-200 text-center text-sm z-1 font-medium">
+                                <TableCell className="sticky left-0 bg-slate-100 border-r-2 border-slate-300 text-center text-sm z-10 font-medium">
                                   {rowIndex}
                                 </TableCell>
                               )}
                               {columnVisibility.entity && (
                                 <TableCell className={cn(
-                                  "sticky bg-blue-100 border-r-2 border-gray-200 font-medium z-1",
+                                  "sticky bg-slate-100 border-r-2 border-slate-300 font-medium z-10",
                                   columnVisibility.index ? "left-16" : "left-0"
                                 )}>
                                   <div className="flex justify-between items-center gap-2">
-                                    <span className="font-semibold text-gray-900">{subdept.name}</span>
+                                    <span className="font-semibold text-slate-800">{subdept.name}</span>
                                     {hasClasses && (
                                       <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="h-6 w-6 hover:bg-blue-100"
+                                        className="h-6 w-6 hover:bg-slate-300/50"
                                         onClick={() => toggleRowExpansion(subdeptRowId)}
                                       >
                                         {isExpanded ? (
-                                          <Minus className="h-4 w-4 text-blue-600" />
+                                          <Minus className="h-4 w-4 text-slate-600" />
                                         ) : (
-                                          <Plus className="h-4 w-4 text-blue-600" />
+                                          <Plus className="h-4 w-4 text-slate-600" />
                                         )}
                                       </Button>
                                     )}
@@ -1660,7 +1749,7 @@ export default function Stages() {
                               )}
                               {columnVisibility.stageName && (
                                 <TableCell className={cn(
-                                  "sticky bg-blue-100 border-r-2 border-gray-200 text-center text-sm z-1",
+                                  "sticky bg-slate-100 border-r-2 border-slate-300 text-center text-sm z-10",
                                   columnVisibility.index && columnVisibility.entity ? "left-80" :
                                     columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
                                 )}></TableCell>
@@ -1669,11 +1758,12 @@ export default function Stages() {
                                 const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id)
                                 const hasAllocation = stageAllocation?.applicable ?? true
                                 const hasDisplay = stageAllocation?.display ?? true
+                                const columnClass = stageIndex % 2 === 0 ? "bg-slate-50" : "bg-slate-100/80";
 
                                 return (
                                   <TableCell
                                     key={`subdept-${subdept.id}-${stage.id}`}
-                                    className="border-r border-l border-gray-200 p-0"
+                                    className={cn("border-x border-slate-200 p-0", columnClass)}
                                   >
                                     {!hasClasses ? (
                                       columnVisibility.controls && (
@@ -1687,42 +1777,10 @@ export default function Stages() {
                                             >
                                               <Select
                                                 value={hasAllocation ? 'applicable' : 'not-applicable'}
-                                                onValueChange={async (value) => {
-                                                  const newValue = value === 'applicable';
-                                                  setDepartments(prevDepartments => {
-                                                    return prevDepartments.map(dept => {
-                                                      if (dept.id !== activeTab) return dept;
-
-                                                      return {
-                                                        ...dept,
-                                                        subdepartments: dept.subdepartments?.map(sd => {
-                                                          if (sd.id !== subdept.id) return sd;
-
-                                                          const updatedStages = [...(sd.stages || [])];
-                                                          let stageAlloc = updatedStages.find(s => s.stage_id === stage.id);
-
-                                                          if (!stageAlloc) {
-                                                            stageAlloc = { stage_id: stage.id, applicable: newValue, display: newValue };
-                                                            updatedStages.push(stageAlloc);
-                                                          } else {
-                                                            stageAlloc.applicable = newValue;
-                                                            if (!newValue) stageAlloc.display = false;
-                                                          }
-
-                                                          return {
-                                                            ...sd,
-                                                            stages: updatedStages
-                                                          };
-                                                        }) || []
-                                                      };
-                                                    });
-                                                  });
-
-                                                  await handleAllocationChangeInternal(subdept.id, stage.id, newValue);
-                                                }}
+                                                onValueChange={(value) => handleAllocationChangeInternal(subdept.id, stage.id, value === 'applicable')}
                                               >
                                                 <SelectTrigger
-                                                  className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50"
+                                                  className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-slate-200/50"
                                                   onClick={(e) => e.stopPropagation()}
                                                 >
                                                   <SelectValue>
@@ -1780,32 +1838,32 @@ export default function Stages() {
                               const isClassExpanded = expandedRows.has(classRowId)
 
                               rows.push(
-                                <TableRow key={classRowId} className="bg-blue-25 hover:bg-blue-50 transition-colors">
+                                <TableRow key={classRowId} className="border-b border-gray-200">
                                   {columnVisibility.index && (
-                                    <TableCell className="sticky left-0 bg-blue-25 border-r-2 border-gray-200 text-center text-sm z-30 font-semibold">
+                                    <TableCell className="sticky left-0 bg-gray-50 border-r-2 border-gray-200 text-center text-sm z-10 font-semibold">
                                       {rowIndex}.{clsIndex + 1}
                                     </TableCell>
                                   )}
                                   {columnVisibility.entity && (
                                     <TableCell className={cn(
-                                      "sticky bg-blue-25 border-r-2 border-gray-200 pl-8 z-1",
+                                      "sticky bg-gray-50 border-r-2 border-gray-200 pl-8 z-10",
                                       columnVisibility.index ? "left-16" : "left-0"
                                     )}>
                                       <div className="flex justify-between items-center gap-2">
                                         <div className="flex items-center gap-2">
-                                          <span className="text-sm font-medium">{cls.name}</span>
+                                          <span className="text-sm font-medium text-gray-800">{cls.name}</span>
                                         </div>
                                         {hasSubClasses && (
                                           <Button
                                             variant="ghost"
                                             size="icon"
-                                            className="h-5 w-5 hover:bg-blue-200"
+                                            className="h-5 w-5 hover:bg-gray-200"
                                             onClick={() => toggleRowExpansion(classRowId)}
                                           >
                                             {isClassExpanded ? (
-                                              <Minus className="h-3 w-3 text-blue-600" />
+                                              <Minus className="h-3 w-3 text-gray-600" />
                                             ) : (
-                                              <Plus className="h-3 w-3 text-blue-600" />
+                                              <Plus className="h-3 w-3 text-gray-600" />
                                             )}
                                           </Button>
                                         )}
@@ -1815,7 +1873,7 @@ export default function Stages() {
 
                                   {columnVisibility.stageName && (
                                     <TableCell className={cn(
-                                      "sticky bg-blue-25 border-r-2 border-gray-200 text-center text-sm z-30",
+                                      "sticky bg-gray-50 border-r-2 border-gray-200 text-center text-sm z-10",
                                       columnVisibility.index && columnVisibility.entity ? "left-80" :
                                         columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
                                     )}></TableCell>
@@ -1824,11 +1882,12 @@ export default function Stages() {
                                     const stageAllocation = cls.stages?.find(s => s.stage_id === stage.id)
                                     const hasAllocation = stageAllocation?.applicable ?? true
                                     const hasDisplay = stageAllocation?.display ?? true
+                                    const columnClass = stageIndex % 2 === 0 ? "bg-white" : "bg-gray-100/80";
 
                                     return (
                                       <TableCell
                                         key={`class-${subdept.id}-${cls.id}-${stage.id}`}
-                                        className="border-r border-l border-gray-200 p-0 z-30"
+                                        className={cn("border-x border-gray-200 p-0", columnClass)}
                                       >
                                         {!hasSubClasses ? (
                                           columnVisibility.controls && (
@@ -1840,7 +1899,7 @@ export default function Stages() {
                                                     handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex)
                                                   }
                                                 >
-                                                  <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50">
+                                                  <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-gray-200/50">
                                                     <SelectValue>
                                                       <div className="flex items-center gap-1">
                                                         <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
@@ -1891,27 +1950,27 @@ export default function Stages() {
                               if (isClassExpanded && hasSubClasses) {
                                 cls.subClasses?.forEach((subCls, subClsIndex) => {
                                   rows.push(
-                                    <TableRow key={`subclass-${subdept.id}-${cls.id}-${subCls.id}`} className="bg-blue-50 hover:bg-blue-100 transition-colors">
+                                    <TableRow key={`subclass-${subdept.id}-${cls.id}-${subCls.id}`} className="border-b border-gray-200">
                                       {columnVisibility.index && (
-                                        <TableCell className="sticky left-0 bg-blue-50 border-r-2 border-gray-200 text-center text-sm z-30 font-semibold">
+                                        <TableCell className="sticky left-0 bg-white border-r-2 border-gray-200 text-center text-sm z-10 font-semibold">
                                           {rowIndex}.{clsIndex + 1}.{subClsIndex + 1}
                                         </TableCell>
                                       )}
                                       {columnVisibility.entity && (
                                         <TableCell className={cn(
-                                          "sticky bg-blue-50 border-r-2 border-gray-200 pl-16 z-30",
+                                          "sticky bg-white border-r-2 border-gray-200 pl-16 z-10",
                                           columnVisibility.index ? "left-16" : "left-0"
                                         )}>
                                           <div className="flex items-center gap-2">
-                                            <ChevronRight className="h-3 w-3 text-blue-500" />
-                                            <span className="text-blue-700 text-sm font-medium">{subCls.name}</span>
+                                            <ChevronRight className="h-3 w-3 text-gray-500" />
+                                            <span className="text-gray-700 text-sm font-medium">{subCls.name}</span>
                                           </div>
                                         </TableCell>
                                       )}
 
                                       {columnVisibility.stageName && (
                                         <TableCell className={cn(
-                                          "sticky bg-blue-50 border-r-2 border-gray-200 text-center text-sm z-30",
+                                          "sticky bg-white border-r-2 border-gray-200 text-center text-sm z-10",
                                           columnVisibility.index && columnVisibility.entity ? "left-80" :
                                             columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
                                         )}></TableCell>
@@ -1920,11 +1979,12 @@ export default function Stages() {
                                         const stageAllocation = subCls.stages?.find(s => s.stage_id === stage.id)
                                         const hasAllocation = stageAllocation?.applicable ?? true
                                         const hasDisplay = stageAllocation?.display ?? true
+                                        const columnClass = stageIndex % 2 === 0 ? "bg-white" : "bg-gray-50/80";
 
                                         return (
                                           <TableCell
                                             key={`subclass-${subdept.id}-${cls.id}-${subCls.id}-${stage.id}`}
-                                            className="border-r border-l border-gray-200 p-0"
+                                            className={cn("border-x border-gray-200 p-0", columnClass)}
                                           >
                                             {columnVisibility.controls && (
                                               <div className="grid grid-cols-2 gap-1 p-1">
@@ -1935,7 +1995,7 @@ export default function Stages() {
                                                       handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex, subClsIndex)
                                                     }
                                                   >
-                                                    <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50">
+                                                    <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-gray-200/50">
                                                       <SelectValue>
                                                         <div className="flex items-center gap-1">
                                                           <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
