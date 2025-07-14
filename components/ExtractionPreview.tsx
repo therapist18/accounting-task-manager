@@ -85,17 +85,19 @@ const DocumentViewer = ({ fileUrl, fileName, documentName }) => {
         <CardDescription>Visual representation of the uploaded file.</CardDescription>
       </CardHeader>
       <CardContent className="flex-1 p-2">
-        <div className="relative w-full h-full bg-secondary/30 rounded-md overflow-hidden border">
+        <div className="relative w-full h-[600px] bg-secondary/30 rounded-md overflow-hidden border">
           {fileUrl ? (
             isPDF ? (
               <PDFViewer url={fileUrl} />
             ) : (
-              <Image
-                src={fileUrl}
-                alt={documentName}
-                fill
-                className="object-contain"
-              />
+              <div className="relative w-full h-full">
+                <Image
+                  src={fileUrl}
+                  alt={documentName}
+                  fill
+                  className="object-contain"
+                />
+              </div>
             )
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
