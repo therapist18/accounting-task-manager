@@ -6,8 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Loader2, Upload, FileText } from "lucide-react"
+import { Loader2, Upload } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { performExtraction } from "@/lib/extractionUtils"
 import { supabase } from "@/lib/supabase/client"
@@ -23,7 +22,9 @@ interface FileUploadComponentProps {
   onOpenChange: (open: boolean) => void
   task: any
   document: any
-  columnType: 'principal' | 'dependant' | 'understudy'
+  columnType: 'principal' | 'dependant' | 'understudy' | 'reference'
+  applicantId?: number
+  individualNames?: Record<number, string>
   onUploadComplete?: () => void
 }
 
@@ -33,6 +34,8 @@ export function FileUploadComponent({
   task,
   document,
   columnType,
+  applicantId,
+  individualNames,
   onUploadComplete
 }: FileUploadComponentProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -41,7 +44,9 @@ export function FileUploadComponent({
   const [fileUrl, setFileUrl] = useState<string | null>(null)
   const [previewData, setPreviewData] = useState<any>(null)
 
-  // Update the extraction fields initialization
+  // Determine if this is a company document
+  const isCompanyDocument = document?.category === 'company-docs' || document?.category === 'company'
+
   const extractionFields = React.useMemo(() => {
     return document?.fields?.map((field: any) => ({
       id: field.id,
@@ -52,7 +57,7 @@ export function FileUploadComponent({
       arrayConfig: field.arrayConfig || null
     })) || [];
   }, [document])
-  // Clean up when dialog closes
+
   React.useEffect(() => {
     if (!open) {
       setSelectedFile(null)
@@ -62,7 +67,6 @@ export function FileUploadComponent({
         URL.revokeObjectURL(fileUrl)
         setFileUrl(null)
       }
-      // Clean up global function
       if (window.refreshExtraction) {
         delete window.refreshExtraction
       }
@@ -78,35 +82,64 @@ export function FileUploadComponent({
         return task.dependant_member || task.individual_id
       case 'understudy':
         return task.understudy_member || task.individual_id
+      case 'reference':
+        return applicantId || task.individual_id
       default:
         return task.individual_id
     }
-  }, [task, columnType])
+  }, [task, columnType, applicantId])
 
-  // Upload file to Supabase storage
-  const uploadFileToStorage = async (file: File, individualId: number): Promise<string> => {
+  // Upload file to appropriate storage path
+  const uploadFileToStorage = async (file: File): Promise<string> => {
     try {
       const bucketName = 'kyc-documents'
-
-      // Get individual name for folder structure
-      const { data: individual, error: individualError } = await supabase
-        .from('registry_individuals')
-        .select('full_name')
-        .eq('id', individualId)
-        .single()
-
-      if (individualError) {
-        throw new Error(`Failed to get individual name: ${individualError.message}`)
-      }
-
-      const normalizedName = individual.full_name
-        .toLowerCase()
-        .replace(/\s+/g, '_')
-        .replace(/[^a-z0-9_]/g, '')
-
       const fileExtension = file.name.split('.').pop()
       const timestamp = Date.now()
-      const filename = `individual-documents/${normalizedName}/${document.name}/${timestamp}.${fileExtension}`
+
+      let filename: string
+
+      if (isCompanyDocument) {
+        // Company document path
+        const { data: company, error: companyError } = await supabase
+          .from('acc_portal_company_duplicate')
+          .select('company_name')
+          .eq('id', task.company_id)
+          .single()
+
+        if (companyError) {
+          throw new Error(`Failed to get company name: ${companyError.message}`)
+        }
+
+        const normalizedCompanyName = company.company_name
+          .toLowerCase()
+          .replace(/\s+/g, '_')
+          .replace(/[^a-z0-9_]/g, '')
+
+        filename = `company-documents/${normalizedCompanyName}/${document.name}/${timestamp}.${fileExtension}`
+      } else {
+        // Individual document path
+        const individualId = getIndividualId()
+        if (!individualId) {
+          throw new Error('Individual ID not found')
+        }
+
+        const { data: individual, error: individualError } = await supabase
+          .from('registry_individuals')
+          .select('full_name')
+          .eq('id', individualId)
+          .single()
+
+        if (individualError) {
+          throw new Error(`Failed to get individual name: ${individualError.message}`)
+        }
+
+        const normalizedName = individual.full_name
+          .toLowerCase()
+          .replace(/\s+/g, '_')
+          .replace(/[^a-z0-9_]/g, '')
+
+        filename = `individual-documents/${normalizedName}/${document.name}/${timestamp}.${fileExtension}`
+      }
 
       const { data, error } = await supabase.storage
         .from(bucketName)
@@ -126,9 +159,6 @@ export function FileUploadComponent({
     }
   }
 
-
-
-  // Handle file selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
@@ -136,7 +166,6 @@ export function FileUploadComponent({
       const objectUrl = URL.createObjectURL(file)
       setFileUrl(objectUrl)
 
-      // Set up immediate preview with empty data
       const previewData = {
         fileUrl: objectUrl,
         fileName: file.name,
@@ -145,27 +174,23 @@ export function FileUploadComponent({
       }
       setPreviewData(previewData)
 
-      // Make refreshExtraction available globally
       window.refreshExtraction = async () => {
         if (file) {
           await performDataExtraction(file, objectUrl, true)
         }
       }
 
-      // Start extraction in the background
       performDataExtraction(file, objectUrl)
     }
   }
-  // In the performDataExtraction function, update the array field processing:
+
   const performDataExtraction = async (file: File, fileUrl: string, isRefresh = false) => {
     if (!file || !document) return
 
     setUploading(true)
     try {
-      // Process extraction fields to include array configurations
       const processedFields = extractionFields.map(field => {
         if (field.type === 'array' && document.fields) {
-          // Find the corresponding field in document.fields to get arrayConfig
           const docField = document.fields.find(df => df.id === field.id || df.name === field.name);
           if (docField && docField.arrayConfig) {
             return {
@@ -178,11 +203,9 @@ export function FileUploadComponent({
         return field;
       });
 
-      console.log('Processed extraction fields:', processedFields);
-
-      const { extractedData, success, message } = await performExtraction(
+      const { extractedData, success } = await performExtraction(
         fileUrl,
-        processedFields, // Use processed fields instead of extractionFields
+        processedFields,
         document?.category || 'document',
         (progressMessage) => {
           console.log('Extraction progress:', progressMessage)
@@ -201,18 +224,15 @@ export function FileUploadComponent({
         }
       }
 
-      // Enhanced array field processing
       if (parsedData && processedFields) {
         processedFields.forEach(field => {
           if ((field.type === 'array' || field.isArray) && field.arrayConfig?.fields) {
             const fieldName = field.name;
             if (parsedData[fieldName]) {
-              // Ensure array fields are properly structured
               if (!Array.isArray(parsedData[fieldName])) {
                 parsedData[fieldName] = [parsedData[fieldName]];
               }
 
-              // Validate each array item has the expected structure
               parsedData[fieldName] = parsedData[fieldName].map((item: any) => {
                 if (typeof item !== 'object' || item === null) {
                   return {};
@@ -225,7 +245,6 @@ export function FileUploadComponent({
 
                 return validatedItem;
               }).filter((item: any) => {
-                // Remove completely empty items
                 return Object.values(item).some(val => val !== null && val !== undefined && val !== '');
               });
             } else {
@@ -236,7 +255,6 @@ export function FileUploadComponent({
       }
 
       setExtractedData(parsedData)
-
       setPreviewData(prev => ({
         ...prev,
         extractedData: parsedData
@@ -260,7 +278,6 @@ export function FileUploadComponent({
     }
   }
 
-  // Handle data change from ExtractionPreview
   const handleDataChange = (fieldName: string, value: any) => {
     setExtractedData(prev => ({
       ...prev,
@@ -268,7 +285,7 @@ export function FileUploadComponent({
     }))
   }
 
-  // Save document to database
+  // Save document to appropriate database table
   const handleSaveDocument = async () => {
     if (!selectedFile) {
       toast({
@@ -282,33 +299,57 @@ export function FileUploadComponent({
     try {
       setUploading(true)
 
-      const individualId = getIndividualId()
-      if (!individualId) {
-        throw new Error('Individual ID not found')
-      }
-
       // Upload file to storage
-      const filePath = await uploadFileToStorage(selectedFile, individualId)
+      const filePath = await uploadFileToStorage(selectedFile)
 
-      // Save document record to database
-      const documentRecord = {
-        director_id: individualId,
-        document_id: document.id,
-        file_path: filePath,
-        extracted_details: extractedData,
-        status: 'uploaded',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }
+      if (isCompanyDocument) {
+        // Save to company documents table
+        const documentRecord = {
+          company_id: task.company_id,
+          kyc_document_id: document.id,
+          file_path: filePath,
+          extracted_details: extractedData,
+          status: 'active',
+          document_type: 'upload',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
 
-      const { data: insertedDoc, error } = await supabase
-        .from('acc_portal_directors_documents')
-        .insert(documentRecord)
-        .select()
-        .single()
+        const { data: insertedDoc, error } = await supabase
+          .from('acc_portal_kyc_uploads')
+          .insert(documentRecord)
+          .select()
+          .single()
 
-      if (error) {
-        throw new Error(`Failed to save document: ${error.message}`)
+        if (error) {
+          throw new Error(`Failed to save company document: ${error.message}`)
+        }
+      } else {
+        // Save to individual documents table
+        const individualId = getIndividualId()
+        if (!individualId) {
+          throw new Error('Individual ID not found')
+        }
+
+        const documentRecord = {
+          director_id: individualId,
+          document_id: document.id,
+          file_path: filePath,
+          extracted_details: extractedData,
+          status: 'uploaded',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+
+        const { data: insertedDoc, error } = await supabase
+          .from('acc_portal_directors_documents')
+          .insert(documentRecord)
+          .select()
+          .single()
+
+        if (error) {
+          throw new Error(`Failed to save individual document: ${error.message}`)
+        }
       }
 
       toast({
@@ -316,7 +357,6 @@ export function FileUploadComponent({
         description: 'Document uploaded and saved successfully'
       })
 
-      // Close dialog and trigger refresh
       onOpenChange(false)
       if (onUploadComplete) {
         onUploadComplete()
@@ -340,11 +380,16 @@ export function FileUploadComponent({
         <DialogHeader>
           <DialogTitle>
             Upload {(document?.display_name || document?.name || 'Unknown Document')} for {columnType}
+            {applicantId && columnType !== 'principal' ? ` (${individualNames?.[applicantId]})` : ''}
+            {isCompanyDocument && (
+              <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">
+                Company Document
+              </span>
+            )}
           </DialogTitle>
         </DialogHeader>
 
         <div className="">
-          {/* Left Panel - Upload Options */}
           <div className="space-y-4">
             <div className="space-y-4 p-4 rounded-lg border">
               <div className="space-y-2">
@@ -363,35 +408,30 @@ export function FileUploadComponent({
                   Supported formats: PDF, Images
                 </p>
               </div>
-
-
             </div>
           </div>
 
-          {/* Right Panel - Preview */}
-          <div>
-            <div className="mt-6">
-              {fileUrl ? (
-                <ExtractionPreview
-                  documentName={document?.display_name || document?.name || 'Document'}
-                  extractedData={previewData?.extractedData || {}}
-                  fields={extractionFields}
-                  onDataChange={(field, value) => {
-                    setExtractedData((prev: any) => ({
-                      ...prev,
-                      [field]: value
-                    }))
-                  }}
-                  fileUrl={fileUrl}
-                  fileName={selectedFile?.name || ''}
-                  expanded={true}
-                />
-              ) : (
-                <div className="flex items-center justify-center h-64 border-2 border-dashed rounded-lg">
-                  <p className="text-muted-foreground">Upload a file to see the preview</p>
-                </div>
-              )}
-            </div>
+          <div className="mt-6">
+            {fileUrl ? (
+              <ExtractionPreview
+                documentName={document?.display_name || document?.name || 'Document'}
+                extractedData={previewData?.extractedData || {}}
+                fields={extractionFields}
+                onDataChange={(field, value) => {
+                  setExtractedData((prev: any) => ({
+                    ...prev,
+                    [field]: value
+                  }))
+                }}
+                fileUrl={fileUrl}
+                fileName={selectedFile?.name || ''}
+                expanded={true}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-64 border-2 border-dashed rounded-lg">
+                <p className="text-muted-foreground">Upload a file to see the preview</p>
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-2 pt-4 border-t">

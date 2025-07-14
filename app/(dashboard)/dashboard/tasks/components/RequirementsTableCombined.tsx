@@ -917,8 +917,463 @@ export default function RequirementsTableCombined({
               </>
             )}
 
-            {/* Continue with Post Application and Client Form Fields sections... */}
-            {/* Note: Apply the same pattern for these sections as shown above */}
+          {/* Post Application Section */}
+          {(organizedRequirements.postApplication.company.length > 0 || organizedRequirements.postApplication.individual.length > 0) && (
+              <>
+                {/* Main Post Application Header */}
+                <TableRow className="bg-gradient-to-r from-blue-100 to-blue-50 border-y-2 border-blue-300">
+                  <TableCell className="sticky left-0 bg-gradient-to-r from-blue-100 to-blue-50 border-r z-[5] text-center font-bold text-gray-700">
+                    <FileText className="h-4 w-4 mx-auto" />
+                  </TableCell>
+                  <TableCell className="sticky left-16 bg-gradient-to-r from-blue-100 to-blue-50 border-r z-[5]">
+                    <div className="flex items-center gap-2 px-2 py-2">
+                      <span className="font-bold text-gray-700 text-lg">Post Application</span>
+                      <span className="text-sm bg-blue-200 text-gray-700 px-2 py-1 rounded-full ml-2">
+                        {organizedRequirements.postApplication.company.length + organizedRequirements.postApplication.individual.length}
+                      </span>
+                    </div>
+                  </TableCell>
+                  {filteredGroupedTasks.map((group, groupIndex) => {
+                    const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                    let columnsCount = 1 + group.dependantIds.length;
+                    if (hasClassD) columnsCount += 1;
+                    if (hasReferencesColumn) columnsCount = columnsCount * 2;
+
+                    return Array.from({ length: columnsCount }, (_, idx) => (
+                      <TableCell
+                        key={`post-app-section-${groupIndex}-${idx}`}
+                        className="bg-gradient-to-r from-blue-100 to-blue-50 border-r text-center"
+                      >
+                        <div className="h-px bg-blue-300 w-full"></div>
+                      </TableCell>
+                    ));
+                  })}
+                </TableRow>
+
+                {/* Company Post Application Documents */}
+                {organizedRequirements.postApplication.company.length > 0 && (
+                  <>
+                    <TableRow className="bg-blue-100">
+                      <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
+                      <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
+                        <span className="font-semibold text-blue-700">Company Stage Documents</span>
+                        <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                          {organizedRequirements.postApplication.company.length}
+                        </span>
+                      </TableCell>
+                      {filteredGroupedTasks.map((group, groupIndex) => {
+                        const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                        let columnsCount = 1 + group.dependantIds.length;
+                        if (hasClassD) columnsCount += 1;
+                        if (hasReferencesColumn) columnsCount = columnsCount * 2;
+
+                        return Array.from({ length: columnsCount }, (_, idx) => (
+                          <TableCell
+                            key={`company-post-app-header-${groupIndex}-${idx}`}
+                            className="bg-blue-100 border-r text-center"
+                          >
+                            -
+                          </TableCell>
+                        ));
+                      })}
+                    </TableRow>
+
+                    {/* Company Post Application Document Items - with restricted icons */}
+                    {organizedRequirements.postApplication.company.map((stageDoc, docIndex) => {
+                      const displayText = `S${stageDoc.stageOrder || docIndex + 1}`;
+
+                      return (
+                        <TableRow key={`company-post-app-${stageDoc.id}`} className="group bg-blue-50 hover:bg-blue-100">
+                          <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
+                            {displayText}
+                          </TableCell>
+                          <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
+                            <div className="flex flex-col px-2">
+                              <div className="flex items-center">
+                                <span className="text-sm font-semibold text-gray-800">
+                                  {stageDoc.display_name}
+                                </span>
+                                <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700">
+                                  {stageDoc.stageName}
+                                </Badge>
+                              </div>
+                              {stageDoc.stageDocumentConfig?.description && (
+                                <span className="text-xs text-gray-500 mt-1">
+                                  {stageDoc.stageDocumentConfig.description}
+                                </span>
+                              )}
+                            </div>
+                          </TableCell>
+                          {filteredGroupedTasks.map((group, groupIndex) => {
+                            const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                            const referenceTask = group.tasks[0];
+
+                            const columns = [
+                              // Principal Documents
+                              <TableCell key={`${stageDoc.id}-${groupIndex}-principal-docs`} className="text-center border p-1">
+                                {referenceTask.applicant_type === 'applicant' ? 
+                                  renderDocumentStatus(referenceTask, stageDoc, 'principal', undefined, true) : 
+                                  <span className="text-muted-foreground">N/A</span>
+                                }
+                              </TableCell>
+                            ];
+
+                            // Principal References
+                            if (hasReferencesColumn) {
+                              columns.push(
+                                <TableCell key={`${stageDoc.id}-${groupIndex}-principal-refs`} className="text-center border p-1">
+                                  {renderReferencesData(referenceTask, 'principal')}
+                                </TableCell>
+                              );
+                            }
+
+                            // Add columns for each dependant
+                            group.dependantIds.forEach((dependantId) => {
+                              // Dependant Documents
+                              columns.push(
+                                <TableCell key={`${stageDoc.id}-${groupIndex}-dependant-${dependantId}-docs`} className="text-center border p-1">
+                                  {referenceTask.applicant_type === 'applicant' ? 
+                                    renderDocumentStatus(referenceTask, stageDoc, 'dependant', dependantId, true) : 
+                                    <span className="text-muted-foreground">N/A</span>
+                                  }
+                                </TableCell>
+                              );
+
+                              // Dependant References
+                              if (hasReferencesColumn) {
+                                columns.push(
+                                  <TableCell key={`${stageDoc.id}-${groupIndex}-dependant-${dependantId}-refs`} className="text-center border p-1">
+                                    {renderReferencesData(referenceTask, 'dependant', dependantId)}
+                                  </TableCell>
+                                );
+                              }
+                            });
+
+                            // Understudy columns
+                            if (hasClassD) {
+                              // Understudy Documents
+                              columns.push(
+                                <TableCell key={`${stageDoc.id}-${groupIndex}-understudy-docs`} className="text-center border p-1">
+                                  {referenceTask.applicant_type === 'applicant' ? 
+                                    renderDocumentStatus(referenceTask, stageDoc, 'understudy', undefined, true) : 
+                                    <span className="text-muted-foreground">N/A</span>
+                                  }
+                                </TableCell>
+                              );
+
+                              // Understudy References
+                              if (hasReferencesColumn) {
+                                columns.push(
+                                  <TableCell key={`${stageDoc.id}-${groupIndex}-understudy-refs`} className="text-center border p-1">
+                                    {renderReferencesData(referenceTask, 'understudy')}
+                                  </TableCell>
+                                );
+                              }
+                            }
+
+                            return columns;
+                          })}
+                        </TableRow>
+                      );
+                    })}
+                  </>
+                )}
+
+                {/* Individual Post Application Documents */}
+                {organizedRequirements.postApplication.individual.length > 0 && (
+                  <>
+                    <TableRow className="bg-blue-100">
+                      <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
+                      <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
+                        <span className="font-semibold text-blue-700">Individual Stage Documents</span>
+                        <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                          {organizedRequirements.postApplication.individual.length}
+                        </span>
+                      </TableCell>
+                      {filteredGroupedTasks.map((group, groupIndex) => {
+                        const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                        let columnsCount = 1 + group.dependantIds.length;
+                        if (hasClassD) columnsCount += 1;
+                        if (hasReferencesColumn) columnsCount = columnsCount * 2;
+
+                        return Array.from({ length: columnsCount }, (_, idx) => (
+                          <TableCell
+                            key={`individual-post-app-header-${groupIndex}-${idx}`}
+                            className="bg-blue-100 border-r text-center"
+                          >
+                            -
+                          </TableCell>
+                        ));
+                      })}
+                    </TableRow>
+
+                    {/* Individual Post Application Document Items - with restricted icons */}
+                    {organizedRequirements.postApplication.individual.map((stageDoc, docIndex) => {
+                      const displayText = `S${stageDoc.stageOrder || docIndex + 1}`;
+
+                      return (
+                        <TableRow key={`individual-post-app-${stageDoc.id}`} className="group bg-blue-50 hover:bg-blue-100">
+                          <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
+                            {displayText}
+                          </TableCell>
+                          <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
+                            <div className="flex flex-col px-2">
+                              <div className="flex items-center">
+                                <span className="text-sm font-semibold text-gray-800">
+                                  {stageDoc.display_name}
+                                </span>
+                                <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700">
+                                  {stageDoc.stageName}
+                                </Badge>
+                              </div>
+                              {stageDoc.stageDocumentConfig?.description && (
+                                <span className="text-xs text-gray-500 mt-1">
+                                  {stageDoc.stageDocumentConfig.description}
+                                </span>
+                              )}
+                            </div>
+                          </TableCell>
+                          {filteredGroupedTasks.map((group, groupIndex) => {
+                            const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                            const referenceTask = group.tasks[0];
+
+                            const columns = [
+                              // Principal Documents
+                              <TableCell key={`${stageDoc.id}-${groupIndex}-principal-docs`} className="text-center border p-1">
+                                {referenceTask.applicant_type === 'applicant' ? 
+                                  renderDocumentStatus(referenceTask, stageDoc, 'principal', undefined, true) : 
+                                  <span className="text-muted-foreground">N/A</span>
+                                }
+                              </TableCell>
+                            ];
+
+                            // Principal References
+                            if (hasReferencesColumn) {
+                              columns.push(
+                                <TableCell key={`${stageDoc.id}-${groupIndex}-principal-refs`} className="text-center border p-1">
+                                  {referenceTask.applicant_type === 'applicant' ? 
+                                    renderReferencesData(referenceTask, 'principal') : 
+                                    <span className="text-muted-foreground">N/A</span>
+                                  }
+                                </TableCell>
+                              );
+                            }
+
+                            // Add columns for each dependant
+                            group.dependantIds.forEach((dependantId) => {
+                              // Dependant Documents
+                              columns.push(
+                                <TableCell key={`${stageDoc.id}-${groupIndex}-dependant-${dependantId}-docs`} className="text-center border p-1">
+                                  {referenceTask.applicant_type === 'applicant' ? 
+                                    renderDocumentStatus(referenceTask, stageDoc, 'dependant', dependantId, true) : 
+                                    <span className="text-muted-foreground">N/A</span>
+                                  }
+                                </TableCell>
+                              );
+
+                              // Dependant References
+                              if (hasReferencesColumn) {
+                                columns.push(
+                                  <TableCell key={`${stageDoc.id}-${groupIndex}-dependant-${dependantId}-refs`} className="text-center border p-1">
+                                    {referenceTask.applicant_type === 'applicant' ? 
+                                      renderReferencesData(referenceTask, 'dependant', dependantId) : 
+                                      <span className="text-muted-foreground">N/A</span>
+                                    }
+                                  </TableCell>
+                                );
+                              }
+                            });
+
+                            // Understudy columns
+                            if (hasClassD) {
+                              // Understudy Documents
+                              columns.push(
+                                <TableCell key={`${stageDoc.id}-${groupIndex}-understudy-docs`} className="text-center border p-1">
+                                  {referenceTask.applicant_type === 'applicant' ? 
+                                    renderDocumentStatus(referenceTask, stageDoc, 'understudy', undefined, true) : 
+                                    <span className="text-muted-foreground">N/A</span>
+                                  }
+                                </TableCell>
+                              );
+
+                              // Understudy References
+                              if (hasReferencesColumn) {
+                                columns.push(
+                                  <TableCell key={`${stageDoc.id}-${groupIndex}-understudy-refs`} className="text-center border p-1">
+                                    {referenceTask.applicant_type === 'applicant' ? 
+                                      renderReferencesData(referenceTask, 'understudy') : 
+                                      <span className="text-muted-foreground">N/A</span>
+                                    }
+                                  </TableCell>
+                                );
+                              }
+                            }
+
+                            return columns;
+                          })}
+                        </TableRow>
+                      );
+                    })}
+                  </>
+                )}
+              </>
+            )}
+
+            {/* Client Form Fields Section */}
+            {(organizedRequirements.clientFields.company.length > 0 || organizedRequirements.clientFields.individual.length > 0) && (
+              <>
+                {/* Main Client Form Fields Header */}
+                <TableRow className="bg-gradient-to-r from-slate-100 to-slate-50 border-y-2 border-slate-300">
+                  <TableCell className="sticky left-0 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5] text-center font-bold text-slate-700">
+                    <Users className="h-4 w-4 mx-auto" />
+                  </TableCell>
+                  <TableCell className="sticky left-16 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5]">
+                    <div className="flex items-center gap-2 px-2 py-2">
+                      <span className="font-bold text-slate-700 text-lg">Client Form Fields</span>
+                      <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">
+                        {organizedRequirements.clientFields.company.length + organizedRequirements.clientFields.individual.length}
+                      </span>
+                    </div>
+                  </TableCell>
+                  {filteredGroupedTasks.map((group, groupIndex) => {
+                    const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                    let columnsCount = 1 + group.dependantIds.length;
+                    if (hasClassD) columnsCount += 1;
+                    if (hasReferencesColumn) columnsCount = columnsCount * 2;
+
+                    return Array.from({ length: columnsCount }, (_, idx) => (
+                      <TableCell
+                        key={`client-section-${groupIndex}-${idx}`}
+                        className="bg-gradient-to-r from-slate-100 to-slate-50 border-r text-center"
+                      >
+                        <div className="h-px bg-slate-300 w-full"></div>
+                      </TableCell>
+                    ));
+                  })}
+                </TableRow>
+
+                {/* Individual Client Fields Subsection */}
+                {organizedRequirements.clientFields.individual.length > 0 && (
+                  <>
+                    <TableRow className="bg-blue-100">
+                      <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-gray-700"></TableCell>
+                      <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
+                        <span className="font-semibold text-blue-700">Individual Fields</span>
+                        <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
+                          {organizedRequirements.clientFields.individual.length}
+                        </span>
+                      </TableCell>
+                      {filteredGroupedTasks.map((group, groupIndex) => {  
+                        const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                        let columnsCount = 1 + group.dependantIds.length;
+                        if (hasClassD) columnsCount += 1;
+                        if (hasReferencesColumn) columnsCount = columnsCount * 2;
+
+                        return Array.from({ length: columnsCount }, (_, idx) => (
+                          <TableCell
+                            key={`individual-field-header-${groupIndex}-${idx}`}
+                            className="bg-blue-100 border-r text-center"
+                          >
+                            -
+                          </TableCell>
+                        ));
+                      })}
+                    </TableRow>
+
+                    {/* Individual Client Field Items */}
+                    {organizedRequirements.clientFields.individual.map((fieldItem, fieldIndex) => (
+                      <TableRow key={`individual-field-${fieldItem.field.selectionId}`} className="group bg-blue-50 hover:bg-blue-100">
+                        <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
+                          {fieldIndex + 1}
+                        </TableCell>
+                        <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
+                          <div className="flex items-center px-2">
+                            <span className="text-sm font-medium text-gray-700">
+                              {fieldItem.field.tableHeader || fieldItem.field.label}
+                            </span>
+                            {fieldItem.field.type && (
+                              <span className="text-xs text-gray-400 ml-2">
+                                ({fieldItem.field.type})
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        {filteredGroupedTasks.map((group, groupIndex) => {
+                          const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                          const principalTask = group.tasks.find(task => task.applicant_type === 'principal');
+                          const understudyTask = group.tasks.find(task => task.applicant_type === 'understudy');
+
+                          const columns = [
+                            // Principal Field Data
+                            <TableCell key={`${fieldItem.field.selectionId}-${groupIndex}-principal-data`} className="text-center border p-1">
+                              {principalTask ? renderClientFieldData(principalTask, fieldItem) :
+                                <span className="text-gray-400 text-xs">N/A</span>}
+                            </TableCell>
+                          ];
+
+                          // Principal References
+                          if (hasReferencesColumn) {
+                            columns.push(
+                              <TableCell key={`${fieldItem.field.selectionId}-${groupIndex}-principal-refs`} className="text-center border p-1">
+                                -
+                              </TableCell>
+                            );
+                          }
+
+                          // Add columns for each dependant
+                          group.dependantIds.forEach((dependantId) => {
+                            const dependantTask = group.tasks.find(task =>
+                              task.dependant_member &&
+                              Array.isArray(task.dependant_member) &&
+                              task.dependant_member.some((dep: any) => dep.id === dependantId)
+                            );
+
+                            // Dependant Field Data
+                            columns.push(
+                              <TableCell key={`${fieldItem.field.selectionId}-${groupIndex}-dependant-${dependantId}-data`} className="text-center border p-1">
+                                {dependantTask ? renderClientFieldData(dependantTask, fieldItem) :
+                                  <span className="text-gray-400 text-xs">N/A</span>}
+                              </TableCell>
+                            );
+
+                            // Dependant References
+                            if (hasReferencesColumn) {
+                              columns.push(
+                                <TableCell key={`${fieldItem.field.selectionId}-${groupIndex}-dependant-${dependantId}-refs`} className="text-center border p-1">
+                                  -
+                                </TableCell>
+                              );
+                            }
+                          });
+
+                          // Understudy columns
+                          if (hasClassD) {
+                            // Understudy Field Data
+                            columns.push(
+                              <TableCell key={`${fieldItem.field.selectionId}-${groupIndex}-understudy-data`} className="text-center border p-1">
+                                {understudyTask ? renderClientFieldData(understudyTask, fieldItem) :
+                                  <span className="text-gray-400 text-xs">N/A</span>}
+                              </TableCell>
+                            );
+
+                            // Understudy References
+                            if (hasReferencesColumn) {
+                              columns.push(
+                                <TableCell key={`${fieldItem.field.selectionId}-${groupIndex}-understudy-refs`} className="text-center border p-1">
+                                  -
+                                </TableCell>
+                              );
+                            }
+                          }
+
+                          return columns;
+                        })}
+                      </TableRow>
+                    ))}
+                  </>
+                )}
+              </>
+            )}
 
             {/* Empty state */}
             {organizedRequirements.documents.company.length === 0 &&

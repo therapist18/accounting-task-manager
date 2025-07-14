@@ -22,8 +22,8 @@ import ColumnVisibilityControl, { ColumnVisibilityOption } from "../main-shared-
 import EntityVisibilityControl, { EntityVisibilityOption } from "../main-shared-components/entity-visibility"
 
 // Simple UUID generator for client-side use
-const generateId = () => { 
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) { 
+const generateId = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = Math.random() * 16 | 0
     const v = c === 'x' ? r : (r & 0x3 | 0x8)
     return v.toString(16)
@@ -306,16 +306,16 @@ export default function Stages() {
   // Process subdepartments based on display settings and entity visibility
   const getProcessedSubdepartments = (dept: Department) => {
     let subdepartments = dept.subdepartments || []
-    
+
     // Filter by default display if needed
     subdepartments = filterByDefaultDisplay(subdepartments, showDefaultDisplayOnly)
-    
+
     // Filter by entity visibility
     subdepartments = subdepartments.filter(subdept => {
       const subdeptId = `subdept-${subdept.id}`
       return entityVisibility[subdeptId] !== false
     })
-    
+
     // Process classes and subclasses within each subdepartment
     return subdepartments.map(subdept => ({
       ...subdept,
@@ -345,13 +345,13 @@ export default function Stages() {
     if (!currentDept) return
 
     const rowIds = new Set<string>()
-    
+
     // Get all potential row IDs
     const processedSubdepartments = getProcessedSubdepartments(currentDept)
     processedSubdepartments.forEach((subdept, subdeptIndex) => {
       const subdeptRowId = `subdept-${subdept.id}`
       rowIds.add(subdeptRowId)
-      
+
       if (subdept.classes && subdept.classes.length > 0) {
         subdept.classes.forEach((cls, clsIndex) => {
           const classRowId = `class-${subdept.id}-${cls.id || clsIndex}`
@@ -359,7 +359,7 @@ export default function Stages() {
         })
       }
     })
-    
+
     setExpandedRows(rowIds)
   }
 
@@ -1080,15 +1080,15 @@ export default function Stages() {
   const moveStage = async (stageId: string, direction: 'up' | 'down') => {
     const currentDept = getCurrentDepartment()
     if (!currentDept) return
- 
+
     const currentStages = JSON.parse(JSON.stringify(currentDept.stages))
     const currentIndex = currentStages.findIndex((s: Stage) => s.id === stageId)
- 
+
     if (currentIndex === -1) return
- 
+
     const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
     if (newIndex < 0 || newIndex >= currentStages.length) return
- 
+
     const newStages = [...currentStages]
     const [movedStage] = newStages.splice(currentIndex, 1)
     newStages.splice(newIndex, 0, movedStage)
@@ -1097,16 +1097,16 @@ export default function Stages() {
       ...stage,
       order_num: index + 1
     }))
- 
+
     try {
       const { data: currentDeptData, error: fetchError } = await supabase
         .from('tm_departments')
         .select('*')
         .eq('id', activeTab)
         .single()
- 
+
       if (fetchError) throw fetchError
- 
+
       const { error } = await supabase
         .from('tm_departments')
         .update({
@@ -1115,9 +1115,9 @@ export default function Stages() {
           updated_at: new Date().toISOString()
         })
         .eq('id', activeTab)
- 
+
       if (error) throw error
- 
+
       setDepartments(prev => prev.map(dept =>
         dept.id === activeTab
           ? { ...dept, stages: updatedStages }
@@ -1132,15 +1132,15 @@ export default function Stages() {
       })
     }
   }
- 
+
   const handleDeleteStage = async (stageId: string) => {
     try {
       const currentDept = getCurrentDepartment()
       if (!currentDept) return
- 
+
       const stageToDelete = currentDept.stages.find(s => s.id === stageId)
       if (!stageToDelete) return
- 
+
       if (stageToDelete.documents) {
         await Promise.all(
           stageToDelete.documents
@@ -1148,11 +1148,11 @@ export default function Stages() {
             .map(doc => deleteKYCDocument(doc.kycId!))
         )
       }
- 
+
       const updatedStages = currentDept.stages
         .filter(s => s.id !== stageId)
         .map((stage, index) => ({ ...stage, order_num: index + 1 }))
- 
+
       const { error } = await supabase
         .from('tm_departments')
         .update({
@@ -1160,15 +1160,15 @@ export default function Stages() {
           updated_at: new Date().toISOString()
         })
         .eq('id', activeTab)
- 
+
       if (error) throw error
- 
+
       setDepartments(prev => prev.map(dept =>
         dept.id === activeTab
           ? { ...dept, stages: updatedStages }
           : dept
       ))
- 
+
       toast({
         title: "Success",
         description: "Stage and associated documents deleted successfully",
@@ -1182,9 +1182,9 @@ export default function Stages() {
       })
     }
   }
- 
+
   const currentDept = getCurrentDepartment()
- 
+
   if (loading) {
     return (
       <div className="p-12 text-center">
@@ -1193,7 +1193,7 @@ export default function Stages() {
       </div>
     )
   }
- 
+
   if (error) {
     return (
       <div className="p-12 text-center">
@@ -1204,7 +1204,7 @@ export default function Stages() {
       </div>
     )
   }
- 
+
   if (!currentDept) {
     return (
       <div className="p-12 text-center">
@@ -1212,7 +1212,7 @@ export default function Stages() {
       </div>
     )
   }
- 
+
   const processedSubdepartments = getProcessedSubdepartments(currentDept)
   const normalizedSubdepartments = processedSubdepartments.length > 0
     ? processedSubdepartments
@@ -1224,7 +1224,7 @@ export default function Stages() {
       hasClasses: false,
       classes: []
     }]
- 
+
   return (
     <div className="w-full min-h-screen">
       <div className="mx-auto p-4">
@@ -1234,16 +1234,6 @@ export default function Stages() {
             <p className="text-gray-600 mt-1">Configure workflow stages and their allocations</p>
           </div>
           <div className="flex items-center gap-3">
-            {/* Default Display Toggle */}
-            <Button
-              variant={showDefaultDisplayOnly ? "default" : "outline"}
-              onClick={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
-              className="flex items-center gap-2"
-            >
-              {showDefaultDisplayOnly ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-              {showDefaultDisplayOnly ? 'Default Display' : 'Show All'}
-            </Button>
-
             {/* Expand/Collapse All Buttons */}
             <Button
               variant="outline"
@@ -1272,11 +1262,11 @@ export default function Stages() {
               onResetToDefault={handleResetEntitiesToDefault}
               showDefaultDisplayOnly={showDefaultDisplayOnly}
               onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
-              title="Entity Visibility"
+              title="Row Visibility"
               description="Control which departments, classes, and subclasses are visible"
             />
 
-            {/* Column Visibility Control */}
+            {/* Column Visibility Control
             <ColumnVisibilityControl
               columns={columnVisibilityOptions}
               onVisibilityChange={handleColumnVisibilityChange}
@@ -1285,13 +1275,13 @@ export default function Stages() {
               onResetToDefault={handleResetToDefault}
               title="Column Visibility"
               description="Toggle stage table columns"
-            />
+            /> */}
 
             <ExportStages
               currentDept={currentDept}
               disabled={!currentDept || !currentDept.stages || currentDept.stages.length === 0}
             />
- 
+
             <AddStageDialog
               open={isDialogOpen}
               onOpenChange={setIsDialogOpen}
@@ -1300,7 +1290,7 @@ export default function Stages() {
             />
           </div>
         </div>
- 
+
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="mb-4">
             {departments.map(dept => (
@@ -1309,7 +1299,7 @@ export default function Stages() {
               </TabsTrigger>
             ))}
           </TabsList>
- 
+
           {departments.map(dept => (
             <TabsContent key={dept.id} value={dept.id} className="space-y-4">
               {dept.stages.length === 0 ? (
@@ -1333,7 +1323,7 @@ export default function Stages() {
                         {/* Stage Names Row */}
                         <TableRow className="bg-blue-600">
                           {columnVisibility.index && (
-                            <TableHead className="sticky left-0 bg-blue-600 border-r-2 border-blue-400 font-bold w-16 z-30 text-center text-white" rowSpan={4}>
+                            <TableHead className="sticky left-0 bg-blue-600 border-r-2 border-blue-400 font-bold w-16 z-20 text-center text-white" rowSpan={4}>
                               #
                             </TableHead>
                           )}
@@ -1352,12 +1342,12 @@ export default function Stages() {
                             <TableHead className={cn(
                               "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
                               columnVisibility.index && columnVisibility.entity ? "left-80" :
-                              columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                                columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
                             )}>
                               Stage Name
                             </TableHead>
                           )}
- 
+
                           {dept.stages.map((stage, index) => (
                             <TableHead
                               key={stage.id}
@@ -1367,7 +1357,7 @@ export default function Stages() {
                                 <div className="flex items-center gap-2">
                                   <span className="font-medium text-sm">{stage.order_num}. {stage.name}</span>
                                 </div>
- 
+
                                 <div className="flex items-center gap-2 text-xs">
                                   {/* Document Indicator */}
                                   {stage.documents && stage.documents.length > 0 && (
@@ -1393,7 +1383,7 @@ export default function Stages() {
                                               {stage.documents.length} document{stage.documents.length > 1 ? 's' : ''}
                                             </Badge>
                                           </div>
- 
+
                                           <div className="space-y-3">
                                             {stage.documents.map((doc, i) => (
                                               <div key={doc.id || i} className="bg-gray-50 p-3 rounded-lg space-y-2">
@@ -1423,13 +1413,13 @@ export default function Stages() {
                                                     </div>
                                                   </div>
                                                 </div>
- 
+
                                                 {doc.description && (
                                                   <div className="text-gray-600 text-xs">
                                                     {doc.description}
                                                   </div>
                                                 )}
- 
+
                                                 {doc.extractionSpecs && doc.extractionSpecs.length > 0 && (
                                                   <div className="space-y-2">
                                                     <div className="flex items-center gap-1 text-xs font-medium">
@@ -1465,7 +1455,7 @@ export default function Stages() {
                                               </div>
                                             ))}
                                           </div>
- 
+
                                           <div className="pt-2 border-t">
                                             <p className="text-xs text-gray-500">
                                               Documents are automatically synced with the KYC system when stages are saved.
@@ -1475,7 +1465,7 @@ export default function Stages() {
                                       </PopoverContent>
                                     </Popover>
                                   )}
- 
+
                                   {/* Special Time Config Indicator */}
                                   {stage.isSpecial && (
                                     <Popover>
@@ -1507,7 +1497,7 @@ export default function Stages() {
                                       </PopoverContent>
                                     </Popover>
                                   )}
- 
+
                                   <div className="flex items-center gap-1">
                                     <Button
                                       variant="ghost"
@@ -1527,7 +1517,7 @@ export default function Stages() {
                                     >
                                       <ChevronRight className="h-3 w-3 text-white" />
                                     </Button>
- 
+
                                     <Button
                                       variant="ghost"
                                       size="icon"
@@ -1542,7 +1532,7 @@ export default function Stages() {
                             </TableHead>
                           ))}
                         </TableRow>
- 
+
                         {/* Duration Row */}
                         {columnVisibility.duration && (
                           <TableRow className="bg-blue-600">
@@ -1550,7 +1540,7 @@ export default function Stages() {
                               <TableHead className={cn(
                                 "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
                                 columnVisibility.index && columnVisibility.entity ? "left-80" :
-                                columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                                  columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
                               )}>
                                 Duration
                               </TableHead>
@@ -1562,7 +1552,7 @@ export default function Stages() {
                                   key={`duration-${stage.id}`}
                                   className="border-r border-blue-400 text-center bg-blue-600"
                                 >
-                                  <div className="font-mono font-bold text-sm text-white">
+                                  <div className="font-bold text-sm text-white">
                                     {days > 0 && `${days}d `}
                                     {hours > 0 && `${hours}h `}
                                     {minutes > 0 ? `${minutes}m` : ''}
@@ -1573,7 +1563,7 @@ export default function Stages() {
                             })}
                           </TableRow>
                         )}
- 
+
                         {/* Follow Up Row */}
                         {columnVisibility.followUp && (
                           <TableRow className="bg-blue-600">
@@ -1581,7 +1571,7 @@ export default function Stages() {
                               <TableHead className={cn(
                                 "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
                                 columnVisibility.index && columnVisibility.entity ? "left-80" :
-                                columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                                  columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
                               )}>
                                 Follow Up
                               </TableHead>
@@ -1598,7 +1588,7 @@ export default function Stages() {
                             ))}
                           </TableRow>
                         )}
- 
+
                         {/* Applicable/Display Headers Row */}
                         {columnVisibility.controls && (
                           <TableRow className="bg-blue-600">
@@ -1606,7 +1596,7 @@ export default function Stages() {
                               <TableHead className={cn(
                                 "sticky bg-blue-600 border-r-2 border-blue-400 z-20",
                                 columnVisibility.index && columnVisibility.entity ? "left-80" :
-                                columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                                  columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
                               )}></TableHead>
                             )}
                             {dept.stages.map((stage, index) => (
@@ -1627,20 +1617,20 @@ export default function Stages() {
                           </TableRow>
                         )}
                       </TableHeader>
- 
+
                       <TableBody>
                         {normalizedSubdepartments.flatMap((subdept, subdeptIndex) => {
                           const subdeptRowId = `subdept-${subdept.id}`
                           const isExpanded = expandedRows.has(subdeptRowId)
                           const rows = []
                           let rowIndex = subdeptIndex + 1
- 
+
                           const hasClasses = subdept.classes && subdept.classes.length > 0
- 
+
                           rows.push(
                             <TableRow key={subdeptRowId} className="hover:bg-blue-25 bg-blue-100 transition-colors">
                               {columnVisibility.index && (
-                                <TableCell className="sticky left-0 bg-blue-100 border-r-2 border-gray-200 text-center font-mono text-sm z-1 font-semibold">
+                                <TableCell className="sticky left-0 bg-blue-100 border-r-2 border-gray-200 text-center text-sm z-1 font-medium">
                                   {rowIndex}
                                 </TableCell>
                               )}
@@ -1670,16 +1660,16 @@ export default function Stages() {
                               )}
                               {columnVisibility.stageName && (
                                 <TableCell className={cn(
-                                  "sticky bg-blue-100 border-r-2 border-gray-200 text-center font-mono text-sm z-1",
+                                  "sticky bg-blue-100 border-r-2 border-gray-200 text-center text-sm z-1",
                                   columnVisibility.index && columnVisibility.entity ? "left-80" :
-                                  columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                                    columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
                                 )}></TableCell>
                               )}
                               {dept.stages.map((stage, stageIndex) => {
                                 const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id)
                                 const hasAllocation = stageAllocation?.applicable ?? true
                                 const hasDisplay = stageAllocation?.display ?? true
- 
+
                                 return (
                                   <TableCell
                                     key={`subdept-${subdept.id}-${stage.id}`}
@@ -1702,15 +1692,15 @@ export default function Stages() {
                                                   setDepartments(prevDepartments => {
                                                     return prevDepartments.map(dept => {
                                                       if (dept.id !== activeTab) return dept;
- 
+
                                                       return {
                                                         ...dept,
                                                         subdepartments: dept.subdepartments?.map(sd => {
                                                           if (sd.id !== subdept.id) return sd;
- 
+
                                                           const updatedStages = [...(sd.stages || [])];
                                                           let stageAlloc = updatedStages.find(s => s.stage_id === stage.id);
- 
+
                                                           if (!stageAlloc) {
                                                             stageAlloc = { stage_id: stage.id, applicable: newValue, display: newValue };
                                                             updatedStages.push(stageAlloc);
@@ -1718,7 +1708,7 @@ export default function Stages() {
                                                             stageAlloc.applicable = newValue;
                                                             if (!newValue) stageAlloc.display = false;
                                                           }
- 
+
                                                           return {
                                                             ...sd,
                                                             stages: updatedStages
@@ -1727,7 +1717,7 @@ export default function Stages() {
                                                       };
                                                     });
                                                   });
- 
+
                                                   await handleAllocationChangeInternal(subdept.id, stage.id, newValue);
                                                 }}
                                               >
@@ -1781,18 +1771,18 @@ export default function Stages() {
                               })}
                             </TableRow>
                           )
- 
+
                           // Add class rows if expanded
                           if (isExpanded && hasClasses) {
                             subdept.classes?.forEach((cls, clsIndex) => {
                               const hasSubClasses = cls.subClasses && cls.subClasses.length > 0
                               const classRowId = `class-${subdept.id}-${cls.id}`
                               const isClassExpanded = expandedRows.has(classRowId)
- 
+
                               rows.push(
                                 <TableRow key={classRowId} className="bg-blue-25 hover:bg-blue-50 transition-colors">
                                   {columnVisibility.index && (
-                                    <TableCell className="sticky left-0 bg-blue-25 border-r-2 border-gray-200 text-center font-mono text-sm z-30 font-semibold">
+                                    <TableCell className="sticky left-0 bg-blue-25 border-r-2 border-gray-200 text-center text-sm z-30 font-semibold">
                                       {rowIndex}.{clsIndex + 1}
                                     </TableCell>
                                   )}
@@ -1822,19 +1812,19 @@ export default function Stages() {
                                       </div>
                                     </TableCell>
                                   )}
- 
+
                                   {columnVisibility.stageName && (
                                     <TableCell className={cn(
-                                      "sticky bg-blue-25 border-r-2 border-gray-200 text-center font-mono text-sm z-30",
+                                      "sticky bg-blue-25 border-r-2 border-gray-200 text-center text-sm z-30",
                                       columnVisibility.index && columnVisibility.entity ? "left-80" :
-                                      columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                                        columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
                                     )}></TableCell>
                                   )}
                                   {dept.stages.map((stage, stageIndex) => {
                                     const stageAllocation = cls.stages?.find(s => s.stage_id === stage.id)
                                     const hasAllocation = stageAllocation?.applicable ?? true
                                     const hasDisplay = stageAllocation?.display ?? true
- 
+
                                     return (
                                       <TableCell
                                         key={`class-${subdept.id}-${cls.id}-${stage.id}`}
@@ -1875,145 +1865,145 @@ export default function Stages() {
                                                 </Select>
                                               </div>
                                               <div className="flex justify-center items-center">
-                                               <Checkbox
-                                                 checked={hasDisplay}
-                                                 onCheckedChange={(checked) =>
-                                                   handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex)
-                                                 }
-                                                 disabled={!hasAllocation}
-                                                 className="h-4 w-4 text-blue-500"
-                                               />
-                                             </div>
-                                           </div>
-                                         )
-                                       ) : (
-                                         <div className="flex items-center justify-center p-2 text-gray-500">
-                                           -
-                                         </div>
-                                       )}
-                                     </TableCell>
-                                   )
-                                 })}
-                               </TableRow>
-                             )
+                                                <Checkbox
+                                                  checked={hasDisplay}
+                                                  onCheckedChange={(checked) =>
+                                                    handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex)
+                                                  }
+                                                  disabled={!hasAllocation}
+                                                  className="h-4 w-4 text-blue-500"
+                                                />
+                                              </div>
+                                            </div>
+                                          )
+                                        ) : (
+                                          <div className="flex items-center justify-center p-2 text-gray-500">
+                                            -
+                                          </div>
+                                        )}
+                                      </TableCell>
+                                    )
+                                  })}
+                                </TableRow>
+                              )
 
-                             // Add subclass rows if class is expanded
-                             if (isClassExpanded && hasSubClasses) {
-                               cls.subClasses?.forEach((subCls, subClsIndex) => {
-                                 rows.push(
-                                   <TableRow key={`subclass-${subdept.id}-${cls.id}-${subCls.id}`} className="bg-blue-50 hover:bg-blue-100 transition-colors">
-                                     {columnVisibility.index && (
-                                       <TableCell className="sticky left-0 bg-blue-50 border-r-2 border-gray-200 text-center font-mono text-sm z-30 font-semibold">
-                                         {rowIndex}.{clsIndex + 1}.{subClsIndex + 1}
-                                       </TableCell>
-                                     )}
-                                     {columnVisibility.entity && (
-                                       <TableCell className={cn(
-                                         "sticky bg-blue-50 border-r-2 border-gray-200 pl-16 z-30",
-                                         columnVisibility.index ? "left-16" : "left-0"
-                                       )}>
-                                         <div className="flex items-center gap-2">
-                                           <ChevronRight className="h-3 w-3 text-blue-500" />
-                                           <span className="text-blue-700 text-sm font-medium">{subCls.name}</span>
-                                         </div>
-                                       </TableCell>
-                                     )}
+                              // Add subclass rows if class is expanded
+                              if (isClassExpanded && hasSubClasses) {
+                                cls.subClasses?.forEach((subCls, subClsIndex) => {
+                                  rows.push(
+                                    <TableRow key={`subclass-${subdept.id}-${cls.id}-${subCls.id}`} className="bg-blue-50 hover:bg-blue-100 transition-colors">
+                                      {columnVisibility.index && (
+                                        <TableCell className="sticky left-0 bg-blue-50 border-r-2 border-gray-200 text-center text-sm z-30 font-semibold">
+                                          {rowIndex}.{clsIndex + 1}.{subClsIndex + 1}
+                                        </TableCell>
+                                      )}
+                                      {columnVisibility.entity && (
+                                        <TableCell className={cn(
+                                          "sticky bg-blue-50 border-r-2 border-gray-200 pl-16 z-30",
+                                          columnVisibility.index ? "left-16" : "left-0"
+                                        )}>
+                                          <div className="flex items-center gap-2">
+                                            <ChevronRight className="h-3 w-3 text-blue-500" />
+                                            <span className="text-blue-700 text-sm font-medium">{subCls.name}</span>
+                                          </div>
+                                        </TableCell>
+                                      )}
 
-                                     {columnVisibility.stageName && (
-                                       <TableCell className={cn(
-                                         "sticky bg-blue-50 border-r-2 border-gray-200 text-center font-mono text-sm z-30",
-                                         columnVisibility.index && columnVisibility.entity ? "left-80" :
-                                         columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
-                                       )}></TableCell>
-                                     )}
-                                     {dept.stages.map((stage, stageIndex) => {
-                                       const stageAllocation = subCls.stages?.find(s => s.stage_id === stage.id)
-                                       const hasAllocation = stageAllocation?.applicable ?? true
-                                       const hasDisplay = stageAllocation?.display ?? true
+                                      {columnVisibility.stageName && (
+                                        <TableCell className={cn(
+                                          "sticky bg-blue-50 border-r-2 border-gray-200 text-center text-sm z-30",
+                                          columnVisibility.index && columnVisibility.entity ? "left-80" :
+                                            columnVisibility.index || columnVisibility.entity ? "left-64" : "left-0"
+                                        )}></TableCell>
+                                      )}
+                                      {dept.stages.map((stage, stageIndex) => {
+                                        const stageAllocation = subCls.stages?.find(s => s.stage_id === stage.id)
+                                        const hasAllocation = stageAllocation?.applicable ?? true
+                                        const hasDisplay = stageAllocation?.display ?? true
 
-                                       return (
-                                         <TableCell
-                                           key={`subclass-${subdept.id}-${cls.id}-${subCls.id}-${stage.id}`}
-                                           className="border-r border-l border-gray-200 p-0"
-                                         >
-                                           {columnVisibility.controls && (
-                                             <div className="grid grid-cols-2 gap-1 p-1">
-                                               <div className="flex justify-center">
-                                                 <Select
-                                                   value={hasAllocation ? 'applicable' : 'not-applicable'}
-                                                   onValueChange={(value) =>
-                                                     handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex, subClsIndex)
-                                                   }
-                                                 >
-                                                   <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50">
-                                                     <SelectValue>
-                                                       <div className="flex items-center gap-1">
-                                                         <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                                         <span className="font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
-                                                       </div>
-                                                     </SelectValue>
-                                                   </SelectTrigger>
-                                                   <SelectContent>
-                                                     <SelectItem value="applicable">
-                                                       <div className="flex items-center gap-2">
-                                                         <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                                         Applicable
-                                                       </div>
-                                                     </SelectItem>
-                                                     <SelectItem value="not-applicable">
-                                                       <div className="flex items-center gap-2">
-                                                         <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                                         Not Applicable
-                                                       </div>
-                                                     </SelectItem>
-                                                   </SelectContent>
-                                                 </Select>
-                                               </div>
-                                               <div className="flex justify-center items-center">
-                                                 <Checkbox
-                                                   checked={hasDisplay}
-                                                   onCheckedChange={(checked) =>
-                                                     handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex, subClsIndex)
-                                                   }
-                                                   disabled={!hasAllocation}
-                                                   className="h-4 w-4 text-blue-500"
-                                                 />
-                                               </div>
-                                             </div>
-                                           )}
-                                         </TableCell>
-                                       )
-                                     })}
-                                   </TableRow>
-                                 )
-                               })
-                             }
-                           })
-                         }
+                                        return (
+                                          <TableCell
+                                            key={`subclass-${subdept.id}-${cls.id}-${subCls.id}-${stage.id}`}
+                                            className="border-r border-l border-gray-200 p-0"
+                                          >
+                                            {columnVisibility.controls && (
+                                              <div className="grid grid-cols-2 gap-1 p-1">
+                                                <div className="flex justify-center">
+                                                  <Select
+                                                    value={hasAllocation ? 'applicable' : 'not-applicable'}
+                                                    onValueChange={(value) =>
+                                                      handleAllocationChange(subdept.id, stage.id, value === 'applicable', clsIndex, subClsIndex)
+                                                    }
+                                                  >
+                                                    <SelectTrigger className="h-7 w-full border-0 shadow-none text-xs bg-transparent hover:bg-white/50">
+                                                      <SelectValue>
+                                                        <div className="flex items-center gap-1">
+                                                          <div className={`w-2 h-2 rounded-full ${hasAllocation ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                                          <span className="font-medium">{hasAllocation ? 'Yes' : 'No'}</span>
+                                                        </div>
+                                                      </SelectValue>
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                      <SelectItem value="applicable">
+                                                        <div className="flex items-center gap-2">
+                                                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                                          Applicable
+                                                        </div>
+                                                      </SelectItem>
+                                                      <SelectItem value="not-applicable">
+                                                        <div className="flex items-center gap-2">
+                                                          <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                                          Not Applicable
+                                                        </div>
+                                                      </SelectItem>
+                                                    </SelectContent>
+                                                  </Select>
+                                                </div>
+                                                <div className="flex justify-center items-center">
+                                                  <Checkbox
+                                                    checked={hasDisplay}
+                                                    onCheckedChange={(checked) =>
+                                                      handleDisplayToggle(subdept.id, stage.id, checked as boolean, clsIndex, subClsIndex)
+                                                    }
+                                                    disabled={!hasAllocation}
+                                                    className="h-4 w-4 text-blue-500"
+                                                  />
+                                                </div>
+                                              </div>
+                                            )}
+                                          </TableCell>
+                                        )
+                                      })}
+                                    </TableRow>
+                                  )
+                                })
+                              }
+                            })
+                          }
 
-                         return rows
-                       })}
-                     </TableBody>
-                   </Table>
-                 </div>
-               </div>
-             )}
-           </TabsContent>
-         ))}
-       </Tabs>
+                          return rows
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+          ))}
+        </Tabs>
 
-       <EditStageDialog
-         open={!!editingStage}
-         onOpenChange={(open) => {
-           if (!open) {
-             setEditingStage(null)
-             setIsEditDialogOpen(false)
-           }
-         }}
-         stage={editingStage}
-         onSave={handleUpdateStage}
-       />
-     </div>
-   </div>
- )
+        <EditStageDialog
+          open={!!editingStage}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditingStage(null)
+              setIsEditDialogOpen(false)
+            }
+          }}
+          stage={editingStage}
+          onSave={handleUpdateStage}
+        />
+      </div>
+    </div>
+  )
 }

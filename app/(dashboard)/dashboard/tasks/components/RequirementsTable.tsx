@@ -13,7 +13,7 @@ import { getTableFields, getGroupedFields } from "../../departments/documents+fi
 import { toast } from "@/hooks/use-toast"
 import { useSearchParams, useRouter } from "next/navigation"
 import { FileUploadComponent } from "./FileUploadComponent"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import ExtractionPreview from "@/components/ExtractionPreview"
 import RequirementsTableHeader from "./RequirementsTableHeader"
 import RequirementsTableBody from "./RequirementsTableBody"
@@ -610,21 +610,24 @@ export function RequirementsTable({
     }
   }, [fetchingDocuments])
 
-  // Update the getDocumentStatusForColumn function to handle BCL templates correctly
-  const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number): DocumentStatus => {
-    const itemId = item.selectionId || item.id;
-    const statusKey = dependantId ? `${task.id}-${itemId}-${columnType}-${dependantId}` : `${task.id}-${itemId}-${columnType}`;
+  // Update the getDocumentStatusForColumn function
+const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy' | 'reference', dependantId?: number, referenceId?: number): DocumentStatus => {
+  const itemId = item.selectionId || item.id;
+  const statusKey = dependantId ? `${task.id}-${itemId}-${columnType}-${dependantId}` : 
+                   referenceId ? `${task.id}-${itemId}-${columnType}-${referenceId}` :
+                   `${task.id}-${itemId}-${columnType}`;
 
-    const isApplicableForColumn =
-      (columnType === 'principal' && (item.ap === true || item.display === true)) ||
-      (columnType === 'dependant' && (item.dp === true || item.display === true)) ||
-      (columnType === 'understudy' && (item.understudy === true || item.display === true));
+  const isApplicableForColumn =
+    (columnType === 'principal' && (item.ap === true || item.display === true)) ||
+    (columnType === 'dependant' && (item.dp === true || item.display === true)) ||
+    (columnType === 'understudy' && (item.understudy === true || item.display === true)) ||
+    (columnType === 'reference' && (item.reference === true || item.display === true));
 
-    if (!isApplicableForColumn) {
-      return {
-        type: 'na',
-        documents: [],
-        count: 0,
+  if (!isApplicableForColumn) {
+    return {
+      type: 'na',
+      documents: [],
+      count: 0,
       applicantTypes: {
         principal: item.ap === true || item.display === true,
         dependant: item.dp === true || item.display === true,
@@ -634,35 +637,49 @@ export function RequirementsTable({
     };
   }
 
-  let individualId: number | null = null;
-
-  if (columnType === 'principal') {
-    individualId = task.principal_member || task.individual_id;
-  } else if (columnType === 'dependant') {
-    individualId = task.dependant_member || task.individual_id;
-  } else if (columnType === 'understudy') {
-    individualId = task.understudy_member || task.individual_id;
-  } else if (columnType === 'reference') {
-    individualId = referenceId || task.individual_id;
-  }
+  // Check if this is a company document
+  const isCompanyDocument = item.category === 'company-docs' || item.category === 'company';
 
   let documents: any[] = [];
-  if (individualId) {
-    const individualDocs = allIndividualDocuments[individualId] || [];
 
-    const baseItemId = itemId.split('_')[0];
+  if (isCompanyDocument) {
+    // Handle company documents
+    if (task.company_id && allCompanyDocuments[task.company_id]) {
+      const baseItemId = itemId.split('_')[0];
+      documents = allCompanyDocuments[task.company_id].filter(doc => {
+        const kycDocId = doc.kyc_document_id;
+        return kycDocId === baseItemId ||
+               kycDocId === itemId ||
+               kycDocId === item.id;
+      });
+    }
+  } else {
+    // Handle individual documents
+    let individualId: number | null = null;
 
-    documents = individualDocs.filter(doc => {
-      const docId = doc.document_id || '';
-      const kycId = (doc.acc_portal_kyc?.id || '');
+    if (columnType === 'principal') {
+      individualId = task.principal_member || task.individual_id;
+    } else if (columnType === 'dependant') {
+      individualId = dependantId || task.dependant_member || task.individual_id;
+    } else if (columnType === 'understudy') {
+      individualId = task.understudy_member || task.individual_id;
+    } else if (columnType === 'reference') {
+      individualId = referenceId || task.individual_id;
+    }
 
-      return docId === baseItemId ||
-        docId === itemId ||
-        kycId === baseItemId ||
-        kycId === itemId ||
-        docId === item.id ||
-        kycId === item.id;
-    });
+    if (individualId && allIndividualDocuments[individualId]) {
+      const baseItemId = itemId.split('_')[0];
+      documents = allIndividualDocuments[individualId].filter(doc => {
+        const docId = doc.document_id || '';
+        const kycId = (doc.acc_portal_kyc?.id || '');
+        return docId === baseItemId ||
+               docId === itemId ||
+               kycId === baseItemId ||
+               kycId === itemId ||
+               docId === item.id ||
+               kycId === item.id;
+      });
+    }
   }
 
   const cachedStatus = documentStatusesMap[statusKey];
@@ -681,7 +698,7 @@ export function RequirementsTable({
       reference: item.reference === true || item.display === true
     }
   };
-}, [documentStatusesMap, allIndividualDocuments]);
+}, [documentStatusesMap, allIndividualDocuments, allCompanyDocuments]);
 
 // Calculate statistics
 const calculateStats = useMemo(() => {
@@ -928,26 +945,26 @@ const calculateStats = useMemo(() => {
   }, [documents, bclTemplateDocuments]);
 
   // Handle upload action
-  const handleUploadAction = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number) => {
-    if (onShowUploadDialog) {
-      const itemId = item.selectionId || item.id;
-      const statusKey = dependantId ? `${task.id}-${itemId}-${columnType}-${dependantId}` : `${task.id}-${itemId}-${columnType}`;
+  const handleUploadAction = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy' | 'reference', applicantId?: number) => {
+    const itemId = item.selectionId || item.id;
+    const statusKey = applicantId ? `${task.id}-${itemId}-${columnType}-${applicantId}` : `${task.id}-${itemId}-${columnType}`;
 
-      const newStatuses = { ...documentStatuses };
-      Object.keys(newStatuses).forEach(key => {
-        if (key.startsWith(`${task.id}-${itemId}-`)) {
-          delete newStatuses[key];
-        }
-      });
-      setDocumentStatuses(newStatuses);
+    const newStatuses = { ...documentStatuses };
+    Object.keys(newStatuses).forEach(key => {
+      if (key.startsWith(`${task.id}-${itemId}-`)) {
+        delete newStatuses[key];
+      }
+    });
+    setDocumentStatuses(newStatuses);
 
-      onShowUploadDialog({
-        ...task,
-        currentColumnType: columnType,
-        currentDependantId: dependantId
-      }, item);
-    }
-  }, [documentStatuses, onShowUploadDialog]);
+    setSelectedUploadData({
+      task,
+      document: item,
+      columnType,
+      applicantId
+    });
+    setUploadDialogOpen(true);
+  }, [documentStatuses]);
 
   // Handle view action
   const handleViewAction = useCallback(async (task: any, item: any, dependantId?: number) => {
@@ -1001,50 +1018,49 @@ const calculateStats = useMemo(() => {
     }
   }, [documentStatuses, onViewDocument, documentTab]);
 
-// Effect to update document status when tasks or items change
-useEffect(() => {
-  const updateDocumentStatuses = async () => {
-    const updates: Record<string, {
-      status: DocumentStatus;
-      loading: boolean;
-    }> = {};
-
-    for (const task of filteredTasks) {
-      const classRequirements = taskClassRequirements[task.id];
-      if (!classRequirements?.documents_and_fields) continue;
-
-      for (const item of classRequirements.documents_and_fields) {
-        const itemId = item.selectionId || item.id;
-        const baseItemId = itemId.split('_')[0];
-
-        if (item.ap || item.dp || item.understudy || item.display || item.reference) {
-          const columnTypes: ('principal' | 'dependant' | 'understudy' | 'reference')[] = [];
-          if (item.ap || item.display) columnTypes.push('principal');
-          if (item.dp || item.display) columnTypes.push('dependant');
-          if (item.understudy || item.display) columnTypes.push('understudy');
-          if (item.reference || item.display) columnTypes.push('reference');
-
-          for (const columnType of columnTypes) {
-            if (columnType === 'dependant' && task.dependant_member && Array.isArray(task.dependant_member)) {
-              for (const dependant of task.dependant_member) {
-                const key = `${task.id}-${itemId}-${columnType}-${dependant.id}`;
-
-                let documents: any[] = [];
-                if (dependant.id && allIndividualDocuments[dependant.id]) {
-                  documents = allIndividualDocuments[dependant.id].filter(doc => {
-                    const docId = doc.document_id || '';
-                    const kycId = (doc.acc_portal_kyc?.id || '');
-                    return docId === baseItemId ||
-                      docId === itemId ||
-                      kycId === baseItemId ||
-                      kycId === itemId;
+  useEffect(() => {
+    const updateDocumentStatuses = async () => {
+      const updates: Record<string, {
+        status: DocumentStatus;
+        loading: boolean;
+      }> = {};
+  
+      for (const task of filteredTasks) {
+        const classRequirements = taskClassRequirements[task.id];
+        if (!classRequirements?.documents_and_fields) continue;
+  
+        for (const item of classRequirements.documents_and_fields) {
+          const itemId = item.selectionId || item.id;
+          const baseItemId = itemId.split('_')[0];
+          const isCompanyDocument = item.category === 'company-docs' || item.category === 'company';
+  
+          if (item.ap || item.dp || item.understudy || item.display || item.reference) {
+            const columnTypes: ('principal' | 'dependant' | 'understudy' | 'reference')[] = [];
+            if (item.ap || item.display) columnTypes.push('principal');
+            if (item.dp || item.display) columnTypes.push('dependant');
+            if (item.understudy || item.display) columnTypes.push('understudy');
+            if (item.reference || item.display) columnTypes.push('reference');
+  
+            for (const columnType of columnTypes) {
+              let documents: any[] = [];
+  
+              if (isCompanyDocument) {
+                // Handle company documents
+                if (task.company_id && allCompanyDocuments[task.company_id]) {
+                  documents = allCompanyDocuments[task.company_id].filter(doc => {
+                    const kycDocId = doc.kyc_document_id;
+                    return kycDocId === baseItemId ||
+                           kycDocId === itemId ||
+                           kycDocId === item.id;
                   });
                 }
-
+                
+                // For company documents, we don't need per-applicant status
+                const key = `${task.id}-${itemId}-${columnType}`;
                 const currentStatus = documentStatusesMap[key];
                 const documentCount = documents.length;
                 const currentCount = currentStatus?.status.count || 0;
-
+  
                 if (!currentStatus || documentCount !== currentCount) {
                   updates[key] = {
                     status: {
@@ -1061,8 +1077,7 @@ useEffect(() => {
                     loading: false
                   };
                 }
-              }
-            } else if (columnType === 'reference' && task.references && Array.isArray(task.references)) {
+              }  else if (columnType === 'reference' && task.references && Array.isArray(task.references)) {
               for (const reference of task.references) {
                 const key = `${task.id}-${itemId}-${columnType}-${reference.id}`;
 
@@ -1159,7 +1174,7 @@ useEffect(() => {
 }, [filteredTasks, taskClassRequirements, allIndividualDocuments, documentStatusesMap]);
 
 // Updated render function to restrict post application icons to matching applicant types
-const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number, isPostApplication?: boolean) => {
+const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy' | 'reference', applicantId?: number, referenceId?: number, isPostApplication?: boolean) => {
   // For post application documents, restrict to matching applicant types only
   if (isPostApplication) {
     // Check if this task's applicant_type matches the column type
@@ -1224,9 +1239,9 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
     }
   }
 
-  const status = getDocumentStatusForColumn(task, item, columnType, referenceId);
+  const status = getDocumentStatusForColumn(task, item, columnType, applicantId || referenceId);
   const itemId = item.selectionId || item.id;
-  const key = referenceId ? `${task.id}-${itemId}-${columnType}-${referenceId}` : `${task.id}-${itemId}-${columnType}`;
+  const key = applicantId ? `${task.id}-${itemId}-${columnType}-${applicantId}` : `${task.id}-${itemId}-${columnType}`;
   const isLoading = documentStatusesMap[key]?.loading || false;
 
   if (isLoading) {
@@ -1257,24 +1272,33 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
   const handleViewClick = async () => {
     if (status.documents.length > 0) {
       const document = status.documents[0];
-
+      
       try {
         const { data: signedUrl, error } = await supabase.storage
           .from('kyc-documents')
           .createSignedUrl(document.file_path, 3600);
-
+  
         if (error) throw error;
-
-        const documentDefinition = documents.find(doc => doc.id === document.document_id) ||
-          bclTemplateDocuments.find(doc => doc.id === document.document_id);
-
+  
+        // Check if this is a company document or individual document
+        const isCompanyDoc = item.category === 'company-docs' || item.category === 'company';
+        
+        let documentDefinition;
+        if (isCompanyDoc) {
+          documentDefinition = documents.find(doc => doc.id === document.kyc_document_id) ||
+            bclTemplateDocuments.find(doc => doc.id === document.kyc_document_id);
+        } else {
+          documentDefinition = documents.find(doc => doc.id === document.document_id) ||
+            bclTemplateDocuments.find(doc => doc.id === document.document_id);
+        }
+  
         const extractionFields = (documentDefinition?.fields || []).map((field: any) => ({
           id: field.id,
           name: field.name,
           type: field.type || 'text',
           required: field.required || false
         }));
-
+  
         setSelectedDocumentForPreview({
           documentName: documentDefinition?.display_name || documentDefinition?.name || document.acc_portal_kyc?.display_name || 'Document',
           extractedData: document.extracted_details || {},
@@ -1301,6 +1325,7 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
       }
     }
   }
+  
   switch (status.type) {
     case 'view':
       return (
@@ -1336,9 +1361,9 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
               size="sm"
               className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50 hover:text-amber-700 transition-colors"
               onClick={() => {
-                handleUploadAction(task, item, columnType, applicantId);
+                handleUploadAction(task, item, columnType, applicantId || referenceId);
               }}
-              title={`Upload ${item.display_name || item.name} for ${columnType}${columnType === 'reference' ? ` (${individualNames[referenceId]})` : columnType === 'dependant' ? ` (${individualNames[dependantId]})` : ''}`}
+              title={`Upload ${item.display_name || item.name} for ${columnType}${(columnType === 'reference' || columnType === 'dependant') && applicantId && individualNames[applicantId] ? ` (${individualNames[applicantId]})` : ''}`}
             >
               <Upload className="h-4 w-4" />
             </Button>
@@ -1406,7 +1431,7 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
   }, [taskIndividualData]);
 
   // Updated render references data function to handle per applicant type
-  const renderReferencesData = useCallback((task: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number) => {
+  const renderReferencesData = useCallback((task: any, columnType: 'principal' | 'dependant' | 'understudy', applicantId?: number) => {
     // Check if this task is applicable for references
     const subdepartmentId = task.subdepartment?.id || task.subdepartment_id;
     const isReferenceApplicable = REFERENCE_SUBDEPARTMENT_IDS.includes(subdepartmentId) ||
@@ -2086,14 +2111,28 @@ const renderDocumentStatus = useCallback((task: any, item: any, columnType: 'pri
         </Dialog>
       )}
 
-      <FileUploadComponent
-        open={uploadDialogOpen}
-        onOpenChange={setUploadDialogOpen}
-        task={selectedUploadData?.task}
-        document={selectedUploadData?.document}
-        columnType={selectedUploadData?.columnType || 'principal'}
-        onUploadComplete={handleUploadComplete}
-      />
+      <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
+        <DialogContent className="max-w-6xl w-[90vw] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Upload {(selectedUploadData?.document?.display_name || selectedUploadData?.document?.name || 'Unknown Document')} for {selectedUploadData?.columnType}
+            </DialogTitle>
+          </DialogHeader>
+          <FileUploadComponent
+            open={uploadDialogOpen}
+            onOpenChange={setUploadDialogOpen}
+            task={selectedUploadData?.task}
+            document={selectedUploadData?.document}
+            columnType={selectedUploadData?.columnType}
+            applicantId={selectedUploadData?.applicantId}
+            individualNames={individualNames}
+            onUploadComplete={() => {
+              setUploadDialogOpen(false);
+              handleUploadComplete();
+            }}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
