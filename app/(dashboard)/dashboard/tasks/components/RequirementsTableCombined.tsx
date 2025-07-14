@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React from "react"
+import React, { useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -85,6 +85,10 @@ export default function RequirementsTableCombined({
 
   const totalColumns = getTotalColumns();
 
+  const isMainApplicantDependant = useCallback((task: any, dependantId: number) => {
+    return task.applicant_type === 'dependant' && task.individual_id === dependantId;
+  }, []);
+
   return (
     <Table className="min-w-full w-full border-collapse">
       <TableHeader className="sticky top-0 z-10">
@@ -145,6 +149,10 @@ export default function RequirementsTableCombined({
           {filteredGroupedTasks.map((group, groupIndex) => {
             const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
 
+            // Find the main applicant task
+            const mainApplicantTask = group.tasks[0]; // or find the primary task
+            const isMainApplicantDependant = mainApplicantTask?.applicant_type === 'dependant';
+
             const { principalId, understudyId } = group.tasks.reduce(
               (acc, task) => {
                 if (task.applicant_type === 'principal') acc.principalId = task.individual_id;
@@ -187,19 +195,27 @@ export default function RequirementsTableCombined({
 
             // Add individual columns for each dependant
             group.dependantIds.forEach((dependantId, depIndex) => {
+              const dependantName = individualNames[dependantId];
+              const isMainApplicant = isMainApplicantDependant && mainApplicantTask?.individual_id === dependantId;
+
               columns.push(
                 <TableHead
                   key={`${groupIndex}-dependant-${dependantId}`}
-                  className="bg-blue-500 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2"
+                  className={`${isMainApplicant ? 'bg-blue-600' : 'bg-blue-500'} border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2`}
                 >
                   <div className="flex flex-col items-center gap-1">
-                    <span className="text-xs">Dependant {depIndex + 1}</span>
-                    {individualNames[dependantId] ? (
+                    <span className="text-xs">
+                      {isMainApplicant ? 'Dependant (Main)' : `Dependant ${depIndex + 1}`}
+                    </span>
+                    {dependantName ? (
                       <div className="flex items-center gap-1">
                         <Users className="h-3 w-3 text-blue-200" />
-                        <span className="text-xs truncate max-w-[100px]" title={individualNames[dependantId]}>
-                          {individualNames[dependantId]}
+                        <span className="text-xs truncate max-w-[100px]" title={dependantName}>
+                          {dependantName}
                         </span>
+                        {isMainApplicant && (
+                          <span className="text-xs bg-yellow-500 px-1 rounded">★</span>
+                        )}
                       </div>
                     ) : (
                       <span className="text-xs text-muted-foreground">-</span>

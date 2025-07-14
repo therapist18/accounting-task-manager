@@ -530,23 +530,22 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             }
 
             // Prepare dependant and reference data with full details
-            const dependantsToSave = includeDependants
-                ? selectedDependants.map(id => {
-                    const dependant = availableDependants.find(d => d.id.toString() === id);
-                    return dependant ? {
-                        id: dependant.id,
-                        name: dependant.full_name,
-                        relationship: dependant.relationship_type === 'Principal Member' ? 'Principal' : (dependant.relationship_type || 'Family Member')
-                    } : null;
-                }).filter(Boolean)
-                : [];
+const dependantsToSave = includeDependants
+? selectedDependants.map(id => {
+    const dependant = availableDependants.find(d => d.id.toString() === id);
+    return dependant ? {
+        id: dependant.id,
+        relationship: dependant.relationship_type === 'Principal Member' ? 'Principal' : (dependant.relationship_type || 'Family Member')
+    } : null;
+}).filter(Boolean)
+.filter(dependant => dependant.relationship !== 'Principal') // Exclude principal member
+: [];
 
             const referencesToSave = includeReferences
                 ? selectedReferences.map(id => {
                     const reference = availableReferences.find(r => r.id.toString() === id);
                     return reference ? {
                         id: reference.id,
-                        name: reference.full_name,
                         relationship: reference.relationship_type || 'reference'
                     } : null;
                 }).filter(Boolean)
@@ -682,7 +681,6 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             [field]: value
         }))
     }
-
     const handleIndividualSelect = async (individual: Individual) => {
         setSelectedIndividual(individual);
         setPrincipalForDependant(null);
@@ -696,65 +694,82 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         setAvailableReferences([]);
         setSelectedReferences([]);
         setIncludeReferences(false);
-
+    
         const primaryPhone = individual.contact_details?.phone?.kenyan?.primary || '';
         const formUpdate: any = {
             full_name: individual.full_name,
             mobile_number: primaryPhone,
             principal_member_id: ''
         };
-
+    
         const references = await fetchReferences(individual.id);
         setAvailableReferences(references);
-
+    
         // Fetch family members for the selected individual
         const familyMembers = await fetchDependants(individual.id);
-
+    
         if (individual.individual_type === 'principal') {
             setAvailableDependants(familyMembers);
+            // Fetch companies for this principal
+            await fetchCompanies(individual.id);
         } else if (individual.individual_type === 'dependant') {
             const principalRelation = individual.relationships?.find(
                 (rel: any) => rel.isPrincipal === 'Yes' || ['principal', 'spouse', 'husband', 'wife'].includes(rel.relationship?.toLowerCase())
             );
-
+    
             if (principalRelation && principalRelation.individual_id) {
                 const principalId = principalRelation.individual_id;
                 formUpdate.principal_member_id = principalId.toString();
-
-                // Fetch principal details and their companies
-                const [principalResult, companiesResult] = await Promise.all([
-                    supabase.from('registry_individuals').select('id, full_name').eq('id', principalId).single(),
-                    fetchCompanies(principalId)
-                ]);
-
+    
+                // Fetch principal details
+                const principalResult = await supabase
+                    .from('registry_individuals')
+                    .select('id, full_name')
+                    .eq('id', principalId)
+                    .single();
+    
                 if (principalResult.error) {
                     console.error("Error fetching principal details:", principalResult.error);
                     toast({ title: "Error", description: "Could not load principal member's details.", variant: "destructive" });
                     return;
                 }
-
+    
                 const principalData = principalResult.data;
                 setPrincipalForDependant(principalData);
-
-                // Include principal in selection but exclude selected individual
-                const allFamilyForSelection = [
-                    { ...principalData, relationship_type: 'Principal Member' },
-                    ...familyMembers.filter(fm => fm.id !== individual.id)
-                ];
-
-                // Only show family members of the selected applicant
-                setAvailableDependants([
-                    ...familyMembers.filter(fm => fm.id !== individual.id)
-                ]);
-
-                // Set companies linked to the principal member
-                setCompanies(companiesResult);
-                setSelectedCompany('');
+    
+                // Fetch companies for the principal (this will set companies state internally)
+                await fetchCompanies(principalId);
+    
+                // Check if principal is already in family members list and handle accordingly
+                const principalIndex = familyMembers.findIndex(fm => fm.id === principalId);
+                let allFamilyForSelection;
+    
+                if (principalIndex !== -1) {
+                    // Principal is already in family members, update their relationship type
+                    allFamilyForSelection = familyMembers
+                        .filter(fm => fm.id !== individual.id) // Exclude the selected dependant
+                        .map(fm => fm.id === principalId 
+                            ? { ...fm, relationship_type: 'Principal Member' }
+                            : fm
+                        );
+                } else {
+                    // Principal is not in family members, add them
+                    allFamilyForSelection = [
+                        { ...principalData, relationship_type: 'Principal Member' },
+                        ...familyMembers.filter(fm => fm.id !== individual.id)
+                    ];
+                }
+    
+                setAvailableDependants(allFamilyForSelection);
+    
+                // Auto-select the principal member
+                setIncludeDependants(true);
+                setSelectedDependants([principalData.id.toString()]);
             } else {
                 toast({ title: "Info", description: "No principal member found for this dependant.", variant: "default" });
             }
         }
-
+    
         setFormData(prev => ({ ...prev, ...formUpdate }));
     };
 

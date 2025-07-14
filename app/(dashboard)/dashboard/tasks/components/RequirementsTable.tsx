@@ -404,54 +404,62 @@ export function RequirementsTable({
     return getTableFields(documentTab);
   }, [documentTab]);
 
-  // Updated groupedTasks to handle multiple dependants
-  const groupedTasks = useMemo(() => {
-    const groups = new Map<string, any[]>();
+  // Updated groupedTasks to include dependant applicant in their own dependant list
+const groupedTasks = useMemo(() => {
+  const groups = new Map<string, any[]>();
 
-    filteredTasks.forEach(task => {
-      let applicantName = task.applicant_name || task.company_name || 'Unknown Applicant';
+  filteredTasks.forEach(task => {
+    let applicantName = task.applicant_name || task.company_name || 'Unknown Applicant';
 
-      if (task.applicant_type === 'dependant') {
-        const principalData = principalMemberData[task.id];
-        if (principalData) {
-          applicantName = `${applicantName} (${principalData.full_name})`;
-        }
+    if (task.applicant_type === 'dependant') {
+      const principalData = principalMemberData[task.id];
+      if (principalData) {
+        applicantName = `${applicantName} (${principalData.full_name})`;
       }
+    }
 
-      if (!groups.has(applicantName)) {
-        groups.set(applicantName, []);
+    if (!groups.has(applicantName)) {
+      groups.set(applicantName, []);
+    }
+    groups.get(applicantName)!.push(task);
+  });
+
+  return Array.from(groups.entries()).map(([name, tasks]) => {
+    const allDependantIds = new Set<number>();
+    const allReferenceIds = new Set<number>();
+    
+    tasks.forEach(task => {
+      // Include the main applicant if they are a dependant
+      if (task.applicant_type === 'dependant' && task.individual_id) {
+        allDependantIds.add(task.individual_id);
       }
-      groups.get(applicantName)!.push(task);
+      
+      // Include other dependants from dependant_member array
+      if (task.dependant_member && Array.isArray(task.dependant_member)) {
+        task.dependant_member.forEach((dep: any) => {
+          if (dep.id && typeof dep.id === 'number') {
+            allDependantIds.add(dep.id);
+          }
+        });
+      }
+      
+      if (task.references && Array.isArray(task.references)) {
+        task.references.forEach((ref: any) => {
+          if (ref.id && typeof ref.id === 'number') {
+            allReferenceIds.add(ref.id);
+          }
+        });
+      }
     });
 
-    return Array.from(groups.entries()).map(([name, tasks]) => {
-      const allDependantIds = new Set<number>();
-      const allReferenceIds = new Set<number>();
-      tasks.forEach(task => {
-        if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          task.dependant_member.forEach((dep: any) => {
-            if (dep.id && typeof dep.id === 'number') {
-              allDependantIds.add(dep.id);
-            }
-          });
-        }
-        if (task.references && Array.isArray(task.references)) {
-          task.references.forEach((ref: any) => {
-            if (ref.id && typeof ref.id === 'number') {
-              allReferenceIds.add(ref.id);
-            }
-          });
-        }
-      });
-
-      return {
-        applicantName: name,
-        tasks: tasks,
-        dependantIds: Array.from(allDependantIds),
-        referenceIds: Array.from(allReferenceIds)
-      };
-    });
-  }, [filteredTasks, principalMemberData]);
+    return {
+      applicantName: name,
+      tasks: tasks,
+      dependantIds: Array.from(allDependantIds),
+      referenceIds: Array.from(allReferenceIds)
+    };
+  });
+}, [filteredTasks, principalMemberData]);
 
   // Filter tasks based on selected applicant
   const filteredGroupedTasks = useMemo(() => {
