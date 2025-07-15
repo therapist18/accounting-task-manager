@@ -13,8 +13,7 @@ export type DocumentExtraction = {
     }
 }
 
-// Add these to your existing types file
-
+// Updated StageDocument interface
 export interface StageDocument {
     id: string
     name: string
@@ -24,16 +23,18 @@ export interface StageDocument {
     inputType?: 'file' | 'message' | 'both'
     extractionSpecs?: DocumentExtraction[]
     kycId?: string
-    // Special document properties
+    // Special document properties - updated for multi-select
     isSpecial?: boolean
-    subdept_id?: number
-    class_id?: string | number
-    subclass_id?: string | number
-    entityType?: 'subdept' | 'class' | 'subclass'
-    entityName?: string
-}
-
-export interface EntityOption {
+    targetEntities?: Array<{
+      entityType: 'subdept' | 'class' | 'subclass'
+      subdept_id: number
+      class_id?: string | number
+      subclass_id?: string | number
+      entityName: string
+    }>
+  }
+  
+  export interface EntityOption {
     id: string | number
     name: string
     type: 'subdept' | 'class' | 'subclass'
@@ -41,7 +42,8 @@ export interface EntityOption {
     subdept_id?: number
     class_id?: string | number
     subclass_id?: string | number
-}
+    selected?: boolean
+  }
 
 // Update NewStage interface if needed
 export interface NewStage {

@@ -1666,7 +1666,6 @@ export default function Stages() {
                                 </div>
 
                                 <div className="flex items-center gap-2 text-xs">
-                                  {/* Document Indicator */}
                                   {stage.documents && stage.documents.length > 0 && (
                                     <Popover>
                                       <PopoverTrigger asChild>
@@ -1697,7 +1696,7 @@ export default function Stages() {
                                               {stage.documents.some(doc => doc.isSpecial) && (
                                                 <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200">
                                                   <Star className="h-3 w-3 mr-1" />
-                                                  Special Docs
+                                                  {stage.documents.filter(doc => doc.isSpecial).length} Special
                                                 </Badge>
                                               )}
                                             </div>
@@ -1731,14 +1730,21 @@ export default function Stages() {
                                                         </Badge>
                                                       )}
                                                     </div>
-                                                    {/* Special document entity info */}
-                                                    {doc.isSpecial && doc.entityName && (
-                                                      <div className="flex items-center gap-1 text-xs text-amber-700">
-                                                        <Info className="h-3 w-3" />
-                                                        <span>Target: {doc.entityName}</span>
-                                                        <Badge variant="outline" className="text-xs">
-                                                          {doc.entityType}
-                                                        </Badge>
+                                                    {/* Special document target entities info */}
+                                                    {doc.isSpecial && doc.targetEntities && doc.targetEntities.length > 0 && (
+                                                      <div className="space-y-1">
+                                                        <div className="flex items-center gap-1 text-xs text-amber-700 font-medium">
+                                                          <Info className="h-3 w-3" />
+                                                          <span>Target Entities ({doc.targetEntities.length}):</span>
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-1">
+                                                          {doc.targetEntities.map((entity, entityIndex) => (
+                                                            <Badge key={entityIndex} variant="outline" className="text-xs">
+                                                              {entity.entityName}
+                                                              <span className="ml-1 text-amber-600">({entity.entityType})</span>
+                                                            </Badge>
+                                                          ))}
+                                                        </div>
                                                       </div>
                                                     )}
                                                   </div>
@@ -1750,6 +1756,7 @@ export default function Stages() {
                                                   </div>
                                                 )}
 
+                                                {/* Extraction specs display */}
                                                 {doc.extractionSpecs && doc.extractionSpecs.length > 0 && (
                                                   <div className="space-y-2">
                                                     <div className="flex items-center gap-1 text-xs font-medium">
@@ -1800,7 +1807,6 @@ export default function Stages() {
                                       </PopoverContent>
                                     </Popover>
                                   )}
-
                                   {/* Special Time Config Indicator */}
                                   {stage.isSpecial && (
                                     <Popover>

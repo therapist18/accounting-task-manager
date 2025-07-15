@@ -106,7 +106,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
               const classId = cls.id || `${subdept.id}-class-${clsIndex}`
               entities.push({
                 id: classId,
-                name: `→ ${cls.name}`,
+                name: `${cls.name}`,
                 type: 'class',
                 level: 1,
                 subdept_id: subdept.id,
@@ -119,7 +119,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                   const subclassId = subCls.id || `${subdept.id}-class-${clsIndex}-subclass-${subClsIndex}`
                   entities.push({
                     id: subclassId,
-                    name: `→ → ${subCls.name}`,
+                    name: `${subCls.name}`,
                     type: 'subclass',
                     level: 2,
                     subdept_id: subdept.id,
@@ -181,7 +181,6 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
     )
   }
 
-  // Document management functions
   const addDocument = (stageId: string, isSpecial: boolean = false) => {
     const newDoc: StageDocument = {
       id: generateId(),
@@ -193,11 +192,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
       extractionSpecs: [],
       isSpecial,
       ...(isSpecial && {
-        entityType: undefined,
-        subdept_id: undefined,
-        class_id: undefined,
-        subclass_id: undefined,
-        entityName: undefined
+        targetEntities: []
       })
     }
     updateNewStage(stageId, {
@@ -211,26 +206,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
 
     const updatedDocs = stage.documents.map(doc => {
       if (doc.id === docId) {
-        const updatedDoc = { ...doc, ...updates }
-        
-        // If selecting an entity, update the related fields
-        if (updates.entityType && entityOptions.length > 0) {
-          const selectedEntity = entityOptions.find(e => 
-            e.type === updates.entityType && 
-            (updates.entityType === 'subdept' ? e.subdept_id === updates.subdept_id :
-             updates.entityType === 'class' ? e.class_id === updates.class_id :
-             e.subclass_id === updates.subclass_id)
-          )
-          
-          if (selectedEntity) {
-            updatedDoc.entityName = selectedEntity.name.replace(/^→\s*/, '').replace(/^→\s*/, '')
-            updatedDoc.subdept_id = selectedEntity.subdept_id
-            updatedDoc.class_id = selectedEntity.class_id
-            updatedDoc.subclass_id = selectedEntity.subclass_id
-          }
-        }
-        
-        return updatedDoc
+        return { ...doc, ...updates }
       }
       return doc
     })
@@ -336,14 +312,10 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                     document_type: 'one_off',
                     fields: doc.extractionSpecs || [],
                     display_name: doc.name,
-                    // Add special document metadata
+                    // Add special document metadata with multiple targets
                     metadata: doc.isSpecial ? {
                       isSpecial: true,
-                      entityType: doc.entityType,
-                      subdept_id: doc.subdept_id,
-                      class_id: doc.class_id,
-                      subclass_id: doc.subclass_id,
-                      entityName: doc.entityName
+                      targetEntities: doc.targetEntities || []
                     } : undefined
                   })
 
@@ -395,6 +367,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
       setSaving(false)
     }
   }
+
 
   const isFormValid = selectedDepartment && newStages.every(stage => stage.name.trim())
   const currentStage = newStages.find(s => s.id === activeStageTab)
@@ -910,7 +883,158 @@ function DocumentsSection({
   )
 }
 
-// Document Card Component
+// Multi-select Entity Picker Component
+function MultiEntityPicker({
+  entities,
+  selectedEntities = [],
+  onSelectionChange,
+  loading = false,
+  placeholder = "Select target entities..."
+}: {
+  entities: EntityOption[]
+  selectedEntities: Array<{
+    entityType: 'subdept' | 'class' | 'subclass'
+    subdept_id: number
+    class_id?: string | number
+    subclass_id?: string | number
+    entityName: string
+  }>
+  onSelectionChange: (selectedEntities: any[]) => void
+  loading?: boolean
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+
+  const toggleEntity = (entity: EntityOption) => {
+    const entityKey = `${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`
+    const isSelected = selectedEntities.some(selected => {
+      const selectedKey = `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}`
+      return selectedKey === entityKey
+    })
+
+    if (isSelected) {
+      // Remove entity
+      onSelectionChange(selectedEntities.filter(selected => {
+        const selectedKey = `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}`
+        return selectedKey !== entityKey
+      }))
+    } else {
+      // Add entity
+      const newEntity = {
+        entityType: entity.type,
+        subdept_id: entity.subdept_id!,
+        class_id: entity.class_id,
+        subclass_id: entity.subclass_id,
+        entityName: entity.name
+      }
+      onSelectionChange([...selectedEntities, newEntity])
+    }
+  }
+
+  const isEntitySelected = (entity: EntityOption) => {
+    const entityKey = `${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`
+    return selectedEntities.some(selected => {
+      const selectedKey = `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}`
+      return selectedKey === entityKey
+    })
+  }
+
+  // Group entities by subdepartment for better organization
+  const groupedEntities = entities.reduce((acc, entity) => {
+    const subdeptName = entities.find(e => e.type === 'subdept' && e.subdept_id === entity.subdept_id)?.name || 'Unknown'
+    if (!acc[subdeptName]) {
+      acc[subdeptName] = []
+    }
+    acc[subdeptName].push(entity)
+    return acc
+  }, {} as Record<string, EntityOption[]>)
+
+  return (
+    <div className="space-y-2">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            className="w-full justify-between"
+            disabled={loading}
+          >
+            {selectedEntities.length === 0 ? (
+              <span className="text-muted-foreground">{loading ? "Loading entities..." : placeholder}</span>
+            ) : (
+              <span>{selectedEntities.length} entit{selectedEntities.length === 1 ? 'y' : 'ies'} selected</span>
+            )}
+            <X className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-96 p-0">
+          <Command>
+            <CommandInput placeholder="Search entities..." />
+            <CommandEmpty>No entities found.</CommandEmpty>
+            <div className="max-h-72 overflow-y-auto">
+              {Object.entries(groupedEntities).map(([subdeptName, subdeptEntities]) => (
+                <CommandGroup key={subdeptName} heading={subdeptName}>
+                  {subdeptEntities
+                    .sort((a, b) => a.level - b.level)
+                    .map((entity) => (
+                      <CommandItem
+                        key={`${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`}
+                        onSelect={() => toggleEntity(entity)}
+                        className="flex items-center gap-2"
+                      >
+                        <div className="flex items-center gap-2 flex-1">
+                          <div className="flex h-4 w-4 items-center justify-center">
+                            {isEntitySelected(entity) && <Check className="h-3 w-3" />}
+                          </div>
+                          <span style={{ marginLeft: `${entity.level * 12}px` }}>
+                            {entity.name}
+                          </span>
+                          <Badge variant="outline" className="text-xs">
+                            {entity.type}
+                          </Badge>
+                        </div>
+                      </CommandItem>
+                    ))}
+                </CommandGroup>
+              ))}
+            </div>
+          </Command>
+        </PopoverContent>
+      </Popover>
+
+      {/* Display selected entities */}
+      {selectedEntities.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {selectedEntities.map((entity, index) => (
+            <Badge
+              key={index}
+              variant="secondary"
+              className="flex items-center gap-1 text-xs"
+            >
+              {entity.entityName}
+              <Badge variant="outline" className="text-xs ml-1">
+                {entity.entityType}
+              </Badge>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-3 w-3 ml-1 hover:bg-destructive hover:text-destructive-foreground"
+                onClick={() => {
+                  onSelectionChange(selectedEntities.filter((_, i) => i !== index))
+                }}
+              >
+                <X className="h-2 w-2" />
+              </Button>
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Updated Document Card Component with multi-select
 function DocumentCard({
   doc,
   docIndex,
@@ -933,7 +1057,7 @@ function DocumentCard({
   onRemoveExtraction: (docId: string, extractionId: string) => void
 }) {
   return (
-    <Card key={doc.id} className={doc.isSpecial ? 'border-amber-200 bg-amber-50/20' : ''}>
+    <Card className={doc.isSpecial ? 'border-amber-200 bg-amber-50/20' : ''}>
       <CardHeader>
         <div className="flex justify-between items-start">
           <div className="flex items-center gap-2">
@@ -947,9 +1071,9 @@ function DocumentCard({
             <Badge variant="outline" className="text-xs">
               {doc.documentType}
             </Badge>
-            {doc.isSpecial && doc.entityName && (
+            {doc.isSpecial && doc.targetEntities && doc.targetEntities.length > 0 && (
               <Badge variant="secondary" className="text-xs">
-                {doc.entityName}
+                {doc.targetEntities.length} target{doc.targetEntities.length === 1 ? '' : 's'}
               </Badge>
             )}
           </div>
@@ -969,48 +1093,24 @@ function DocumentCard({
           <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
             <Label className="font-medium flex items-center gap-2">
               <Star className="h-4 w-4 text-amber-500" />
-              Target Entity
+              Target Entities
             </Label>
-            <Select
-              value={`${doc.entityType}-${doc.subdept_id}-${doc.class_id}-${doc.subclass_id}`}
-              onValueChange={(value) => {
-                const [entityType, subdeptId, classId, subclassId] = value.split('-')
-                onUpdateDocument(doc.id, {
-                  entityType: entityType as 'subdept' | 'class' | 'subclass',
-                  subdept_id: parseInt(subdeptId),
-                  class_id: classId !== 'undefined' ? classId : undefined,
-                  subclass_id: subclassId !== 'undefined' ? subclassId : undefined
-                })
+            <MultiEntityPicker
+              entities={entityOptions}
+              selectedEntities={doc.targetEntities || []}
+              onSelectionChange={(selectedEntities) => {
+                onUpdateDocument(doc.id, { targetEntities: selectedEntities })
               }}
-              disabled={loadingEntities}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={loadingEntities ? "Loading entities..." : "Select target entity"} />
-              </SelectTrigger>
-              <SelectContent>
-                {entityOptions.map((entity) => (
-                  <SelectItem 
-                    key={`${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`}
-                    value={`${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span style={{ marginLeft: `${entity.level * 12}px` }}>
-                        {entity.name}
-                      </span>
-                      <Badge variant="outline" className="text-xs">
-                        {entity.type}
-                      </Badge>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              loading={loadingEntities}
+              placeholder="Select which entities need this document..."
+            />
             <p className="text-xs text-muted-foreground">
-              This document will only be required for the selected entity
+              This document will only be required for the selected entities
             </p>
           </div>
         )}
 
+        {/* Rest of the document configuration (name, type, etc.) - same as before */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="space-y-2">
             <Label>Document Name *</Label>
@@ -1089,7 +1189,6 @@ function DocumentCard({
             </Select>
           </div>
         </div>
-
         <div className="space-y-2">
           <Label>Description</Label>
           <Textarea
