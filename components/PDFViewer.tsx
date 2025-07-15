@@ -8,7 +8,7 @@ interface PDFViewerProps {
 
 const PDFViewer: React.FC<PDFViewerProps> = ({ url }) => {
   return (
-    <div className="w-full h-[calc(98vh-8rem)] bg-[#202124] rounded-lg">
+    <div className="w-full h-[70vh] bg-[#202124] rounded-lg">
       <iframe
         src={`${url}#view=FitH`}
         className="w-full h-full"

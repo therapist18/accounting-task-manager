@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Send, FileText, RotateCw, Trash2, MessageSquare } from "lucide-react"
+import { Loader2, Send, FileText, RotateCw, Trash2, MessageSquare, Upload } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -60,6 +60,98 @@ export function StageUploadDialog({
   const STAGE_DOCUMENTS_STORAGE_KEY = 'stageDocuments'
   const TASK_STAGE_STATUS_KEY = 'taskStageStatuses'
 
+  // Helper function to get input type for a document
+  const getDocumentInputType = (doc: any): 'file' | 'message' | 'both' => {
+    return doc.inputType || 'both' // Default to 'both' if not specified
+  }
+
+  // Helper function to render input section based on input type
+  const renderInputSection = (doc: any) => {
+    const inputType = getDocumentInputType(doc)
+
+    return (
+      <div className="space-y-4 p-4 rounded-lg border">
+        {/* File Upload Section */}
+        {(inputType === 'file' || inputType === 'both') && (
+          <div className="space-y-2">
+            <Label htmlFor={`file-${doc.id}`} className="font-medium flex items-center gap-2">
+              <Upload className="h-4 w-4" />
+              {inputType === 'both' ? 'Upload File' : doc.description || `Upload ${doc.name}`}
+            </Label>
+            <Input
+              id={`file-${doc.id}`}
+              type="file"
+              accept="application/pdf,image/*"
+              onChange={(e) => handleFileChange(e, doc.id)}
+              className="cursor-pointer"
+              disabled={uploading}
+            />
+            <p className="text-sm text-muted-foreground">
+              {doc.isRequired ? "Required" : "Optional"} • Accepts PDF and image files
+            </p>
+
+            {/* Upload Progress */}
+            {uploadProgress[doc.id] > 0 && uploadProgress[doc.id] < 100 && (
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${uploadProgress[doc.id]}%` }}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Separator for 'both' type */}
+        {inputType === 'both' && (
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">Or</span>
+            </div>
+          </div>
+        )}
+
+        {/* Message Input Section */}
+        {(inputType === 'message' || inputType === 'both') && (
+          <div className="space-y-2">
+            <Label className="font-medium flex items-center gap-2">
+              <MessageSquare className="h-4 w-4" />
+              {inputType === 'both' ? 'Submit Message/Text' : doc.description || `Enter ${doc.name}`}
+            </Label>
+            <div className="relative">
+              <Textarea
+                placeholder={`${inputType === 'both' ? 'Or type' : 'Type'} message content for ${doc.name}...`}
+                className="min-h-[100px] resize-none"
+                value={messageTexts[doc.id] || ''}
+                onChange={(e) => setMessageTexts(prev => ({ ...prev, [doc.id]: e.target.value }))}
+                disabled={uploading}
+              />
+            </div>
+            <Button
+              className="w-full"
+              onClick={() => handleMessageSubmit(messageTexts[doc.id] || '', doc.id)}
+              disabled={!messageTexts[doc.id]?.trim() || uploading}
+              variant={inputType === 'message' ? 'default' : 'outline'}
+            >
+              {uploading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="mr-2 h-4 w-4" />
+              )}
+              Submit {inputType === 'message' ? 'Message' : 'Text'}
+            </Button>
+            <p className="text-sm text-muted-foreground">
+              {doc.isRequired ? "Required" : "Optional"} • Message will be converted to PDF
+            </p>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   // Clean up object URLs when component unmounts or when dialog closes
   useEffect(() => {
     return () => {
@@ -102,7 +194,6 @@ export function StageUploadDialog({
     window.dispatchEvent(new Event('localStorageChange'))
   }
 
-  // Database submission functions
   const searchRegistryIndividuals = async (individual: any) => {
     try {
       console.log('Searching registry for individual:', individual)
@@ -212,7 +303,7 @@ export function StageUploadDialog({
   const createNewRegistryIndividual = async (individual: any): Promise<number> => {
     try {
       if (!selectedStageTask) throw new Error('No task selected')
-      
+
       let fullName = individual.full_name || selectedStageTask.task.applicant_name || selectedStageTask.task.principal_member_name
 
       if (!fullName && individual.first_name && individual.last_name) {
@@ -259,7 +350,6 @@ export function StageUploadDialog({
       throw error
     }
   }
-
   const submitDocumentsToDatabase = async (documents: any[], registryIndividual: any, docId: string) => {
     try {
       console.log('=== Starting document submission ===')
@@ -306,7 +396,7 @@ export function StageUploadDialog({
   // Get fields for extraction based on document configuration
   const getFieldsForDocument = (docId: string) => {
     if (!selectedStageTask?.stage?.documents) return []
-    
+
     const document = selectedStageTask.stage.documents.find(d => d.id === docId)
     if (!document?.extractionSpecs) return []
 
@@ -348,7 +438,7 @@ export function StageUploadDialog({
   // Handle file upload and extraction
   const handleFileUpload = async (files: File[] | File, docId: string) => {
     if (!selectedStageTask) return
-    
+
     try {
       const fileArray = Array.isArray(files) ? files : [files]
       if (!fileArray.length) {
@@ -567,7 +657,7 @@ export function StageUploadDialog({
   // Handle message submission
   const handleMessageSubmit = async (message: string, docId: string) => {
     if (!selectedStageTask) return
-    
+
     try {
       setUploading(true)
       setMessageTexts(prev => ({ ...prev, [docId]: message }))
@@ -641,7 +731,7 @@ export function StageUploadDialog({
   // Main data submission handler
   const handleDataSubmission = async (docId: string, saveData: any) => {
     if (!selectedStageTask) return
-    
+
     try {
       setUploading(true)
 
@@ -691,7 +781,7 @@ export function StageUploadDialog({
   // Handle existing save logic for backward compatibility
   const handleExistingSaveLogic = async (docId: string, docsToSave: any[]) => {
     if (!selectedStageTask) return
-    
+
     const existingDocs = JSON.parse(localStorage.getItem(STAGE_DOCUMENTS_STORAGE_KEY) || '[]')
 
     const processedUploads = docsToSave.map(doc => ({
@@ -767,7 +857,7 @@ export function StageUploadDialog({
   // Re-extraction function
   const handleReExtraction = async (docId: string, docIndex: number) => {
     if (!selectedStageTask) return
-    
+
     try {
       const docsForType = uploadedDocs[docId] || []
       const doc = docsForType[docIndex]
@@ -895,339 +985,314 @@ export function StageUploadDialog({
         [docId]: {
           ...prev[docId],
           extractedData: mappedData
-       }
-     }))
+        }
+      }))
 
-     toast({
-       title: 'Success',
-       description: `Successfully re-extracted data from ${doc.fileName}`,
-     })
-   } catch (error) {
-     console.error('Error during re-extraction:', error)
-     toast({
-       title: 'Error',
-       description: `Re-extraction failed: ${error.message}`,
-       variant: 'destructive',
-     })
-   }
- }
+      toast({
+        title: 'Success',
+        description: `Successfully re-extracted data from ${doc.fileName}`,
+      })
+    } catch (error) {
+      console.error('Error during re-extraction:', error)
+      toast({
+        title: 'Error',
+        description: `Re-extraction failed: ${error.message}`,
+        variant: 'destructive',
+      })
+    }
+  }
 
- // Fuzzy Match Confirmation Dialog Component
- const FuzzyMatchConfirmationDialog = () => {
-   const handleConfirmMatch = async (selectedMatch: any) => {
-     try {
-       setUploading(true)
-       await submitDocumentsToDatabase(
-         pendingSubmission.docsToSave,
-         selectedMatch,
-         pendingSubmission.docId
-       )
-       await handleExistingSaveLogic(pendingSubmission.docId, pendingSubmission.docsToSave)
+  // Fuzzy Match Confirmation Dialog Component
+  const FuzzyMatchConfirmationDialog = () => {
+    const handleConfirmMatch = async (selectedMatch: any) => {
+      try {
+        setUploading(true)
+        await submitDocumentsToDatabase(
+          pendingSubmission.docsToSave,
+          selectedMatch,
+          pendingSubmission.docId
+        )
+        await handleExistingSaveLogic(pendingSubmission.docId, pendingSubmission.docsToSave)
 
-       setConfirmationDialogOpen(false)
-       setPendingSubmission(null)
-       setFuzzyMatchResults([])
-     } catch (error) {
-       console.error('Error confirming match:', error)
-       toast({
-         title: 'Error',
-         description: `Failed to confirm match: ${error.message}`,
-         variant: "destructive"
-       })
-     } finally {
-       setUploading(false)
-     }
-   }
+        setConfirmationDialogOpen(false)
+        setPendingSubmission(null)
+        setFuzzyMatchResults([])
+      } catch (error) {
+        console.error('Error confirming match:', error)
+        toast({
+          title: 'Error',
+          description: `Failed to confirm match: ${error.message}`,
+          variant: "destructive"
+        })
+      } finally {
+        setUploading(false)
+      }
+    }
 
-   const handleCreateNew = async () => {
-     try {
-       setUploading(true)
-       const newRegistryId = await createNewRegistryIndividual(pendingSubmission.originalIndividual)
-       await submitDocumentsToDatabase(
-         pendingSubmission.docsToSave,
-         { id: newRegistryId },
-         pendingSubmission.docId
-       )
-       await handleExistingSaveLogic(pendingSubmission.docId, pendingSubmission.docsToSave)
+    const handleCreateNew = async () => {
+      try {
+        setUploading(true)
+        const newRegistryId = await createNewRegistryIndividual(pendingSubmission.originalIndividual)
+        await submitDocumentsToDatabase(
+          pendingSubmission.docsToSave,
+          { id: newRegistryId },
+          pendingSubmission.docId
+        )
+        await handleExistingSaveLogic(pendingSubmission.docId, pendingSubmission.docsToSave)
 
-       setConfirmationDialogOpen(false)
-       setPendingSubmission(null)
-       setFuzzyMatchResults([])
-     } catch (error) {
-       console.error('Error creating new individual:', error)
-       toast({
-         title: 'Error',
-         description: `Failed to create new individual: ${error.message}`,
-         variant: "destructive"
-       })
-     } finally {
-       setUploading(false)
-     }
-   }
+        setConfirmationDialogOpen(false)
+        setPendingSubmission(null)
+        setFuzzyMatchResults([])
+      } catch (error) {
+        console.error('Error creating new individual:', error)
+        toast({
+          title: 'Error',
+          description: `Failed to create new individual: ${error.message}`,
+          variant: "destructive"
+        })
+      } finally {
+        setUploading(false)
+      }
+    }
 
-   return (
-     <Dialog open={confirmationDialogOpen} onOpenChange={setConfirmationDialogOpen}>
-       <DialogContent className="max-w-4xl">
-         <DialogHeader>
-           <DialogTitle>Confirm Individual Identity</DialogTitle>
-           <DialogDescription>
-             We found similar individuals in the registry. Please confirm if any of these match
-             <strong> {pendingSubmission?.originalIndividual?.full_name}</strong>:
-           </DialogDescription>
-         </DialogHeader>
+    return (
+      <Dialog open={confirmationDialogOpen} onOpenChange={setConfirmationDialogOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Confirm Individual Identity</DialogTitle>
+            <DialogDescription>
+              We found similar individuals in the registry. Please confirm if any of these match
+              <strong> {pendingSubmission?.originalIndividual?.full_name}</strong>:
+            </DialogDescription>
+          </DialogHeader>
 
-         <div className="space-y-4 max-h-96 overflow-y-auto">
-           {fuzzyMatchResults.map((match) => (
-             <div key={match.id} className="border rounded-lg p-4 hover:bg-gray-50">
-               <div className="flex justify-between items-start">
-                 <div className="space-y-2">
-                   <h4 className="font-semibold">{match.full_name}</h4>
-                   <div className="text-sm text-gray-600 space-y-1">
-                     {match.r_number && <p><span className="font-medium">R-Number:</span> {match.r_number}</p>}
-                     {match.passport_number && <p><span className="font-medium">Passport:</span> {match.passport_number}</p>}
-                     {match.nationality && <p><span className="font-medium">Nationality:</span> {match.nationality}</p>}
-                     {match.date_of_birth && <p><span className="font-medium">DOB:</span> {match.date_of_birth}</p>}
-                   </div>
-                 </div>
-                 <Button
-                   onClick={() => handleConfirmMatch(match)}
-                   className="ml-4"
-                   disabled={uploading}
-                 >
-                   {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                   Select This Person
-                 </Button>
-               </div>
-             </div>
-           ))}
-         </div>
+          <div className="space-y-4 max-h-96 overflow-y-auto">
+            {fuzzyMatchResults.map((match) => (
+              <div key={match.id} className="border rounded-lg p-4 hover:bg-gray-50">
+                <div className="flex justify-between items-start">
+                  <div className="space-y-2">
+                    <h4 className="font-semibold">{match.full_name}</h4>
+                    <div className="text-sm text-gray-600 space-y-1">
+                      {match.r_number && <p><span className="font-medium">R-Number:</span> {match.r_number}</p>}
+                      {match.passport_number && <p><span className="font-medium">Passport:</span> {match.passport_number}</p>}
+                      {match.nationality && <p><span className="font-medium">Nationality:</span> {match.nationality}</p>}
+                      {match.date_of_birth && <p><span className="font-medium">DOB:</span> {match.date_of_birth}</p>}
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => handleConfirmMatch(match)}
+                    className="ml-4"
+                    disabled={uploading}
+                  >
+                    {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Select This Person
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
 
-         <div className="flex justify-between pt-4 border-t">
-           <Button
-             variant="outline"
-             onClick={() => setConfirmationDialogOpen(false)}
-             disabled={uploading}
-           >
-             Cancel
-           </Button>
-           <Button
-             onClick={handleCreateNew}
-             disabled={uploading}
-           >
-             {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-             Create New Individual
-           </Button>
-         </div>
-       </DialogContent>
-     </Dialog>
-   )
- }
+          <div className="flex justify-between pt-4 border-t">
+            <Button
+              variant="outline"
+              onClick={() => setConfirmationDialogOpen(false)}
+              disabled={uploading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateNew}
+              disabled={uploading}
+            >
+              {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Create New Individual
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )
+  }
 
- // Don't render anything if there's no selected stage task
- if (!selectedStageTask) {
-   return null
- }
+  // Don't render anything if there's no selected stage task
+  if (!selectedStageTask) {
+    return null
+  }
 
- const { task, stage } = selectedStageTask
- const activeDocument = stage?.documents?.find(d => d.id === activeDocumentTab)
+  const { task, stage } = selectedStageTask
+  const activeDocument = stage?.documents?.find(d => d.id === activeDocumentTab)
 
- return (
-   <>
-     <Dialog open={open} onOpenChange={onOpenChange}>
-       <DialogContent className="max-w-7xl max-h-[95vh] overflow-y-auto">
-         <DialogHeader>
-           <DialogTitle>Upload Documents for {stage?.name}</DialogTitle>
-           <DialogDescription>
-             Upload required documents or submit messages to complete this stage.
-           </DialogDescription>
-         </DialogHeader>
+  return (
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-[1800px] max-h-[95vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Upload Documents for {stage?.name} Stage
+            </DialogTitle>
+            <DialogDescription>
+              Complete this stage by uploading required documents or submitting messages as specified.
+            </DialogDescription>
+          </DialogHeader>
 
-         <Tabs
-           value={activeDocumentTab}
-           onValueChange={setActiveDocumentTab}
-           className="w-full"
-         >
-           <TabsList className="w-full justify-start overflow-x-auto">
-             {stage?.documents?.map((doc) => (
-               <TabsTrigger
-                 key={doc.id}
-                 value={doc.id}
-                 className="whitespace-nowrap"
-               >
-                 {doc.name}
-                 {uploadedDocs[doc.id]?.length > 0 && (
-                   <div className="ml-2 w-2 h-2 bg-green-500 rounded-full"></div>
-                 )}
-               </TabsTrigger>
-             ))}
-           </TabsList>
+          <Tabs
+            value={activeDocumentTab}
+            onValueChange={setActiveDocumentTab}
+            className="w-full"
+          >
+            <TabsList className="w-full justify-start">
+              {stage?.documents?.map((doc) => {
+                const inputType = getDocumentInputType(doc)
+                const hasUploads = uploadedDocs[doc.id]?.length > 0
 
-           {stage?.documents?.map((doc) => (
-             <div
-               key={doc.id}
-               className={`mt-6 ${activeDocumentTab === doc.id ? 'block' : 'hidden'}`}
-             >
-               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                 {/* Left Panel - Document Upload/Message Input */}
-                 <div className="space-y-4 lg:col-span-1">
-                   <div className="space-y-4 p-4 rounded-lg border">
-                     <div className="space-y-2">
-                       <Label htmlFor={`file-${doc.id}`} className="font-medium">
-                         {doc.description || `Upload ${doc.name}`}
-                       </Label>
-                       <Input
-                         id={`file-${doc.id}`}
-                         type="file"
-                         accept="application/pdf,image/*"
-                         onChange={(e) => handleFileChange(e, doc.id)}
-                         className="cursor-pointer"
-                         disabled={uploading}
-                       />
-                       <p className="text-sm text-muted-foreground">
-                         {doc.required ? "Required" : "Optional"} • {doc.type}
-                       </p>
+                return (
+                  <TabsTrigger
+                    key={doc.id}
+                    value={doc.id}
+                    className="whitespace-nowrap flex items-center gap-2"
+                  >
+                    {/* Input type indicator */}
+                    {inputType === 'file' && <Upload className="h-3 w-3" />}
+                    {inputType === 'message' && <MessageSquare className="h-3 w-3" />}
+                    {inputType === 'both' && <FileText className="h-3 w-3" />}
 
-                       {/* Upload Progress */}
-                       {uploadProgress[doc.id] > 0 && uploadProgress[doc.id] < 100 && (
-                         <div className="w-full bg-gray-200 rounded-full h-2">
-                           <div
-                             className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                             style={{ width: `${uploadProgress[doc.id]}%` }}
-                           />
-                         </div>
-                       )}
-                     </div>
+                    {doc.name}
 
-                     <div className="relative">
-                       <div className="relative flex items-center">
-                         <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                           <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                         </div>
-                         <Textarea
-                           placeholder={`Or type a message for ${doc.name}...`}
-                           className="pl-10 min-h-[100px]"
-                           value={messageTexts[doc.id] || ''}
-                           onChange={(e) => setMessageTexts(prev => ({ ...prev, [doc.id]: e.target.value }))}
-                           disabled={uploading}
-                         />
-                       </div>
-                       <Button
-                         className="mt-2 w-full"
-                         onClick={() => handleMessageSubmit(messageTexts[doc.id] || '', doc.id)}
-                         disabled={!messageTexts[doc.id]?.trim() || uploading}
-                       >
-                         {uploading ? (
-                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                         ) : (
-                           <Send className="mr-2 h-4 w-4" />
-                         )}
-                         Submit Message
-                       </Button>
-                     </div>
-                   </div>
-                 </div>
+                    {/* Required indicator */}
+                    {doc.isRequired && (
+                      <Badge variant="destructive" className="text-xs px-1">
+                        Required
+                      </Badge>
+                    )}
 
-                 {/* Right Panel - Preview and Extracted Data */}
-                 <div className="lg:col-span-2">
-                   {uploadedDocs[doc.id]?.length > 0 ? (
-                     <div className="space-y-6">
-                       {uploadedDocs[doc.id].map((uploadedDoc, index) => (
-                         <div key={uploadedDoc.id} className="relative bg-gray-50 rounded-lg p-4 border">
-                           <div className="flex justify-between items-start mb-4">
-                             <span className="inline-flex items-center justify-center bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded">
-                               Upload #{index + 1}
-                             </span>
-                             <div className="flex gap-2">
-                               <Button
-                                 variant="ghost"
-                                 size="sm"
-                                 className="text-blue-600 hover:text-blue-800 hover:bg-blue-100"
-                                 onClick={() => handleReExtraction(doc.id, index)}
-                               >
-                                 <RotateCw className="h-4 w-4" />
-                               </Button>
-                               <Button
-                                 variant="ghost"
-                                 size="sm"
-                                 className="text-red-600 hover:text-red-800 hover:bg-red-100"
-                                 onClick={() => {
-                                   setUploadedDocs(prev => ({
-                                     ...prev,
-                                     [doc.id]: prev[doc.id].filter((_, i) => i !== index)
-                                   }))
-                                 }}
-                               >
-                                 <Trash2 className="h-4 w-4" />
-                               </Button>
-                             </div>
-                           </div>
-                           <ExtractionPreview
-                             documentName={doc.name}
-                             extractedData={uploadedDoc.extractedData || {}}
-                             fields={getFieldsForDocument(doc.id)}
-                             onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
-                             fileUrl={uploadedDoc.fileUrl}
-                             fileName={uploadedDoc.fileName}
-                             expanded={true}
-                             showSaveButton={false}
-                             type={doc.type || 'document'}
-                             file={uploadedDoc.file}
-                           />
-                         </div>
-                       ))}
-                     </div>
-                   ) : previewData[doc.id] ? (
-                     <ExtractionPreview
-                       documentName={doc.name}
-                       extractedData={previewData[doc.id].extractedData || {}}
-                       fields={getFieldsForDocument(doc.id)}
-                       onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
-                       fileUrl={previewData[doc.id].fileUrl}
-                       fileName={previewData[doc.id].fileName}
-                       expanded={true}
-                       showSaveButton={false}
-                       type={doc.type || 'document'}
-                     />
-                   ) : (
-                     <div className="border rounded-lg p-8 text-center bg-gray-50">
-                       <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />
-                       <p className="text-muted-foreground mb-2">No document uploaded yet</p>
-                       <p className="text-sm text-muted-foreground">
-                         Upload a file or submit a message to see the preview and extracted data
-                       </p>
-                     </div>
-                   )}
-                 </div>
-               </div>
-             </div>
-           ))}
-         </Tabs>
+                    {/* Upload status indicator */}
+                    {hasUploads && (
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                    )}
+                  </TabsTrigger>
+                )
+              })}
+            </TabsList>
 
-         <div className="flex justify-end gap-2 pt-4 border-t">
-           <Button
-             variant="outline"
-             onClick={() => onOpenChange(false)}
-             disabled={uploading}
-           >
-             Close
-           </Button>
-           <Button
-             onClick={handleSaveAllDocuments}
-             disabled={uploading || Object.values(uploadedDocs).every(docs => docs.length === 0)}
-           >
-             {uploading ? (
-               <>
-                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                 Saving...
-               </>
-             ) : (
-               'Save All Documents'
-             )}
-           </Button>
-         </div>
-       </DialogContent>
-     </Dialog>
-     <FuzzyMatchConfirmationDialog />
-   </>
- )
+            {stage?.documents?.map((doc) => (
+              <div
+                key={doc.id}
+                className={`mt-6 ${activeDocumentTab === doc.id ? 'block' : 'hidden'}`}
+              >
+                <div className="space-y-6 grid">
+                  {/* Left Panel - Document Upload/Message Input */}
+                  <div className="space-y-4">
+                    {renderInputSection(doc)}
+                  </div>
+
+                  {/* Right Panel - Preview and Extracted Data */}
+                  <div className="">
+                    {uploadedDocs[doc.id]?.length > 0 ? (
+                      <div className="space-y-6">
+                        {uploadedDocs[doc.id].map((uploadedDoc, index) => (
+                          <div key={uploadedDoc.id} className="relative bg-gray-50 rounded-lg p-4 border">
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="inline-flex items-center justify-center bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded">
+                                Upload #{index + 1}
+                              </span>
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-blue-600 hover:text-blue-800 hover:bg-blue-100"
+                                  onClick={() => handleReExtraction(doc.id, index)}
+                                >
+                                  <RotateCw className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-red-600 hover:text-red-800 hover:bg-red-100"
+                                  onClick={() => {
+                                    setUploadedDocs(prev => ({
+                                      ...prev,
+                                      [doc.id]: prev[doc.id].filter((_, i) => i !== index)
+                                    }))
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                            <ExtractionPreview
+                              documentName={doc.name}
+                              extractedData={uploadedDoc.extractedData || {}}
+                              fields={getFieldsForDocument(doc.id)}
+                              onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
+                              fileUrl={uploadedDoc.fileUrl}
+                              fileName={uploadedDoc.fileName}
+                              expanded={true}
+                              showSaveButton={false}
+                              type={doc.documentType || 'document'}
+                              file={uploadedDoc.file}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    ) : previewData[doc.id] ? (
+                      <ExtractionPreview
+                        documentName={doc.name}
+                        extractedData={previewData[doc.id].extractedData || {}}
+                        fields={getFieldsForDocument(doc.id)}
+                        onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
+                        fileUrl={previewData[doc.id].fileUrl}
+                        fileName={previewData[doc.id].fileName}
+                        expanded={true}
+                        showSaveButton={false}
+                        type={doc.documentType || 'document'}
+                      />
+                    ) : (
+                      <div className="border rounded-lg p-8 text-center bg-gray-50">
+                        <div className="flex flex-col items-center">
+                          {getDocumentInputType(doc) === 'file' && <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
+                          {getDocumentInputType(doc) === 'message' && <MessageSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
+                          {getDocumentInputType(doc) === 'both' && <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
+
+                          <p className="text-muted-foreground mb-2">No content submitted yet</p>
+                          <p className="text-sm text-muted-foreground">
+                            {getDocumentInputType(doc) === 'file' && 'Upload a file to see the preview and extracted data'}
+                            {getDocumentInputType(doc) === 'message' && 'Submit a message to see the processed content'}
+                            {getDocumentInputType(doc) === 'both' && 'Upload a file or submit a message to see the preview and extracted data'}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </Tabs>
+
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={uploading}
+            >
+              Close
+            </Button>
+            <Button
+              onClick={handleSaveAllDocuments}
+              disabled={uploading || Object.values(uploadedDocs).every(docs => docs.length === 0)}
+            >
+              {uploading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save All Documents'
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <FuzzyMatchConfirmationDialog />
+    </>
+  )
 }

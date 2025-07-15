@@ -85,7 +85,7 @@ const DocumentViewer = ({ fileUrl, fileName, documentName }) => {
         <CardDescription>Visual representation of the uploaded file.</CardDescription>
       </CardHeader>
       <CardContent className="flex-1 p-2">
-        <div className="relative w-full h-[600px] bg-secondary/30 rounded-md overflow-hidden border">
+        <div className="relative w-full max-h-[70vh] bg-secondary/30 rounded-md border">
           {fileUrl ? (
             isPDF ? (
               <PDFViewer url={fileUrl} />
@@ -296,11 +296,11 @@ const ExtractionPreview = ({
             )}
           </div>
         </div>
-        <div className="flex gap-6 items-start">
-          <div className="xl:sticky xl:top-6 w-full">
+        <div className="flex gap-6 items-start grid grid-cols-3">
+          <div className="xl:sticky xl:top-6 w-full col-span-2">
             <DocumentViewer fileUrl={doc.fileUrl} fileName={doc.fileName} documentName={doc.documentName} />
           </div>
-          <Card className="h-full w-full">
+          <Card className="h-full w-full col-span-1">
             <CardHeader>
               <div className="flex items-center justify-between gap-4">
                 <div>
