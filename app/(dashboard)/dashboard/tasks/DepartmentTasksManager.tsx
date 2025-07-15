@@ -7,15 +7,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AlertTriangle, FileText, ChevronDown, Edit, Trash2, Upload, Download, Plus, Globe, CheckCheckIcon, Building, Workflow, Layers, Target } from "lucide-react"
+import { AlertTriangle, FileText, Edit, Trash2, Download, Plus, Building } from "lucide-react"
+import { EnquiryDialog } from "./components/EnquiryDialog"
 import { format, parseISO } from "date-fns"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { EditableStageCell } from "./components/EditableStageCell"
 import { EditTaskDialog } from "./components/EditTaskDialog"
-import ColumnVisibilityControl, { ColumnVisibilityOption } from "../departments/main-shared-components/column-visibility"
 import { fetchDepartments } from "../departments/departments/database"
 
+// Interface definitions
 interface Stage {
   id: string;
   name: string;
@@ -149,7 +150,7 @@ interface DepartmentTasksManagerProps {
   getCurrentRequirements?: () => any[]
 }
 
-export function DepartmentTasksManager({
+export default function DepartmentTasksManager({
   error,
   onTaskAction,
   onStageDocumentUpload,
@@ -163,6 +164,8 @@ export function DepartmentTasksManager({
 }: DepartmentTasksManagerProps) {
   const [departments, setDepartments] = useState<any[]>([])
   const [departmentsLoading, setDepartmentsLoading] = useState(true)
+  const [companies, setCompanies] = useState<Map<number, string>>(new Map())
+  const [companiesLoading, setCompaniesLoading] = useState(true)
   const [activeDepartmentTab, setActiveDepartmentTab] = useState<string>("")
   const [activeSubTab, setActiveSubTab] = useState<string>("enquiries")
   const [editDialogOpen, setEditDialogOpen] = useState(false)
@@ -170,690 +173,419 @@ export function DepartmentTasksManager({
   const [tasks, setTasks] = useState<any[]>([])
   const [stages, setStages] = useState<any[]>([])
   const [tasksLoading, setTasksLoading] = useState(true)
+  const [isEnquiryDialogOpen, setIsEnquiryDialogOpen] = useState(false)
+
+  // Helper functions to resolve class names
+  const getClassName = useCallback((task: any, departments: any[]) => {
+    if (!task?.class_id || !task?.subdepartment?.id || !departments?.length) return 'N/A'
+    const dept = departments.find(d => d.id === task.department?.id)
+    const subdept = dept?.tm_subdepartments?.find(s => s.id === task.subdepartment?.id)
+    const cls = subdept?.classes?.find(c => c.id.toString() === task.class_id.toString())
+    return cls?.name || 'N/A'
+  }, [])
+
+  const getSubClassName = useCallback((task: any, departments: any[]) => {
+    if (!task?.subclass_id || !task?.class_id || !task?.subdepartment?.id || !departments?.length) return 'N/A'
+    const dept = departments.find(d => d.id === task.department?.id)
+    const subdept = dept?.tm_subdepartments?.find(s => s.id === task.subdepartment?.id)
+    const cls = subdept?.classes?.find(c => c.id.toString() === task.class_id.toString())
+    const subCls = cls?.subClasses?.find(sc => sc.id.toString() === task.subclass_id.toString())
+    return subCls?.name || 'N/A'
+  }, [])
+
+  // Fetch companies from acc_portal_company_duplicate
+  const fetchCompanies = async () => {
+    try {
+      setCompaniesLoading(true)
+      const { data, error } = await supabase
+        .from('acc_portal_company_duplicate')
+        .select('id, company_name')
+
+      if (error) throw error
+
+      if (data) {
+        const companyMap = new Map(data.map(c => [c.id, c.company_name]))
+        setCompanies(companyMap)
+      }
+    } catch (error) {
+      console.error('Error fetching companies:', error)
+      toast({
+        title: "Error",
+        description: "Failed to load company data.",
+        variant: "destructive"
+      })
+    } finally {
+      setCompaniesLoading(false)
+    }
+  }
+
+  // Handle new enquiry creation
+  const handleEnquiryCreated = useCallback((newEnquiry: any) => {
+    setTasks(prevTasks => [newEnquiry, ...prevTasks])
+    toast({
+      title: "Success",
+      description: "New enquiry created successfully",
+      variant: "default"
+    })
+  }, [])
 
   // Fetch tasks with related data
-  const fetchTasks = async () => {
+  const fetchTasks = useCallback(async () => {
     try {
       setTasksLoading(true)
       const { data, error } = await supabase
         .from('tm_tasks')
-        .select(`
-          *,
-          department:department_id (id, name),
-          subdepartment:subdepartment_id (id, name),
-          current_stage:current_stage_id (id, name, order_num)
-        `)
+        .select(`*, department:department_id (id, name), subdepartment:subdepartment_id (id, name), current_stage:current_stage_id (id, name, order_num)`)
         .order('created_at', { ascending: false })
 
       if (error) throw error
       setTasks(data || [])
     } catch (error) {
       console.error('Error fetching tasks:', error)
-      toast({
-        title: "Error",
-        description: "Failed to load tasks. Please try again.",
-        variant: "destructive"
-      })
+      toast({ title: "Error", description: "Failed to load tasks.", variant: "destructive" })
     } finally {
       setTasksLoading(false)
     }
-  }
+  }, [])
 
-  // Fetch stages for a department
+  // Fetch and process stages for a department
   const fetchStages = async (departmentId: string) => {
     try {
-      const department = departments.find(d => d.id === departmentId)
+      const department = departments.find(d => d.id.toString() === departmentId.toString())
       if (!department) return
 
-      // Get all stages from the department and subdepartments
-      const allStages = department.stages.map(stage => ({
-        ...stage,
-        departmentId: department.id,
-        departmentName: department.name
-      }))
-
-      // Add stages from subdepartments that are applicable
-      department.tm_subdepartments.forEach(subdept => {
-        subdept.stages.forEach(stageMapping => {
-          if (stageMapping.applicable) {
-            const stage = department.stages.find(s => s.id === stageMapping.stage_id)
-            if (stage) {
-              allStages.push({
-                ...stage,
-                departmentId: department.id,
-                departmentName: department.name,
-                subdepartmentId: subdept.id,
-                subdepartmentName: subdept.name
-              })
-            }
-          }
-        })
+      const uniqueStages = new Map()
+      department.stages.forEach(stage => {
+        if (!uniqueStages.has(stage.id)) {
+          uniqueStages.set(stage.id, { ...stage, departmentId: department.id, departmentName: department.name })
+        }
       })
-
-      // Sort stages by order_num
-      allStages.sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
-      
+      const allStages = Array.from(uniqueStages.values()).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
       setStages(allStages)
     } catch (error) {
       console.error('Error fetching stages:', error)
-      toast({
-        title: "Error",
-        description: "Failed to load stages. Please try again.",
-        variant: "destructive"
-      })
+      toast({ title: "Error", description: "Failed to load stages.", variant: "destructive" })
     }
   }
 
-  // Fetch departments data
+  // Fetch initial data on component mount
   useEffect(() => {
-    const loadDepartments = async () => {
+    const loadInitialData = async () => {
+      setDepartmentsLoading(true)
       try {
-        setDepartmentsLoading(true)
-        const departmentsData = await fetchDepartments()
+        const [departmentsData] = await Promise.all([
+          fetchDepartments(),
+          fetchCompanies(),
+        ])
         setDepartments(departmentsData)
-        
-        // Set initial department tab
         if (departmentsData.length > 0) {
-          setActiveDepartmentTab(departmentsData[0].id)
+          setActiveDepartmentTab(departmentsData[0].id.toString())
         }
       } catch (error) {
-        console.error('Error fetching departments:', error)
-        toast({
-          title: "Error",
-          description: "Failed to load departments. Please try again.",
-          variant: "destructive"
-        })
+        console.error('Error loading initial data:', error)
+        toast({ title: "Error", description: "Failed to load initial data.", variant: "destructive" })
       } finally {
         setDepartmentsLoading(false)
       }
     }
-
-    loadDepartments()
+    loadInitialData()
   }, [])
 
   // Fetch tasks and stages when department changes
   useEffect(() => {
-    if (activeDepartmentTab) {
+    if (activeDepartmentTab && departments.length > 0) {
       fetchTasks()
       fetchStages(activeDepartmentTab)
     }
-  }, [activeDepartmentTab])
+  }, [activeDepartmentTab, departments])
 
-  // Helper function to get task hierarchy info
+  // Get task hierarchy info
   const getTaskHierarchy = useCallback((task: any) => {
     if (!task || !departments.length) return null
-
     const dept = departments.find(d => d.id === task.department?.id)
     if (!dept) return null
-
     const subdept = dept.tm_subdepartments?.find(s => s.id === task.subdepartment?.id)
-    const cls = subdept?.classes?.find(c => c.id === task.class_id)
-    const subCls = cls?.subClasses?.find(sc => sc.id === task.subclass_id)
-
-    return {
-      department: dept,
-      subdepartment: subdept,
-      class: cls,
-      subclass: subCls
-    }
+    const cls = subdept?.classes?.find(c => c.id.toString() === task.class_id?.toString())
+    const subCls = cls?.subClasses?.find(sc => sc.id.toString() === task.subclass_id?.toString())
+    return { department: dept, subdepartment: subdept, class: cls, subclass: subCls }
   }, [departments])
 
   // Filter tasks by department and status
   const getFilteredTasks = useCallback((status?: string) => {
-    if (!departments || !Array.isArray(departments) || !activeDepartmentTab || !tasks || !Array.isArray(tasks)) {
-      return [];
-    }
-    
-    const currentDept = departments.find(d => d.id === activeDepartmentTab);
-    if (!currentDept) return [];
+    if (!departments.length || !activeDepartmentTab || !tasks.length) return []
+    const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
+    if (!currentDept) return []
+    return tasks.filter(task =>
+      task &&
+      task.department?.id?.toString() === currentDept.id.toString() &&
+      (!status || task.status === status)
+    )
+  }, [tasks, departments, activeDepartmentTab])
 
-    let filtered = tasks.filter(task => {
-      if (!task) return false;
-      // Filter by department
-      if (task.department?.id !== currentDept.id) return false;
-      // Filter by status if provided
-      if (status && task.status !== status) return false;
-      return true;
-    });
-
-    return filtered;
-  }, [tasks, departments, activeDepartmentTab]);
-
-  // Get tasks for each tab
-  const getTasksByStatus = (status: string) => {
-    return tasks.filter(task => task.status === status)
-  }
-
-  const enquiryTasks = useMemo(() => getTasksByStatus('enquiry'), [tasks]);
-  const wipTasks = useMemo(() => getTasksByStatus('in_progress'), [tasks]);
-  const completedTasks = useMemo(() => getTasksByStatus('completed'), [tasks]);
+  // Memoized task lists
+  const enquiryTasks = useMemo(() => getFilteredTasks('enquiry'), [getFilteredTasks])
+  const wipTasks = useMemo(() => getFilteredTasks('in_progress'), [getFilteredTasks])
+  const completedTasks = useMemo(() => getFilteredTasks('completed'), [getFilteredTasks])
 
   // Generate table rows for transposed view
-  const generateTableRows = useCallback((tasks: Task[], tableType: string) => {
-    if (!tasks.length) return [];
+  const generateTableRows = useCallback((tasks: Task[]) => {
+    if (!tasks.length) return []
 
-    const currentDept = departments.find(d => d.id === activeDepartmentTab);
-    if (!currentDept) return [];
+    const allStages = stages.filter(stage => stage).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
 
-    // Get all stages for the current department, sorted by order
-    const allStages = stages
-      .filter(stage => stage)
-      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-
-    // Define the row structure
-    const rows = [
-      {
-        key: 'task_id',
-        label: 'Task ID',
-        type: 'basic',
-        getValue: (task: any) => `#${task.id}`
-      },
-      {
-        key: 'job_description',
-        label: 'Job Description',
-        type: 'basic',
-        getValue: (task: any) => task.job_description || 'No description'
-      },
-      {
-        key: 'status',
-        label: 'Status',
-        type: 'badge',
-        getValue: (task: any) => task.status || 'pending'
-      },
-      {
-        key: 'applicant_name',
-        label: 'Applicant Name',
-        type: 'basic',
-        getValue: (task: any) => task.applicant_name || 'Missing'
-      },
-      {
-        key: 'company_name',
-        label: 'Company Name',
-        type: 'basic',
-        getValue: (task: any) => task.company_name || 'Missing'
-      },
-      {
-        key: 'department',
-        label: 'Department',
-        type: 'hierarchy',
-        getValue: (task: any) => {
-          const hierarchy = getTaskHierarchy(task);
-          return hierarchy?.department?.name || 'Not assigned';
-        }
-      },
-      {
-        key: 'subdepartment',
-        label: 'Subdepartment',
-        type: 'hierarchy',
-        getValue: (task: any) => {
-          const hierarchy = getTaskHierarchy(task);
-          return hierarchy?.subdepartment?.name || 'Not assigned';
-        }
-      },
-      {
-        key: 'class',
-        label: 'Class',
-        type: 'hierarchy',
-        getValue: (task: any) => {
-          const hierarchy = getTaskHierarchy(task);
-          return hierarchy?.class?.name || 'Not assigned';
-        }
-      },
-      {
-        key: 'subclass',
-        label: 'Subclass',
-        type: 'hierarchy',
-        getValue: (task: any) => {
-          const hierarchy = getTaskHierarchy(task);
-          return hierarchy?.subclass?.name || 'Not assigned';
-        }
-      },
-      {
-        key: 'task_manager',
-        label: 'Task Manager',
-        type: 'basic',
-        getValue: (task: any) => task.task_manager?.name || task.task_manager?.email || 'Unassigned'
-      },
-      {
-        key: 'renewal_status',
-        label: 'New/Renewal',
-        type: 'badge',
-        getValue: (task: any) => task.renewal_status || 'New'
-      },
-      {
-        key: 'created_at',
-        label: 'Created Date',
-        type: 'date',
-        getValue: (task: any) => {
-          try {
-            return task.created_at ? format(parseISO(task.created_at), 'dd/MM/yyyy') : 'N/A';
-          } catch (e) {
-            return 'N/A';
-          }
-        }
-      },
-      {
-        key: 'separator_stages',
-        label: '--- STAGES ---',
-        type: 'separator',
-        getValue: () => ''
-      },
-      // Add stage rows
+    return [
+      { key: 'task_id', label: 'Task ID', type: 'basic', getValue: (task: any) => `#${task.id}` },
+      { key: 'job_description', label: 'Job Description', type: 'basic', getValue: (task: any) => task.job_description || 'N/A' },
+      { key: 'status', label: 'Status', type: 'badge', getValue: (task: any) => task.status || 'pending' },
+      { key: 'applicant_name', label: 'Applicant Name', type: 'basic', getValue: (task: any) => task.applicant_name || 'N/A' },
+      { key: 'company_name', label: 'Company Name', type: 'basic', getValue: (task: any) => companies.get(task.company_id) || 'N/A' },
+      { key: 'department', label: 'Department', type: 'basic', getValue: (task: any) => getTaskHierarchy(task)?.department?.name || 'N/A' },
+      { key: 'subdepartment', label: 'Subdepartment', type: 'basic', getValue: (task: any) => getTaskHierarchy(task)?.subdepartment?.name || 'N/A' },
+      { key: 'class', label: 'Class', type: 'basic', getValue: (task: any) => getClassName(task, departments) },
+      { key: 'subclass', label: 'Subclass', type: 'basic', getValue: (task: any) => getSubClassName(task, departments) },
+      { key: 'task_manager', label: 'Task Manager', type: 'basic', getValue: (task: any) => task.task_manager?.name || task.task_manager?.email || 'Unassigned' },
+      { key: 'renewal_status', label: 'New/Renewal', type: 'badge', getValue: (task: any) => task.renewal_status || 'New' },
+      { key: 'created_at', label: 'Created Date', type: 'date', getValue: (task: any) => task.created_at ? format(parseISO(task.created_at), 'dd MMM, yyyy') : 'N/A' },
+      { key: 'separator_stages', label: 'STAGES', type: 'separator' },
       ...allStages.map(stage => ({
-        key: `stage_${stage.id}`,
-        label: `${stage.order_num || 0}. ${stage.name}`,
+        key: `stage_${activeDepartmentTab}_${stage.id}`,
+        label: `${stage.order_num || '–'}. ${stage.name}`,
         type: 'stage',
-        stage: stage,
-        getValue: (task: Task) => {
-          const stageData = task.stages?.[stage.id];
-          if (!stageData) return '';
-          
-          return (
-            <div className="flex flex-col gap-1">
-              <span className="text-sm">
-                {stageData.status === 'completed' ? (
-                  <Badge variant="default">Completed</Badge>
-                ) : (
-                  <Badge variant="outline">Pending</Badge>
-                )}
-              </span>
-              <span className="text-xs text-gray-600">{stageData.date}</span>
-              {stageData.completedAt && (
-                <span className="text-xs text-gray-600">Completed: {stageData.completedAt}</span>
-              )}
-            </div>
-          );
-        }
+        stage,
+        getValue: (task: Task) => task.stages?.[stage.id]
       })),
-      {
-        key: 'separator_actions',
-        label: '--- ACTIONS ---',
-        type: 'separator',
-        getValue: () => ''
-      },
-      {
-        key: 'actions',
-        label: 'Actions',
-        type: 'actions',
-        getValue: () => ''
-      }
-    ];
+      { key: 'separator_actions', label: 'ACTIONS', type: 'separator' },
+      { key: 'actions', label: 'Actions', type: 'actions' }
+    ]
+  }, [departments, activeDepartmentTab, stages, companies, getTaskHierarchy, getClassName, getSubClassName])
 
-    return rows;
-  }, [departments, activeDepartmentTab, getTaskHierarchy, getTaskStageStatus]);
+  // Task actions handlers
+  const handleTaskEdit = (task: any) => { setEditingTask(task); setEditDialogOpen(true) }
+  const handleTaskUpdate = (updatedTask: any) => { onTaskUpdate?.(updatedTask); setEditDialogOpen(false); setEditingTask(null) }
 
-  // Handle task edit
-  const handleTaskEdit = (task: any) => {
-    setEditingTask(task);
-    setEditDialogOpen(true);
-  };
-
-  // Handle task update
-  const handleTaskUpdate = (updatedTask: any) => {
-    onTaskUpdate?.(updatedTask);
-    setEditDialogOpen(false);
-    setEditingTask(null);
-  };
-
-  // Render cell content based on type
-  const renderCellContent = useCallback((row: any, task: any, taskIndex: number) => {
-    const value = row.getValue(task);
-
-    switch (row.type) {
-      case 'basic':
-        return <span className="text-sm">{value}</span>;
-      
-      case 'badge':
-        return (
-          <Badge 
-            variant={value === 'completed' ? 'default' : 
-                   value === 'in_progress' ? 'secondary' : 
-                   value === 'enquiry' ? 'outline' : 'destructive'}
-            className="text-xs"
-          >
-            {value}
-          </Badge>
-        );
-      
-      case 'hierarchy':
-        return (
-          <div className="flex items-center gap-1 text-xs">
-            {row.key === 'department' && <Building className="h-3 w-3 text-blue-600" />}
-            {row.key === 'subdepartment' && <Workflow className="h-3 w-3 text-green-600" />}
-            {row.key === 'class' && <Layers className="h-3 w-3 text-orange-600" />}
-            {row.key === 'subclass' && <Target className="h-3 w-3 text-purple-600" />}
-            <span className="font-medium">{value}</span>
-          </div>
-        );
-      
-      case 'date':
-        return <span className="text-xs text-gray-600">{value}</span>;
-      
-      case 'stage':
-        return (
-          <EditableStageCell
-            stage={row.stage}
-            task={task}
-            value={value}
-            onSave={handleStageStatusSave}
-            onDocumentUpload={onStageDocumentUpload}
-            onShowDocuments={onShowUploadDialog}
-          />
-        );
-      
-      case 'actions':
-        return (
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => handleTaskEdit(task)}
-              className="h-6 w-6 p-0"
-            >
-              <Edit className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onTaskAction?.('delete', task)}
-              className="h-6 w-6 p-0 text-destructive hover:text-destructive"
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
-          </div>
-        );
-      
-      case 'separator':
-        return null;
-      
-      default:
-        return <span className="text-sm">{value}</span>;
+  // Export to CSV
+  const handleExport = useCallback((tasks: any[], tableType: string) => {
+    if (!tasks.length) {
+      toast({ title: "No Data", description: "No data available to export.", variant: "destructive" })
+      return
     }
-  }, [handleStageStatusSave, onStageDocumentUpload, onShowUploadDialog, onTaskAction, handleTaskEdit]);
+
+    const rows = generateTableRows(tasks)
+    const csvContent = []
+    const headerRow = ['Field', ...tasks.map(task => `Task #${task.id}`)]
+    csvContent.push(headerRow.join(','))
+
+    rows.forEach(row => {
+      if (row.type === 'separator') return
+      const rowData = [`"${row.label}"`, ...tasks.map(task => {
+        const value = row.getValue(task)
+        if (typeof value === 'object' && value !== null) {
+          return `"${value.status || ''} | ${value.date || ''}"`
+        }
+        return `"${String(value || '').replace(/"/g, '""')}"`
+      })]
+      csvContent.push(rowData.join(','))
+    })
+
+    const blob = new Blob([csvContent.join('\n')], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.setAttribute('download', `${tableType}_export_${new Date().toISOString().split('T')[0]}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    toast({ title: "Export Successful", description: `${tableType} data exported.` })
+  }, [generateTableRows])
+
+  // Render cell content
+  const renderCellContent = useCallback((row: any, task: any) => {
+    const value = row.getValue ? row.getValue(task) : ''
+    switch (row.type) {
+      case 'basic': return <span className="text-sm font-medium text-slate-800">{value}</span>
+      case 'badge': return <Badge variant={value === 'completed' ? 'success' : value === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{value}</Badge>
+      case 'date': return <span className="text-sm text-slate-600">{value}</span>
+      case 'stage': return <EditableStageCell stage={row.stage} task={task} value={value} onSave={handleStageStatusSave} onDocumentUpload={onStageDocumentUpload} onShowDocuments={onShowUploadDialog} />
+      case 'actions': return (
+        <div className="flex items-center justify-center gap-1">
+          <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100"><Edit className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" onClick={() => onTaskAction?.('delete', task)} className="h-8 w-8 text-red-600 hover:bg-red-100"><Trash2 className="h-4 w-4" /></Button>
+        </div>
+      )
+      default: return <span className="text-sm text-slate-800">{value}</span>
+    }
+  }, [handleStageStatusSave, onStageDocumentUpload, onShowUploadDialog, onTaskAction, handleTaskEdit])
 
   // Render transposed table
   const renderTransposedTable = useCallback((tasks: any[], tableType: string) => {
-    const rows = generateTableRows(tasks, tableType);
-    
+    const rows = generateTableRows(tasks)
+
     if (!tasks.length) {
       return (
-        <div className="text-center p-8 text-muted-foreground bg-gray-50 rounded-md border">
-          <div className="flex flex-col items-center space-y-2">
-            <FileText className="h-8 w-8 text-muted-foreground/50" />
-            <p className="font-medium">No {tableType} found</p>
-            <p className="text-sm text-muted-foreground">
-              Try adjusting your filters or create new tasks
-            </p>
-          </div>
+        <div className="flex flex-col items-center justify-center p-16 bg-blue-50/30 rounded-lg border-2 border-dashed border-gray-200">
+          <FileText className="h-12 w-12" />
+          <p className="mt-4 font-semibold">No {tableType} found</p>
+          <p className="text-sm">Tasks with this status will appear here.</p>
         </div>
-      );
+      )
     }
 
     return (
-      <div className="rounded-md border w-full flex flex-col bg-background shadow-sm" style={{ maxHeight: '80vh', maxWidth: '95vw' }}>
-        <div className="overflow-auto flex-1 relative">
-          <Table className="min-w-full w-full border-collapse">
-            <TableHeader className="sticky top-0 z-10">
-              <TableRow className="h-12 bg-blue-600">
-                <TableHead className="whitespace-nowrap p-3 border-b border-r font-medium text-sm text-white bg-blue-600 sticky left-0 z-20 min-w-[200px]">
-                  Field
+      <div className="border border-gray-200 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 350px)' }}>
+        <Table className="min-w-full">
+          <TableHeader className="sticky top-0 z-20 bg-blue-100/80 backdrop-blur-sm">
+            <TableRow className="border-b-2 border-gray-200">
+              <TableHead className="sticky left-0 z-30 bg-blue-100 font-bold text-blue-900 min-w-[250px] text-sm py-3 border-r border-gray-200">Field</TableHead>
+              {tasks.map(task => (
+                <TableHead key={`header-${task.id}`} className="font-semibold text-blue-800 min-w-[200px] text-center text-sm py-2 border-r border-gray-200">
+                  <div className="space-y-1">
+                    <div className="font-bold">Task #{task.id}</div>
+                    <div className="text-xs font-normal text-blue-700">{task.applicant_name}</div>
+                  </div>
                 </TableHead>
-                {tasks.map((task, index) => (
-                  <TableHead
-                    key={task.id}
-                    className="whitespace-nowrap p-3 border-b border-r font-medium text-sm text-white bg-blue-600 min-w-[150px] text-center"
-                  >
-                    Task #{task.id}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-
-            <TableBody className="divide-y">
-              {tasksLoading || departmentsLoading ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={tasks.length + 1}
-                    className="h-24 text-center bg-gray-50"
-                  >
-                    <div className="flex items-center justify-center space-x-2">
-                      <div className="h-4 w-4 border-2 border-t-2 border-t-primary rounded-full animate-spin"></div>
-                      <span>Loading {tableType}...</span>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : error ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={tasks.length + 1}
-                    className="h-24 text-center text-destructive bg-red-50"
-                  >
-                    <div className="flex items-center justify-center space-x-2">
-                      <AlertTriangle className="h-5 w-5 text-destructive" />
-                      <span>{error}</span>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                rows.map((row, rowIndex) => {
-                  if (row.type === 'separator') {
-                    return (
-                      <TableRow key={row.key} className="bg-gray-100">
-                        <TableCell 
-                          colSpan={tasks.length + 1} 
-                          className="p-2 text-center font-semibold text-gray-700 text-sm"
-                        >
-                          {row.label}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  }
-
-                  const isEven = rowIndex % 2 === 0;
-                  
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {(tasksLoading || departmentsLoading || companiesLoading) ? (
+              <TableRow><TableCell colSpan={tasks.length + 1} className="h-32 text-center"><div className="flex justify-center items-center gap-2 text-blue-600"><div className="h-5 w-5 border-2 border-t-blue-600 border-gray-200 rounded-full animate-spin"></div>Loading {tableType}...</div></TableCell></TableRow>
+            ) : error ? (
+              <TableRow><TableCell colSpan={tasks.length + 1} className="h-32 text-center text-red-600"><div className="flex justify-center items-center gap-2"><AlertTriangle className="h-5 w-5" />{error}</div></TableCell></TableRow>
+            ) : (
+              rows.map(row => {
+                if (row.type === 'separator') {
                   return (
-                    <TableRow
-                      key={row.key}
-                      className={`hover:bg-gray-50 ${isEven ? 'bg-white' : 'bg-gray-50'}`}
-                    >
-                      <TableCell 
-                        className="p-3 border-r border-b font-medium text-sm bg-gray-50 sticky left-0 z-10"
-                      >
-                        {row.label}
-                      </TableCell>
-                      {tasks.map((task, taskIndex) => (
-                        <TableCell
-                          key={`${row.key}-${task.id}`}
-                          className="p-3 border-r border-b text-center"
-                        >
-                          {renderCellContent(row, task, taskIndex)}
-                        </TableCell>
-                      ))}
+                    <TableRow key={row.key} className="bg-blue-50 hover:bg-blue-50">
+                      <TableCell colSpan={tasks.length + 1} className="py-2.5 text-center font-bold text-blue-700 text-xs tracking-wider uppercase border-t border-b border-gray-200">{row.label}</TableCell>
                     </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                  )
+                }
+                return (
+                  <TableRow key={row.key} className="hover:bg-blue-50/50 border-b border-gray-100">
+                    <TableCell className="sticky left-0 z-10 bg-white hover:bg-blue-50/50 border-r border-gray-200 font-semibold text-sm text-slate-700 py-3">{row.label}</TableCell>
+                    {tasks.map(task => (
+                      <TableCell key={`${row.key}-${task.id}`} className="border-r border-gray-100 text-center text-sm py-2 px-3">{renderCellContent(row, task)}</TableCell>
+                    ))}
+                  </TableRow>
+                )
+              })
+            )}
+          </TableBody>
+        </Table>
       </div>
-    );
-  }, [generateTableRows, tasksLoading, departmentsLoading, error, renderCellContent]);
+    )
+  }, [generateTableRows, tasksLoading, departmentsLoading, companiesLoading, error, renderCellContent])
 
-  const currentDept = departments.find(d => d.id === activeDepartmentTab);
-
-  // Loading state
   if (departmentsLoading) {
     return (
-      <div className="flex-1 space-y-4 p-4">
-        <div className="flex items-center justify-center h-96">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-            <p className="mt-4 text-muted-foreground">Loading departments...</p>
-          </div>
+      <div className="flex items-center justify-center h-screen bg-blue-50/30">
+        <div className="text-center space-y-3">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-600 mx-auto"></div>
+          <p className="font-semibold text-blue-800">Loading Workspace...</p>
+          <p className="text-sm text-blue-600">Fetching departments and tasks.</p>
         </div>
       </div>
-    );
+    )
   }
 
-  // No departments state
-  if (!departments || !Array.isArray(departments) || departments.length === 0) {
+  if (!departments.length) {
     return (
-      <div className="flex-1 space-y-4 p-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>No Departments Found</CardTitle>
-            <CardDescription>
-              No departments are available. Please add departments first using the Departments page.
-            </CardDescription>
+      <div className="flex-1 p-8 bg-blue-50/30">
+        <Card className="border-2 border-dashed border-gray-300 bg-white">
+          <CardHeader className="text-center items-center">
+            <Building className="h-12 w-12 text-blue-400 mb-2" />
+            <CardTitle className="text-xl">No Departments Found</CardTitle>
+            <CardDescription className="text-blue-700">Please add departments via the Admin panel to start managing tasks.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <Button onClick={() => window.location.href = '/dashboard/departments'}>
-              Go to Departments
-            </Button>
-          </CardContent>
+          <CardContent className="text-center"><Button onClick={() => window.location.href = '/dashboard/departments'}>Go to Departments</Button></CardContent>
         </Card>
       </div>
-    );
+    )
   }
 
   return (
-    <div className="flex-1 space-y-4 p-4">
-      {/* Header */}
-      <div className="flex items-center justify-between space-y-2">
+    <div className="flex-1 space-y-4 p-4 md:p-6 bg-blue-50/30 min-h-screen">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Department Task Management (Transposed View)</h2>
-          <p className="text-muted-foreground">
-            View tasks in a transposed layout with fields as rows and tasks as columns
-          </p>
+          <h2 className="text-2xl font-bold text-slate-900">Task Manager</h2>
         </div>
       </div>
 
-      {/* Department Tabs */}
       <Tabs value={activeDepartmentTab} onValueChange={setActiveDepartmentTab} className="space-y-4">
-        <TabsList className="grid w-full" style={{ gridTemplateColumns: `repeat(${departments.length}, 1fr)` }}>
+        <TabsList className="grid w-full rounded-lg p-1 shadow-sm" style={{ gridTemplateColumns: `repeat(${departments.length}, 1fr)` }}>
           {departments.map(dept => (
-            <TabsTrigger key={dept.id} value={dept.id} className="text-sm">
+            <TabsTrigger key={dept.id} value={dept.id.toString()} className="text-sm font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
               {dept.name}
             </TabsTrigger>
           ))}
         </TabsList>
 
         {departments.map(dept => (
-          <TabsContent key={dept.id} value={dept.id} className="space-y-4">
-            {/* Sub Tabs for each department */}
-            <Tabs value={activeSubTab} onValueChange={setActiveSubTab} className="space-y-4">
-              <TabsList>
-                <TabsTrigger value="enquiries" className="flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
+          <TabsContent key={dept.id} value={dept.id.toString()} className="space-y-4">
+            <Tabs value={activeSubTab} onValueChange={setActiveSubTab}>
+              <TabsList className="rounded-lg p-1 shadow-sm">
+                <TabsTrigger value="enquiries" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
                   Enquiries
                   <Badge variant="secondary">{enquiryTasks.length}</Badge>
                 </TabsTrigger>
-                <TabsTrigger value="wip-stages" className="flex items-center gap-2">
-                  <Globe className="h-4 w-4" />
-                  WIP Stages Progress
+                <TabsTrigger value="wip-stages" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                  WIP Stages
                   <Badge variant="secondary">{wipTasks.length}</Badge>
                 </TabsTrigger>
-                <TabsTrigger value="completed" className="flex items-center gap-2">
-                  <CheckCheckIcon className="h-4 w-4" />
-                  Completed Tasks
+                <TabsTrigger value="completed" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                  Completed
                   <Badge variant="secondary">{completedTasks.length}</Badge>
                 </TabsTrigger>
               </TabsList>
 
-              {/* Enquiries Tab */}
-              <TabsContent value="enquiries" className="space-y-4">
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle>Enquiries - {dept.name}</CardTitle>
-                        <CardDescription>
-                          Transposed view of enquiry tasks with fields as rows
-                        </CardDescription>
+              {[
+                { value: "enquiries", title: "Enquiries", tasks: enquiryTasks, description: "Transposed view of enquiry tasks with fields as rows." },
+                { value: "wip-stages", title: "WIP Stages Progress", tasks: wipTasks, description: "Transposed view showing all workflow stages for in-progress tasks." },
+                { value: "completed", title: "Completed Tasks", tasks: completedTasks, description: "Transposed view of all completed tasks." },
+              ].map(tab => (
+                <TabsContent key={tab.value} value={tab.value} className="mt-4">
+                  <Card className="bg-white/80 backdrop-blur-sm shadow-md border-gray-100">
+                    <CardHeader className="border-b border-gray-100 bg-white">
+                      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
+                        <div>
+                          <CardTitle className="text-lg text-slate-800">{tab.title} - {dept.name}</CardTitle>
+                          <CardDescription className="text-slate-600">{tab.description}</CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {tab.value === 'enquiries' && (
+        <Button 
+          className="flex items-center gap-2"
+          onClick={() => setIsEnquiryDialogOpen(true)}
+        >
+          <Plus className="h-4 w-4" />
+          New Enquiry
+        </Button>
+      )}
+                          <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(tab.tasks, tab.title.toLowerCase())}>
+                            <Download className="h-4 w-4" />Export CSV
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Button className="flex items-center gap-2">
-                          <Plus className="h-4 w-4" />
-                          New Enquiry
-                        </Button>
-                        <Button variant="outline" size="sm" className="flex items-center gap-2">
-                          <Download className="h-4 w-4" />
-                          Export CSV
-                        </Button>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-4">
-                    {renderTransposedTable(enquiryTasks, 'enquiries')}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              {/* WIP Stages Progress Tab */}
-              <TabsContent value="wip-stages" className="space-y-4">
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle>WIP Stages Progress - {dept.name}</CardTitle>
-                        <CardDescription>
-                          Transposed view showing all workflow stages (regardless of visibility settings)
-                        </CardDescription>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" className="flex items-center gap-2">
-                          <Download className="h-4 w-4" />
-                          Export CSV
-                        </Button>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-4">
-                    {renderTransposedTable(wipTasks, 'work in progress tasks')}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              {/* Completed Tasks Tab */}
-              <TabsContent value="completed" className="space-y-4">
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle>Completed Tasks - {dept.name}</CardTitle>
-                        <CardDescription>
-                          Transposed view of completed tasks with performance metrics
-                        </CardDescription>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" className="flex items-center gap-2">
-                          <Download className="h-4 w-4" />
-                          Export CSV
-                        </Button>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-4">
-                    {renderTransposedTable(completedTasks, 'completed tasks')}
-                  </CardContent>
-                </Card>
-              </TabsContent>
+                    </CardHeader>
+                    <CardContent className="p-2 sm:p-4">
+                      {renderTransposedTable(tab.tasks, tab.title.toLowerCase())}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              ))}
             </Tabs>
           </TabsContent>
         ))}
       </Tabs>
 
-      {/* Edit Dialog */}
-      <EditTaskDialog
-        open={editDialogOpen}
-        onOpenChange={setEditDialogOpen}
-        task={editingTask}
-        departments={departments}
-        onTaskUpdate={handleTaskUpdate}
+      <EditTaskDialog open={editDialogOpen} onOpenChange={setEditDialogOpen} task={editingTask} departments={departments} onTaskUpdate={handleTaskUpdate} />
+      
+      {/* Enquiry Dialog */}
+      <EnquiryDialog 
+        open={isEnquiryDialogOpen}
+        onOpenChange={setIsEnquiryDialogOpen}
+        onEnquiryCreated={handleEnquiryCreated}
       />
     </div>
-  );
+  )
 }
-
-export default DepartmentTasksManager;

@@ -15,15 +15,15 @@ export default function Page(){
     const [error, setError] = useState<string | null>(null);
     
     return (
-    <Tabs defaultValue="department">
+    <Tabs defaultValue="overall">
       <TabsList> 
-      <TabsTrigger value="applications">OverallView</TabsTrigger>
+      <TabsTrigger value="overall">OverallView</TabsTrigger>
         <TabsTrigger value="department">Department-Wise</TabsTrigger>
       </TabsList>
-      <TabsContent value="department">
+      <TabsContent value="overall">
         <DepartmentTasksManager />
       </TabsContent>
-      <TabsContent value="applications">
+      <TabsContent value="department">
         <TasksPage />
       </TabsContent>
     </Tabs>

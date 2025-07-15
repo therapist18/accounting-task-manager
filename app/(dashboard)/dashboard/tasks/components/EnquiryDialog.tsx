@@ -775,8 +775,8 @@ const dependantsToSave = includeDependants
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
+            <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto border border-gray-200/50 shadow-lg">
+                <DialogHeader className="border-b border-gray-200/50 pb-4 bg-white/50">
                     <DialogTitle className="text-2xl font-bold text-gray-900">New Enquiry</DialogTitle>
                     <DialogDescription className="text-gray-600">
                         Record a new client enquiry to start the process
@@ -789,9 +789,9 @@ const dependantsToSave = includeDependants
                         {/* Left Column - Applicant Information */}
                         <div className="lg:col-span-1 space-y-6">
                             {/* Applicant Type */}
-                            <Card className="border border-gray-200 rounded-lg">
-                                <CardHeader className="pb-3">
-                                    <CardTitle className="text-base font-semibold flex items-center gap-2">
+                            <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
+                                <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
+                                    <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
                                         <User className="h-4 w-4" />
                                         Applicant Type
                                     </CardTitle>
@@ -802,14 +802,14 @@ const dependantsToSave = includeDependants
                                         onValueChange={(value: 'principal' | 'dependant') => setApplicantType(value)}
                                         className="space-y-2"
                                     >
-                                        <div className="flex items-center space-x-2">
-                                            <RadioGroupItem value="principal" id="principal" />
-                                            <Label htmlFor="principal" className="font-normal">
+                                        <div className="flex items-center space-x-2 border-b border-gray-200/50 pb-2 ">
+                                            <RadioGroupItem className="border-2 border-blue-500/50 hover:border-blue-500/70 transition-colors duration-200" value="principal" id="principal" />
+                                            <Label htmlFor="principal" className="font-normal text-blue-700">
                                                 Principal
                                             </Label>
                                         </div>
-                                        <div className="flex items-center space-x-2">
-                                            <RadioGroupItem value="dependant" id="dependant" />
+                                        <div className="flex items-center space-x-2 border-b border-gray-200/50 pb-2">
+                                            <RadioGroupItem className="border-2 border-blue-500/50 hover:border-blue-500/70 transition-colors duration-200" value="dependant" id="dependant" />
                                             <Label htmlFor="dependant" className="font-normal">
                                                 Dependant
                                             </Label>
@@ -819,9 +819,9 @@ const dependantsToSave = includeDependants
                             </Card>
 
                             {/* Individual Selection */}
-                            <Card className="border border-gray-200 rounded-lg">
-                                <CardHeader className="pb-3">
-                                    <CardTitle className="text-base font-semibold flex items-center gap-2">
+                            <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
+                                <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
+                                    <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
                                         <Users className="h-4 w-4" />
                                         {selectedIndividual ? 'Selected Individual' : 'Select Individual'}
                                     </CardTitle>
@@ -832,14 +832,14 @@ const dependantsToSave = includeDependants
                                             <Loader2 className="h-5 w-5 animate-spin text-gray-500" />
                                         </div>
                                     ) : (
-                                        <Select
+                                        <Select className="w-full"
                                             value={selectedIndividual?.id?.toString() || ''}
                                             onValueChange={(value) => {
                                                 const individual = individuals.find(i => i.id.toString() === value);
                                                 if (individual) handleIndividualSelect(individual);
                                             }}
                                         >
-                                            <SelectTrigger>
+                                            <SelectTrigger className="w-full">
                                                 <SelectValue placeholder={`Select ${applicantType}...`}>
                                                     {selectedIndividual && <span>{selectedIndividual.full_name}</span>}
                                                 </SelectValue>
@@ -859,16 +859,18 @@ const dependantsToSave = includeDependants
                             </Card>
 
                             {/* Company Selection */}
-                            <Card className="border border-gray-200 rounded-lg">
-                                <CardHeader className="pb-3">
-                                    <CardTitle className="text-base font-semibold flex items-center gap-2">
-                                        <Building2 className="h-4 w-4" />
+                            <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
+                                <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
+                                    <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
+                                        <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                                            <Building2 className="h-4 w-4" />
+                                        </Button>
                                         {applicantType === 'dependant' && principalForDependant
                                             ? 'Company (Linked to Principal)'
                                             : 'Select Company'}
                                     </CardTitle>
                                     {applicantType === 'dependant' && principalForDependant && (
-                                        <CardDescription>
+                                        <CardDescription className="text-blue-600">
                                             Showing companies for: {principalForDependant.full_name}
                                         </CardDescription>
                                     )}
@@ -892,16 +894,16 @@ const dependantsToSave = includeDependants
                                                     ))}
                                                 </>
                                             ) : (
-                                                <div className="px-3 py-2 text-sm text-muted-foreground">No companies found</div>
+                                                <div className="px-3 py-2 text-blue-500 text-sm">No companies found</div>
                                             )}
                                         </SelectContent>
                                     </Select>
                                 </CardContent>
                             </Card>
 
-                            <Card className="border border-gray-200 rounded-lg">
-                                <CardHeader className="pb-3">
-                                    <CardTitle className="text-base font-semibold flex items-center gap-2">
+                            <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
+                                <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
+                                    <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
                                         <UserPlus className="h-4 w-4" />
                                         Select Understudy
                                     </CardTitle>
@@ -924,7 +926,7 @@ const dependantsToSave = includeDependants
                                                     ))}
                                                 </>
                                             ) : (
-                                                <div className="px-3 py-2 text-sm text-muted-foreground">No understudies found</div>
+                                                <div className="px-3 py-2 text-blue-500 text-sm">No understudies found</div>
                                             )}
                                         </SelectContent>
                                     </Select>
@@ -933,32 +935,37 @@ const dependantsToSave = includeDependants
 
                             {/* Dependants Selection */}
                             {availableDependants.length > 0 && (
-                                <Card className="border border-gray-200 rounded-lg">
-                                    <CardHeader className="pb-3">
-                                        <CardTitle className="text-base font-semibold flex items-center gap-2">
+                                <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
+                                    <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
+                                        <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
                                             <Users className="h-4 w-4" />
                                             Include Family Members
                                         </CardTitle>
                                     </CardHeader>
                                     <CardContent>
-                                        <div className="space-y-2">
-                                            <div className="flex items-center space-x-2">
+                                        <div className="space-y-2 border-b border-gray-200/50 pb-2">
+                                            <div className="flex items-center space-x-2 border-b border-gray-200/50 pb-2">
                                                 <input
-                                                    type="checkbox" id="include-dependants" checked={includeDependants}
+                                                    type="checkbox"
+                                                    id="include-dependants"
+                                                    checked={includeDependants}
                                                     onChange={(e) => {
                                                         setIncludeDependants(e.target.checked);
                                                         if (!e.target.checked) setSelectedDependants([]);
                                                     }}
                                                     className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                 />
-                                                <label htmlFor="include-dependants" className="text-sm font-medium">Include family members</label>
+                                                <label htmlFor="include-dependants" className="text-blue-700">
+                                                    Include family members
+                                                </label>
                                             </div>
                                             {includeDependants && (
                                                 <div className="mt-2 space-y-2 max-h-60 overflow-y-auto border rounded-md p-2">
                                                     {availableDependants.map((dependant) => (
                                                         <div key={dependant.id} className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded">
                                                             <input
-                                                                type="checkbox" id={`dependant-${dependant.id}`}
+                                                                type="checkbox"
+                                                                id={`dependant-${dependant.id}`}
                                                                 checked={selectedDependants.includes(dependant.id.toString())}
                                                                 onChange={(e) => {
                                                                     setSelectedDependants(prev => e.target.checked
@@ -968,10 +975,12 @@ const dependantsToSave = includeDependants
                                                                 }}
                                                                 className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                             />
-                                                            <label htmlFor={`dependant-${dependant.id}`} className="text-sm flex-1 flex justify-between items-center">
+                                                            <label htmlFor={`dependant-${dependant.id}`} className="text-blue-700 text-sm flex-1 flex justify-between items-center">
                                                                 <span>{dependant.full_name}</span>
                                                                 {dependant.relationship_type === 'Principal Member' ? (
-                                                                    <Badge variant="outline">Principal</Badge>
+                                                                    <Button type="button" variant="outline" className="border-blue-500 hover:bg-blue-50 text-blue-700 hover:text-blue-900">
+                                                                        Principal
+                                                                    </Button>
                                                                 ) : (
                                                                     <span className="text-xs text-gray-500 capitalize">
                                                                         {dependant.relationship_type || 'Family Member'}
@@ -989,32 +998,37 @@ const dependantsToSave = includeDependants
 
                             {/* References Selection */}
                             {availableReferences.length > 0 && (
-                                <Card className="border border-gray-200 rounded-lg">
-                                    <CardHeader className="pb-3">
-                                        <CardTitle className="text-base font-semibold flex items-center gap-2">
+                                <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
+                                    <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
+                                        <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
                                             <UserCheck className="h-4 w-4" />
                                             Include References
                                         </CardTitle>
                                     </CardHeader>
                                     <CardContent>
-                                        <div className="space-y-2">
-                                            <div className="flex items-center space-x-2">
+                                        <div className="space-y-2 border-b border-gray-200/50 pb-2">
+                                            <div className="flex items-center space-x-2 border-b border-gray-200/50 pb-2">
                                                 <input
-                                                    type="checkbox" id="include-references" checked={includeReferences}
+                                                    type="checkbox"
+                                                    id="include-references"
+                                                    checked={includeReferences}
                                                     onChange={(e) => {
                                                         setIncludeReferences(e.target.checked);
                                                         if (!e.target.checked) setSelectedReferences([]);
                                                     }}
                                                     className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                 />
-                                                <label htmlFor="include-references" className="text-sm font-medium">Include references</label>
+                                                <label htmlFor="include-references" className="text-blue-700">
+                                                    Include references
+                                                </label>
                                             </div>
                                             {includeReferences && (
                                                 <div className="mt-2 space-y-2 max-h-60 overflow-y-auto border rounded-md p-2">
                                                     {availableReferences.map((reference) => (
                                                         <div key={reference.id} className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded">
                                                             <input
-                                                                type="checkbox" id={`reference-${reference.id}`}
+                                                                type="checkbox"
+                                                                id={`reference-${reference.id}`}
                                                                 checked={selectedReferences.includes(reference.id.toString())}
                                                                 onChange={(e) => {
                                                                     setSelectedReferences(prev => e.target.checked
@@ -1024,7 +1038,9 @@ const dependantsToSave = includeDependants
                                                                 }}
                                                                 className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                             />
-                                                            <label htmlFor={`reference-${reference.id}`} className="text-sm flex-1">{reference.full_name}</label>
+                                                            <label htmlFor={`reference-${reference.id}`} className="text-blue-700 text-sm flex-1">
+                                                                {reference.full_name}
+                                                            </label>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -1037,9 +1053,9 @@ const dependantsToSave = includeDependants
 
                         {/* Right Column - Enquiry Details */}
                         <div className="lg:col-span-2 space-y-6">
-                            <Card className="border border-gray-200 rounded-lg">
-                                <CardHeader className="pb-3">
-                                    <CardTitle className="text-base font-semibold flex items-center gap-2">
+                            <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
+                                <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
+                                    <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
                                         <FileText className="h-4 w-4" />
                                         Enquiry Details
                                     </CardTitle>
@@ -1050,7 +1066,7 @@ const dependantsToSave = includeDependants
                                             <Label htmlFor="task-type" className="text-sm font-medium">
                                                 Task Type <span className="text-red-500">*</span>
                                             </Label>
-                                            <Select
+                                            <Select className="w-full"
                                                 value={taskType}
                                                 onValueChange={(value: 'new' | 'renewal') => setTaskType(value)}
                                             >
@@ -1095,10 +1111,12 @@ const dependantsToSave = includeDependants
                             </Card>
 
                             {/* Department & Classification */}
-                            <Card className="border border-gray-200 rounded-lg">
-                                <CardHeader className="pb-3">
-                                    <CardTitle className="text-base font-semibold flex items-center gap-2">
-                                        <Building2 className="h-4 w-4" />
+                            <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
+                                <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
+                                    <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
+                                        <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                                            <Building2 className="h-4 w-4" />
+                                        </Button>
                                         Department & Classification
                                     </CardTitle>
                                 </CardHeader>
@@ -1108,7 +1126,7 @@ const dependantsToSave = includeDependants
                                             <Label htmlFor="department" className="text-sm font-medium">
                                                 Department <span className="text-red-500">*</span>
                                             </Label>
-                                            <Select
+                                            <Select className="w-full"
                                                 value={formData.department_id}
                                                 onValueChange={(value) => {
                                                     const selectedDept = departments.find(d => d.id === value);
@@ -1143,7 +1161,7 @@ const dependantsToSave = includeDependants
                                             <Label htmlFor="subdepartment" className="text-sm font-medium">
                                                 Subdepartment
                                             </Label>
-                                            <Select
+                                            <Select className="w-full"
                                                 value={formData.subdepartment_id}
                                                 onValueChange={(value) => {
                                                     const selectedSubdept = availableSubdepartments.find(sd => sd.id === value);
@@ -1181,7 +1199,7 @@ const dependantsToSave = includeDependants
                                             <Label htmlFor="class" className="text-sm font-medium">
                                                 Class
                                             </Label>
-                                            <Select
+                                            <Select className="w-full"
                                                 value={formData.class_id}
                                                 onValueChange={(value) => {
                                                     const selectedClass = availableClasses.find(c => c.id === value);
@@ -1217,7 +1235,7 @@ const dependantsToSave = includeDependants
                                             <Label htmlFor="subclass" className="text-sm font-medium">
                                                 Subclass
                                             </Label>
-                                            <Select
+                                            <Select className="w-full"
                                                 value={formData.subclass_id}
                                                 onValueChange={(value) => {
                                                     const selectedSubclass = availableSubclasses.find(sc => sc.id === value);
@@ -1254,28 +1272,31 @@ const dependantsToSave = includeDependants
                         </div>
                     </div>
                     {/* Form Actions */}
-                    <DialogFooter className="flex flex-col sm:flex-row sm:justify-between gap-3">
-                        <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => {
-                                resetForm();
-                                onOpenChange(false);
-                            }}
-                            disabled={loading}
-                        >
-                            Cancel
-                        </Button>
-                        <Button type="submit" disabled={loading}>
-                            {loading ? (
-                                <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Creating...
-                                </>
-                            ) : (
-                                'Create Enquiry'
-                            )}
-                        </Button>
+                    <DialogFooter className="border-t border-gray-200/50 pt-4 bg-white/50 flex flex-col sm:flex-row sm:justify-between gap-3 flex-end">
+                        <div className="flex flex-col sm:flex-row sm:justify-between gap-3">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-blue-500 hover:bg-blue-50 text-blue-700 hover:text-blue-900"
+                                onClick={() => {
+                                    resetForm();
+                                    onOpenChange(false);
+                                }}
+                                disabled={loading}
+                            >
+                                Cancel
+                            </Button>
+                            <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white">
+                                {loading ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Creating...
+                                    </>
+                                ) : (
+                                    'Create Enquiry'
+                                )}
+                            </Button>
+                        </div>
                     </DialogFooter>
                 </form>
             </DialogContent>
