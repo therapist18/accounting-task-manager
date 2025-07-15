@@ -3,6 +3,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { TruncatedText } from "@/app/(dashboard)/dashboard/departments/documents+fields/types"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -334,7 +335,7 @@ export default function DepartmentTasksManager({
     const allStages = stages.filter(stage => stage).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
 
     return [
-      { key: 'task_id', label: 'Task ID', type: 'basic', getValue: (task: any) => `#${task.id}` },
+      { key: 'task_id', label: 'Task ID', type: 'basic', getValue: (task: any) => `${task.id}` },
       { key: 'job_description', label: 'Job Description', type: 'basic', getValue: (task: any) => task.job_description || 'N/A' },
       { key: 'status', label: 'Status', type: 'badge', getValue: (task: any) => task.status || 'pending' },
       { key: 'applicant_name', label: 'Applicant Name', type: 'basic', getValue: (task: any) => task.applicant_name || 'N/A' },
@@ -349,7 +350,7 @@ export default function DepartmentTasksManager({
       { key: 'separator_stages', label: 'STAGES', type: 'separator' },
       ...allStages.map(stage => ({
         key: `stage_${activeDepartmentTab}_${stage.id}`,
-        label: `${stage.order_num || '–'}. ${stage.name}`,
+        label: `${stage.name}`,
         type: 'stage',
         stage,
         getValue: (task: Task) => task.stages?.[stage.id]
@@ -435,12 +436,13 @@ export default function DepartmentTasksManager({
         <Table className="min-w-full">
           <TableHeader className="sticky top-0 z-20 bg-blue-100/80 backdrop-blur-sm">
             <TableRow className="border-b-2 border-gray-200">
-              <TableHead className="sticky left-0 z-30 bg-blue-100 font-bold text-blue-900 min-w-[250px] text-sm py-3 border-r border-gray-200">Field</TableHead>
+            <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r border-gray-200">#</TableHead>
+            <TableHead className="sticky left-10 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r border-gray-200">Field</TableHead>
               {tasks.map(task => (
-                <TableHead key={`header-${task.id}`} className="font-semibold text-blue-800 min-w-[200px] text-center text-sm py-2 border-r border-gray-200">
+                <TableHead key={`header-${task.id}`} className="font-semibold bg-blue-600 text-white min-w-[200px] text-center text-sm py-2 border-r border-gray-200">
                   <div className="space-y-1">
                     <div className="font-bold">Task #{task.id}</div>
-                    <div className="text-xs font-normal text-blue-700">{task.applicant_name}</div>
+                    <div className="text-xs font-normal text-white">{task.applicant_name}</div>
                   </div>
                 </TableHead>
               ))}
@@ -452,17 +454,21 @@ export default function DepartmentTasksManager({
             ) : error ? (
               <TableRow><TableCell colSpan={tasks.length + 1} className="h-32 text-center text-red-600"><div className="flex justify-center items-center gap-2"><AlertTriangle className="h-5 w-5" />{error}</div></TableCell></TableRow>
             ) : (
-              rows.map(row => {
+              rows.map((row, index) => {
                 if (row.type === 'separator') {
                   return (
                     <TableRow key={row.key} className="bg-blue-50 hover:bg-blue-50">
+                      <TableCell colSpan={1} className="py-2.5 text-center font-bold text-blue-700 text-xs tracking-wider uppercase border-t border-b border-gray-200"></TableCell>
                       <TableCell colSpan={tasks.length + 1} className="py-2.5 text-center font-bold text-blue-700 text-xs tracking-wider uppercase border-t border-b border-gray-200">{row.label}</TableCell>
                     </TableRow>
                   )
                 }
                 return (
                   <TableRow key={row.key} className="hover:bg-blue-50/50 border-b border-gray-100">
-                    <TableCell className="sticky left-0 z-10 bg-white hover:bg-blue-50/50 border-r border-gray-200 font-semibold text-sm text-slate-700 py-3">{row.label}</TableCell>
+                    <TableCell className="sticky left-0 z-10 bg-white hover:bg-blue-50/50 border-r border-gray-200 font-semibold text-sm text-slate-700 py-3">{row.stage?.order_num || index + 1}</TableCell>
+                    <TableCell className="sticky left-10 z-10 bg-white hover:bg-blue-50/50 border-r border-gray-200 font-semibold text-sm text-slate-700 py-3">
+  <TruncatedText text={row.label} maxLength={30} className="text-slate-700" />
+</TableCell>
                     {tasks.map(task => (
                       <TableCell key={`${row.key}-${task.id}`} className="border-r border-gray-100 text-center text-sm py-2 px-3">{renderCellContent(row, task)}</TableCell>
                     ))}
@@ -553,14 +559,14 @@ export default function DepartmentTasksManager({
                         </div>
                         <div className="flex items-center gap-2">
                           {tab.value === 'enquiries' && (
-        <Button 
-          className="flex items-center gap-2"
-          onClick={() => setIsEnquiryDialogOpen(true)}
-        >
-          <Plus className="h-4 w-4" />
-          New Enquiry
-        </Button>
-      )}
+                            <Button
+                              className="flex items-center gap-2"
+                              onClick={() => setIsEnquiryDialogOpen(true)}
+                            >
+                              <Plus className="h-4 w-4" />
+                              New Enquiry
+                            </Button>
+                          )}
                           <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(tab.tasks, tab.title.toLowerCase())}>
                             <Download className="h-4 w-4" />Export CSV
                           </Button>
@@ -579,9 +585,9 @@ export default function DepartmentTasksManager({
       </Tabs>
 
       <EditTaskDialog open={editDialogOpen} onOpenChange={setEditDialogOpen} task={editingTask} departments={departments} onTaskUpdate={handleTaskUpdate} />
-      
+
       {/* Enquiry Dialog */}
-      <EnquiryDialog 
+      <EnquiryDialog
         open={isEnquiryDialogOpen}
         onOpenChange={setIsEnquiryDialogOpen}
         onEnquiryCreated={handleEnquiryCreated}
