@@ -1,13 +1,13 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, X, Clock, FileText, User, Info, MessageSquare, Trash2 } from "lucide-react"
+import { Plus, X, Clock, FileText, User, Info, MessageSquare, Trash2, Star } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
@@ -15,7 +15,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { useToast } from "@/components/ui/use-toast"
-import type { NewStage, TimeConfig, StageDocument, DocumentExtraction, DepartmentOption } from "./types"
+import { supabase } from "@/lib/supabase/client"
+import { DocumentExtraction, Stage, StageDocument, TimeConfig , NewStage, EntityOption, DepartmentOption} from "../stagesdb"
 import { createKYCDocument } from "../kycDocuments"
 
 // Simple UUID generator
@@ -50,6 +51,8 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
   }])
   const [saving, setSaving] = useState(false)
   const [activeStageTab, setActiveStageTab] = useState<string>('')
+  const [entityOptions, setEntityOptions] = useState<EntityOption[]>([])
+  const [loadingEntities, setLoadingEntities] = useState(false)
   const { toast } = useToast()
 
   React.useEffect(() => {
@@ -57,6 +60,91 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
       setActiveStageTab(newStages[0].id)
     }
   }, [newStages, activeStageTab])
+
+  // Fetch entities when department is selected
+  useEffect(() => {
+    if (selectedDepartment) {
+      fetchEntities(selectedDepartment)
+    } else {
+      setEntityOptions([])
+    }
+  }, [selectedDepartment])
+
+  const fetchEntities = async (departmentId: string) => {
+    setLoadingEntities(true)
+    try {
+      const { data: deptData, error } = await supabase
+        .from('tm_departments')
+        .select(`
+          *,
+          tm_subdepartments (
+            *,
+            classes
+          )
+        `)
+        .eq('id', departmentId)
+        .single()
+
+      if (error) throw error
+
+      const entities: EntityOption[] = []
+      
+      if (deptData?.tm_subdepartments) {
+        deptData.tm_subdepartments.forEach((subdept: any) => {
+          // Add subdepartment
+          entities.push({
+            id: subdept.id,
+            name: subdept.name,
+            type: 'subdept',
+            level: 0,
+            subdept_id: subdept.id
+          })
+
+          // Add classes
+          if (subdept.classes && Array.isArray(subdept.classes)) {
+            subdept.classes.forEach((cls: any, clsIndex: number) => {
+              const classId = cls.id || `${subdept.id}-class-${clsIndex}`
+              entities.push({
+                id: classId,
+                name: `→ ${cls.name}`,
+                type: 'class',
+                level: 1,
+                subdept_id: subdept.id,
+                class_id: classId
+              })
+
+              // Add subclasses
+              if (cls.subClasses && Array.isArray(cls.subClasses)) {
+                cls.subClasses.forEach((subCls: any, subClsIndex: number) => {
+                  const subclassId = subCls.id || `${subdept.id}-class-${clsIndex}-subclass-${subClsIndex}`
+                  entities.push({
+                    id: subclassId,
+                    name: `→ → ${subCls.name}`,
+                    type: 'subclass',
+                    level: 2,
+                    subdept_id: subdept.id,
+                    class_id: classId,
+                    subclass_id: subclassId
+                  })
+                })
+              }
+            })
+          }
+        })
+      }
+
+      setEntityOptions(entities)
+    } catch (error) {
+      console.error('Error fetching entities:', error)
+      toast({
+        title: "Error",
+        description: "Failed to load entities. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setLoadingEntities(false)
+    }
+  }
 
   const addNewStageRow = () => {
     const newStage = {
@@ -94,7 +182,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
   }
 
   // Document management functions
-  const addDocument = (stageId: string) => {
+  const addDocument = (stageId: string, isSpecial: boolean = false) => {
     const newDoc: StageDocument = {
       id: generateId(),
       name: '',
@@ -102,7 +190,15 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
       isRequired: false,
       documentType: 'both',
       inputType: 'file',
-      extractionSpecs: []
+      extractionSpecs: [],
+      isSpecial,
+      ...(isSpecial && {
+        entityType: undefined,
+        subdept_id: undefined,
+        class_id: undefined,
+        subclass_id: undefined,
+        entityName: undefined
+      })
     }
     updateNewStage(stageId, {
       documents: [...(newStages.find(s => s.id === stageId)?.documents || []), newDoc]
@@ -113,9 +209,31 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
     const stage = newStages.find(s => s.id === stageId)
     if (!stage) return
 
-    const updatedDocs = stage.documents.map(doc =>
-      doc.id === docId ? { ...doc, ...updates } : doc
-    )
+    const updatedDocs = stage.documents.map(doc => {
+      if (doc.id === docId) {
+        const updatedDoc = { ...doc, ...updates }
+        
+        // If selecting an entity, update the related fields
+        if (updates.entityType && entityOptions.length > 0) {
+          const selectedEntity = entityOptions.find(e => 
+            e.type === updates.entityType && 
+            (updates.entityType === 'subdept' ? e.subdept_id === updates.subdept_id :
+             updates.entityType === 'class' ? e.class_id === updates.class_id :
+             e.subclass_id === updates.subclass_id)
+          )
+          
+          if (selectedEntity) {
+            updatedDoc.entityName = selectedEntity.name.replace(/^→\s*/, '').replace(/^→\s*/, '')
+            updatedDoc.subdept_id = selectedEntity.subdept_id
+            updatedDoc.class_id = selectedEntity.class_id
+            updatedDoc.subclass_id = selectedEntity.subclass_id
+          }
+        }
+        
+        return updatedDoc
+      }
+      return doc
+    })
     updateNewStage(stageId, { documents: updatedDocs })
   }
 
@@ -217,7 +335,16 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                     category: 'application-docs',
                     document_type: 'one_off',
                     fields: doc.extractionSpecs || [],
-                    display_name: doc.name
+                    display_name: doc.name,
+                    // Add special document metadata
+                    metadata: doc.isSpecial ? {
+                      isSpecial: true,
+                      entityType: doc.entityType,
+                      subdept_id: doc.subdept_id,
+                      class_id: doc.class_id,
+                      subclass_id: doc.subclass_id,
+                      entityName: doc.entityName
+                    } : undefined
                   })
 
                   return { ...doc, kycId }
@@ -256,6 +383,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
       }])
       setSelectedDepartment('')
       setActiveStageTab('')
+      setEntityOptions([])
     } catch (error) {
       console.error('Error adding stages:', error)
       toast({
@@ -373,7 +501,9 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                       <Separator />
                       <DocumentsSection
                         stage={stage}
-                        onAddDocument={() => addDocument(stage.id)}
+                        entityOptions={entityOptions}
+                        loadingEntities={loadingEntities}
+                        onAddDocument={(isSpecial) => addDocument(stage.id, isSpecial)}
                         onUpdateDocument={(docId, updates) => updateDocument(stage.id, docId, updates)}
                         onRemoveDocument={(docId) => removeDocument(stage.id, docId)}
                         onAddExtraction={(docId) => addExtractionField(stage.id, docId)}
@@ -390,7 +520,9 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                     <Separator />
                     <DocumentsSection
                       stage={currentStage}
-                      onAddDocument={() => addDocument(currentStage.id)}
+                      entityOptions={entityOptions}
+                      loadingEntities={loadingEntities}
+                      onAddDocument={(isSpecial) => addDocument(currentStage.id, isSpecial)}
                       onUpdateDocument={(docId, updates) => updateDocument(currentStage.id, docId, updates)}
                       onRemoveDocument={(docId) => removeDocument(currentStage.id, docId)}
                       onAddExtraction={(docId) => addExtractionField(currentStage.id, docId)}
@@ -436,7 +568,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
   )
 }
 
-// Stage Form Component
+// Stage Form Component (unchanged from your original)
 function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: Partial<NewStage>) => void }) {
   const addTimeConfig = () => {
     onUpdate({
@@ -640,9 +772,11 @@ function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: P
   )
 }
 
-// Documents Section Component
+// Updated Documents Section Component
 function DocumentsSection({
   stage,
+  entityOptions,
+  loadingEntities,
   onAddDocument,
   onUpdateDocument,
   onRemoveDocument,
@@ -651,15 +785,20 @@ function DocumentsSection({
   onRemoveExtraction
 }: {
   stage: NewStage
-  onAddDocument: () => void
+  entityOptions: EntityOption[]
+  loadingEntities: boolean
+  onAddDocument: (isSpecial?: boolean) => void
   onUpdateDocument: (docId: string, updates: Partial<StageDocument>) => void
   onRemoveDocument: (docId: string) => void
   onAddExtraction: (docId: string) => void
   onUpdateExtraction: (docId: string, extractionId: string, updates: Partial<DocumentExtraction>) => void
   onRemoveExtraction: (docId: string, extractionId: string) => void
 }) {
+  const regularDocuments = stage.documents.filter(doc => !doc.isSpecial)
+  const specialDocuments = stage.documents.filter(doc => doc.isSpecial)
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h4 className="font-medium flex items-center gap-2">
@@ -670,240 +809,394 @@ function DocumentsSection({
             Documents required for this stage will be created in the KYC system
           </p>
         </div>
-        <Button onClick={onAddDocument} size="sm" variant="outline">
-          <Plus className="h-4 w-4 mr-2" />
-          Add Document
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => onAddDocument(false)} size="sm" variant="outline">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Regular Document
+          </Button>
+          <Button 
+            onClick={() => onAddDocument(true)} 
+            size="sm" 
+            variant="outline"
+            disabled={!entityOptions.length && !loadingEntities}
+            title={!entityOptions.length ? "Select a department first to add special documents" : ""}
+          >
+            <Star className="h-4 w-4 mr-2" />
+            Add Special Document
+          </Button>
+        </div>
       </div>
 
-      {stage.documents.length > 0 ? (
+      {/* Regular Documents */}
+      {regularDocuments.length > 0 && (
         <div className="space-y-4">
-          {stage.documents.map((doc, docIndex) => (
-            <Card key={doc.id}>
-              <CardHeader>
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-2">
-                    <h5 className="font-medium">Document {docIndex + 1}</h5>
-                    {doc.isRequired && (
-                      <Badge variant="destructive" className="text-xs">Required</Badge>
-                    )}
-                    <Badge variant="outline" className="text-xs">
-                      {doc.documentType}
-                    </Badge>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => onRemoveDocument(doc.id)}
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label>Document Name *</Label>
-                    <Input
-                      value={doc.name || ''}
-                      onChange={(e) => onUpdateDocument(doc.id, { name: e.target.value })}
-                      placeholder="e.g., Application Form"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Document Type</Label>
-                    <Select
-                      value={doc.documentType}
-                      onValueChange={(value: 'upload' | 'extraction' | 'both') =>
-                        onUpdateDocument(doc.id, { documentType: value })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="upload">
-                          <div className="flex items-center gap-2">
-                            <FileText className="h-4 w-4" />
-                            Upload Only
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="extraction">
-                          <div className="flex items-center gap-2">
-                            <Info className="h-4 w-4" />
-                            Data Extraction Only
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="both">
-                          <div className="flex items-center gap-2">
-                            <FileText className="h-4 w-4" />
-                            <Info className="h-4 w-4" />
-                            Upload + Extraction
-                          </div>
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Input Type</Label>
-                    <Select
-                      value={doc.inputType || 'file'}
-                      onValueChange={(value: 'file' | 'message' | 'both') =>
-                        onUpdateDocument(doc.id, { inputType: value })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="file">
-                          <div className="flex items-center gap-2">
-                            <FileText className="h-4 w-4" />
-                            File Upload
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="message">
-                          <div className="flex items-center gap-2">
-                            <MessageSquare className="h-4 w-4" />
-                            Message/Text
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="both">
-                          <div className="flex items-center gap-2">
-                            <FileText className="h-4 w-4" />
-                            <MessageSquare className="h-4 w-4" />
-                            Both
-                          </div>
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
- 
-                <div className="space-y-2">
-                  <Label>Description</Label>
-                  <Textarea
-                    value={doc.description || ''}
-                    onChange={(e) => onUpdateDocument(doc.id, { description: e.target.value })}
-                    placeholder="Brief description of this document's purpose..."
-                    rows={2}
-                  />
-                </div>
- 
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    checked={doc.isRequired}
-                    onCheckedChange={(checked) => onUpdateDocument(doc.id, { isRequired: checked as boolean })}
-                  />
-                  <Label className="text-sm">This document is required for stage completion</Label>
-                </div>
- 
-                {(doc.documentType === 'extraction' || doc.documentType === 'both') && (
-                  <div className="space-y-4 border-t pt-4">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <Label className="text-sm font-medium">Data Extraction Fields</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Define what data should be extracted from this document
-                        </p>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onAddExtraction(doc.id)}
-                      >
-                        <Plus className="h-4 w-4 mr-2" />
-                        Add Field
-                      </Button>
-                    </div>
- 
-                    {doc.extractionSpecs && doc.extractionSpecs.length > 0 ? (
-                      <div className="space-y-3">
-                        {doc.extractionSpecs.map((extraction, extractionIndex) => (
-                          <div key={extraction.id} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end p-3 bg-muted/20 rounded-lg">
-                            <div className="space-y-1 col-span-2">
-                              <Label className="text-xs">Field Name</Label>
-                              <Input
-                                value={extraction.fieldName || ''}
-                                onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { fieldName: e.target.value })}
-                                placeholder="e.g., Application Date"
-                                className="h-8"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs">Field Type</Label>
-                              <Select
-                                value={extraction.fieldType}
-                                onValueChange={(value: 'text' | 'date' | 'number' | 'boolean' | 'file') =>
-                                  onUpdateExtraction(doc.id, extraction.id, { fieldType: value })
-                                }
-                              >
-                                <SelectTrigger className="h-8">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="text">Text</SelectItem>
-                                  <SelectItem value="date">Date</SelectItem>
-                                  <SelectItem value="number">Number</SelectItem>
-                                  <SelectItem value="boolean">Boolean</SelectItem>
-                                  <SelectItem value="file">File</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1 col-span-2">
-                              <Label className="text-xs">Description</Label>
-                              <Input
-                                value={extraction.description || ''}
-                                onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { description: e.target.value })}
-                                placeholder="Optional description"
-                                className="h-8"
-                              />
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Checkbox
-                                checked={extraction.isRequired}
-                                onCheckedChange={(checked) => onUpdateExtraction(doc.id, extraction.id, { isRequired: checked as boolean })}
-                              />
-                              <Label className="text-xs">Required</Label>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                                onClick={() => onRemoveExtraction(doc.id, extraction.id)}
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg">
-                        <Info className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">No extraction fields defined</p>
-                        <p className="text-xs">Add fields to specify what data should be extracted</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+          <div className="flex items-center gap-2">
+            <h5 className="font-medium">Regular Documents</h5>
+            <Badge variant="secondary" className="text-xs">
+              {regularDocuments.length}
+            </Badge>
+          </div>
+          {regularDocuments.map((doc, docIndex) => (
+            <DocumentCard
+              key={doc.id}
+              doc={doc}
+              docIndex={docIndex}
+              entityOptions={entityOptions}
+              loadingEntities={loadingEntities}
+              onUpdateDocument={onUpdateDocument}
+              onRemoveDocument={onRemoveDocument}
+              onAddExtraction={onAddExtraction}
+              onUpdateExtraction={onUpdateExtraction}
+              onRemoveExtraction={onRemoveExtraction}
+            />
           ))}
         </div>
-      ) : (
+      )}
+
+      {/* Special Documents */}
+      {specialDocuments.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <h5 className="font-medium flex items-center gap-2">
+              <Star className="h-4 w-4 text-amber-500" />
+              Special Documents
+            </h5>
+            <Badge variant="secondary" className="text-xs">
+              {specialDocuments.length}
+            </Badge>
+          </div>
+          {specialDocuments.map((doc, docIndex) => (
+            <DocumentCard
+              key={doc.id}
+              doc={doc}
+              docIndex={docIndex}
+              entityOptions={entityOptions}
+              loadingEntities={loadingEntities}
+              onUpdateDocument={onUpdateDocument}
+              onRemoveDocument={onRemoveDocument}
+              onAddExtraction={onAddExtraction}
+              onUpdateExtraction={onUpdateExtraction}
+              onRemoveExtraction={onRemoveExtraction}
+            />
+          ))}
+        </div>
+      )}
+
+      {stage.documents.length === 0 && (
         <div className="text-center py-8 border-2 border-dashed border-muted rounded-lg">
           <FileText className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
           <h4 className="font-medium text-muted-foreground mb-1">No documents added yet</h4>
           <p className="text-sm text-muted-foreground mb-4">
             Add documents that are required for this stage
           </p>
-          <Button onClick={onAddDocument} variant="outline" size="sm">
-            <Plus className="h-4 w-4 mr-2" />
-            Add First Document
-          </Button>
+          <div className="flex gap-2 justify-center">
+            <Button onClick={() => onAddDocument(false)} variant="outline" size="sm">
+              <Plus className="h-4 w-4 mr-2" />
+              Add Regular Document
+            </Button>
+            <Button 
+              onClick={() => onAddDocument(true)} 
+              variant="outline" 
+              size="sm"
+              disabled={!entityOptions.length && !loadingEntities}
+            >
+              <Star className="h-4 w-4 mr-2" />
+              Add Special Document
+            </Button>
+          </div>
         </div>
       )}
     </div>
+  )
+}
+
+// Document Card Component
+function DocumentCard({
+  doc,
+  docIndex,
+  entityOptions,
+  loadingEntities,
+  onUpdateDocument,
+  onRemoveDocument,
+  onAddExtraction,
+  onUpdateExtraction,
+  onRemoveExtraction
+}: {
+  doc: StageDocument
+  docIndex: number
+  entityOptions: EntityOption[]
+  loadingEntities: boolean
+  onUpdateDocument: (docId: string, updates: Partial<StageDocument>) => void
+  onRemoveDocument: (docId: string) => void
+  onAddExtraction: (docId: string) => void
+  onUpdateExtraction: (docId: string, extractionId: string, updates: Partial<DocumentExtraction>) => void
+  onRemoveExtraction: (docId: string, extractionId: string) => void
+}) {
+  return (
+    <Card key={doc.id} className={doc.isSpecial ? 'border-amber-200 bg-amber-50/20' : ''}>
+      <CardHeader>
+        <div className="flex justify-between items-start">
+          <div className="flex items-center gap-2">
+            <h5 className="font-medium">
+              {doc.isSpecial && <Star className="h-4 w-4 text-amber-500 inline mr-1" />}
+              Document {docIndex + 1}
+            </h5>
+            {doc.isRequired && (
+              <Badge variant="destructive" className="text-xs">Required</Badge>
+            )}
+            <Badge variant="outline" className="text-xs">
+              {doc.documentType}
+            </Badge>
+            {doc.isSpecial && doc.entityName && (
+              <Badge variant="secondary" className="text-xs">
+                {doc.entityName}
+              </Badge>
+            )}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onRemoveDocument(doc.id)}
+            className="text-muted-foreground hover:text-destructive"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Special Document Entity Selection */}
+        {doc.isSpecial && (
+          <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <Label className="font-medium flex items-center gap-2">
+              <Star className="h-4 w-4 text-amber-500" />
+              Target Entity
+            </Label>
+            <Select
+              value={`${doc.entityType}-${doc.subdept_id}-${doc.class_id}-${doc.subclass_id}`}
+              onValueChange={(value) => {
+                const [entityType, subdeptId, classId, subclassId] = value.split('-')
+                onUpdateDocument(doc.id, {
+                  entityType: entityType as 'subdept' | 'class' | 'subclass',
+                  subdept_id: parseInt(subdeptId),
+                  class_id: classId !== 'undefined' ? classId : undefined,
+                  subclass_id: subclassId !== 'undefined' ? subclassId : undefined
+                })
+              }}
+              disabled={loadingEntities}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={loadingEntities ? "Loading entities..." : "Select target entity"} />
+              </SelectTrigger>
+              <SelectContent>
+                {entityOptions.map((entity) => (
+                  <SelectItem 
+                    key={`${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`}
+                    value={`${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span style={{ marginLeft: `${entity.level * 12}px` }}>
+                        {entity.name}
+                      </span>
+                      <Badge variant="outline" className="text-xs">
+                        {entity.type}
+                      </Badge>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              This document will only be required for the selected entity
+            </p>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="space-y-2">
+            <Label>Document Name *</Label>
+            <Input
+              value={doc.name || ''}
+              onChange={(e) => onUpdateDocument(doc.id, { name: e.target.value })}
+              placeholder="e.g., Application Form"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Document Type</Label>
+            <Select
+              value={doc.documentType}
+              onValueChange={(value: 'upload' | 'extraction' | 'both') =>
+                onUpdateDocument(doc.id, { documentType: value })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="upload">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Upload Only
+                  </div>
+                </SelectItem>
+                <SelectItem value="extraction">
+                  <div className="flex items-center gap-2">
+                    <Info className="h-4 w-4" />
+                    Data Extraction Only
+                  </div>
+                </SelectItem>
+                <SelectItem value="both">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    <Info className="h-4 w-4" />
+                    Upload + Extraction
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Input Type</Label>
+            <Select
+              value={doc.inputType || 'file'}
+              onValueChange={(value: 'file' | 'message' | 'both') =>
+                onUpdateDocument(doc.id, { inputType: value })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="file">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    File Upload
+                  </div>
+                </SelectItem>
+                <SelectItem value="message">
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4" />
+                    Message/Text
+                  </div>
+                </SelectItem>
+                <SelectItem value="both">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    <MessageSquare className="h-4 w-4" />
+                    Both
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Description</Label>
+          <Textarea
+            value={doc.description || ''}
+            onChange={(e) => onUpdateDocument(doc.id, { description: e.target.value })}
+            placeholder="Brief description of this document's purpose..."
+            rows={2}
+          />
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <Checkbox
+            checked={doc.isRequired}
+            onCheckedChange={(checked) => onUpdateDocument(doc.id, { isRequired: checked as boolean })}
+          />
+          <Label className="text-sm">This document is required for stage completion</Label>
+        </div>
+
+        {(doc.documentType === 'extraction' || doc.documentType === 'both') && (
+          <div className="space-y-4 border-t pt-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <Label className="text-sm font-medium">Data Extraction Fields</Label>
+                <p className="text-xs text-muted-foreground">
+                  Define what data should be extracted from this document
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onAddExtraction(doc.id)}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Field
+              </Button>
+            </div>
+
+            {doc.extractionSpecs && doc.extractionSpecs.length > 0 ? (
+              <div className="space-y-3">
+                {doc.extractionSpecs.map((extraction, extractionIndex) => (
+                  <div key={extraction.id} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end p-3 bg-muted/20 rounded-lg">
+                    <div className="space-y-1 col-span-2">
+                      <Label className="text-xs">Field Name</Label>
+                      <Input
+                        value={extraction.fieldName || ''}
+                        onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { fieldName: e.target.value })}
+                        placeholder="e.g., Application Date"
+                        className="h-8"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Field Type</Label>
+                      <Select
+                        value={extraction.fieldType}
+                        onValueChange={(value: 'text' | 'date' | 'number' | 'boolean' | 'file') =>
+                          onUpdateExtraction(doc.id, extraction.id, { fieldType: value })
+                        }
+                      >
+                        <SelectTrigger className="h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="text">Text</SelectItem>
+                          <SelectItem value="date">Date</SelectItem>
+                          <SelectItem value="number">Number</SelectItem>
+                          <SelectItem value="boolean">Boolean</SelectItem>
+                          <SelectItem value="file">File</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1 col-span-2">
+                      <Label className="text-xs">Description</Label>
+                      <Input
+                        value={extraction.description || ''}
+                        onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { description: e.target.value })}
+                        placeholder="Optional description"
+                        className="h-8"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={extraction.isRequired}
+                        onCheckedChange={(checked) => onUpdateExtraction(doc.id, extraction.id, { isRequired: checked as boolean })}
+                      />
+                      <Label className="text-xs">Required</Label>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                        onClick={() => onRemoveExtraction(doc.id, extraction.id)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg">
+                <Info className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">No extraction fields defined</p>
+                <p className="text-xs">Add fields to specify what data should be extracted</p>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }

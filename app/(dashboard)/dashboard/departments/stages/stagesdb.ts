@@ -13,7 +13,9 @@ export type DocumentExtraction = {
     }
 }
 
-export type StageDocument = {
+// Add these to your existing types file
+
+export interface StageDocument {
     id: string
     name: string
     description?: string
@@ -21,26 +23,51 @@ export type StageDocument = {
     documentType: 'upload' | 'extraction' | 'both'
     inputType?: 'file' | 'message' | 'both'
     extractionSpecs?: DocumentExtraction[]
-    kycId?: string // New field to store the acc_portal_kyc ID
+    kycId?: string
+    // Special document properties
+    isSpecial?: boolean
+    subdept_id?: number
+    class_id?: string | number
+    subclass_id?: string | number
+    entityType?: 'subdept' | 'class' | 'subclass'
+    entityName?: string
 }
 
-export type TimeConfig = {
-    applicationType: string
+export interface EntityOption {
+    id: string | number
+    name: string
+    type: 'subdept' | 'class' | 'subclass'
+    level: number
+    subdept_id?: number
+    class_id?: string | number
+    subclass_id?: string | number
+}
+
+// Update NewStage interface if needed
+export interface NewStage {
+    id: string
+    name: string
+    description?: string
     days: number
     hours: number
     minutes: number
+    followUp: string
+    isSpecial: boolean
+    timeConfigs: TimeConfig[]
+    documents: StageDocument[] // Updated to use the enhanced StageDocument interface
 }
 
-export type Stage = {
+// Update Stage interface if needed
+export interface Stage {
     id: string
     name: string
     description?: string
     order_num: number
     estimated_time: number | null
     follow_up?: 'Client' | 'Officer' | 'BCL' | null
-    isSpecial: boolean
+    isSpecial?: boolean
     timeConfigs?: TimeConfig[]
-    documents?: StageDocument[]
+    documents?: StageDocument[] // Updated to use the enhanced StageDocument interface
     allocations?: {
         [key: string]: {
             applicable: boolean
@@ -55,6 +82,13 @@ export type Stage = {
             documents?: StageDocument[]
         }
     }
+}
+
+export type TimeConfig = {
+    applicationType: string
+    days: number
+    hours: number
+    minutes: number
 }
 
 export type ClassRequirement = {
@@ -92,19 +126,6 @@ export type Department = {
     stages: Stage[]
     tm_subdepartments?: Subdepartment[]
     subdepartments?: Subdepartment[]
-}
-
-export type NewStage = {
-    id: string
-    name: string
-    description?: string
-    days: number
-    hours: number
-    minutes: number
-    followUp: string
-    isSpecial: boolean
-    timeConfigs: TimeConfig[]
-    documents: StageDocument[]
 }
 
 export type DepartmentOption = {

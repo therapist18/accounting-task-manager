@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { ArrowUp, ArrowDown, Pencil, X, Info, Minus, Plus, Clock, FileText, User, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Eye, EyeOff, Settings, ChevronDown, ChevronUp } from "lucide-react"
+import { ArrowUp, ArrowDown, Pencil, X, Info, Minus, Plus, Clock, FileText, User, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Eye, EyeOff, Settings, ChevronDown, ChevronUp, Star } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
@@ -1187,16 +1187,16 @@ export default function Stages() {
 
   const handleExportToExcel = () => {
     if (!currentDept) return;
-  
+
     const processedSubdepartments = getProcessedSubdepartments(currentDept);
     const dataToExport = [];
-  
+
     // Process entities to create rows exactly like the table
     let entityIndex = 1;
-    
+
     processedSubdepartments.forEach(subdept => {
       const hasClasses = subdept.classes && subdept.classes.length > 0;
-      
+
       if (!hasClasses) {
         // Subdepartment without classes - add as leaf node
         const rowData = {
@@ -1204,26 +1204,26 @@ export default function Stages() {
           '#': entityIndex++,
           'Entity': subdept.name
         };
-  
+
         // Add stage data for each stage
         currentDept.stages.forEach(stage => {
           const stageAllocation = subdept.stages?.find(s => s.stage_id === stage.id);
           const isApplicable = stageAllocation?.applicable ?? true;
           const isDisplayed = stageAllocation?.display ?? true;
-          
+
           rowData[`${stage.name} - Stage Name`] = stage.name;
           rowData[`${stage.name} - Duration`] = minutesToTimeString(stage.estimated_time);
           rowData[`${stage.name} - Follow Up`] = stage.follow_up || '-';
           rowData[`${stage.name} - Applicable`] = isApplicable ? 'yes' : 'no';
           rowData[`${stage.name} - Display`] = isDisplayed ? 'yes' : 'no';
         });
-  
+
         dataToExport.push(rowData);
       } else {
         // Subdepartment with classes
         subdept.classes.forEach(cls => {
           const hasSubClasses = cls.subClasses && cls.subClasses.length > 0;
-          
+
           if (!hasSubClasses) {
             // Class without subclasses - add as leaf node
             const rowData = {
@@ -1231,19 +1231,19 @@ export default function Stages() {
               '#': entityIndex++,
               'Entity': cls.name
             };
-  
+
             currentDept.stages.forEach(stage => {
               const stageAllocation = cls.stages?.find(s => s.stage_id === stage.id);
               const isApplicable = stageAllocation?.applicable ?? true;
               const isDisplayed = stageAllocation?.display ?? true;
-              
+
               rowData[`${stage.name} - Stage Name`] = stage.name;
               rowData[`${stage.name} - Duration`] = minutesToTimeString(stage.estimated_time);
               rowData[`${stage.name} - Follow Up`] = stage.follow_up || '-';
               rowData[`${stage.name} - Applicable`] = isApplicable ? 'yes' : 'no';
               rowData[`${stage.name} - Display`] = isDisplayed ? 'yes' : 'no';
             });
-  
+
             dataToExport.push(rowData);
           } else {
             // Class with subclasses
@@ -1253,26 +1253,26 @@ export default function Stages() {
                 '#': entityIndex++,
                 'Entity': subCls.name
               };
-  
+
               currentDept.stages.forEach(stage => {
                 const stageAllocation = subCls.stages?.find(s => s.stage_id === stage.id);
                 const isApplicable = stageAllocation?.applicable ?? true;
                 const isDisplayed = stageAllocation?.display ?? true;
-                
+
                 rowData[`${stage.name} - Stage Name`] = stage.name;
                 rowData[`${stage.name} - Duration`] = minutesToTimeString(stage.estimated_time);
                 rowData[`${stage.name} - Follow Up`] = stage.follow_up || '-';
                 rowData[`${stage.name} - Applicable`] = isApplicable ? 'yes' : 'no';
                 rowData[`${stage.name} - Display`] = isDisplayed ? 'yes' : 'no';
               });
-  
+
               dataToExport.push(rowData);
             });
           }
         });
       }
     });
-  
+
     if (dataToExport.length === 0) {
       toast({
         title: "No Data to Export",
@@ -1281,13 +1281,13 @@ export default function Stages() {
       });
       return;
     }
-  
+
     // Create workbook
     const wb = XLSX.utils.book_new();
-  
+
     // Create header structure exactly like the table
     const headerRows = [];
-    
+
     // Row 1: Stage Names
     const stageNameRow = ['Department', '#', 'Entity'];
     currentDept.stages.forEach(stage => {
@@ -1297,38 +1297,38 @@ export default function Stages() {
       );
     });
     headerRows.push(stageNameRow);
-  
+
     // Row 2: Duration
     const durationRow = ['', '', 'Stage Name'];
     currentDept.stages.forEach(stage => {
       durationRow.push('Duration', '', '', '', '');
     });
     headerRows.push(durationRow);
-  
+
     // Row 3: Follow Up
     const followUpRow = ['', '', 'Duration'];
     currentDept.stages.forEach(stage => {
       followUpRow.push(minutesToTimeString(stage.estimated_time), '', '', '', '');
     });
     headerRows.push(followUpRow);
-  
+
     // Row 4: Applicable/Display headers
     const controlsRow = ['', '', 'Follow Up'];
     currentDept.stages.forEach(stage => {
       controlsRow.push(stage.follow_up || '-', 'Applicable', 'Display', '', '');
     });
     headerRows.push(controlsRow);
-  
+
     // Create worksheet with proper structure
     const ws = XLSX.utils.aoa_to_sheet([]);
-  
+
     // Add header rows
     XLSX.utils.sheet_add_aoa(ws, headerRows, { origin: 'A1' });
-  
+
     // Add data rows
     const dataRows = dataToExport.map(row => {
       const dataRow = [row['Department'], row['#'], row['Entity']];
-      
+
       currentDept.stages.forEach(stage => {
         dataRow.push(
           row[`${stage.name} - Stage Name`],
@@ -1338,20 +1338,20 @@ export default function Stages() {
           row[`${stage.name} - Display`]
         );
       });
-      
+
       return dataRow;
     });
-  
+
     XLSX.utils.sheet_add_aoa(ws, dataRows, { origin: 'A5' });
-  
+
     // Set up merges to match the table structure
     const merges = [];
-    
+
     // Merge basic columns vertically (Department, #, Entity)
     merges.push({ s: { r: 0, c: 0 }, e: { r: 3, c: 0 } }); // Department
     merges.push({ s: { r: 0, c: 1 }, e: { r: 3, c: 1 } }); // #
     merges.push({ s: { r: 0, c: 2 }, e: { r: 3, c: 2 } }); // Entity
-  
+
     // Merge stage headers
     let colIndex = 3;
     currentDept.stages.forEach(stage => {
@@ -1364,9 +1364,9 @@ export default function Stages() {
       // Stage name, duration, follow up each get 1 column, then applicable and display
       colIndex += 5;
     });
-  
+
     ws['!merges'] = merges;
-  
+
     // Apply styling
     const headerStyle = {
       font: { bold: true, color: { rgb: 'FFFFFF' } },
@@ -1379,7 +1379,7 @@ export default function Stages() {
         right: { style: 'thin', color: { rgb: '1E40AF' } }
       }
     };
-  
+
     const subHeaderStyle = {
       font: { bold: true, color: { rgb: 'FFFFFF' } },
       fill: { fgColor: { rgb: '2563EB' } }, // Blue-600 background
@@ -1391,7 +1391,7 @@ export default function Stages() {
         right: { style: 'thin', color: { rgb: '1E40AF' } }
       }
     };
-  
+
     const stickyColumnStyle = {
       font: { bold: true, color: { rgb: 'FFFFFF' } },
       fill: { fgColor: { rgb: '1D4ED8' } }, // Blue-700 background
@@ -1403,16 +1403,16 @@ export default function Stages() {
         right: { style: 'thick', color: { rgb: '1E40AF' } }
       }
     };
-  
+
     // Get range for styling
     const range = XLSX.utils.decode_range(ws['!ref']);
-    
+
     // Style header rows (0-3)
     for (let r = 0; r < 4; r++) {
       for (let c = 0; c <= range.e.c; c++) {
         const cellRef = XLSX.utils.encode_cell({ r, c });
         if (!ws[cellRef]) ws[cellRef] = { v: '' };
-        
+
         if (c < 3) {
           ws[cellRef].s = stickyColumnStyle; // Sticky columns
         } else {
@@ -1420,16 +1420,16 @@ export default function Stages() {
         }
       }
     }
-  
+
     // Style data rows with alternating colors
     for (let r = 4; r <= range.e.r; r++) {
       for (let c = 0; c <= range.e.c; c++) {
         const cellRef = XLSX.utils.encode_cell({ r, c });
         if (!ws[cellRef]) continue;
-        
+
         const isOddRow = (r - 4) % 2 === 1;
         const isStickyColumn = c < 3;
-        
+
         ws[cellRef].s = {
           border: {
             top: { style: 'thin', color: { rgb: 'D1D5DB' } },
@@ -1437,30 +1437,30 @@ export default function Stages() {
             left: { style: 'thin', color: { rgb: 'D1D5DB' } },
             right: { style: 'thin', color: { rgb: 'D1D5DB' } }
           },
-          fill: { 
-            fgColor: { 
-              rgb: isStickyColumn 
+          fill: {
+            fgColor: {
+              rgb: isStickyColumn
                 ? (isOddRow ? 'F1F5F9' : 'E2E8F0') // Slate colors for sticky columns
                 : (isOddRow ? 'F9FAFB' : 'FFFFFF')   // Gray colors for data columns
-            } 
+            }
           },
-          alignment: { 
-            vertical: 'center', 
-            horizontal: c < 3 ? 'left' : 'center' 
+          alignment: {
+            vertical: 'center',
+            horizontal: c < 3 ? 'left' : 'center'
           },
-          font: { 
-            bold: isStickyColumn 
+          font: {
+            bold: isStickyColumn
           }
         };
       }
     }
-  
+
     // Set column widths
     const colWidths = [];
     colWidths.push({ wch: 15 }); // Department
     colWidths.push({ wch: 5 });  // #
     colWidths.push({ wch: 25 }); // Entity
-    
+
     // Stage columns
     for (let i = 0; i < currentDept.stages.length; i++) {
       colWidths.push({ wch: 15 }); // Stage name
@@ -1469,18 +1469,18 @@ export default function Stages() {
       colWidths.push({ wch: 10 }); // Applicable
       colWidths.push({ wch: 10 }); // Display
     }
-    
+
     ws['!cols'] = colWidths;
-  
+
     // Freeze panes to simulate sticky headers (freeze first 4 rows and first 3 columns)
     ws['!freeze'] = { xSplit: 3, ySplit: 4 };
-  
+
     // Add the worksheet to workbook
     XLSX.utils.book_append_sheet(wb, ws, 'Stages Overview');
-  
+
     // Generate file
     XLSX.writeFile(wb, `${currentDept.name}_Stages_Overview_${new Date().toISOString().split('T')[0]}.xlsx`);
-  
+
     toast({
       title: "Export Successful",
       description: `Exported ${dataToExport.length} rows with ${currentDept.stages.length} stages to Excel`,
@@ -1578,7 +1578,7 @@ export default function Stages() {
               title="Column Visibility"
               description="Toggle stage table columns"
             /> */}
-            
+
             <Button
               variant="outline"
               onClick={handleExportToExcel}
@@ -1680,25 +1680,38 @@ export default function Stages() {
                                               {stage.documents.length}
                                             </div>
                                           </Badge>
+                                          {/* Special document indicator */}
+                                          {stage.documents.some(doc => doc.isSpecial) && (
+                                            <Star className="absolute -bottom-1 -left-1 h-3 w-3 text-amber-400 bg-white rounded-full p-0.5" />
+                                          )}
                                         </Button>
                                       </PopoverTrigger>
                                       <PopoverContent className="w-96 max-h-96 overflow-y-auto z-50">
                                         <div className="space-y-3">
                                           <div className="flex items-center justify-between">
                                             <h4 className="font-medium">Stage Documents</h4>
-                                            <Badge variant="outline" className="text-xs">
-                                              {stage.documents.length} document{stage.documents.length > 1 ? 's' : ''}
-                                            </Badge>
+                                            <div className="flex items-center gap-2">
+                                              <Badge variant="outline" className="text-xs">
+                                                {stage.documents.length} document{stage.documents.length > 1 ? 's' : ''}
+                                              </Badge>
+                                              {stage.documents.some(doc => doc.isSpecial) && (
+                                                <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200">
+                                                  <Star className="h-3 w-3 mr-1" />
+                                                  Special Docs
+                                                </Badge>
+                                              )}
+                                            </div>
                                           </div>
 
                                           <div className="space-y-3">
                                             {stage.documents.map((doc, i) => (
-                                              <div key={doc.id || i} className="bg-gray-50 p-3 rounded-lg space-y-2">
+                                              <div key={doc.id || i} className={`p-3 rounded-lg space-y-2 ${doc.isSpecial ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50'}`}>
                                                 <div className="flex items-start justify-between">
                                                   <div className="space-y-1">
                                                     <div className="font-medium flex items-center gap-2">
                                                       <FileText className="h-4 w-4" />
                                                       {doc.name}
+                                                      {doc.isSpecial && <Star className="h-4 w-4 text-amber-500" />}
                                                     </div>
                                                     <div className="flex items-center gap-2">
                                                       <Badge variant={doc.isRequired ? "default" : "secondary"} className="text-xs">
@@ -1718,6 +1731,16 @@ export default function Stages() {
                                                         </Badge>
                                                       )}
                                                     </div>
+                                                    {/* Special document entity info */}
+                                                    {doc.isSpecial && doc.entityName && (
+                                                      <div className="flex items-center gap-1 text-xs text-amber-700">
+                                                        <Info className="h-3 w-3" />
+                                                        <span>Target: {doc.entityName}</span>
+                                                        <Badge variant="outline" className="text-xs">
+                                                          {doc.entityType}
+                                                        </Badge>
+                                                      </div>
+                                                    )}
                                                   </div>
                                                 </div>
 
@@ -1766,6 +1789,11 @@ export default function Stages() {
                                           <div className="pt-2 border-t">
                                             <p className="text-xs text-gray-500">
                                               Documents are automatically synced with the KYC system when stages are saved.
+                                              {stage.documents.some(doc => doc.isSpecial) && (
+                                                <span className="block mt-1 text-amber-600 font-medium">
+                                                  ⭐ Special documents are entity-specific and will only appear for their target entities.
+                                                </span>
+                                              )}
                                             </p>
                                           </div>
                                         </div>
@@ -1853,15 +1881,15 @@ export default function Stages() {
                               </TableHead>
                             )}
                             {dept.stages.map((stage, index) => (
-                                <TableHead
-                                  key={`duration-${stage.id}`}
-                                  className="border-r border-blue-400 text-center bg-blue-600"
-                                >
-                                  <div className="font-bold text-sm text-white py-2">
-                                    {minutesToTimeString(stage.estimated_time)}
-                                  </div>
-                                </TableHead>
-                              )
+                              <TableHead
+                                key={`duration-${stage.id}`}
+                                className="border-r border-blue-400 text-center bg-blue-600"
+                              >
+                                <div className="font-bold text-sm text-white py-2">
+                                  {minutesToTimeString(stage.estimated_time)}
+                                </div>
+                              </TableHead>
+                            )
                             )}
                           </TableRow>
                         )}
