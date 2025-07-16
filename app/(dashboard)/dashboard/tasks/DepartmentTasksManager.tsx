@@ -7,6 +7,7 @@ import { TruncatedText } from "@/app/(dashboard)/dashboard/departments/documents
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Eye } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AlertTriangle, FileText, Edit, Trash2, Download, Plus, Building, RotateCcw, TableProperties, Search, Hash } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -49,6 +50,41 @@ export default function DepartmentTasksManager({
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null)
   const [isStageUploadDialogOpen, setIsStageUploadDialogOpen] = useState(false)
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
+  const [previewDocument, setPreviewDocument] = useState<{
+    open: boolean;
+    document: any;
+    extractedData: any;
+  }>({
+    open: false,
+    document: null,
+    extractedData: {}
+  });
+
+  // Function to handle document preview
+  const handlePreviewDocument = async (documentId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('acc_portal_directors_documents')
+        .select('*')
+        .eq('id', documentId)
+        .single();
+
+      if (error) throw error;
+
+      setPreviewDocument({
+        open: true,
+        document: data,
+        extractedData: data.extracted_details || {}
+      });
+    } catch (error) {
+      console.error('Error fetching document:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load document',
+        variant: 'destructive',
+      });
+    }
+  };
 
   const handleStageDocumentUpload = useCallback((task: any, stage: any) => {
     // Ensure the task has all necessary entity hierarchy information
@@ -812,6 +848,14 @@ export default function DepartmentTasksManager({
                         <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(wipTasks, 'wip-stages')}>
                           <Download className="h-4 w-4" />Export CSV
                         </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="flex items-center gap-2"
+                          onClick={() => handlePreviewDocument('document-id-here')}
+                        >
+                          <Eye className="h-4 w-4" /> View Document
+                        </Button>
                       </div>
                     </div>
 
@@ -906,6 +950,36 @@ export default function DepartmentTasksManager({
         getCurrentRequirements={getCurrentRequirements}
         fuzzyMatch={fuzzyMatch}
       />
+
+      {/* Document Preview Modal */}
+      {previewDocument.document && (
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 ${!previewDocument.open ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg w-full max-w-6xl h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h3 className="text-lg font-semibold">{previewDocument.document.document_name || 'Document Preview'}</h3>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setPreviewDocument(prev => ({ ...prev, open: false }))}
+              >
+                Close
+              </Button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <ExtractionPreview
+                documentName={previewDocument.document.document_name || 'Document'}
+                extractedData={previewDocument.extractedData}
+                fields={[]} // You may need to pass the correct fields here
+                fileUrl={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${previewDocument.document.file_path}`}
+                fileName={previewDocument.document.file_path?.split('/').pop() || 'document'}
+                expanded={true}
+                viewMode={true}
+                onDataChange={() => {}}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div >
   )
 }

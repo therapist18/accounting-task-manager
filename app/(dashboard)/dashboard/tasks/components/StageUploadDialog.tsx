@@ -438,7 +438,7 @@ export function StageUploadDialog({
     }
   }
 
-  const uploadFileToStorage = async (file: File, individualId: number, documentType: string): Promise<string> => {
+  const uploadFileToStorage = async (file: File, individualId: number, documentName: string): Promise<string> => {
     try {
       const bucketName = 'kyc-documents'
 
@@ -456,8 +456,14 @@ export function StageUploadDialog({
         .toLowerCase()
         .replace(/\s+/g, '_')
         .replace(/[^a-z0-9_]/g, '')
+      
+      // Normalize document name for path
+      const normalizedDocName = documentName
+        .toLowerCase()
+        .replace(/\s+/g, '_')
+        .replace(/[^a-z0-9_]/g, '')
 
-      const filename = `individual-documents/${normalizedName}/${documentType}/${file.name}`
+      const filename = `individual-documents/${normalizedName}/${normalizedDocName}/${file.name}`
 
       const { data, error } = await supabase.storage
         .from(bucketName)
@@ -527,24 +533,69 @@ export function StageUploadDialog({
       throw error
     }
   }
+  // Function to fetch document details by ID
+  const fetchDocumentDetails = async (documentId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('acc_portal_directors_documents')
+        .select('*')
+        .eq('id', documentId)
+        .single()
+      
+      if (error) throw error
+      return data
+    } catch (error) {
+      console.error('Error fetching document details:', error)
+      return null
+    }
+  }
+
   const submitDocumentsToDatabase = async (documents: any[], registryIndividual: any, docId: string) => {
     try {
       console.log('=== Starting document submission ===')
 
+      if (!selectedStageTask?.task?.individual_id) {
+        throw new Error('No individual ID found in task')
+      }
+
       const submittedDocIds = []
 
+      // Find the document configuration to get the kycId and name
+      const documentConfig = selectedStageTask?.stage?.documents?.find(d => d.id === docId)
+      const documentKycId = documentConfig?.kycId
+      const documentName = documentConfig?.name || 'document'
+
+      if (!documentKycId) {
+        throw new Error('Document configuration not found or missing kycId')
+      }
+
+      // Get the individual's details from registry_individuals
+      const { data: individual, error: individualError } = await supabase
+        .from('registry_individuals')
+        .select('*')
+        .eq('id', selectedStageTask.task.individual_id)
+        .single()
+
+      if (individualError) {
+        throw new Error(`Failed to fetch individual details: ${individualError.message}`)
+      }
+
       for (const [index, doc] of documents.entries()) {
-        // Document submission logic here
+        // Upload file to storage
+        const filePath = await uploadFileToStorage(doc.file, selectedStageTask.task.individual_id, documentName)
+        
+        // Prepare document record
         const documentRecord = {
-          director_id: registryIndividual.id,
-          document_id: doc.documentType || 'unknown',
-          file_path: await uploadFileToStorage(doc.file, registryIndividual.id, doc.documentType || 'document'),
+          director_id: selectedStageTask.task.individual_id,
+          document_id: documentKycId,
+          file_path: filePath,
           extracted_details: doc.extractedData || {},
           status: 'pending',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         }
 
+        // Insert document record
         const { data: insertedDoc, error: insertError } = await supabase
           .from('acc_portal_directors_documents')
           .insert(documentRecord)
@@ -565,7 +616,7 @@ export function StageUploadDialog({
 
       return submittedDocIds
     } catch (error) {
-      console.error('=== Document submission failed ===')
+      console.error('=== Document submission failed ===', error)
       throw error
     }
   }
@@ -686,8 +737,17 @@ export function StageUploadDialog({
           fields: document.extractionSpecs || []
         }
 
-        const key = `${selectedStageTask.task.id}-${selectedStageTask.stage.id}-${docId}`
-        if (existingDocsMap.has(key)) {
+        // Create a unique key using task ID, stage ID, document ID, file name, and timestamp
+        const fileKey = `${selectedStageTask.task.id}-${selectedStageTask.stage.id}-${docId}-${file.name}-${Date.now()}`
+        
+        // Check if this exact file was already uploaded in this session
+        const isDuplicateInSession = Object.values(uploadedDocs[docId] || {}).some(
+          (uploadedDoc: any) => uploadedDoc.fileName === file.name && 
+          uploadedDoc.fileSize === file.size &&
+          uploadedDoc.uploadDate > (Date.now() - 60000) // Check if uploaded in the last minute
+        )
+        
+        if (isDuplicateInSession) {
           duplicates.push(file.name)
           continue
         }
@@ -1458,6 +1518,22 @@ export function StageUploadDialog({
               </div>
             ))}
           </Tabs>
+          <div className="flex justify-end pt-4 border-t mt-4">
+            <Button 
+              onClick={handleSaveAllDocuments}
+              disabled={Object.keys(uploadedDocs).length === 0 || uploading}
+              className="w-full sm:w-auto"
+            >
+              {uploading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save All Documents'
+              )}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
       <FuzzyMatchConfirmationDialog />

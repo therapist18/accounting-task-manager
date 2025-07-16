@@ -7,6 +7,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Check, ChevronsUpDown } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -832,26 +836,52 @@ const dependantsToSave = includeDependants
                                             <Loader2 className="h-5 w-5 animate-spin text-gray-500" />
                                         </div>
                                     ) : (
-                                        <Select className="w-full"
-                                            value={selectedIndividual?.id?.toString() || ''}
-                                            onValueChange={(value) => {
-                                                const individual = individuals.find(i => i.id.toString() === value);
-                                                if (individual) handleIndividualSelect(individual);
-                                            }}
-                                        >
-                                            <SelectTrigger className="w-full">
-                                                <SelectValue placeholder={`Select ${applicantType}...`}>
-                                                    {selectedIndividual && <span>{selectedIndividual.full_name}</span>}
-                                                </SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent className="max-h-60">
-                                                {individuals.map((individual) => (
-                                                    <SelectItem key={individual.id} value={individual.id.toString()}>
-                                                        {individual.full_name}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                        <Popover>
+                                            <PopoverTrigger asChild>
+                                                <Button
+                                                    variant="outline"
+                                                    role="combobox"
+                                                    className={cn(
+                                                        "w-full justify-between",
+                                                        !selectedIndividual && "text-muted-foreground"
+                                                    )}
+                                                >
+                                                    {selectedIndividual
+                                                        ? individuals.find(
+                                                              (individual) => individual.id === selectedIndividual.id
+                                                          )?.full_name
+                                                        : `Select ${applicantType}...`}
+                                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                                </Button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-full p-0">
+                                                <Command>
+                                                    <CommandInput placeholder={`Search ${applicantType}...`} className="h-9" />
+                                                    <CommandEmpty>No {applicantType} found.</CommandEmpty>
+                                                    <CommandGroup className="max-h-60 overflow-auto">
+                                                        {individuals.map((individual) => (
+                                                            <CommandItem
+                                                                value={individual.full_name}
+                                                                key={individual.id}
+                                                                onSelect={() => {
+                                                                    handleIndividualSelect(individual);
+                                                                }}
+                                                            >
+                                                                {individual.full_name}
+                                                                <Check
+                                                                    className={cn(
+                                                                        "ml-auto h-4 w-4",
+                                                                        selectedIndividual?.id === individual.id
+                                                                            ? "opacity-100"
+                                                                            : "opacity-0"
+                                                                    )}
+                                                                />
+                                                            </CommandItem>
+                                                        ))}
+                                                    </CommandGroup>
+                                                </Command>
+                                            </PopoverContent>
+                                        </Popover>
                                     )}
 
                                     {/* OR Create New section remains for manual entry */}
