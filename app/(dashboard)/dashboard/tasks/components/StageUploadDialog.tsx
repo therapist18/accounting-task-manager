@@ -1064,8 +1064,14 @@ export function StageUploadDialog({
       if (selectedStageTask?.task?.id) {
         onTaskAction?.({
           type: 'refresh',
-          taskId: selectedStageTask.task.id
+          taskId: selectedStageTask.task.id,
+          timestamp: Date.now() // Add timestamp to force refresh
         })
+        
+        // Also trigger a refresh of the parent component's data
+        if (onTaskAction) {
+          onTaskAction({ type: 'refresh-data' })
+        }
       }
     } catch (error) {
       console.error('Error saving document:', error)
@@ -1086,6 +1092,16 @@ export function StageUploadDialog({
       })
 
       await Promise.all(savePromises)
+
+      // Call onTaskAction to refresh the parent component's data
+      if (selectedStageTask?.task?.id && onTaskAction) {
+        onTaskAction({ 
+          type: 'refresh',
+          taskId: selectedStageTask.task.id,
+          timestamp: Date.now() // Add timestamp to force refresh
+        })
+        onTaskAction({ type: 'refresh-data' })
+      }
 
       onOpenChange(false)
 

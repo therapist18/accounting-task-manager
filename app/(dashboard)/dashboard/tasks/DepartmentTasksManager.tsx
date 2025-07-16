@@ -210,13 +210,23 @@ export default function DepartmentTasksManager({
   }
 
    // Fetch tasks with related data
-   const fetchTasks = useCallback(async () => {
+  const fetchTasks = useCallback(async (departmentId?: string) => {
     try {
       setTasksLoading(true)
-      const { data, error } = await supabase
+      let query = supabase
         .from('tm_tasks')
-        .select(`*, department:department_id (id, name), subdepartment:subdepartment_id (id, name), current_stage:current_stage_id (id, name, order_num)`)
+        .select(`*, 
+          department:department_id (id, name), 
+          subdepartment:subdepartment_id (id, name), 
+          current_stage:current_stage_id (id, name, order_num)
+        `)
         .order('created_at', { ascending: false })
+
+      if (departmentId) {
+        query = query.eq('department_id', departmentId)
+      }
+
+      const { data, error } = await query
 
       if (error) throw error
       setTasks(data || [])
@@ -295,13 +305,29 @@ export default function DepartmentTasksManager({
     loadInitialData()
   }, [])
 
+  // Handle task actions
+  const handleTaskAction = useCallback((action: { type: string; taskId?: string | number; [key: string]: any }) => {
+    switch (action.type) {
+      case 'refresh':
+      case 'refresh-data':
+        if (activeDepartmentTab) {
+          fetchTasks(activeDepartmentTab)
+          fetchStages(activeDepartmentTab)
+        }
+        break
+      // Add other action types as needed
+      default:
+        onTaskAction?.(action)
+    }
+  }, [activeDepartmentTab, onTaskAction])
+
   // Fetch tasks and stages when department changes
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {
-      fetchTasks()
+      fetchTasks(activeDepartmentTab)
       fetchStages(activeDepartmentTab)
     }
-  }, [activeDepartmentTab, departments])
+  }, [activeDepartmentTab, departments, fetchTasks])
 
   // Get task hierarchy info
   const getTaskHierarchy = useCallback((task: any) => {
@@ -949,6 +975,7 @@ export default function DepartmentTasksManager({
         selectedStageTask={selectedStageTask}
         getCurrentRequirements={getCurrentRequirements}
         fuzzyMatch={fuzzyMatch}
+        onTaskAction={handleTaskAction}
       />
 
       {/* Document Preview Modal */}
