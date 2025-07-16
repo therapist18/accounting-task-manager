@@ -13,7 +13,7 @@ interface EditableStageCellProps {
   stage: any
   task: any
   value?: string | null
-  onSave: (stageId: string, taskId: string, value: string) => void
+  onSave?: (stageId: string, taskId: string, value: string) => Promise<void> | void
   onDocumentUpload?: (task: any, stage: any) => void
   onShowDocuments?: (task: any) => void
 }
@@ -147,6 +147,16 @@ export function EditableStageCell({
   };
 
   const handleSave = async () => {
+    if (!onSave) {
+      console.error('onSave function is not provided');
+      toast({
+        title: "Error",
+        description: "Cannot save stage: Save handler not available",
+        variant: "destructive"
+      });
+      return;
+    }
+
     if (!editValue.trim()) {
       toast({
         title: "Error",
@@ -173,7 +183,7 @@ export function EditableStageCell({
       });
   
       setIsLoading(true);
-      const saveResult = await onSave(stage.id, task.id, formattedDate);
+      const saveResult = await onSave?.(stage.id, task.id, formattedDate);
       console.log('Save completed:', saveResult);
       setIsEditing(false);
       

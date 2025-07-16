@@ -78,24 +78,6 @@ export default function DepartmentTasksManager({
       childLevelId = enrichedTask.subdepartment.id;
       childLevelType = 'subdepartment';
     }
-
-    console.log('Setting selected stage task with child level info:', {
-      task: enrichedTask,
-      stage,
-      childLevelId,
-      childLevelType,
-      taskClassId: enrichedTask.class_id,
-      taskSubdepartmentId: enrichedTask.subdepartment?.id,
-      stageDocuments: stage.documents?.map(doc => ({
-        id: doc.id,
-        name: doc.name,
-        isSpecial: doc.isSpecial,
-        entityType: doc.entityType,
-        class_id: doc.class_id,
-        subdept_id: doc.subdept_id
-      }))
-    })
-
     setSelectedStageTask({
       task: enrichedTask,
       stage,
@@ -191,18 +173,8 @@ export default function DepartmentTasksManager({
     }
   }
 
-  // Handle new enquiry creation
-  const handleEnquiryCreated = useCallback((newEnquiry: any) => {
-    setTasks(prevTasks => [newEnquiry, ...prevTasks])
-    toast({
-      title: "Success",
-      description: "New enquiry created successfully",
-      variant: "default"
-    })
-  }, [])
-
-  // Fetch tasks with related data
-  const fetchTasks = useCallback(async () => {
+   // Fetch tasks with related data
+   const fetchTasks = useCallback(async () => {
     try {
       setTasksLoading(true)
       const { data, error } = await supabase
@@ -219,6 +191,30 @@ export default function DepartmentTasksManager({
       setTasksLoading(false)
     }
   }, [])
+
+  // Handle new enquiry creation
+  const handleEnquiryCreated = useCallback(async (newEnquiry: any) => {
+    try {
+      // First add the new enquiry optimistically
+      setTasks(prevTasks => [newEnquiry, ...prevTasks])
+      
+      // Then refresh the tasks list to ensure we have the latest data
+      await fetchTasks();
+      
+      toast({
+        title: "Success",
+        description: "New enquiry created successfully",
+        variant: "default"
+      })
+    } catch (error) {
+      console.error('Error creating enquiry:', error);
+      toast({
+        title: "Error",
+        description: "Failed to create enquiry",
+        variant: "destructive"
+      });
+    }
+  }, [fetchTasks])
 
   // Fetch and process stages for a department
   const fetchStages = async (departmentId: string) => {
@@ -440,8 +436,11 @@ export default function DepartmentTasksManager({
             stage={row.stage}
             task={task}
             value={value}
-            onSave={handleStageStatusSave}
-            onDocumentUpload={handleStageDocumentUpload} // Make sure this is passed
+            onSave={async (stageId, taskId, date) => {
+              await handleStageStatusSave(stageId, taskId, date);
+              await fetchTasks();
+            }}
+            onDocumentUpload={handleStageDocumentUpload}
             onShowDocuments={onShowUploadDialog}
           />
         )

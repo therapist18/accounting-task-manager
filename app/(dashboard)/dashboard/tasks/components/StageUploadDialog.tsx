@@ -23,8 +23,8 @@ const ExtractionPreview = dynamic(
 interface StageUploadDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  selectedStageTask: { 
-    task: any, 
+  selectedStageTask: {
+    task: any,
     stage: any,
     // Add child level IDs for better type safety
     childLevelId?: string,
@@ -41,17 +41,6 @@ export function StageUploadDialog({
   getCurrentRequirements,
   fuzzyMatch
 }: StageUploadDialogProps) {
-  // Log child level information for debugging
-  useEffect(() => {
-    if (selectedStageTask) {
-      console.log('StageUploadDialog - Child level info:', {
-        childLevelId: selectedStageTask.childLevelId,
-        childLevelType: selectedStageTask.childLevelType,
-        task: selectedStageTask.task,
-        stage: selectedStageTask.stage
-      });
-    }
-  }, [selectedStageTask]);
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File>>({})
   const [messageTexts, setMessageTexts] = useState<Record<string, string>>({})
   const [extractedData, setExtractedData] = useState<Record<string, any>>({})
@@ -79,17 +68,14 @@ export function StageUploadDialog({
 
   // Helper function to get input type for a document
   const getDocumentInputType = (doc: any): 'file' | 'message' | 'both' => {
-    // If document has a specific input type configured, use that
     if (doc.inputType) {
       return doc.inputType;
     }
-    
-    // For special documents, default to file upload only
+
     if (doc.isSpecial) {
       return 'file';
     }
-    
-    // Default to both for regular documents
+
     return 'both';
   }
 
@@ -109,8 +95,8 @@ export function StageUploadDialog({
               </div>
               <div className="ml-3">
                 <p className="text-sm text-amber-700">
-                  {doc.entityName ? 
-                    `This document is specific to ${doc.entityName}` : 
+                  {doc.entityName ?
+                    `This document is specific to ${doc.entityName}` :
                     'This is a special document with specific requirements'}
                 </p>
               </div>
@@ -128,19 +114,19 @@ export function StageUploadDialog({
             <Input
               id={`file-${doc.id}`}
               type="file"
-              accept={documentType === 'both' ? "application/pdf,image/*" : 
-                     documentType === 'upload' ? "application/pdf,image/*" : 
-                     documentType === 'extraction' ? "application/pdf" : "application/pdf,image/*"}
+              accept={documentType === 'both' ? "application/pdf,image/*" :
+                documentType === 'upload' ? "application/pdf,image/*" :
+                  documentType === 'extraction' ? "application/pdf" : "application/pdf,image/*"}
               onChange={(e) => handleFileChange(e, doc.id)}
               className="cursor-pointer"
               disabled={uploading}
             />
             <p className="text-sm text-muted-foreground">
-              {doc.isRequired ? "Required" : "Optional"} • 
-              {documentType === 'both' ? "Accepts PDF and image files" : 
-               documentType === 'upload' ? "Upload document only (PDF/Images)" :
-               documentType === 'extraction' ? "PDF only (data extraction required)" : 
-               "Accepts PDF and image files"}
+              {doc.isRequired ? "Required" : "Optional"} •
+              {documentType === 'both' ? "Accepts PDF and image files" :
+                documentType === 'upload' ? "Upload document only (PDF/Images)" :
+                  documentType === 'extraction' ? "PDF only (data extraction required)" :
+                    "Accepts PDF and image files"}
             </p>
 
             {/* Upload Progress */}
@@ -224,69 +210,30 @@ export function StageUploadDialog({
     }
   }, [previewData])
 
-  
+
   // Helper function to check if a document applies to the current task
   const isDocumentApplicableToTask = useCallback((doc: any, task: any) => {
-    // Debug log to see what we're checking
-    console.log('Checking document applicability:', {
-      docName: doc.name,
-      docIsSpecial: doc.isSpecial,
-      docClassId: doc.class_id,
-      docSubdeptId: doc.subdept_id,
-      taskClassId: task.class_id,
-      taskSubdeptId: task.subdepartment?.id,
-      childLevelId: selectedStageTask?.childLevelId,
-      childLevelType: selectedStageTask?.childLevelType,
-      hasTargetEntities: !!doc.targetEntities
-    });
-
     // If it's not a special document, it applies to all tasks
     if (!doc.isSpecial) {
-      console.log('Document is not special - applying to all tasks');
       return true;
     }
-
-    // Special document handling
-    console.log('Processing special document');
-
     // Check if document has targetEntities
     if (doc.targetEntities && Array.isArray(doc.targetEntities) && doc.targetEntities.length > 0) {
-      console.log('Document has targetEntities:', doc.targetEntities);
-      
-      // Check if any target entity matches the task's class_id and subdepartment_id
       const matchesTarget = doc.targetEntities.some((entity: any) => {
-        // If entity has class_id, it must match task's class_id
-        const classMatch = entity.class_id ? 
-          entity.class_id.toString() === task.class_id?.toString() : 
+        const classMatch = entity.class_id ?
+          entity.class_id.toString() === task.class_id?.toString() :
           true;
-          
-        // If entity has subdept_id, it must match task's subdepartment.id
-        const subdeptMatch = entity.subdept_id ? 
-          entity.subdept_id.toString() === task.subdepartment?.id?.toString() : 
+        const subdeptMatch = entity.subdept_id ?
+          entity.subdept_id.toString() === task.subdepartment?.id?.toString() :
           true;
-        
-        console.log('Checking target entity:', {
-          entity,
-          classMatch,
-          subdeptMatch,
-          taskClassId: task.class_id,
-          taskSubdeptId: task.subdepartment?.id
-        });
-        
         return classMatch && subdeptMatch;
       });
-      
-      console.log('Document targetEntities match result:', matchesTarget);
-      
-      // If we have targetEntities and none match, the document is not applicable
+
       if (doc.targetEntities.length > 0 && !matchesTarget) {
-        console.log('Document has targetEntities but none match the task - not applicable');
         return false;
       }
-      
-      // If we have targetEntities and there's a match, the document is applicable
+
       if (matchesTarget) {
-        console.log('Document matches targetEntities - applying to task');
         return true;
       }
     }
@@ -296,75 +243,52 @@ export function StageUploadDialog({
     const taskSubdeptId = task.subdepartment?.id?.toString();
     const docClassId = doc.class_id?.toString();
     const docSubdeptId = doc.subdept_id?.toString();
-    
+
     // If document is specifically targeting a class
-    if (docClassId) {
-      console.log('Document targets class:', docClassId);
-      // If document targets a specific class, check if it matches the task's class
+    if (docClassId) { 
       if (docClassId !== taskClassId) {
-        console.log('Class ID does not match');
         return false;
       }
-      
-      // If document also targets a specific subdepartment, check that too
+
       if (docSubdeptId && docSubdeptId !== taskSubdeptId) {
-        console.log('Subdepartment ID does not match');
         return false;
       }
-      
-      console.log('Document matches class and subdepartment (if specified)');
+
       return true;
     }
-    
-    // If document targets a specific subdepartment but no class
+
     if (docSubdeptId) {
-      console.log('Document targets subdepartment:', docSubdeptId);
       const matches = docSubdeptId === taskSubdeptId;
-      console.log('Subdepartment match:', matches);
       return matches;
     }
-    
-    // If we have a child level ID and type from the selected stage task, use that for additional filtering
+
     if (selectedStageTask?.childLevelId && selectedStageTask?.childLevelType) {
-      console.log('Using child level info for filtering:', selectedStageTask.childLevelType, selectedStageTask.childLevelId);
       const childLevelId = selectedStageTask.childLevelId;
       const childLevelType = selectedStageTask.childLevelType;
-      
-      // If document has explicit targeting for this child level, check if it matches
+
       if (doc[`${childLevelType}_id`] && doc[`${childLevelType}_id`].toString() !== childLevelId) {
-        console.log('Child level ID does not match');
         return false;
       }
-      
-      // If document targets a different level in the hierarchy, check parent relationships
+
       if (childLevelType === 'subclass' && doc.class_id && doc.class_id.toString() !== taskClassId) {
-        console.log('Parent class ID does not match for subclass');
         return false;
       }
-      
+
       if (childLevelType === 'class' && doc.subdept_id && doc.subdept_id.toString() !== taskSubdeptId) {
-        console.log('Parent subdepartment ID does not match for class');
         return false;
       }
     }
 
     // For special documents with entity type, check the entity targeting
     if (doc.entityType === 'class' && doc.class_id) {
-      console.log('Document has entityType class with class_id:', doc.class_id);
       const classMatch = task.class_id?.toString() === doc.class_id.toString();
-      
+
       // If subdept_id is specified, check it too, otherwise just match on class
       if (doc.subdept_id) {
         const subdeptMatch = task.subdepartment?.id?.toString() === doc.subdept_id.toString();
-        console.log('Checking subdepartment match:', { 
-          taskSubdept: task.subdepartment?.id, 
-          docSubdept: doc.subdept_id,
-          matches: subdeptMatch
-        });
         return classMatch && subdeptMatch;
       }
-      
-      console.log('Class match result:', classMatch);
+
       return classMatch;
     }
 
@@ -398,43 +322,25 @@ export function StageUploadDialog({
     return false
   }, [])
 
-  
-    // Filter the documents based on applicability to the current task
-    const applicableDocuments = useMemo(() => {
-      if (!selectedStageTask?.stage?.documents || !selectedStageTask?.task) {
-        return []
-      }
-  
-      const filtered = selectedStageTask.stage.documents.filter(doc =>
-        isDocumentApplicableToTask(doc, selectedStageTask.task)
-      )
-  
-      // Debug logging to help troubleshoot
-      console.log('=== Document Filtering Results ===')
-      console.log('Task details:', {
-        id: selectedStageTask.task.id,
-        departmentId: selectedStageTask.task.department?.id,
-        subdepartmentId: selectedStageTask.task.subdepartment?.id,
-        classId: selectedStageTask.task.class_id,
-        subclassId: selectedStageTask.task.subclass_id
-      })
-      console.log('Total documents:', selectedStageTask.stage.documents.length)
-      console.log('Applicable documents:', filtered.length)
-      selectedStageTask.stage.documents.forEach(doc => {
-        const isApplicable = isDocumentApplicableToTask(doc, selectedStageTask.task)
-        console.log(`- "${doc.name}": ${isApplicable ? 'APPLICABLE' : 'NOT APPLICABLE'}`, {
-          isSpecial: doc.isSpecial,
-          entityType: doc.entityType,
-          class_id: doc.class_id,
-          subdept_id: doc.subdept_id
-        })
-      })
-      console.log('=== End Filtering Results ===')
-  
-      return filtered
-    }, [selectedStageTask, isDocumentApplicableToTask])
 
-    
+  // Filter the documents based on applicability to the current task
+  const applicableDocuments = useMemo(() => {
+    if (!selectedStageTask?.stage?.documents || !selectedStageTask?.task) {
+      return []
+    }
+
+    const filtered = selectedStageTask.stage.documents.filter(doc =>
+      isDocumentApplicableToTask(doc, selectedStageTask.task)
+    )
+
+    selectedStageTask.stage.documents.forEach(doc => {
+      const isApplicable = isDocumentApplicableToTask(doc, selectedStageTask.task)
+    })
+
+    return filtered
+  }, [selectedStageTask, isDocumentApplicableToTask])
+
+
   useEffect(() => {
     if (applicableDocuments.length > 0 && !activeDocumentTab) {
       setActiveDocumentTab(applicableDocuments[0].id)
@@ -1395,162 +1301,162 @@ export function StageUploadDialog({
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-[1800px] max-h-[95vh] overflow-y-auto">
-        <DialogHeader>
-  <DialogTitle className="flex items-center gap-2">
-    <FileText className="h-5 w-5" />
-    Upload Documents for {stage?.name} Stage
-  </DialogTitle>
-  <DialogDescription>
-    Complete this stage by uploading required documents or submitting messages as specified.
-    {selectedStageTask?.stage?.documents && applicableDocuments.length !== selectedStageTask.stage.documents.length && (
-      <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded">
-        <p className="text-sm text-blue-700">
-          Showing {applicableDocuments.length} of {selectedStageTask.stage.documents.length} documents applicable to this entity.
-          {selectedStageTask.task.class_id && (
-            <span className="block mt-1">
-              Entity: {selectedStageTask.task.subdepartment?.name} 
-              {selectedStageTask.task.class_id && ` → Class ID: ${selectedStageTask.task.class_id}`}
-            </span>
-          )}
-        </p>
-      </div>
-    )}
-  </DialogDescription>
-</DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Upload Documents for {stage?.name} Stage
+            </DialogTitle>
+            <DialogDescription>
+              Complete this stage by uploading required documents or submitting messages as specified.
+              {selectedStageTask?.stage?.documents && applicableDocuments.length !== selectedStageTask.stage.documents.length && (
+                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded">
+                  <p className="text-sm text-blue-700">
+                    Showing {applicableDocuments.length} of {selectedStageTask.stage.documents.length} documents applicable to this entity.
+                    {selectedStageTask.task.class_id && (
+                      <span className="block mt-1">
+                        Entity: {selectedStageTask.task.subdepartment?.name}
+                        {selectedStageTask.task.class_id && ` → Class ID: ${selectedStageTask.task.class_id}`}
+                      </span>
+                    )}
+                  </p>
+                </div>
+              )}
+            </DialogDescription>
+          </DialogHeader>
           <Tabs
             value={activeDocumentTab}
             onValueChange={setActiveDocumentTab}
             className="w-full"
           >
-          <TabsList className="w-full justify-start">
-  {applicableDocuments?.map((doc) => {
-    const inputType = getDocumentInputType(doc)
-    const hasUploads = uploadedDocs[doc.id]?.length > 0
+            <TabsList className="w-full justify-start">
+              {applicableDocuments?.map((doc) => {
+                const inputType = getDocumentInputType(doc)
+                const hasUploads = uploadedDocs[doc.id]?.length > 0
 
-    return (
-      <TabsTrigger
-        key={doc.id}
-        value={doc.id}
-        className="whitespace-nowrap flex items-center gap-2"
-      >
-        {/* Input type indicator */}
-        {inputType === 'file' && <Upload className="h-3 w-3" />}
-        {inputType === 'message' && <MessageSquare className="h-3 w-3" />}
-        {inputType === 'both' && <FileText className="h-3 w-3" />}
+                return (
+                  <TabsTrigger
+                    key={doc.id}
+                    value={doc.id}
+                    className="whitespace-nowrap flex items-center gap-2"
+                  >
+                    {/* Input type indicator */}
+                    {inputType === 'file' && <Upload className="h-3 w-3" />}
+                    {inputType === 'message' && <MessageSquare className="h-3 w-3" />}
+                    {inputType === 'both' && <FileText className="h-3 w-3" />}
 
-        {doc.name}
+                    {doc.name}
 
-        {/* Special document indicator */}
-        {doc.isSpecial && <Star className="h-3 w-3 text-amber-500" />}
+                    {/* Special document indicator */}
+                    {doc.isSpecial && <Star className="h-3 w-3 text-amber-500" />}
 
-        {/* Required indicator */}
-        {doc.isRequired && (
-          <Badge variant="destructive" className="text-xs px-1">
-            Required
-          </Badge>
-        )}
+                    {/* Required indicator */}
+                    {doc.isRequired && (
+                      <Badge variant="destructive" className="text-xs px-1">
+                        Required
+                      </Badge>
+                    )}
 
-        {/* Upload status indicator */}
-        {hasUploads && (
-          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-        )}
-      </TabsTrigger>
-    )
-  })}
-</TabsList>
+                    {/* Upload status indicator */}
+                    {hasUploads && (
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                    )}
+                  </TabsTrigger>
+                )
+              })}
+            </TabsList>
 
-{applicableDocuments?.map((doc) => (
-  <div
-    key={doc.id}
-    className={`mt-6 ${activeDocumentTab === doc.id ? 'block' : 'hidden'}`}
-  >
-    <div className="space-y-6 grid">
-      {/* Left Panel - Document Upload/Message Input */}
-      <div className="space-y-4">
-        {renderInputSection(doc)}
-      </div>
+            {applicableDocuments?.map((doc) => (
+              <div
+                key={doc.id}
+                className={`mt-6 ${activeDocumentTab === doc.id ? 'block' : 'hidden'}`}
+              >
+                <div className="space-y-6 grid">
+                  {/* Left Panel - Document Upload/Message Input */}
+                  <div className="space-y-4">
+                    {renderInputSection(doc)}
+                  </div>
 
-      {/* Right Panel - Preview and Extracted Data */}
-      <div className="">
-        {uploadedDocs[doc.id]?.length > 0 ? (
-          <div className="space-y-6">
-            {uploadedDocs[doc.id].map((uploadedDoc, index) => (
-              <div key={uploadedDoc.id} className="relative bg-gray-50 rounded-lg p-4 border">
-                <div className="flex justify-between items-start mb-2">
-                  <span className="inline-flex items-center justify-center bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded">
-                    Upload #{index + 1}
-                  </span>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-blue-600 hover:text-blue-800 hover:bg-blue-100"
-                      onClick={() => handleReExtraction(doc.id, index)}
-                    >
-                      <RotateCw className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-red-600 hover:text-red-800 hover:bg-red-100"
-                      onClick={() => {
-                        setUploadedDocs(prev => ({
-                          ...prev,
-                          [doc.id]: prev[doc.id].filter((_, i) => i !== index)
-                        }))
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                  {/* Right Panel - Preview and Extracted Data */}
+                  <div className="">
+                    {uploadedDocs[doc.id]?.length > 0 ? (
+                      <div className="space-y-6">
+                        {uploadedDocs[doc.id].map((uploadedDoc, index) => (
+                          <div key={uploadedDoc.id} className="relative bg-gray-50 rounded-lg p-4 border">
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="inline-flex items-center justify-center bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded">
+                                Upload #{index + 1}
+                              </span>
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-blue-600 hover:text-blue-800 hover:bg-blue-100"
+                                  onClick={() => handleReExtraction(doc.id, index)}
+                                >
+                                  <RotateCw className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-red-600 hover:text-red-800 hover:bg-red-100"
+                                  onClick={() => {
+                                    setUploadedDocs(prev => ({
+                                      ...prev,
+                                      [doc.id]: prev[doc.id].filter((_, i) => i !== index)
+                                    }))
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                            <ExtractionPreview
+                              documentName={doc.name}
+                              extractedData={uploadedDoc.extractedData || {}}
+                              fields={getFieldsForDocument(doc.id)}
+                              onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
+                              fileUrl={uploadedDoc.fileUrl}
+                              fileName={uploadedDoc.fileName}
+                              expanded={true}
+                              showSaveButton={false}
+                              type={doc.documentType || 'document'}
+                              file={uploadedDoc.file}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    ) : previewData[doc.id] ? (
+                      <ExtractionPreview
+                        documentName={doc.name}
+                        extractedData={previewData[doc.id].extractedData || {}}
+                        fields={getFieldsForDocument(doc.id)}
+                        onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
+                        fileUrl={previewData[doc.id].fileUrl}
+                        fileName={previewData[doc.id].fileName}
+                        expanded={true}
+                        showSaveButton={false}
+                        type={doc.documentType || 'document'}
+                      />
+                    ) : (
+                      <div className="border rounded-lg p-8 text-center bg-gray-50">
+                        <div className="flex flex-col items-center">
+                          {getDocumentInputType(doc) === 'file' && <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
+                          {getDocumentInputType(doc) === 'message' && <MessageSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
+                          {getDocumentInputType(doc) === 'both' && <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
+
+                          <p className="text-muted-foreground mb-2">No content submitted yet</p>
+                          <p className="text-sm text-muted-foreground">
+                            {getDocumentInputType(doc) === 'file' && 'Upload a file to see the preview and extracted data'}
+                            {getDocumentInputType(doc) === 'message' && 'Submit a message to see the processed content'}
+                            {getDocumentInputType(doc) === 'both' && 'Upload a file or submit a message to see the preview and extracted data'}
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <ExtractionPreview
-                  documentName={doc.name}
-                  extractedData={uploadedDoc.extractedData || {}}
-                  fields={getFieldsForDocument(doc.id)}
-                  onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
-                  fileUrl={uploadedDoc.fileUrl}
-                  fileName={uploadedDoc.fileName}
-                  expanded={true}
-                  showSaveButton={false}
-                  type={doc.documentType || 'document'}
-                  file={uploadedDoc.file}
-                />
               </div>
             ))}
-          </div>
-        ) : previewData[doc.id] ? (
-          <ExtractionPreview
-            documentName={doc.name}
-            extractedData={previewData[doc.id].extractedData || {}}
-            fields={getFieldsForDocument(doc.id)}
-            onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
-            fileUrl={previewData[doc.id].fileUrl}
-            fileName={previewData[doc.id].fileName}
-            expanded={true}
-            showSaveButton={false}
-            type={doc.documentType || 'document'}
-          />
-        ) : (
-          <div className="border rounded-lg p-8 text-center bg-gray-50">
-            <div className="flex flex-col items-center">
-              {getDocumentInputType(doc) === 'file' && <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
-              {getDocumentInputType(doc) === 'message' && <MessageSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
-              {getDocumentInputType(doc) === 'both' && <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
-
-              <p className="text-muted-foreground mb-2">No content submitted yet</p>
-              <p className="text-sm text-muted-foreground">
-                {getDocumentInputType(doc) === 'file' && 'Upload a file to see the preview and extracted data'}
-                {getDocumentInputType(doc) === 'message' && 'Submit a message to see the processed content'}
-                {getDocumentInputType(doc) === 'both' && 'Upload a file or submit a message to see the preview and extracted data'}
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  </div>
-))}
           </Tabs>
         </DialogContent>
       </Dialog>
