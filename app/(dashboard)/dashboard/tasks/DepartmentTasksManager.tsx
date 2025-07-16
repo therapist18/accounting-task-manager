@@ -50,11 +50,38 @@ export default function DepartmentTasksManager({
   const [isStageUploadDialogOpen, setIsStageUploadDialogOpen] = useState(false)
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
 
-  // Add this function to handle opening the stage upload dialog
   const handleStageDocumentUpload = useCallback((task: any, stage: any) => {
-    setSelectedStageTask({ task, stage })
+    // Ensure the task has all necessary entity hierarchy information
+    const enrichedTask = {
+      ...task,
+      // Make sure we have the complete hierarchy
+      department: task.department || departments.find(d => d.id === task.department_id),
+      subdepartment: task.subdepartment || departments
+        .find(d => d.id === task.department_id)
+        ?.tm_subdepartments?.find(s => s.id === task.subdepartment_id),
+      // Ensure class_id and subclass_id are properly set
+      class_id: task.class_id,
+      subclass_id: task.subclass_id,
+    }
+  
+    console.log('Setting selected stage task:', {
+      task: enrichedTask,
+      stage,
+      taskClassId: enrichedTask.class_id,
+      taskSubdepartmentId: enrichedTask.subdepartment?.id,
+      stageDocuments: stage.documents?.map(doc => ({
+        id: doc.id,
+        name: doc.name,
+        isSpecial: doc.isSpecial,
+        entityType: doc.entityType,
+        class_id: doc.class_id,
+        subdept_id: doc.subdept_id
+      }))
+    })
+  
+    setSelectedStageTask({ task: enrichedTask, stage })
     setIsStageUploadDialogOpen(true)
-  }, [])
+  }, [departments])
 
   // Add this function for fuzzy matching (implement based on your needs)
   const fuzzyMatch = useCallback((str1: string, str2: string, threshold = 0.7) => {
