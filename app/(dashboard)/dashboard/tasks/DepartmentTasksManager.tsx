@@ -63,10 +63,27 @@ export default function DepartmentTasksManager({
       class_id: task.class_id,
       subclass_id: task.subclass_id,
     }
-  
-    console.log('Setting selected stage task:', {
+
+    // Determine the child level type and ID
+    let childLevelId: string | undefined;
+    let childLevelType: 'subdepartment' | 'class' | 'subclass' | undefined;
+
+    if (enrichedTask.subclass_id) {
+      childLevelId = enrichedTask.subclass_id;
+      childLevelType = 'subclass';
+    } else if (enrichedTask.class_id) {
+      childLevelId = enrichedTask.class_id;
+      childLevelType = 'class';
+    } else if (enrichedTask.subdepartment?.id) {
+      childLevelId = enrichedTask.subdepartment.id;
+      childLevelType = 'subdepartment';
+    }
+
+    console.log('Setting selected stage task with child level info:', {
       task: enrichedTask,
       stage,
+      childLevelId,
+      childLevelType,
       taskClassId: enrichedTask.class_id,
       taskSubdepartmentId: enrichedTask.subdepartment?.id,
       stageDocuments: stage.documents?.map(doc => ({
@@ -78,8 +95,13 @@ export default function DepartmentTasksManager({
         subdept_id: doc.subdept_id
       }))
     })
-  
-    setSelectedStageTask({ task: enrichedTask, stage })
+
+    setSelectedStageTask({
+      task: enrichedTask,
+      stage,
+      childLevelId,
+      childLevelType
+    })
     setIsStageUploadDialogOpen(true)
   }, [departments])
 

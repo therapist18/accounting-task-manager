@@ -22,9 +22,12 @@ export interface StageDocument {
     documentType: 'upload' | 'extraction' | 'both'
     inputType?: 'file' | 'message' | 'both'
     extractionSpecs?: DocumentExtraction[]
-    kycId?: string
-    // Special document properties - updated for multi-select
     isSpecial?: boolean
+    entityType?: 'subdept' | 'class' | 'subclass'
+    subdept_id?: number
+    class_id?: string | number
+    subclass_id?: string | number
+    entityName?: string
     targetEntities?: Array<{
       entityType: 'subdept' | 'class' | 'subclass'
       subdept_id: number
@@ -32,6 +35,8 @@ export interface StageDocument {
       subclass_id?: string | number
       entityName: string
     }>
+    kycId?: string
+    linkedKycDocument?: string // NEW FIELD
   }
   
   export interface EntityOption {

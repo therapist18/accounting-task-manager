@@ -7,16 +7,18 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, X, Clock, User, FileText, Info, Pencil, MessageSquare, Star, Trash2 } from "lucide-react"
+import { Plus, X, Clock, User, FileText, Info, Pencil, MessageSquare, Star, Trash2, Check } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import type { Stage, TimeConfig, StageDocument, DocumentExtraction, EntityOption } from "../types"
 import { createKYCDocument, updateKYCDocument } from "../kycDocuments"   
+import { toast } from "@/hooks/use-toast"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
 
 // Simple UUID generator
 const generateId = () => {
@@ -25,6 +27,16 @@ const generateId = () => {
     const v = c === 'x' ? r : (r & 0x3 | 0x8)
     return v.toString(16)
   })
+}
+
+interface KYCDocument {
+  id: string
+  name: string
+  display_name: string
+  department: string
+  category: string
+  fields: DocumentExtraction[]
+  document_type: string
 }
 
 interface EditStageDialogProps {
@@ -50,7 +62,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
   const [saving, setSaving] = useState(false)
   const [entityOptions, setEntityOptions] = useState<EntityOption[]>([])
   const [loadingEntities, setLoadingEntities] = useState(false)
-  const { toast } = useToast()
+  const [kycDocuments, setKycDocuments] = useState<KYCDocument[]>([])
+  const [loadingKycDocs, setLoadingKycDocs] = useState(false)
 
   useEffect(() => {
     if (stage) {
@@ -60,8 +73,9 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
         documents: stage.documents || [],
         timeConfigs: stage.timeConfigs?.length ? stage.timeConfigs : [{ applicationType: 'Default', days: 0, hours: 0, minutes: 0 }]
       })
-      // Fetch entities when stage is loaded
       fetchEntities()
+      const departmentName = "Applications" // or get from parent component
+      fetchKYCDocuments(departmentName)
     } else {
       setFormData({
         id: '',
@@ -75,9 +89,50 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
         documents: []
       })
       setEntityOptions([])
+      setKycDocuments([])
     }
     setActiveTab('general')
   }, [stage, open])
+
+  const fetchKYCDocuments = async (departmentName?: string) => {
+    setLoadingKycDocs(true)
+    try {
+      let query = supabase
+        .from('acc_portal_kyc')
+        .select('id, name, display_name, department, category, fields, document_type')
+        .order('name')
+  
+      if (departmentName) {
+        query = query.eq('department', departmentName)
+      }
+  
+      const { data, error } = await query
+  
+      if (error) throw error
+  
+      const transformedDocs: KYCDocument[] = (data || []).map(doc => ({
+        ...doc,
+        fields: Array.isArray(doc.fields) ? doc.fields.map((field: any) => ({
+          id: field.id || `field-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          fieldName: field.fieldName || field.name || '',
+          description: field.description || '',
+          isRequired: field.isRequired !== false,
+          fieldType: field.fieldType || field.type || 'text'
+        })) : []
+      }))
+  
+      setKycDocuments(transformedDocs)
+    } catch (error) {
+      console.error('Error fetching KYC documents:', error)
+      toast({
+        title: "Error",
+        description: "Failed to load existing documents. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setLoadingKycDocs(false)
+    }
+  }
 
   const fetchEntities = async () => {
     setLoadingEntities(true)
@@ -99,7 +154,6 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
       deptsData?.forEach((dept: any) => {
         if (dept.tm_subdepartments) {
           dept.tm_subdepartments.forEach((subdept: any) => {
-            // Add subdepartment
             entities.push({
               id: subdept.id,
               name: subdept.name,
@@ -108,7 +162,6 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
               subdept_id: subdept.id
             })
 
-            // Add classes
             if (subdept.classes && Array.isArray(subdept.classes)) {
               subdept.classes.forEach((cls: any, clsIndex: number) => {
                 const classId = cls.id || `${subdept.id}-class-${clsIndex}`
@@ -121,7 +174,6 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                   class_id: classId
                 })
 
-                // Add subclasses
                 if (cls.subClasses && Array.isArray(cls.subClasses)) {
                   cls.subClasses.forEach((subCls: any, subClsIndex: number) => {
                     const subclassId = subCls.id || `${subdept.id}-class-${clsIndex}-subclass-${subClsIndex}`
@@ -163,60 +215,67 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
     }
     setSaving(true)
     try {
-      // Get department name for KYC documents
       const departmentName = "Applications" // You'll need to pass this from parent component
       
       // Process documents and sync with KYC
       const processedDocs = await Promise.all(
         (formData.documents || []).map(async (doc) => {
-          if (doc.name.trim() && !doc.kycId) {
-            // Create new KYC document if it doesn't exist
-            try {
-              const kycId = await createKYCDocument({
-                name: doc.name,
-                department: departmentName,
-                category: 'application-docs',
-                document_type: 'one_off',
-                fields: doc.extractionSpecs || [],
-                display_name: doc.name,
-                metadata: doc.isSpecial ? {
-                  isSpecial: true,
-                  entityType: doc.entityType,
-                  subdept_id: doc.subdept_id,
-                  class_id: doc.class_id,
-                  subclass_id: doc.subclass_id,
-                  entityName: doc.entityName
-                } : undefined
-              })
-              return { ...doc, kycId }
-            } catch (error) {
-              console.error('Error creating KYC document:', error)
-              return doc
+          if (doc.name.trim()) {
+            // Skip KYC creation/update if it's a linked document
+            if (doc.linkedKycDocument) {
+              return doc // Return as-is for linked documents
             }
-          } else if (doc.kycId && doc.name.trim()) {
-            // Update existing KYC document
-            try {
-              await updateKYCDocument(doc.kycId, {
-                name: doc.name,
-                fields: doc.extractionSpecs || [],
-                display_name: doc.name,
-                metadata: doc.isSpecial ? {
-                  isSpecial: true,
-                  entityType: doc.entityType,
-                  subdept_id: doc.subdept_id,
-                  class_id: doc.class_id,
-                  subclass_id: doc.subclass_id,
-                  entityName: doc.entityName
-                } : undefined
-              })
-            } catch (error) {
-              console.error('Error updating KYC document:', error)
+            
+            // Rest of the existing KYC creation/update logic
+            if (!doc.kycId) {
+              // Create new KYC document
+              try {
+                const kycId = await createKYCDocument({
+                  name: doc.name,
+                  department: departmentName,
+                  category: 'application-docs',
+                  document_type: 'one_off',
+                  fields: doc.extractionSpecs || [],
+                  display_name: doc.name,
+                  metadata: doc.isSpecial ? {
+                    isSpecial: true,
+                    entityType: doc.entityType,
+                    subdept_id: doc.subdept_id,
+                    class_id: doc.class_id,
+                    subclass_id: doc.subclass_id,
+                    entityName: doc.entityName
+                  } : undefined
+                })
+                return { ...doc, kycId }
+              } catch (error) {
+                console.error('Error creating KYC document:', error)
+                return doc
+              }
+            } else {
+              // Update existing KYC document
+              try {
+                await updateKYCDocument(doc.kycId, {
+                  name: doc.name,
+                  fields: doc.extractionSpecs || [],
+                  display_name: doc.name,
+                  metadata: doc.isSpecial ? {
+                    isSpecial: true,
+                    entityType: doc.entityType,
+                    subdept_id: doc.subdept_id,
+                    class_id: doc.class_id,
+                    subclass_id: doc.subclass_id,
+                    entityName: doc.entityName
+                  } : undefined
+                })
+              } catch (error) {
+                console.error('Error updating KYC document:', error)
+              }
             }
           }
           return doc
         })
       )
-
+      
       const updatedStage = {
         ...formData,
         name: trimmedName,
@@ -247,7 +306,6 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
-
     setFormData(prev => ({
       ...prev,
       [name]: value
@@ -258,7 +316,6 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
     setFormData(prev => {
       const updatedTimeConfigs = [...(prev.timeConfigs || [])]
       updatedTimeConfigs[index] = { ...updatedTimeConfigs[index], ...updates }
-
       return {
         ...prev,
         timeConfigs: updatedTimeConfigs
@@ -309,7 +366,6 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
     })
   }
 
-  // Document management functions
   const addDocument = (isSpecial: boolean = false) => {
     const newDoc: StageDocument = {
       id: `doc-${Date.now()}`,
@@ -319,19 +375,15 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
       documentType: 'both',
       extractionSpecs: [],
       isSpecial,
+      linkedKycDocument: undefined,
       ...(isSpecial && {
-        entityType: undefined,
-        subdept_id: undefined,
-        class_id: undefined,
-        subclass_id: undefined,
-        entityName: undefined
+        targetEntities: []
       })
     }
     setFormData(prev => ({
       ...prev,
       documents: [...(prev.documents || []), newDoc]
     }))
-    // Switch to the Documents tab when adding a new document
     setActiveTab('documents')
   }
 
@@ -342,7 +394,6 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
         if (doc.id === docId) {
           const updatedDoc = { ...doc, ...updates }
           
-          // If selecting an entity, update the related fields
           if (updates.entityType && entityOptions.length > 0) {
             const selectedEntity = entityOptions.find(e => 
               e.type === updates.entityType && 
@@ -395,36 +446,18 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
           : doc
       ) || [];
 
-      // Auto-scroll to the new field
-      requestAnimationFrame(() => {
-        const fieldElement = document.querySelector(
-          `[name^="doc-${docId}-extraction-"][name$="-name"]:last-of-type`
-        ) as HTMLInputElement | null;
-
-        if (fieldElement) {
-          fieldElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          fieldElement.focus();
-
-          // Set cursor to end of input
-          const length = fieldElement.value.length;
-          fieldElement.setSelectionRange(length, length);
-        }
-      });
-
       return { ...prev, documents: updatedDocs };
     });
   }, []);
 
   const updateExtraction = useCallback((docId: string, extractionId: string, updates: Partial<DocumentExtraction>) => {
     setFormData(prev => {
-      // Only update if there are actual changes
       const doc = prev.documents?.find(d => d.id === docId);
       if (!doc) return prev;
 
       const extraction = doc.extractionSpecs?.find(e => e.id === extractionId);
       if (!extraction) return prev;
 
-      // Check if any of the updated values are actually different
       const hasChanges = Object.entries(updates).some(
         ([key, value]) => extraction[key as keyof DocumentExtraction] !== value
       );
@@ -514,6 +547,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                 docIndex={docIndex}
                 entityOptions={entityOptions}
                 loadingEntities={loadingEntities}
+                kycDocuments={kycDocuments}
+                loadingKycDocs={loadingKycDocs}
                 onUpdateDocument={updateDocument}
                 onRemoveDocument={removeDocument}
                 onAddExtraction={addExtractionField}
@@ -543,6 +578,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
                 docIndex={docIndex}
                 entityOptions={entityOptions}
                 loadingEntities={loadingEntities}
+                kycDocuments={kycDocuments}
+                loadingKycDocs={loadingKycDocs}
                 onUpdateDocument={updateDocument}
                 onRemoveDocument={removeDocument}
                 onAddExtraction={addExtractionField}
@@ -580,254 +617,523 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
     )
   }
 
-  // Document Card Component (same as in AddStageDialog)
-  const DocumentCard = ({ doc, docIndex, entityOptions, loadingEntities, onUpdateDocument, onRemoveDocument, onAddExtraction, onUpdateExtraction, onRemoveExtraction }: any) => (
-    <Card className={doc.isSpecial ? 'border-amber-200 bg-amber-50/20' : ''}>
-      <CardHeader>
-        <div className="flex justify-between items-start">
-          <div className="flex items-center gap-2">
-            <h4 className="font-medium">
-              {doc.isSpecial && <Star className="h-4 w-4 text-amber-500 inline mr-1" />}
-              Document {docIndex + 1}
-            </h4>
-            {doc.isRequired && (
-              <Badge variant="destructive" className="text-xs">Required</Badge>
-            )}
-            <Badge variant="outline" className="text-xs">
-              {doc.documentType}
-            </Badge>
-            {doc.isSpecial && doc.entityName && (
-              <Badge variant="secondary" className="text-xs">
-                {doc.entityName}
-              </Badge>
-            )}
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onRemoveDocument(doc.id)}
-            className="text-muted-foreground hover:text-destructive"
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Special Document Entity Selection */}
-        {doc.isSpecial && (
-          <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-            <Label className="font-medium flex items-center gap-2">
-              <Star className="h-4 w-4 text-amber-500" />
-              Target Entity
-            </Label>
-            <Select
-              value={`${doc.entityType}-${doc.subdept_id}-${doc.class_id}-${doc.subclass_id}`}
-              onValueChange={(value) => {
-                const [entityType, subdeptId, classId, subclassId] = value.split('-')
-                onUpdateDocument(doc.id, {
-                  entityType: entityType as 'subdept' | 'class' | 'subclass',
-                  subdept_id: parseInt(subdeptId),
-                  class_id: classId !== 'undefined' ? classId : undefined,
-                  subclass_id: subclassId !== 'undefined' ? subclassId : undefined
-                })
-              }}
-              disabled={loadingEntities}
+  // Multi-select Entity Picker Component
+  const MultiEntityPicker = ({
+    entities,
+    selectedEntities = [],
+    onSelectionChange,
+    loading = false,
+    placeholder = "Select target entities..."
+  }: {
+    entities: EntityOption[]
+    selectedEntities: Array<{
+      entityType: 'subdept' | 'class' | 'subclass'
+      subdept_id: number
+      class_id?: string | number
+      subclass_id?: string | number
+      entityName: string
+    }>
+    onSelectionChange: (selectedEntities: any[]) => void
+    loading?: boolean
+    placeholder?: string
+  }) => {
+    const [open, setOpen] = useState(false)
+
+    const toggleEntity = (entity: EntityOption) => {
+      const entityKey = `${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`
+      const isSelected = selectedEntities.some(selected => {
+        const selectedKey = `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}`
+        return selectedKey === entityKey
+      })
+
+      if (isSelected) {
+        onSelectionChange(selectedEntities.filter(selected => {
+          const selectedKey = `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}`
+          return selectedKey !== entityKey
+        }))
+      } else {
+        const newEntity = {
+          entityType: entity.type,
+          subdept_id: entity.subdept_id!,
+          class_id: entity.class_id,
+          subclass_id: entity.subclass_id,
+          entityName: entity.name.replace(/^→\s*/g, '')
+        }
+        onSelectionChange([...selectedEntities, newEntity])
+      }
+    }
+
+    const isEntitySelected = (entity: EntityOption) => {
+      const entityKey = `${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`
+      return selectedEntities.some(selected => {
+        const selectedKey = `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}`
+        return selectedKey === entityKey
+      })
+    }
+
+    const groupedEntities = entities.reduce((acc, entity) => {
+      const subdeptName = entities.find(e => e.type === 'subdept' && e.subdept_id === entity.subdept_id)?.name || 'Unknown'
+      if (!acc[subdeptName]) {
+        acc[subdeptName] = []
+      }
+      acc[subdeptName].push(entity)
+      return acc
+    }, {} as Record<string, EntityOption[]>)
+
+    return (
+      <div className="space-y-2">
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              role="combobox"
+              aria-expanded={open}
+              className="w-full justify-between"
+              disabled={loading}
             >
-              <SelectTrigger>
-                <SelectValue placeholder={loadingEntities ? "Loading entities..." : "Select target entity"} />
-              </SelectTrigger>
-              <SelectContent>
-                {entityOptions.map((entity: EntityOption) => (
-                  <SelectItem 
-                    key={`${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`}
-                    value={`${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span style={{ marginLeft: `${entity.level * 12}px` }}>
-                        {entity.name}
-                      </span>
-                      <Badge variant="outline" className="text-xs">
-                        {entity.type}
-                      </Badge>
-                    </div>
-                  </SelectItem>
+              {selectedEntities.length === 0 ? (
+                <span className="text-muted-foreground">{loading ? "Loading entities..." : placeholder}</span>
+              ) : (
+                <span>{selectedEntities.length} entit{selectedEntities.length === 1 ? 'y' : 'ies'} selected</span>
+              )}
+              <X className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-96 p-0">
+            <Command>
+              <CommandInput placeholder="Search entities..." />
+              <CommandEmpty>No entities found.</CommandEmpty>
+              <div className="max-h-72 overflow-y-auto">
+                {Object.entries(groupedEntities).map(([subdeptName, subdeptEntities]) => (
+                  <CommandGroup key={subdeptName} heading={subdeptName}>
+                    {subdeptEntities
+                      .sort((a, b) => a.level - b.level)
+                      .map((entity) => (
+                        <CommandItem
+                          key={`${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`}
+                          onSelect={() => toggleEntity(entity)}
+                          className="flex items-center gap-2"
+                        >
+                          <div className="flex items-center gap-2 flex-1">
+                            <div className="flex h-4 w-4 items-center justify-center">
+                              {isEntitySelected(entity) && <Check className="h-3 w-3" />}
+                            </div>
+                            <span style={{ marginLeft: `${entity.level * 12}px` }}>
+                              {entity.name}
+                            </span>
+                            <Badge variant="outline" className="text-xs">
+                              {entity.type}
+                            </Badge>
+                          </div>
+                        </CommandItem>
+                      ))}
+                  </CommandGroup>
                 ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              This document will only be required for the selected entity
-            </p>
+              </div>
+            </Command>
+          </PopoverContent>
+        </Popover>
+
+        {selectedEntities.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {selectedEntities.map((entity, index) => (
+              <Badge
+                key={index}
+                variant="secondary"
+                className="flex items-center gap-1 text-xs"
+              >
+                {entity.entityName}
+                <Badge variant="outline" className="text-xs ml-1">
+                  {entity.entityType}
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-3 w-3 ml-1 hover:bg-destructive hover:text-destructive-foreground"
+                  onClick={() => {
+                    onSelectionChange(selectedEntities.filter((_, i) => i !== index))
+                  }}
+                >
+                  <X className="h-2 w-2" />
+                </Button>
+              </Badge>
+            ))}
           </div>
         )}
+      </div>
+    )
+  }
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <Label>Document Name *</Label>
-            <Input
-              name={`doc-${doc.id}-name`}
-              value={doc.name || ''}
-              onChange={(e) => onUpdateDocument(doc.id, { name: e.target.value })}
-              placeholder="e.g., Application Form, Passport Copy"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Document Type</Label>
-            <Select
-              value={doc.documentType}
-              onValueChange={(value: 'upload' | 'extraction' | 'both') =>
-                onUpdateDocument(doc.id, { documentType: value })
-              }
+  // Enhanced Document Card Component with KYC Linking
+  const DocumentCard = ({ 
+    doc, 
+    docIndex, 
+    entityOptions, 
+    loadingEntities,
+    kycDocuments,
+    loadingKycDocs,
+    onUpdateDocument, 
+    onRemoveDocument, 
+    onAddExtraction, 
+    onUpdateExtraction, 
+    onRemoveExtraction 
+  }: any) => {
+    const [documentMode, setDocumentMode] = useState<'new' | 'existing'>(doc.kycId && doc.linkedKycDocument ? 'existing' : 'new')
+
+    const handleModeChange = (mode: 'new' | 'existing') => {
+      setDocumentMode(mode)
+      if (mode === 'new') {
+        onUpdateDocument(doc.id, {
+          linkedKycDocument: undefined,
+          kycId: undefined,
+          name: '',
+          extractionSpecs: []
+        })
+      }
+    }
+
+    const handleKycDocumentSelect = (kycDocId: string) => {
+      const selectedKycDoc = kycDocuments.find(d => d.id === kycDocId)
+      if (selectedKycDoc) {
+        onUpdateDocument(doc.id, {
+          linkedKycDocument: selectedKycDoc.id,
+          kycId: selectedKycDoc.id,
+          name: selectedKycDoc.display_name || selectedKycDoc.name,
+          extractionSpecs: selectedKycDoc.fields || []
+        })
+      }
+    }
+
+    return (
+      <Card className={doc.isSpecial ? 'border-amber-200 bg-amber-50/20' : ''}>
+        <CardHeader>
+          <div className="flex justify-between items-start">
+            <div className="flex items-center gap-2">
+              <h4 className="font-medium">
+                {doc.isSpecial && <Star className="h-4 w-4 text-amber-500 inline mr-1" />}
+                Document {docIndex + 1}
+              </h4>
+              {doc.isRequired && (
+                <Badge variant="destructive" className="text-xs">Required</Badge>
+              )}
+              <Badge variant="outline" className="text-xs">
+                {doc.documentType}
+              </Badge>
+              {documentMode === 'existing' && (
+                <Badge variant="secondary" className="text-xs">Linked</Badge>
+              )}
+              {doc.isSpecial && doc.targetEntities && doc.targetEntities.length > 0 && (
+                <Badge variant="secondary" className="text-xs">
+                  {doc.targetEntities.length} target{doc.targetEntities.length === 1 ? '' : 's'}
+                </Badge>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onRemoveDocument(doc.id)}
+              className="text-muted-foreground hover:text-destructive"
             >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="upload">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    Upload Only
-                  </div>
-                </SelectItem>
-                <SelectItem value="extraction">
-                  <div className="flex items-center gap-2">
-                    <Info className="h-4 w-4" />
-                    Data Extraction Only
-                  </div>
-                </SelectItem>
-                <SelectItem value="both">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    <Info className="h-4 w-4" />
-                    Upload + Extraction
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              <X className="h-4 w-4" />
+            </Button>
           </div>
-          <div className="space-y-2">
-            <Label>Input Type</Label>
-            <Select
-              value={doc.inputType || 'file'}
-              onValueChange={(value: 'file' | 'message' | 'both') =>
-                onUpdateDocument(doc.id, { inputType: value })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="file">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    File Upload
-                  </div>
-                </SelectItem>
-                <SelectItem value="message">
-                  <div className="flex items-center gap-2">
-                    <MessageSquare className="h-4 w-4" />
-                    Message/Text
-                  </div>
-                </SelectItem>
-                <SelectItem value="both">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    <MessageSquare className="h-4 w-4" />
-                    Both
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label>Description</Label>
-          <Textarea
-            name={`doc-${doc.id}-description`}
-            value={doc.description || ''}
-            onChange={(e) => onUpdateDocument(doc.id, { description: e.target.value })}
-            placeholder="Brief description of this document's purpose..."
-            className="resize-none min-h-[80px]"
-            rows={2}
-          />
-        </div>
-
-        <div className="flex items-center space-x-2">
-          <Checkbox
-            checked={doc.isRequired}
-            onCheckedChange={(checked) => onUpdateDocument(doc.id, { isRequired: checked as boolean })}
-          />
-          <Label className="text-sm">This document is required for stage completion</Label>
-        </div>
-
-        {(doc.documentType === 'extraction' || doc.documentType === 'both') && (
-          <div className="space-y-4 border-t pt-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <Label className="text-sm font-medium">Data Extraction Fields</Label>
-                <p className="text-xs text-muted-foreground">
-                  Define what data should be extracted from this document
-                </p>
-              </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Document Mode Selection */}
+          <div className="space-y-3 p-4 bg-muted/30 border rounded-lg">
+            <Label className="font-medium">Document Source</Label>
+            <div className="grid grid-cols-2 gap-2">
               <Button
-                variant="outline"
+                variant={documentMode === 'new' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => onAddExtraction(doc.id)}
+                onClick={() => handleModeChange('new')}
+                className="justify-start"
               >
                 <Plus className="h-4 w-4 mr-2" />
-                Add Field
+                Create New
+              </Button>
+              <Button
+                variant={documentMode === 'existing' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => handleModeChange('existing')}
+                className="justify-start"
+                disabled={loadingKycDocs}
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Link Existing
               </Button>
             </div>
-
-            {doc.extractionSpecs && doc.extractionSpecs.length > 0 ? (
-              <div className="space-y-3">
-                {doc.extractionSpecs.map((extraction: DocumentExtraction, extractionIndex: number) => (
-                  <div key={extraction.id} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end p-3 bg-muted/20 rounded-lg">
-                    <div className="space-y-1 col-span-2">
-                      <Label className="text-xs">Field Name</Label>
-                      <Input
-                        name={`doc-${doc.id}-extraction-${extraction.id}-name`}
-                        value={extraction.fieldName || ''}
-                        onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { fieldName: e.target.value })}
-                        placeholder="e.g., Application Date"
-                        className="h-8"
-                      />
-                    </div>
-                    <div className="space-y-1 col-span-2">
-                      <Label className="text-xs">Description</Label>
-                      <Input
-                        name={`doc-${doc.id}-extraction-${extraction.id}-description`}
-                        value={extraction.description || ''}
-                        onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { description: e.target.value })}
-                        placeholder="Optional description"
-                        className="h-8"
-                      />
-                    </div>
-                    <div className="pt-4 col-span-1 justify-end">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => onRemoveExtraction(doc.id, extraction.id)}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg">
-                <Info className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No extraction fields defined</p>
-                <p className="text-xs">Add fields to specify what data should be extracted</p>
+            
+            {documentMode === 'existing' && (
+              <div className="space-y-2">
+                <Label className="text-sm">Select Existing Document</Label>
+                <Select
+                  value={doc.linkedKycDocument || ''}
+                  onValueChange={handleKycDocumentSelect}
+                  disabled={loadingKycDocs}
+                >
+                  <SelectTrigger>
+                    <SelectValue 
+                      placeholder={loadingKycDocs ? "Loading documents..." : "Choose an existing document"} 
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {kycDocuments.map((kycDoc) => (
+                      <SelectItem key={kycDoc.id} value={kycDoc.id}>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{kycDoc.display_name || kycDoc.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {kycDoc.department} • {kycDoc.category} • {kycDoc.fields?.length || 0} fields
+                          </span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                    {kycDocuments.length === 0 && !loadingKycDocs && (
+                      <SelectItem value="" disabled>
+                        No existing documents found
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+                {doc.linkedKycDocument && (
+                  <p className="text-xs text-muted-foreground">
+                    ✓ Document linked successfully. Extraction fields have been populated automatically.
+                  </p>
+                )}
               </div>
             )}
           </div>
-        )}
-      </CardContent>
-    </Card>
-  )
+
+          {/* Special Document Entity Selection */}
+          {doc.isSpecial && (
+            <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+              <Label className="font-medium flex items-center gap-2">
+                <Star className="h-4 w-4 text-amber-500" />
+                Target Entities
+              </Label>
+              <MultiEntityPicker
+                entities={entityOptions}
+                selectedEntities={doc.targetEntities || []}
+                onSelectionChange={(selectedEntities) => {
+                  onUpdateDocument(doc.id, { targetEntities: selectedEntities })
+                }}
+                loading={loadingEntities}
+                placeholder="Select which entities need this document..."
+              />
+              <p className="text-xs text-muted-foreground">
+                This document will only be required for the selected entities
+              </p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label>Document Name *</Label>
+              <Input
+                name={`doc-${doc.id}-name`}
+                value={doc.name || ''}
+                onChange={(e) => onUpdateDocument(doc.id, { name: e.target.value })}
+                placeholder="e.g., Application Form, Passport Copy"
+                disabled={documentMode === 'existing' && doc.linkedKycDocument}
+              />
+              {documentMode === 'existing' && doc.linkedKycDocument && (
+                <p className="text-xs text-muted-foreground">
+                  Name is automatically set from the linked document
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Document Type</Label>
+              <Select
+                value={doc.documentType}
+                onValueChange={(value: 'upload' | 'extraction' | 'both') =>
+                  onUpdateDocument(doc.id, { documentType: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="upload">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      Upload Only
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="extraction">
+                    <div className="flex items-center gap-2">
+                      <Info className="h-4 w-4" />
+                      Data Extraction Only
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="both">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      <Info className="h-4 w-4" />
+                      Upload + Extraction
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Input Type</Label>
+              <Select
+                value={doc.inputType || 'file'}
+                onValueChange={(value: 'file' | 'message' | 'both') =>
+                  onUpdateDocument(doc.id, { inputType: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="file">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      File Upload
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="message">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="h-4 w-4" />
+                      Message/Text
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="both">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      <MessageSquare className="h-4 w-4" />
+                      Both
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <Textarea
+              name={`doc-${doc.id}-description`}
+              value={doc.description || ''}
+              onChange={(e) => onUpdateDocument(doc.id, { description: e.target.value })}
+              placeholder="Brief description of this document's purpose..."
+              className="resize-none min-h-[80px]"
+              rows={2}
+            />
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              checked={doc.isRequired}
+              onCheckedChange={(checked) => onUpdateDocument(doc.id, { isRequired: checked as boolean })}
+            />
+            <Label className="text-sm">This document is required for stage completion</Label>
+          </div>
+
+          {(doc.documentType === 'extraction' || doc.documentType === 'both') && (
+            <div className="space-y-4 border-t pt-4">
+              <div className="flex justify-between items-center">
+                <div>
+                  <Label className="text-sm font-medium">Data Extraction Fields</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {documentMode === 'existing' && doc.linkedKycDocument 
+                      ? "Fields from the linked document (read-only)" 
+                      : "Define what data should be extracted from this document"
+                    }
+                  </p>
+                </div>
+                {documentMode === 'new' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onAddExtraction(doc.id)}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Field
+                  </Button>
+                )}
+              </div>
+
+              {doc.extractionSpecs && doc.extractionSpecs.length > 0 ? (
+                <div className="space-y-3">
+                  {doc.extractionSpecs.map((extraction: DocumentExtraction, extractionIndex: number) => (
+                    <div key={extraction.id} className={`grid grid-cols-1 md:grid-cols-5 gap-3 items-end p-3 rounded-lg ${
+                      documentMode === 'existing' && doc.linkedKycDocument 
+                        ? 'bg-blue-50 border border-blue-200' 
+                        : 'bg-muted/20'
+                    }`}>
+                      <div className="space-y-1 col-span-2">
+                        <Label className="text-xs">Field Name</Label>
+                        <Input
+                          name={`doc-${doc.id}-extraction-${extraction.id}-name`}
+                          value={extraction.fieldName || ''}
+                          onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { fieldName: e.target.value })}
+                          placeholder="e.g., Application Date"
+                          className="h-8"
+                          disabled={documentMode === 'existing' && doc.linkedKycDocument}
+                        />
+                      </div>
+                      <div className="space-y-1 col-span-2">
+                        <Label className="text-xs">Description</Label>
+                        <Input
+                          name={`doc-${doc.id}-extraction-${extraction.id}-description`}
+                          value={extraction.description || ''}
+                          onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { description: e.target.value })}
+                          placeholder="Optional description"
+                          className="h-8"
+                          disabled={documentMode === 'existing' && doc.linkedKycDocument}
+                        />
+                      </div>
+                      <div className="pt-4 col-span-1 justify-end">
+                        {documentMode === 'new' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                            onClick={() => onRemoveExtraction(doc.id, extraction.id)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {documentMode === 'existing' && doc.linkedKycDocument && (
+                    <div className="text-center p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <Info className="h-5 w-5 mx-auto mb-2 text-blue-600" />
+                      <p className="text-sm text-blue-800 font-medium">Linked Document Fields</p>
+                      <p className="text-xs text-blue-600">
+                        These fields are imported from the linked KYC document and cannot be edited here.
+                        To modify them, edit the original document in the KYC system.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg">
+                  <Info className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">
+                    {documentMode === 'existing' 
+                      ? "Select a linked document to view its extraction fields" 
+                      : "No extraction fields defined"
+                    }
+                  </p>
+                  <p className="text-xs">
+                    {documentMode === 'existing'
+                      ? "Choose an existing document from the dropdown above"
+                      : "Add fields to specify what data should be extracted"
+                    }
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -873,7 +1179,6 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave }: EditStage
 
           <form onSubmit={handleSubmit} className="space-y-6 mt-6">
             <TabsContent value="general" className="space-y-6">
-              {/* General tab content - same as before */}
               <div className="grid grid-cols-1 md:grid-cols-4 items-start gap-4">
                 <div className="space-y-1">
                   <Label htmlFor="name" className="flex items-center gap-1">

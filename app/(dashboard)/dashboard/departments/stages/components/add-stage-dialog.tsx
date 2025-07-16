@@ -7,17 +7,19 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, X, Clock, FileText, User, Info, MessageSquare, Trash2, Star } from "lucide-react"
+import { Plus, X, Clock, FileText, User, Info, MessageSquare, Trash2, Star, Check } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
-import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { DocumentExtraction, Stage, StageDocument, TimeConfig , NewStage, EntityOption, DepartmentOption} from "../stagesdb"
 import { createKYCDocument } from "../kycDocuments"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
+import { toast } from "@/hooks/use-toast"
 
 // Simple UUID generator
 const generateId = () => {
@@ -26,6 +28,16 @@ const generateId = () => {
     const v = c === 'x' ? r : (r & 0x3 | 0x8)
     return v.toString(16)
   })
+}
+
+interface KYCDocument {
+  id: string
+  name: string
+  display_name: string
+  department: string
+  category: string
+  fields: DocumentExtraction[]
+  document_type: string
 }
 
 interface AddStageDialogProps {
@@ -53,7 +65,8 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
   const [activeStageTab, setActiveStageTab] = useState<string>('')
   const [entityOptions, setEntityOptions] = useState<EntityOption[]>([])
   const [loadingEntities, setLoadingEntities] = useState(false)
-  const { toast } = useToast()
+  const [kycDocuments, setKycDocuments] = useState<KYCDocument[]>([])
+  const [loadingKycDocs, setLoadingKycDocs] = useState(false)
 
   React.useEffect(() => {
     if (newStages.length > 0 && !activeStageTab) {
@@ -65,10 +78,53 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
   useEffect(() => {
     if (selectedDepartment) {
       fetchEntities(selectedDepartment)
+      const departmentName = departments.find(d => d.id === selectedDepartment)?.name
+      fetchKYCDocuments(departmentName)
     } else {
       setEntityOptions([])
+      setKycDocuments([])
     }
   }, [selectedDepartment])
+
+  const fetchKYCDocuments = async (departmentName?: string) => {
+    setLoadingKycDocs(true)
+    try {
+      let query = supabase
+        .from('acc_portal_kyc')
+        .select('id, name, display_name, department, category, fields, document_type')
+        .order('name')
+  
+      if (departmentName) {
+        query = query.eq('department', departmentName)
+      }
+  
+      const { data, error } = await query
+  
+      if (error) throw error
+  
+      const transformedDocs: KYCDocument[] = (data || []).map(doc => ({
+        ...doc,
+        fields: Array.isArray(doc.fields) ? doc.fields.map((field: any) => ({
+          id: field.id || `field-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          fieldName: field.fieldName || field.name || '',
+          description: field.description || '',
+          isRequired: field.isRequired !== false,
+          fieldType: field.fieldType || field.type || 'text'
+        })) : []
+      }))
+  
+      setKycDocuments(transformedDocs)
+    } catch (error) {
+      console.error('Error fetching KYC documents:', error)
+      toast({
+        title: "Error",
+        description: "Failed to load existing documents. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setLoadingKycDocs(false)
+    }
+  }
 
   const fetchEntities = async (departmentId: string) => {
     setLoadingEntities(true)
@@ -91,7 +147,6 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
       
       if (deptData?.tm_subdepartments) {
         deptData.tm_subdepartments.forEach((subdept: any) => {
-          // Add subdepartment
           entities.push({
             id: subdept.id,
             name: subdept.name,
@@ -100,7 +155,6 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
             subdept_id: subdept.id
           })
 
-          // Add classes
           if (subdept.classes && Array.isArray(subdept.classes)) {
             subdept.classes.forEach((cls: any, clsIndex: number) => {
               const classId = cls.id || `${subdept.id}-class-${clsIndex}`
@@ -113,7 +167,6 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                 class_id: classId
               })
 
-              // Add subclasses
               if (cls.subClasses && Array.isArray(cls.subClasses)) {
                 cls.subClasses.forEach((subCls: any, subClsIndex: number) => {
                   const subclassId = subCls.id || `${subdept.id}-class-${clsIndex}-subclass-${subClsIndex}`
@@ -183,16 +236,20 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
 
   const addDocument = (stageId: string, isSpecial: boolean = false) => {
     const newDoc: StageDocument = {
-      id: generateId(),
+      id: `doc-${Date.now()}`,
       name: '',
       description: '',
       isRequired: false,
       documentType: 'both',
-      inputType: 'file',
       extractionSpecs: [],
       isSpecial,
+      linkedKycDocument: undefined, // NEW FIELD
       ...(isSpecial && {
-        targetEntities: []
+        entityType: undefined,
+        subdept_id: undefined,
+        class_id: undefined,
+        subclass_id: undefined,
+        entityName: undefined
       })
     }
     updateNewStage(stageId, {
@@ -303,8 +360,13 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
           const processedDocs = await Promise.all(
             stage.documents.map(async (doc) => {
               if (doc.name.trim()) {
+                // Skip KYC creation if it's a linked document
+                if (doc.linkedKycDocument) {
+                  return doc // Return as-is for linked documents
+                }
+                
                 try {
-                  // Create KYC document
+                  // Create KYC document for new documents
                   const kycId = await createKYCDocument({
                     name: doc.name,
                     department: departmentName,
@@ -312,7 +374,6 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                     document_type: 'one_off',
                     fields: doc.extractionSpecs || [],
                     display_name: doc.name,
-                    // Add special document metadata with multiple targets
                     metadata: doc.isSpecial ? {
                       isSpecial: true,
                       targetEntities: doc.targetEntities || []
@@ -356,6 +417,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
       setSelectedDepartment('')
       setActiveStageTab('')
       setEntityOptions([])
+      setKycDocuments([])
     } catch (error) {
       console.error('Error adding stages:', error)
       toast({
@@ -367,7 +429,6 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
       setSaving(false)
     }
   }
-
 
   const isFormValid = selectedDepartment && newStages.every(stage => stage.name.trim())
   const currentStage = newStages.find(s => s.id === activeStageTab)
@@ -476,6 +537,8 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                         stage={stage}
                         entityOptions={entityOptions}
                         loadingEntities={loadingEntities}
+                        kycDocuments={kycDocuments}
+                        loadingKycDocs={loadingKycDocs}
                         onAddDocument={(isSpecial) => addDocument(stage.id, isSpecial)}
                         onUpdateDocument={(docId, updates) => updateDocument(stage.id, docId, updates)}
                         onRemoveDocument={(docId) => removeDocument(stage.id, docId)}
@@ -495,6 +558,8 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                       stage={currentStage}
                       entityOptions={entityOptions}
                       loadingEntities={loadingEntities}
+                      kycDocuments={kycDocuments}
+                      loadingKycDocs={loadingKycDocs}
                       onAddDocument={(isSpecial) => addDocument(currentStage.id, isSpecial)}
                       onUpdateDocument={(docId, updates) => updateDocument(currentStage.id, docId, updates)}
                       onRemoveDocument={(docId) => removeDocument(currentStage.id, docId)}
@@ -541,7 +606,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
   )
 }
 
-// Stage Form Component (unchanged from your original)
+// Stage Form Component
 function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: Partial<NewStage>) => void }) {
   const addTimeConfig = () => {
     onUpdate({
@@ -745,11 +810,13 @@ function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: P
   )
 }
 
-// Updated Documents Section Component
+// Enhanced Documents Section Component
 function DocumentsSection({
   stage,
   entityOptions,
   loadingEntities,
+  kycDocuments,
+  loadingKycDocs,
   onAddDocument,
   onUpdateDocument,
   onRemoveDocument,
@@ -760,6 +827,8 @@ function DocumentsSection({
   stage: NewStage
   entityOptions: EntityOption[]
   loadingEntities: boolean
+  kycDocuments: KYCDocument[]
+  loadingKycDocs: boolean
   onAddDocument: (isSpecial?: boolean) => void
   onUpdateDocument: (docId: string, updates: Partial<StageDocument>) => void
   onRemoveDocument: (docId: string) => void
@@ -816,6 +885,8 @@ function DocumentsSection({
               docIndex={docIndex}
               entityOptions={entityOptions}
               loadingEntities={loadingEntities}
+              kycDocuments={kycDocuments}
+              loadingKycDocs={loadingKycDocs}
               onUpdateDocument={onUpdateDocument}
               onRemoveDocument={onRemoveDocument}
               onAddExtraction={onAddExtraction}
@@ -845,6 +916,8 @@ function DocumentsSection({
               docIndex={docIndex}
               entityOptions={entityOptions}
               loadingEntities={loadingEntities}
+              kycDocuments={kycDocuments}
+              loadingKycDocs={loadingKycDocs}
               onUpdateDocument={onUpdateDocument}
               onRemoveDocument={onRemoveDocument}
               onAddExtraction={onAddExtraction}
@@ -913,13 +986,11 @@ function MultiEntityPicker({
     })
 
     if (isSelected) {
-      // Remove entity
       onSelectionChange(selectedEntities.filter(selected => {
         const selectedKey = `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}`
         return selectedKey !== entityKey
       }))
     } else {
-      // Add entity
       const newEntity = {
         entityType: entity.type,
         subdept_id: entity.subdept_id!,
@@ -939,7 +1010,6 @@ function MultiEntityPicker({
     })
   }
 
-  // Group entities by subdepartment for better organization
   const groupedEntities = entities.reduce((acc, entity) => {
     const subdeptName = entities.find(e => e.type === 'subdept' && e.subdept_id === entity.subdept_id)?.name || 'Unknown'
     if (!acc[subdeptName]) {
@@ -1003,7 +1073,6 @@ function MultiEntityPicker({
         </PopoverContent>
       </Popover>
 
-      {/* Display selected entities */}
       {selectedEntities.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-2">
           {selectedEntities.map((entity, index) => (
@@ -1034,12 +1103,14 @@ function MultiEntityPicker({
   )
 }
 
-// Updated Document Card Component with multi-select
+// Enhanced Document Card Component with KYC Linking
 function DocumentCard({
   doc,
   docIndex,
   entityOptions,
   loadingEntities,
+  kycDocuments,
+  loadingKycDocs,
   onUpdateDocument,
   onRemoveDocument,
   onAddExtraction,
@@ -1050,12 +1121,42 @@ function DocumentCard({
   docIndex: number
   entityOptions: EntityOption[]
   loadingEntities: boolean
+  kycDocuments: KYCDocument[]
+  loadingKycDocs: boolean
   onUpdateDocument: (docId: string, updates: Partial<StageDocument>) => void
   onRemoveDocument: (docId: string) => void
   onAddExtraction: (docId: string) => void
   onUpdateExtraction: (docId: string, extractionId: string, updates: Partial<DocumentExtraction>) => void
   onRemoveExtraction: (docId: string, extractionId: string) => void
 }) {
+  const [documentMode, setDocumentMode] = useState<'new' | 'existing'>(
+    doc.kycId && doc.linkedKycDocument ? 'existing' : 'new'
+  )
+
+  const handleModeChange = (mode: 'new' | 'existing') => {
+    setDocumentMode(mode)
+    if (mode === 'new') {
+      onUpdateDocument(doc.id, {
+        linkedKycDocument: undefined,
+        kycId: undefined,
+        name: '',
+        extractionSpecs: []
+      })
+    }
+  }
+
+  const handleKycDocumentSelect = (kycDocId: string) => {
+    const selectedKycDoc = kycDocuments.find(d => d.id === kycDocId)
+    if (selectedKycDoc) {
+      onUpdateDocument(doc.id, {
+        linkedKycDocument: selectedKycDoc.id,
+        kycId: selectedKycDoc.id,
+        name: selectedKycDoc.display_name || selectedKycDoc.name,
+        extractionSpecs: selectedKycDoc.fields || []
+      })
+    }
+  }
+
   return (
     <Card className={doc.isSpecial ? 'border-amber-200 bg-amber-50/20' : ''}>
       <CardHeader>
@@ -1071,6 +1172,9 @@ function DocumentCard({
             <Badge variant="outline" className="text-xs">
               {doc.documentType}
             </Badge>
+            {documentMode === 'existing' && (
+              <Badge variant="secondary" className="text-xs">Linked</Badge>
+            )}
             {doc.isSpecial && doc.targetEntities && doc.targetEntities.length > 0 && (
               <Badge variant="secondary" className="text-xs">
                 {doc.targetEntities.length} target{doc.targetEntities.length === 1 ? '' : 's'}
@@ -1088,6 +1192,71 @@ function DocumentCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Document Mode Selection */}
+        <div className="space-y-3 p-4 bg-muted/30 border rounded-lg">
+          <Label className="font-medium">Document Source</Label>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant={documentMode === 'new' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleModeChange('new')}
+              className="justify-start"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Create New
+            </Button>
+            <Button
+              variant={documentMode === 'existing' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleModeChange('existing')}
+              className="justify-start"
+              disabled={loadingKycDocs}
+            >
+              <FileText className="h-4 w-4 mr-2" />
+              Link Existing
+            </Button>
+          </div>
+          
+          {documentMode === 'existing' && (
+            <div className="space-y-2">
+              <Label className="text-sm">Select Existing Document</Label>
+              <Select
+                value={doc.linkedKycDocument || ''}
+                onValueChange={handleKycDocumentSelect}
+                disabled={loadingKycDocs}
+              >
+                <SelectTrigger>
+                  <SelectValue 
+                    placeholder={loadingKycDocs ? "Loading documents..." : "Choose an existing document"} 
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {kycDocuments.map((kycDoc) => (
+                    <SelectItem key={kycDoc.id} value={kycDoc.id}>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{kycDoc.display_name || kycDoc.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {kycDoc.department} • {kycDoc.category} • {kycDoc.fields?.length || 0} fields
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                  {kycDocuments.length === 0 && !loadingKycDocs && (
+                    <SelectItem value="" disabled>
+                      No existing documents found
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              {doc.linkedKycDocument && (
+                <p className="text-xs text-muted-foreground">
+                  ✓ Document linked successfully. Extraction fields have been populated automatically.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Special Document Entity Selection */}
         {doc.isSpecial && (
           <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
@@ -1110,7 +1279,7 @@ function DocumentCard({
           </div>
         )}
 
-        {/* Rest of the document configuration (name, type, etc.) - same as before */}
+        {/* Document Configuration */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="space-y-2">
             <Label>Document Name *</Label>
@@ -1118,7 +1287,13 @@ function DocumentCard({
               value={doc.name || ''}
               onChange={(e) => onUpdateDocument(doc.id, { name: e.target.value })}
               placeholder="e.g., Application Form"
+              disabled={documentMode === 'existing' && doc.linkedKycDocument}
             />
+            {documentMode === 'existing' && doc.linkedKycDocument && (
+              <p className="text-xs text-muted-foreground">
+                Name is automatically set from the linked document
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label>Document Type</Label>
@@ -1189,6 +1364,7 @@ function DocumentCard({
             </Select>
           </div>
         </div>
+
         <div className="space-y-2">
           <Label>Description</Label>
           <Textarea
@@ -1207,29 +1383,39 @@ function DocumentCard({
           <Label className="text-sm">This document is required for stage completion</Label>
         </div>
 
+        {/* Data Extraction Fields */}
         {(doc.documentType === 'extraction' || doc.documentType === 'both') && (
           <div className="space-y-4 border-t pt-4">
             <div className="flex justify-between items-center">
               <div>
                 <Label className="text-sm font-medium">Data Extraction Fields</Label>
                 <p className="text-xs text-muted-foreground">
-                  Define what data should be extracted from this document
+                  {documentMode === 'existing' && doc.linkedKycDocument 
+                    ? "Fields from the linked document (read-only)" 
+                    : "Define what data should be extracted from this document"
+                  }
                 </p>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onAddExtraction(doc.id)}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Field
-              </Button>
+              {documentMode === 'new' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onAddExtraction(doc.id)}
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Field
+                </Button>
+              )}
             </div>
 
             {doc.extractionSpecs && doc.extractionSpecs.length > 0 ? (
               <div className="space-y-3">
                 {doc.extractionSpecs.map((extraction, extractionIndex) => (
-                  <div key={extraction.id} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end p-3 bg-muted/20 rounded-lg">
+                  <div key={extraction.id} className={`grid grid-cols-1 md:grid-cols-6 gap-3 items-end p-3 rounded-lg ${
+                    documentMode === 'existing' && doc.linkedKycDocument 
+                      ? 'bg-blue-50 border border-blue-200' 
+                      : 'bg-muted/20'
+                  }`}>
                     <div className="space-y-1 col-span-2">
                       <Label className="text-xs">Field Name</Label>
                       <Input
@@ -1237,6 +1423,7 @@ function DocumentCard({
                         onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { fieldName: e.target.value })}
                         placeholder="e.g., Application Date"
                         className="h-8"
+                        disabled={documentMode === 'existing' && doc.linkedKycDocument}
                       />
                     </div>
                     <div className="space-y-1">
@@ -1246,6 +1433,7 @@ function DocumentCard({
                         onValueChange={(value: 'text' | 'date' | 'number' | 'boolean' | 'file') =>
                           onUpdateExtraction(doc.id, extraction.id, { fieldType: value })
                         }
+                        disabled={documentMode === 'existing' && doc.linkedKycDocument}
                       >
                         <SelectTrigger className="h-8">
                           <SelectValue />
@@ -1266,31 +1454,57 @@ function DocumentCard({
                         onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { description: e.target.value })}
                         placeholder="Optional description"
                         className="h-8"
+                        disabled={documentMode === 'existing' && doc.linkedKycDocument}
                       />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        checked={extraction.isRequired}
-                        onCheckedChange={(checked) => onUpdateExtraction(doc.id, extraction.id, { isRequired: checked as boolean })}
-                      />
-                      <Label className="text-xs">Required</Label>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                        onClick={() => onRemoveExtraction(doc.id, extraction.id)}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          checked={extraction.isRequired}
+                          onCheckedChange={(checked) => onUpdateExtraction(doc.id, extraction.id, { isRequired: checked as boolean })}
+                          disabled={documentMode === 'existing' && doc.linkedKycDocument}
+                        />
+                        <Label className="text-xs">Required</Label>
+                      </div>
+                      {documentMode === 'new' && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                          onClick={() => onRemoveExtraction(doc.id, extraction.id)}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
+                {documentMode === 'existing' && doc.linkedKycDocument && (
+                  <div className="text-center p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <Info className="h-5 w-5 mx-auto mb-2 text-blue-600" />
+                    <p className="text-sm text-blue-800 font-medium">Linked Document Fields</p>
+                    <p className="text-xs text-blue-600">
+                      These fields are imported from the linked KYC document and cannot be edited here.
+                      To modify them, edit the original document in the KYC system.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg">
                 <Info className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No extraction fields defined</p>
-                <p className="text-xs">Add fields to specify what data should be extracted</p>
+                <p className="text-sm">
+                  {documentMode === 'existing' 
+                    ? "Select a linked document to view its extraction fields" 
+                    : "No extraction fields defined"
+                  }
+                </p>
+                <p className="text-xs">
+                  {documentMode === 'existing'
+                    ? "Choose an existing document from the dropdown above"
+                    : "Add fields to specify what data should be extracted"
+                  }
+                </p>
               </div>
             )}
           </div>

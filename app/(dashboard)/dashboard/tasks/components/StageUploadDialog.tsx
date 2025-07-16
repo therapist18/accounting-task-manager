@@ -23,7 +23,13 @@ const ExtractionPreview = dynamic(
 interface StageUploadDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  selectedStageTask: { task: any, stage: any } | null
+  selectedStageTask: { 
+    task: any, 
+    stage: any,
+    // Add child level IDs for better type safety
+    childLevelId?: string,
+    childLevelType?: 'subdepartment' | 'class' | 'subclass'
+  } | null
   getCurrentRequirements: () => any[]
   fuzzyMatch: (str1: string, str2: string, threshold?: number) => boolean
 }
@@ -35,6 +41,17 @@ export function StageUploadDialog({
   getCurrentRequirements,
   fuzzyMatch
 }: StageUploadDialogProps) {
+  // Log child level information for debugging
+  useEffect(() => {
+    if (selectedStageTask) {
+      console.log('StageUploadDialog - Child level info:', {
+        childLevelId: selectedStageTask.childLevelId,
+        childLevelType: selectedStageTask.childLevelType,
+        task: selectedStageTask.task,
+        stage: selectedStageTask.stage
+      });
+    }
+  }, [selectedStageTask]);
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File>>({})
   const [messageTexts, setMessageTexts] = useState<Record<string, string>>({})
   const [extractedData, setExtractedData] = useState<Record<string, any>>({})
@@ -62,15 +79,45 @@ export function StageUploadDialog({
 
   // Helper function to get input type for a document
   const getDocumentInputType = (doc: any): 'file' | 'message' | 'both' => {
-    return doc.inputType || 'both' // Default to 'both' if not specified
+    // If document has a specific input type configured, use that
+    if (doc.inputType) {
+      return doc.inputType;
+    }
+    
+    // For special documents, default to file upload only
+    if (doc.isSpecial) {
+      return 'file';
+    }
+    
+    // Default to both for regular documents
+    return 'both';
   }
 
-  // Helper function to render input section based on input type
+  // Helper function to render input section based on input type and document configuration
   const renderInputSection = (doc: any) => {
-    const inputType = getDocumentInputType(doc)
+    const inputType = getDocumentInputType(doc);
+    const isSpecialDocument = doc.isSpecial;
+    const documentType = doc.documentType || 'both';
 
     return (
       <div className="space-y-4 p-4 rounded-lg border">
+        {isSpecialDocument && (
+          <div className="bg-amber-50 border-l-4 border-amber-400 p-4 mb-4">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <Star className="h-5 w-5 text-amber-600" />
+              </div>
+              <div className="ml-3">
+                <p className="text-sm text-amber-700">
+                  {doc.entityName ? 
+                    `This document is specific to ${doc.entityName}` : 
+                    'This is a special document with specific requirements'}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* File Upload Section */}
         {(inputType === 'file' || inputType === 'both') && (
           <div className="space-y-2">
@@ -81,13 +128,19 @@ export function StageUploadDialog({
             <Input
               id={`file-${doc.id}`}
               type="file"
-              accept="application/pdf,image/*"
+              accept={documentType === 'both' ? "application/pdf,image/*" : 
+                     documentType === 'upload' ? "application/pdf,image/*" : 
+                     documentType === 'extraction' ? "application/pdf" : "application/pdf,image/*"}
               onChange={(e) => handleFileChange(e, doc.id)}
               className="cursor-pointer"
               disabled={uploading}
             />
             <p className="text-sm text-muted-foreground">
-              {doc.isRequired ? "Required" : "Optional"} • Accepts PDF and image files
+              {doc.isRequired ? "Required" : "Optional"} • 
+              {documentType === 'both' ? "Accepts PDF and image files" : 
+               documentType === 'upload' ? "Upload document only (PDF/Images)" :
+               documentType === 'extraction' ? "PDF only (data extraction required)" : 
+               "Accepts PDF and image files"}
             </p>
 
             {/* Upload Progress */}
@@ -127,14 +180,22 @@ export function StageUploadDialog({
                 className="min-h-[100px] resize-none"
                 value={messageTexts[doc.id] || ''}
                 onChange={(e) => setMessageTexts(prev => ({ ...prev, [doc.id]: e.target.value }))}
-                disabled={uploading}
+                disabled={uploading || documentType === 'upload'}
               />
+              {documentType === 'upload' && (
+                <div className="absolute inset-0 bg-gray-50 bg-opacity-50 flex items-center justify-center rounded-md">
+                  <p className="text-sm text-muted-foreground">
+                    Message input not available for upload-only documents
+                  </p>
+                </div>
+              )}
             </div>
             <Button
               className="w-full"
               onClick={() => handleMessageSubmit(messageTexts[doc.id] || '', doc.id)}
-              disabled={!messageTexts[doc.id]?.trim() || uploading}
+              disabled={!messageTexts[doc.id]?.trim() || uploading || documentType === 'upload'}
               variant={inputType === 'message' ? 'default' : 'outline'}
+              title={documentType === 'upload' ? 'Message submission not available for upload-only documents' : ''}
             >
               {uploading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -164,20 +225,147 @@ export function StageUploadDialog({
   }, [previewData])
 
   
-  // Add this helper function to check if a document applies to the current task
+  // Helper function to check if a document applies to the current task
   const isDocumentApplicableToTask = useCallback((doc: any, task: any) => {
+    // Debug log to see what we're checking
+    console.log('Checking document applicability:', {
+      docName: doc.name,
+      docIsSpecial: doc.isSpecial,
+      docClassId: doc.class_id,
+      docSubdeptId: doc.subdept_id,
+      taskClassId: task.class_id,
+      taskSubdeptId: task.subdepartment?.id,
+      childLevelId: selectedStageTask?.childLevelId,
+      childLevelType: selectedStageTask?.childLevelType,
+      hasTargetEntities: !!doc.targetEntities
+    });
+
     // If it's not a special document, it applies to all tasks
     if (!doc.isSpecial) {
-      return true
+      console.log('Document is not special - applying to all tasks');
+      return true;
     }
 
-    // For special documents, check the entity targeting based on the document's properties
-    if (doc.entityType === 'class' && doc.class_id && doc.subdept_id) {
-      // Document is targeted to a specific class
-      return (
-        task.subdepartment?.id?.toString() === doc.subdept_id?.toString() &&
-        task.class_id?.toString() === doc.class_id?.toString()
-      )
+    // Special document handling
+    console.log('Processing special document');
+
+    // Check if document has targetEntities
+    if (doc.targetEntities && Array.isArray(doc.targetEntities) && doc.targetEntities.length > 0) {
+      console.log('Document has targetEntities:', doc.targetEntities);
+      
+      // Check if any target entity matches the task's class_id and subdepartment_id
+      const matchesTarget = doc.targetEntities.some((entity: any) => {
+        // If entity has class_id, it must match task's class_id
+        const classMatch = entity.class_id ? 
+          entity.class_id.toString() === task.class_id?.toString() : 
+          true;
+          
+        // If entity has subdept_id, it must match task's subdepartment.id
+        const subdeptMatch = entity.subdept_id ? 
+          entity.subdept_id.toString() === task.subdepartment?.id?.toString() : 
+          true;
+        
+        console.log('Checking target entity:', {
+          entity,
+          classMatch,
+          subdeptMatch,
+          taskClassId: task.class_id,
+          taskSubdeptId: task.subdepartment?.id
+        });
+        
+        return classMatch && subdeptMatch;
+      });
+      
+      console.log('Document targetEntities match result:', matchesTarget);
+      
+      // If we have targetEntities and none match, the document is not applicable
+      if (doc.targetEntities.length > 0 && !matchesTarget) {
+        console.log('Document has targetEntities but none match the task - not applicable');
+        return false;
+      }
+      
+      // If we have targetEntities and there's a match, the document is applicable
+      if (matchesTarget) {
+        console.log('Document matches targetEntities - applying to task');
+        return true;
+      }
+    }
+
+    // For special documents, check if they're applicable to the current task's hierarchy
+    const taskClassId = task.class_id?.toString();
+    const taskSubdeptId = task.subdepartment?.id?.toString();
+    const docClassId = doc.class_id?.toString();
+    const docSubdeptId = doc.subdept_id?.toString();
+    
+    // If document is specifically targeting a class
+    if (docClassId) {
+      console.log('Document targets class:', docClassId);
+      // If document targets a specific class, check if it matches the task's class
+      if (docClassId !== taskClassId) {
+        console.log('Class ID does not match');
+        return false;
+      }
+      
+      // If document also targets a specific subdepartment, check that too
+      if (docSubdeptId && docSubdeptId !== taskSubdeptId) {
+        console.log('Subdepartment ID does not match');
+        return false;
+      }
+      
+      console.log('Document matches class and subdepartment (if specified)');
+      return true;
+    }
+    
+    // If document targets a specific subdepartment but no class
+    if (docSubdeptId) {
+      console.log('Document targets subdepartment:', docSubdeptId);
+      const matches = docSubdeptId === taskSubdeptId;
+      console.log('Subdepartment match:', matches);
+      return matches;
+    }
+    
+    // If we have a child level ID and type from the selected stage task, use that for additional filtering
+    if (selectedStageTask?.childLevelId && selectedStageTask?.childLevelType) {
+      console.log('Using child level info for filtering:', selectedStageTask.childLevelType, selectedStageTask.childLevelId);
+      const childLevelId = selectedStageTask.childLevelId;
+      const childLevelType = selectedStageTask.childLevelType;
+      
+      // If document has explicit targeting for this child level, check if it matches
+      if (doc[`${childLevelType}_id`] && doc[`${childLevelType}_id`].toString() !== childLevelId) {
+        console.log('Child level ID does not match');
+        return false;
+      }
+      
+      // If document targets a different level in the hierarchy, check parent relationships
+      if (childLevelType === 'subclass' && doc.class_id && doc.class_id.toString() !== taskClassId) {
+        console.log('Parent class ID does not match for subclass');
+        return false;
+      }
+      
+      if (childLevelType === 'class' && doc.subdept_id && doc.subdept_id.toString() !== taskSubdeptId) {
+        console.log('Parent subdepartment ID does not match for class');
+        return false;
+      }
+    }
+
+    // For special documents with entity type, check the entity targeting
+    if (doc.entityType === 'class' && doc.class_id) {
+      console.log('Document has entityType class with class_id:', doc.class_id);
+      const classMatch = task.class_id?.toString() === doc.class_id.toString();
+      
+      // If subdept_id is specified, check it too, otherwise just match on class
+      if (doc.subdept_id) {
+        const subdeptMatch = task.subdepartment?.id?.toString() === doc.subdept_id.toString();
+        console.log('Checking subdepartment match:', { 
+          taskSubdept: task.subdepartment?.id, 
+          docSubdept: doc.subdept_id,
+          matches: subdeptMatch
+        });
+        return classMatch && subdeptMatch;
+      }
+      
+      console.log('Class match result:', classMatch);
+      return classMatch;
     }
 
     if (doc.entityType === 'subdept' && doc.subdept_id) {

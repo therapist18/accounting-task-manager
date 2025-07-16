@@ -31,7 +31,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, UserPlus, UserCheck, UserX, ChevronDown, Check, Eye, EyeOff, ChevronRight, ChevronUp, Trash2, FileText, Layers, Target, UserIcon, Minus, ChevronsUpDown, Search, FileDown, Workflow, Building } from "lucide-react"
+import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, UserPlus, UserCheck, UserX, ChevronDown, Check, Eye, EyeOff, ChevronRight, ChevronUp, Trash2, FileText, Layers, Target, UserIcon, Minus, ChevronsUpDown, Search, FileDown, Workflow, Building, FolderOpen } from "lucide-react"
 import supabase from "@/lib/supabase/client"
 import { toast } from "sonner"
 
