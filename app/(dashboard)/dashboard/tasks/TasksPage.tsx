@@ -220,6 +220,22 @@ export default function TasksPage() {
     // Implement web data viewing logic
   }
 
+  const refreshTasks = useCallback(async () => {
+    try {
+      const tasksData = await getTasks();
+      setTasks(tasksData);
+      return tasksData;
+    } catch (error) {
+      console.error('Error refreshing tasks:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to refresh tasks',
+        variant: 'destructive',
+      });
+      throw error;
+    }
+  }, []);
+
   const handleExtractData = (task: any) => {
     console.log('Extracting data for task:', task.id)
     // Implement data extraction logic
@@ -1079,7 +1095,14 @@ export default function TasksPage() {
             title={`Delete Task ${taskToDelete?.id || ''}`}
             description="Are you sure you want to delete this task? This action cannot be undone."
             confirmText="Delete Task"
-            loading={isDeleting}
+            refreshTasks={refreshTasks}
+            onViewWebData={handleViewWebData}
+            onExtractData={handleExtractData}
+            onTaskAction={async (action, task) => {
+              if (action === 'refresh') {
+                await refreshTasks();
+              }
+            }}
             onDeptClick={handleDeptClick}
             onSubdeptClick={handleSubdeptClick}
             onClassClick={handleClassClick}

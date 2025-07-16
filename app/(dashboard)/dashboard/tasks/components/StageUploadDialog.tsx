@@ -32,6 +32,7 @@ interface StageUploadDialogProps {
   } | null
   getCurrentRequirements: () => any[]
   fuzzyMatch: (str1: string, str2: string, threshold?: number) => boolean
+  onTaskAction?: (action: { type: string; taskId: string | number; [key: string]: any }) => void
 }
 
 export function StageUploadDialog({
@@ -39,7 +40,8 @@ export function StageUploadDialog({
   onOpenChange,
   selectedStageTask,
   getCurrentRequirements,
-  fuzzyMatch
+  fuzzyMatch,
+  onTaskAction
 }: StageUploadDialogProps) {
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File>>({})
   const [messageTexts, setMessageTexts] = useState<Record<string, string>>({})
@@ -1056,7 +1058,19 @@ export function StageUploadDialog({
 
   // Handle document save with database submission
   const handleSaveDocument = async (docId: string, saveData: any) => {
-    await handleDataSubmission(docId, saveData)
+    try {
+      await handleDataSubmission(docId, saveData)
+      // Call the onTaskAction prop to refresh the task list in the parent component
+      if (selectedStageTask?.task?.id) {
+        onTaskAction?.({
+          type: 'refresh',
+          taskId: selectedStageTask.task.id
+        })
+      }
+    } catch (error) {
+      console.error('Error saving document:', error)
+      throw error
+    }
   }
 
   // Handle saving all documents

@@ -109,7 +109,8 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
           fieldName: field.fieldName || field.name || '',
           description: field.description || '',
           isRequired: field.isRequired !== false,
-          fieldType: field.fieldType || field.type || 'text'
+          fieldType: field.fieldType || field.type || 'text',
+          inputType: field.inputType || 'text'
         })) : []
       }))
   
@@ -287,7 +288,8 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
       fieldName: '',
       description: '',
       isRequired: true,
-      fieldType: 'text'
+      fieldType: 'text',
+      inputType: 'text'
     }
 
     const updatedDocs = stage.documents.map(doc =>
