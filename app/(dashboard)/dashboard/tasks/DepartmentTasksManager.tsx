@@ -209,10 +209,29 @@ export default function DepartmentTasksManager({
     }
   }
 
-   // Fetch tasks with related data
+  // Fetch all documents for a task
+  const fetchTaskDocuments = async (taskId: string) => {
+    try {
+      const { data: documents, error } = await supabase
+        .from('tm_task_documents')
+        .select('*')
+        .eq('task_id', taskId)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      return documents || []
+    } catch (error) {
+      console.error(`Error fetching documents for task ${taskId}:`, error)
+      return []
+    }
+  }
+
+  // Fetch tasks with related data and their documents
   const fetchTasks = useCallback(async (departmentId?: string) => {
     try {
       setTasksLoading(true)
+      
+      // First, fetch all tasks
       let query = supabase
         .from('tm_tasks')
         .select(`*, 
@@ -226,13 +245,46 @@ export default function DepartmentTasksManager({
         query = query.eq('department_id', departmentId)
       }
 
-      const { data, error } = await query
+      const { data: tasks, error: tasksError } = await query
+      if (tasksError) throw tasksError
 
-      if (error) throw error
-      setTasks(data || [])
+      // If no tasks, return early
+      if (!tasks?.length) {
+        setTasks([])
+        return
+      }
+
+      // Fetch all documents for all tasks at once
+      const taskIds = tasks.map(task => task.id)
+      const { data: allDocuments, error: docsError } = await supabase
+        .from('tm_task_documents')
+        .select('*')
+        .in('task_id', taskIds)
+        .order('created_at', { ascending: false })
+
+      if (docsError) throw docsError
+
+      // Group documents by task_id
+      const documentsByTask = (allDocuments || []).reduce((acc, doc) => {
+        if (!acc[doc.task_id]) acc[doc.task_id] = []
+        acc[doc.task_id].push(doc)
+        return acc
+      }, {} as Record<string, any[]>)
+
+      // Enrich tasks with their documents
+      const tasksWithDocuments = tasks.map(task => ({
+        ...task,
+        documents: documentsByTask[task.id] || []
+      }))
+
+      setTasks(tasksWithDocuments)
     } catch (error) {
       console.error('Error fetching tasks:', error)
-      toast({ title: "Error", description: "Failed to load tasks.", variant: "destructive" })
+      toast({ 
+        title: "Error", 
+        description: "Failed to load tasks. " + (error as Error).message, 
+        variant: "destructive" 
+      })
     } finally {
       setTasksLoading(false)
     }
@@ -265,17 +317,67 @@ export default function DepartmentTasksManager({
   // Fetch and process stages for a department
   const fetchStages = async (departmentId: string) => {
     try {
-      const department = departments.find(d => d.id.toString() === departmentId.toString())
+      // First fetch the department with its stages and documents
+      const { data: department, error: deptError } = await supabase
+        .from('tm_departments')
+        .select(`
+          *,
+          tm_subdepartments(
+            *,
+            classes(
+              *,
+              subClasses(*),
+              stages!inner(
+                *,
+                documents(
+                  *,
+                  extraction_specs(*)
+                )
+              )
+            ),
+            stages!inner(
+              *,
+              documents(
+                *,
+                extraction_specs(*)
+              )
+            )
+          )
+        `)
+        .eq('id', departmentId)
+        .single()
+
+      if (deptError) throw deptError
       if (!department) return
 
-      const uniqueStages = new Map()
-      department.stages.forEach(stage => {
-        if (!uniqueStages.has(stage.id)) {
-          uniqueStages.set(stage.id, { ...stage, departmentId: department.id, departmentName: department.name })
-        }
-      })
-      const allStages = Array.from(uniqueStages.values()).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
-      setStages(allStages)
+      // Process stages and their documents
+      const processedStages = department.tm_subdepartments
+        .flatMap(subdept => [
+          ...(subdept.stages || []).map(stage => ({
+            ...stage,
+            departmentId: department.id,
+            departmentName: department.name,
+            subdepartmentId: subdept.id,
+            subdepartmentName: subdept.name
+          })),
+          ...(subdept.classes?.flatMap(cls => 
+            (cls.stages || []).map(stage => ({
+              ...stage,
+              departmentId: department.id,
+              departmentName: department.name,
+              subdepartmentId: subdept.id,
+              subdepartmentName: subdept.name,
+              classId: cls.id,
+              className: cls.name
+            }))
+          ) || [])
+        ])
+        .filter((stage, index, self) => 
+          index === self.findIndex(s => s.id === stage.id)
+        )
+        .sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
+
+      setStages(processedStages)
     } catch (error) {
       console.error('Error fetching stages:', error)
       toast({ title: "Error", description: "Failed to load stages.", variant: "destructive" })
