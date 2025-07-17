@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { supabase } from "@/lib/supabase/client"
-import { DocumentExtraction, Stage, StageDocument, TimeConfig , NewStage, EntityOption, DepartmentOption} from "../stagesdb"
+import { DocumentExtraction, Stage, StageDocument, TimeConfig, NewStage, EntityOption, DepartmentOption } from "../stagesdb"
 import { createKYCDocument } from "../kycDocuments"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
@@ -28,6 +28,35 @@ const generateId = () => {
     const r = Math.random() * 16 | 0
     const v = c === 'x' ? r : (r & 0x3 | 0x8)
     return v.toString(16)
+  })
+}
+
+// Recursive helper to transform KYC fields, handling nested arrays
+const transformKycFields = (fields: any[]): DocumentExtraction[] => {
+  if (!Array.isArray(fields)) return []
+
+  return fields.map((field: any) => {
+    const isArray = field.type === 'array' || field.isArray === true
+
+    const transformedField: any = {
+      id: field.id || generateId(),
+      fieldName: field.name || field.fieldName || '',
+      description: field.description || '',
+      isRequired: field.isRequired !== false,
+      fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
+      parentField: field.parentField,
+      isArray: isArray,
+    }
+
+    if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
+      transformedField.arrayConfig = {
+        maxItems: field.arrayConfig.maxItems,
+        // Recursive call for nested fields
+        fields: transformKycFields(field.arrayConfig.fields)
+      }
+    }
+    
+    return transformedField as DocumentExtraction
   })
 }
 
@@ -95,24 +124,14 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
         .select('id, name, display_name, department, category, fields, document_type')
         .order('name')
   
-      // if (departmentName) {
-      //   query = query.eq('department', departmentName)
-      // }
-  
       const { data, error } = await query
   
       if (error) throw error
-  
+      
+      // Use the new recursive transformer to handle all field types including arrays
       const transformedDocs: KYCDocument[] = (data || []).map(doc => ({
         ...doc,
-        fields: Array.isArray(doc.fields) ? doc.fields.map((field: any) => ({
-          id: field.id || `field-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          fieldName: field.fieldName || field.name || '',
-          description: field.description || '',
-          isRequired: field.isRequired !== false,
-          fieldType: field.fieldType || field.type || 'text',
-          inputType: field.inputType || 'text'
-        })) : []
+        fields: transformKycFields(doc.fields)
       }))
   
       setKycDocuments(transformedDocs)
@@ -243,9 +262,10 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
       description: '',
       isRequired: false,
       documentType: 'both',
+      inputType: 'file',
       extractionSpecs: [],
       isSpecial,
-      linkedKycDocument: undefined, // NEW FIELD
+      linkedKycDocument: undefined,
       ...(isSpecial && {
         entityType: undefined,
         subdept_id: undefined,
@@ -357,19 +377,13 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
     try {
       const departmentName = departments.find(d => d.id === selectedDepartment)?.name || selectedDepartment
 
-      // Process stages and create KYC documents
-      const processedStages = await Promise.all(
+      // First process KYC document creation with extractionSpecs
+      const stagesWithKycDocs = await Promise.all(
         newStages.map(async (stage) => {
           const processedDocs = await Promise.all(
             stage.documents.map(async (doc) => {
-              if (doc.name.trim()) {
-                // Skip KYC creation if it's a linked document
-                if (doc.linkedKycDocument) {
-                  return doc // Return as-is for linked documents
-                }
-                
+              if (doc.name.trim() && !doc.linkedKycDocument) {
                 try {
-                  // Create KYC document for new documents
                   const kycId = await createKYCDocument({
                     name: doc.name,
                     department: departmentName,
@@ -382,8 +396,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                       targetEntities: doc.targetEntities || []
                     } : undefined
                   })
-
-                  return { ...doc, kycId }
+                  return { ...doc, kycId, linkedKycDocument: kycId }
                 } catch (error) {
                   console.error('Error creating KYC document:', error)
                   toast({
@@ -397,14 +410,18 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
               return doc
             })
           )
-
           return { ...stage, documents: processedDocs }
         })
       )
 
+      // Then prepare stages for tm_departments by removing extractionSpecs
+      const processedStages = stagesWithKycDocs.map(stage => ({
+        ...stage,
+        documents: stage.documents.map(({ extractionSpecs, ...doc }) => doc)
+      }))
+
       await onAddStages(processedStages, selectedDepartment)
       
-      // Reset form
       setNewStages([{
         id: generateId(),
         name: '',
@@ -509,7 +526,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
             <CardContent>
               {newStages.length > 1 ? (
                 <Tabs value={activeStageTab} onValueChange={setActiveStageTab} className="w-full">
-                  <TabsList className="grid w-full grid-cols-auto overflow-x-auto">
+                  <TabsList className="flex w-full">
                     {newStages.map((stage, index) => (
                       <TabsTrigger key={stage.id} value={stage.id} className="relative">
                         <span className="mr-2">{index + 1}.</span>
@@ -859,9 +876,9 @@ function DocumentsSection({
             <Plus className="h-4 w-4 mr-2" />
             Add Regular Document
           </Button>
-          <Button 
-            onClick={() => onAddDocument(true)} 
-            size="sm" 
+          <Button
+            onClick={() => onAddDocument(true)}
+            size="sm"
             variant="outline"
             disabled={!entityOptions.length && !loadingEntities}
             title={!entityOptions.length ? "Select a department first to add special documents" : ""}
@@ -943,9 +960,9 @@ function DocumentsSection({
               <Plus className="h-4 w-4 mr-2" />
               Add Regular Document
             </Button>
-            <Button 
-              onClick={() => onAddDocument(true)} 
-              variant="outline" 
+            <Button
+              onClick={() => onAddDocument(true)}
+              variant="outline"
               size="sm"
               disabled={!entityOptions.length && !loadingEntities}
             >
@@ -1155,6 +1172,7 @@ function DocumentCard({
         linkedKycDocument: selectedKycDoc.id,
         kycId: selectedKycDoc.id,
         name: selectedKycDoc.display_name || selectedKycDoc.name,
+        // The fields are already transformed correctly, including arrays
         extractionSpecs: selectedKycDoc.fields || []
       })
     }
@@ -1379,8 +1397,8 @@ function DocumentCard({
               <div>
                 <Label className="text-sm font-medium">Data Extraction Fields</Label>
                 <p className="text-xs text-muted-foreground">
-                  {documentMode === 'existing' && doc.linkedKycDocument 
-                    ? "Fields from the linked document (read-only)" 
+                  {documentMode === 'existing' && doc.linkedKycDocument
+                    ? "Fields from the linked document (read-only)"
                     : "Define what data should be extracted from this document"
                   }
                 </p>
@@ -1399,75 +1417,129 @@ function DocumentCard({
 
             {doc.extractionSpecs && doc.extractionSpecs.length > 0 ? (
               <div className="space-y-3">
-                {doc.extractionSpecs.map((extraction, extractionIndex) => (
-                  <div key={extraction.id} className={`grid grid-cols-1 md:grid-cols-6 gap-3 items-end p-3 rounded-lg ${
-                    documentMode === 'existing' && doc.linkedKycDocument 
-                      ? 'bg-blue-50 border border-blue-200' 
-                      : 'bg-muted/20'
-                  }`}>
-                    <div className="space-y-1 col-span-2">
-                      <Label className="text-xs">Field Name</Label>
-                      <Input
-                        value={extraction.fieldName || ''}
-                        onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { fieldName: e.target.value })}
-                        placeholder="e.g., Application Date"
-                        className="h-8"
-                        disabled={documentMode === 'existing' && doc.linkedKycDocument}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Field Type</Label>
-                      <Select
-                        value={extraction.fieldType}
-                        onValueChange={(value: 'text' | 'date' | 'number' | 'boolean' | 'file') =>
-                          onUpdateExtraction(doc.id, extraction.id, { fieldType: value })
-                        }
-                        disabled={documentMode === 'existing' && doc.linkedKycDocument}
-                      >
-                        <SelectTrigger className="h-8">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="text">Text</SelectItem>
-                          <SelectItem value="date">Date</SelectItem>
-                          <SelectItem value="number">Number</SelectItem>
-                          <SelectItem value="boolean">Boolean</SelectItem>
-                          <SelectItem value="file">File</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1 col-span-2">
-                      <Label className="text-xs">Description</Label>
-                      <Input
-                        value={extraction.description || ''}
-                        onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { description: e.target.value })}
-                        placeholder="Optional description"
-                        className="h-8"
-                        disabled={documentMode === 'existing' && doc.linkedKycDocument}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          checked={extraction.isRequired}
-                          onCheckedChange={(checked) => onUpdateExtraction(doc.id, extraction.id, { isRequired: checked as boolean })}
+                {doc.extractionSpecs.map((extraction) => {
+                  // NEW: Conditional rendering for array types
+                  if (extraction.isArray && extraction.arrayConfig) {
+                    return (
+                      <div key={extraction.id} className={`p-3 rounded-lg border space-y-3 ${
+                        documentMode === 'existing' && doc.linkedKycDocument
+                          ? 'bg-blue-50 border-blue-200'
+                          : 'bg-muted/30'
+                      }`}>
+                        <div className="flex justify-between items-start">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-sm">{extraction.fieldName}</span>
+                              <Badge variant="outline">Array</Badge>
+                              {extraction.isRequired && <Badge variant="destructive" className="text-xs">Required</Badge>}
+                            </div>
+                            <p className="text-xs text-muted-foreground">{extraction.description}</p>
+                          </div>
+                          {documentMode === 'new' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                              onClick={() => onRemoveExtraction(doc.id, extraction.id)}
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                        
+                        <div className="pl-4 border-l-2 ml-1 space-y-2">
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase">Fields in this array</h4>
+                          {extraction.arrayConfig.fields.map(subField => (
+                            <div key={subField.id} className="flex items-center justify-between text-sm p-2 bg-background rounded border">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-xs">{subField.fieldName}</span>
+                                {subField.isRequired && <span className="text-destructive font-bold ml-1">*</span>}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {subField.description && <span className="text-xs text-muted-foreground italic">({subField.description})</span>}
+                                <Badge variant="secondary" className="text-xs">{subField.fieldType}</Badge>
+                              </div>
+                            </div>
+                          ))}
+                          {extraction.arrayConfig.fields.length === 0 && (
+                            <p className="text-xs text-muted-foreground">This array has no fields defined.</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+                  
+                  // Render regular field editor
+                  return (
+                    <div key={extraction.id} className={`grid grid-cols-1 md:grid-cols-6 gap-3 items-end p-3 rounded-lg ${
+                      documentMode === 'existing' && doc.linkedKycDocument
+                        ? 'bg-blue-50 border border-blue-200'
+                        : 'bg-muted/20'
+                    }`}>
+                      <div className="space-y-1 col-span-2">
+                        <Label className="text-xs">Field Name</Label>
+                        <Input
+                          value={extraction.fieldName || ''}
+                          onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { fieldName: e.target.value })}
+                          placeholder="e.g., Application Date"
+                          className="h-8"
                           disabled={documentMode === 'existing' && doc.linkedKycDocument}
                         />
-                        <Label className="text-xs">Required</Label>
                       </div>
-                      {documentMode === 'new' && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                          onClick={() => onRemoveExtraction(doc.id, extraction.id)}
+                      <div className="space-y-1">
+                        <Label className="text-xs">Field Type</Label>
+                        <Select
+                          value={extraction.fieldType}
+                          onValueChange={(value: 'text' | 'date' | 'number' | 'boolean' | 'file') =>
+                            onUpdateExtraction(doc.id, extraction.id, { fieldType: value })
+                          }
+                          disabled={documentMode === 'existing' && doc.linkedKycDocument}
                         >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      )}
+                          <SelectTrigger className="h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="text">Text</SelectItem>
+                            <SelectItem value="date">Date</SelectItem>
+                            <SelectItem value="number">Number</SelectItem>
+                            <SelectItem value="boolean">Boolean</SelectItem>
+                            <SelectItem value="file">File</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1 col-span-2">
+                        <Label className="text-xs">Description</Label>
+                        <Input
+                          value={extraction.description || ''}
+                          onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { description: e.target.value })}
+                          placeholder="Optional description"
+                          className="h-8"
+                          disabled={documentMode === 'existing' && doc.linkedKycDocument}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            checked={extraction.isRequired}
+                            onCheckedChange={(checked) => onUpdateExtraction(doc.id, extraction.id, { isRequired: checked as boolean })}
+                            disabled={documentMode === 'existing' && doc.linkedKycDocument}
+                          />
+                          <Label className="text-xs">Required</Label>
+                        </div>
+                        {documentMode === 'new' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                            onClick={() => onRemoveExtraction(doc.id, extraction.id)}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
                 {documentMode === 'existing' && doc.linkedKycDocument && (
                   <div className="text-center p-4 bg-blue-50 border border-blue-200 rounded-lg">
                     <Info className="h-5 w-5 mx-auto mb-2 text-blue-600" />
@@ -1483,8 +1555,8 @@ function DocumentCard({
               <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg">
                 <Info className="h-8 w-8 mx-auto mb-2 opacity-50" />
                 <p className="text-sm">
-                  {documentMode === 'existing' 
-                    ? "Select a linked document to view its extraction fields" 
+                  {documentMode === 'existing'
+                    ? "Select a linked document to view its extraction fields"
                     : "No extraction fields defined"
                   }
                 </p>

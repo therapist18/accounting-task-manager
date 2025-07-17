@@ -413,13 +413,26 @@ const validateExtractedData = (
   }
 };
 
+export const fetchKycFields = async (kycId: string): Promise<Field[]> => {
+  try {
+    const response = await fetch(`/api/kyc-fields/${kycId}`);
+    if (!response.ok) throw new Error('Failed to fetch KYC fields');
+    const data = await response.json();
+    return data.fields || [];
+  } catch (error) {
+    console.error('Error fetching KYC fields:', error);
+    return [];
+  }
+};
+
 // Update the performExtraction function to handle array fields better
 export const performExtraction = async (
   fileUrl: string,
   fields: Field[],
   documentType: string,
   onProgress?: (message: string) => void,
-  originalFileName?: string
+  originalFileName?: string,
+  kycId?: string
 ): Promise<{
   extractedData: ExtractionResult;
   success: boolean;
@@ -435,9 +448,19 @@ export const performExtraction = async (
     try {
       onProgress?.(`Attempt ${attempts + 1}/${MAX_ATTEMPTS}: Processing document...`);
       
+      // If kycId is provided, fetch fields from KYC document
+      let extractionFields = fields;
+      if (kycId) {
+        onProgress?.('Fetching document fields...');
+        const kycFields = await fetchKycFields(kycId);
+        if (kycFields.length > 0) {
+          extractionFields = kycFields;
+        }
+      }
+      
       const filePart = await fileToGenerativePart(fileUrl, originalFileName);
-      const fieldPrompts = formatFieldPrompts(fields);
-      const exampleOutput = createExampleOutput(fields);
+      const fieldPrompts = formatFieldPrompts(extractionFields);
+      const exampleOutput = createExampleOutput(extractionFields);
       
       console.log('Extraction configuration:', {
         documentType,
@@ -447,7 +470,7 @@ export const performExtraction = async (
       });
 
       // Create detailed array field descriptions for better extraction
-      const arrayFieldDescriptions = fields
+      const arrayFieldDescriptions = extractionFields
         .filter(field => (field.type === 'array' || field.isArray) && field.arrayConfig?.fields)
         .map(field => {
           const subFieldsDesc = field.arrayConfig!.fields!.map(sf => `"${sf.name}": "${sf.type}"`).join(', ');
@@ -504,7 +527,7 @@ export const performExtraction = async (
       // Enhanced array field processing
       const processedData = { ...cleanedData };
       
-      fields.forEach(field => {
+      extractionFields.forEach(field => {
         if ((field.type === 'array' || field.isArray) && field.arrayConfig?.fields) {
           const fieldName = field.name;
           let arrayData = extractedData[fieldName] || [];
@@ -560,7 +583,7 @@ export const performExtraction = async (
       });
 
       let validationErrors: ValidationError[] = [];
-      fields.forEach(field => {
+      extractionFields.forEach(field => {
         const value = processedData[field.name];
         const validation = validateField(value, field);
         if (!validation.isValid) {
@@ -951,7 +974,7 @@ export const createExampleOutput = (fields: Field[]): Record<string, any> => {
             break;
           case 'text':
           default:
-            subAcc[subField.name] = `sample_${subField.name.toLowerCase()}`;
+            subAcc[subField.name || ''] = `sample_${(subField.name || '').toLowerCase()}`;
             break;
         }
         return subAcc;

@@ -624,11 +624,36 @@ export function StageUploadDialog({
   }
 
   // Get fields for extraction based on document configuration
-  const getFieldsForDocument = (docId: string) => {
+  const getFieldsForDocument = async (docId: string) => {
     if (!selectedStageTask?.stage?.documents) return []
 
     const document = selectedStageTask.stage.documents.find(d => d.id === docId)
-    if (!document?.extractionSpecs) return []
+    if (!document) return []
+
+    // If document has a kycId, fetch fields from KYC document
+    if (document.kycId) {
+      try {
+        const response = await fetch(`/api/kyc-fields/${document.kycId}`)
+        if (response.ok) {
+          const data = await response.json()
+          if (data.fields?.length > 0) {
+            return data.fields.map((field: any) => ({
+              id: field.id || `field-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              name: field.name || field.fieldName || 'Unknown Field',
+              type: field.type || 'text',
+              required: field.isRequired || field.required || false,
+              isArray: field.isArray || false,
+              arrayConfig: field.arrayConfig
+            }))
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching KYC fields:', error)
+      }
+    }
+
+    // Fallback to extractionSpecs if no KYC fields found
+    if (!document.extractionSpecs) return []
 
     return document.extractionSpecs.map(spec => ({
       id: spec.id || spec.fieldName || `field-${Date.now()}`,
@@ -754,7 +779,7 @@ export function StageUploadDialog({
           continue
         }
 
-        const documentFields = getFieldsForDocument(docId)
+        const documentFields = await getFieldsForDocument(docId)
 
         try {
           const extractionToast = toast({
@@ -769,7 +794,8 @@ export function StageUploadDialog({
             (progressMessage) => {
               console.log('Extraction progress:', progressMessage)
             },
-            file.name
+            file.name,
+            document.kycId // Pass kycId to performExtraction
           )
 
           let parsedData = extractedData
@@ -1503,7 +1529,7 @@ export function StageUploadDialog({
                             <ExtractionPreview
                               documentName={doc.name}
                               extractedData={uploadedDoc.extractedData || {}}
-                              fields={getFieldsForDocument(doc.id)}
+                              fieldsPromise={getFieldsForDocument(doc.id)}
                               onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
                               fileUrl={uploadedDoc.fileUrl}
                               fileName={uploadedDoc.fileName}
@@ -1519,7 +1545,7 @@ export function StageUploadDialog({
                       <ExtractionPreview
                         documentName={doc.name}
                         extractedData={previewData[doc.id].extractedData || {}}
-                        fields={getFieldsForDocument(doc.id)}
+                        fieldsPromise={getFieldsForDocument(doc.id)}
                         onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
                         fileUrl={previewData[doc.id].fileUrl}
                         fileName={previewData[doc.id].fileName}

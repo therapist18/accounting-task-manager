@@ -45,7 +45,8 @@ interface Field {
 interface ExtractionPreviewProps {
   documentName: string
   extractedData: Record<string, any>
-  fields: Field[]
+  fields?: Field[]
+  fieldsPromise?: Promise<Field[]> | null
   onDataChange?: (fieldName: string, value: any) => void
   onVerify?: () => void
   onRemoveFile?: () => void
@@ -114,7 +115,8 @@ const DocumentViewer = ({ fileUrl, fileName, documentName }) => {
 const ExtractionPreview = ({
   documentName,
   extractedData = {},
-  fields = [],
+  fields: initialFields = [],
+  fieldsPromise,
   onDataChange,
   onVerify,
   onRemoveFile,
@@ -132,22 +134,67 @@ const ExtractionPreview = ({
     getButtonStyle: () => 'bg-primary hover:bg-primary/90 text-primary-foreground'
   })
 }: ExtractionPreviewProps) => {
+  const [fields, setFields] = useState<Field[]>(initialFields);
+  const [loadingFields, setLoadingFields] = useState(!!fieldsPromise);
   const [isOpen, setIsOpen] = useState(expanded);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [documents, setDocuments] = useState<DocumentData[]>([]);
+  const [kycFields, setKycFields] = useState<Field[]>([]);
 
   useEffect(() => {
+    if (fieldsPromise) {
+      setLoadingFields(true);
+      fieldsPromise
+        .then(fetchedFields => {
+          setFields(fetchedFields || []);
+        })
+        .catch(error => {
+          console.error('Error loading fields:', error);
+          setFields(initialFields);
+        })
+        .finally(() => {
+          setLoadingFields(false);
+        });
+    } else {
+      setFields(initialFields);
+    }
+  }, [fieldsPromise, initialFields]);
+
+  useEffect(() => {
+    const fetchKycFields = async () => {
+      if (!extractedData?.kycId) {
+        setKycFields(fields);
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const response = await fetch(`/api/kyc-fields/${extractedData.kycId}`);
+        if (!response.ok) throw new Error('Failed to fetch KYC fields');
+        const data = await response.json();
+        setKycFields(data.fields || []);
+      } catch (error) {
+        console.error('Error fetching KYC fields:', error);
+        setKycFields(fields); // Fallback to provided fields
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
     if (documentName) {
       setDocuments([{
         documentName,
         extractedData,
-        fields,
+        fields: kycFields.length > 0 ? kycFields : fields,
         fileUrl,
         fileName,
         type
       }]);
     }
-  }, [documentName, extractedData, fields, fileUrl, fileName, type]);
+
+    fetchKycFields();
+  }, [documentName, extractedData, fields, fileUrl, fileName, type, extractedData?.kycId, kycFields]);
 
   const getNestedValue = (obj: any, path: string, defaultValue: any = '') => {
     if (!path || !obj) return defaultValue;
@@ -236,7 +283,7 @@ const ExtractionPreview = ({
                 <CardContent className="p-4 pt-0">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {field.arrayConfig.fields.map((subField) => {
-                      const subFieldKey = subField.name.trim();
+                      const subFieldKey = (subField.name || '').trim();
                       const subFieldValue = item[subFieldKey] || '';
                       const subFieldDisplayName = toTitleCase(subField.name);
                       return (
@@ -348,6 +395,15 @@ const ExtractionPreview = ({
       </div>
     );
   };
+
+  if (loadingFields) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <span className="ml-2">Loading document fields...</span>
+      </div>
+    );
+  }
 
   const content = (
     <div className="space-y-12">

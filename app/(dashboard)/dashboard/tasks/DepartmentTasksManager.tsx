@@ -23,6 +23,34 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import EditableStageCell from "./components/EditableStageCell"
 import ExtractionPreview from "@/components/ExtractionPreview"
 
+// Recursive helper to transform KYC fields, handling nested arrays
+const transformKycFields = (fields: any[]): any[] => {
+  if (!Array.isArray(fields)) return []
+
+  return fields.map((field: any) => {
+    const isArray = field.type === 'array' || field.isArray === true
+
+    const transformedField: any = {
+      id: field.id || field.fieldName || '',
+      fieldName: field.name || field.fieldName || '',
+      description: field.description || '',
+      isRequired: field.isRequired !== false,
+      fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
+      parentField: field.parentField,
+      isArray: isArray,
+    }
+
+    if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
+      transformedField.arrayConfig = {
+        maxItems: field.arrayConfig.maxItems,
+        // Recursive call for nested fields
+        fields: transformKycFields(field.arrayConfig.fields)
+      }
+    }
+    
+    return transformedField
+  })
+}
 
 // Document field cell component
 function DocumentFieldCell({ document, field }) {
@@ -72,6 +100,10 @@ export default function DepartmentTasksManager({
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null)
   const [isStageUploadDialogOpen, setIsStageUploadDialogOpen] = useState(false)
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
+  
+  // NEW: KYC documents cache
+  const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map())
+  const [kycDocumentsLoading, setKycDocumentsLoading] = useState(false)
 
   // State for document preview
   const [previewDocument, setPreviewDocument] = useState<any>(null);
@@ -80,6 +112,44 @@ export default function DepartmentTasksManager({
   const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set())
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
+
+  // NEW: Fetch KYC document by kycId
+  const fetchKycDocument = useCallback(async (kycId: string) => {
+    if (kycDocuments.has(kycId)) {
+      return kycDocuments.get(kycId)
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('acc_portal_kyc')
+        .select('*')
+        .eq('id', kycId)
+        .single()
+
+      if (error) throw error
+
+      const transformedDoc = {
+        ...data,
+        fields: transformKycFields(data.fields || [])
+      }
+
+      setKycDocuments(prev => new Map(prev.set(kycId, transformedDoc)))
+      return transformedDoc
+    } catch (error) {
+      console.error('Error fetching KYC document:', error)
+      return null
+    }
+  }, [kycDocuments])
+
+  // NEW: Get KYC fields for a document
+  const getKycFields = useCallback(async (doc: any) => {
+    if (!doc.kycId) {
+      return []
+    }
+
+    const kycDoc = await fetchKycDocument(doc.kycId)
+    return kycDoc?.fields || []
+  }, [fetchKycDocument])
 
   // Fetch all documents once
   const fetchAllDocuments = useCallback(async () => {
@@ -207,7 +277,7 @@ export default function DepartmentTasksManager({
     setIsStageUploadDialogOpen(true)
   }, [departments])
 
-  // Handle document view
+  // UPDATED: Handle document view using KYC fields
   const handleViewDocument = useCallback(async (task: any, stage: any) => {
     try {
       const document = getDocumentForTaskStage(task, stage);
@@ -225,13 +295,16 @@ export default function DepartmentTasksManager({
 
         const fileName = document.file_path?.split('/').pop() || documentName;
 
-        const fields = (stage.documents?.[0]?.extractionSpecs || []).map(spec => ({
-          id: spec.fieldName,
-          name: spec.fieldName,
-          type: spec.fieldType,
-          required: spec.isRequired,
-          description: spec.description,
-          ...(spec.extractionRules || {})
+        // NEW: Get fields from KYC document instead of extractionSpecs
+        const kycFields = await getKycFields(stage.documents?.[0] || {});
+        const fields = kycFields.map(field => ({
+          id: field.id || field.fieldName,
+          name: field.fieldName,
+          type: field.fieldType,
+          required: field.isRequired,
+          description: field.description,
+          isArray: field.isArray,
+          arrayConfig: field.arrayConfig
         }));
 
         const extractedData = { ...(document.extracted_details || {}) };
@@ -272,8 +345,7 @@ export default function DepartmentTasksManager({
         variant: 'destructive',
       });
     }
-  }, [getDocumentForTaskStage]);
-
+  }, [getDocumentForTaskStage, getKycFields]);
 
   // Fetch companies
   const fetchCompanies = async () => {
@@ -509,8 +581,8 @@ export default function DepartmentTasksManager({
     toast({ title: "Export Successful", description: `${tableType} data exported.` })
   }, [])
 
-  // Generate enhanced table rows for transposed view
-  const generateEnhancedTableRows = useCallback((tasks: Task[]) => {
+  // UPDATED: Generate enhanced table rows for transposed view using KYC fields
+  const generateEnhancedTableRows = useCallback(async (tasks: Task[]) => {
     if (!tasks.length) return []
 
     const allStages = stages.filter(stage => stage).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
@@ -534,17 +606,18 @@ export default function DepartmentTasksManager({
     rows.push({ key: 'section_header_stages', type: 'section_header', label: 'Stages', id: 'stages', icon: Briefcase });
 
     if (expandedSections.has('stages')) {
-      allStages.forEach((stage, index) => {
+      for (const stage of allStages) {
+        const stageIndex = allStages.indexOf(stage);
         rows.push({
           key: `stage_${stage.id}`,
-          label: `S${stage.order_num || index + 1}. ${stage.name}`,
+          label: `S${stage.order_num || stageIndex + 1}. ${stage.name}`,
           type: 'stage',
           stage,
           getValue: (task: Task) => isStageApplicableToTask(stage, task, departments) ? task.stages?.[stage.id] : 'N/A'
         })
 
         if (expandedStages.has(stage.id) && stage.documents && stage.documents.length > 0) {
-          stage.documents.forEach(doc => {
+          for (const doc of stage.documents) {
             rows.push({
               key: `doc_${stage.id}_${doc.id}`,
               label: `${doc.name}`,
@@ -555,34 +628,38 @@ export default function DepartmentTasksManager({
               getValue: (task: Task) => getDocumentForTaskStage(task, { ...stage, documents: [doc] }) ? 'Uploaded' : 'Not Uploaded'
             })
 
-            if (expandedDocuments.has(doc.id) && doc.extractionSpecs && doc.extractionSpecs.length > 0) {
-              doc.extractionSpecs.forEach(field => {
-                rows.push({
-                  key: `field_${stage.id}_${doc.id}_${field.id || field.fieldName}`,
-                  label: `${field.fieldName}`,
-                  type: 'field',
-                  stage,
-                  document: doc,
-                  field,
-                  isSubRow: true,
-                  isSubSubRow: true,
-                  getValue: (task: Task) => {
-                    const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
-                    if (!document || !document.extracted_details) return 'N/A'
-                    return document.extracted_details[field.fieldName] || document.extracted_details[field.id] || 'N/A'
-                  }
+            if (expandedDocuments.has(doc.id) && doc.kycId) {
+              // NEW: Get KYC fields instead of extractionSpecs
+              const kycFields = await getKycFields(doc);
+              if (kycFields && kycFields.length > 0) {
+                kycFields.forEach(field => {
+                  rows.push({
+                    key: `field_${stage.id}_${doc.id}_${field.id || field.fieldName}`,
+                    label: `${field.fieldName}`,
+                    type: 'field',
+                    stage,
+                    document: doc,
+                    field,
+                    isSubRow: true,
+                    isSubSubRow: true,
+                    getValue: (task: Task) => {
+                      const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
+                      if (!document || !document.extracted_details) return 'N/A'
+                      return document.extracted_details[field.fieldName] || document.extracted_details[field.id] || 'N/A'
+                    }
+                  })
                 })
-              })
+              }
             }
-          })
+          }
         }
-      })
+      }
     }
 
     rows.push({ key: 'actions_row', label: 'Actions', type: 'actions' })
 
     return rows
-  }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getDocumentForTaskStage])
+  }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getDocumentForTaskStage, getKycFields])
 
   // Format date to dd/MM/yyyy format
   const formatDateValue = (dateString: string | Date | null | undefined) => {
@@ -630,7 +707,7 @@ export default function DepartmentTasksManager({
               {formatDateValue(stageData.date)}
             </span>
           )}
-                 </div>
+        </div>
       );
     }
 
@@ -685,9 +762,34 @@ export default function DepartmentTasksManager({
     }
   }, [allDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, handleStageStatusSave])
 
-  // Render enhanced transposed table
+  // State for enhanced table rendering
+  const [tableRows, setTableRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // Function to load rows for enhanced table
+  const loadRows = useCallback(async (tasks: any[]) => {
+    setLoading(true);
+    const rows = await generateEnhancedTableRows(tasks);
+    setTableRows(rows);
+    setLoading(false);
+  }, [expandedSections, expandedStages, expandedDocuments, generateEnhancedTableRows]);
+
+  // Effect to load rows when tasks change
+  useEffect(() => {
+    loadRows(tasks);
+  }, [tasks, loadRows]);
+
+  // Render function for enhanced table
   const renderEnhancedTransposedTable = useCallback((tasks: any[], tableType: string) => {
-    const rows = generateEnhancedTableRows(tasks)
+    if (loading) {
+      return (
+        <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
+          <div className="h-8 w-8 border-2 border-t-slate-600 border-slate-200 rounded-full animate-spin mb-4"></div>
+          <p className="font-semibold text-slate-700">Loading table data...</p>
+          <p className="text-sm text-slate-500">Fetching KYC field configurations...</p>
+        </div>
+      );
+    }
 
     if (!tasks.length) {
       return (
@@ -740,7 +842,7 @@ export default function DepartmentTasksManager({
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((row, index) => {
+                tableRows.map((row, index) => {
                   const rowBg = row.isSubSubRow ? 'bg-slate-100/50' : row.isSubRow ? 'bg-slate-50/60' : 'bg-white';
                   const hoverBg = 'hover:bg-blue-50/50';
 
@@ -769,7 +871,7 @@ export default function DepartmentTasksManager({
 
                   return (
                     <TableRow key={row.key} className={`${rowBg} ${hoverBg} group`}>
-                    <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:${hoverBg.replace('hover:', '')}-50 border-r border-slate-200 font-medium text-sm text-slate-700 p-2`}>{row.type === 'basic' || row.type === 'badge' || row.type === 'date' ? (index + 1) : ''}</TableCell>
+                      <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:${hoverBg.replace('hover:', '')}-50 border-r border-slate-200 font-medium text-sm text-slate-700 p-2`}>{row.type === 'basic' || row.type === 'badge' || row.type === 'date' ? (index + 1) : ''}</TableCell>
                       <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border-r border-slate-200 font-medium text-sm text-slate-700 p-2`}>
                         <div className="flex items-center gap-2">
                           <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }}>
@@ -780,7 +882,7 @@ export default function DepartmentTasksManager({
                               {expandedStages.has(row.stage.id) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
                             </Button>
                           )}
-                          {row.type === 'document' && row.document?.extractionSpecs?.length > 0 && (
+                          {row.type === 'document' && row.document?.kycId && (
                             <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-500 hover:text-slate-800" onClick={() => toggleDocumentExpansion(row.document.id)}>
                               {expandedDocuments.has(row.document.id) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
                             </Button>
@@ -803,8 +905,44 @@ export default function DepartmentTasksManager({
     )
   }, [generateEnhancedTableRows, tasksLoading, departmentsLoading, companiesLoading, error, renderCellContent, expandedSections, expandedStages, expandedDocuments, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies])
 
-  // Enhanced normal table with better nested structure handling
+  // UPDATED: Enhanced normal table with KYC fields
   const renderEnhancedNormalTable = useCallback((tasks: any[], tableType: string) => {
+    const [kycFieldsMap, setKycFieldsMap] = useState(new Map());
+    const [fieldsLoading, setFieldsLoading] = useState(true);
+
+    useEffect(() => {
+      const loadKycFields = async () => {
+        setFieldsLoading(true);
+        const fieldsMap = new Map();
+        
+        for (const stage of stages) {
+          if (stage.documents) {
+            for (const doc of stage.documents) {
+              if (doc.kycId && !fieldsMap.has(doc.kycId)) {
+                const fields = await getKycFields(doc);
+                fieldsMap.set(doc.kycId, fields);
+              }
+            }
+          }
+        }
+        
+        setKycFieldsMap(fieldsMap);
+        setFieldsLoading(false);
+      };
+      
+      loadKycFields();
+    }, [stages, getKycFields]);
+
+    if (fieldsLoading) {
+      return (
+        <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
+          <div className="h-8 w-8 border-2 border-t-slate-600 border-slate-200 rounded-full animate-spin mb-4"></div>
+          <p className="font-semibold text-slate-700">Loading KYC configurations...</p>
+          <p className="text-sm text-slate-500">Fetching document field specifications...</p>
+        </div>
+      );
+    }
+
     if (!tasks.length) {
       return (
         <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
@@ -821,8 +959,9 @@ export default function DepartmentTasksManager({
       let stageCols = 0;
       if (expandedStages.has(stage.id) && stage.documents && stage.documents.length > 0) {
         stage.documents.forEach(doc => {
-          if (expandedDocuments.has(doc.id) && doc.extractionSpecs && doc.extractionSpecs.length > 0) {
-            stageCols += doc.extractionSpecs.length;
+          if (expandedDocuments.has(doc.id) && doc.kycId) {
+            const kycFields = kycFieldsMap.get(doc.kycId) || [];
+            stageCols += kycFields.length || 1;
           } else {
             stageCols += 1;
           }
@@ -857,12 +996,19 @@ export default function DepartmentTasksManager({
 
                 if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
                   stage.documents.forEach(doc => {
-                    if (expandedDocuments.has(doc.id) && doc.extractionSpecs?.length > 0) {
-                      stageCols += doc.extractionSpecs.length;
-                      doc.extractionSpecs.forEach(field => subHeaders.push({ type: 'field', name: field.fieldName }));
+                    if (expandedDocuments.has(doc.id) && doc.kycId) {
+                      const kycFields = kycFieldsMap.get(doc.kycId) || [];
+                      if (kycFields.length > 0) {
+                        stageCols += kycFields.length;
+                        kycFields.forEach(field => subHeaders.push({ type: 'field', name: field.fieldName }));
+                      } else {
+                        stageCols += 1;
+                        subHeaders.push({ type: 'doc', name: doc.name, id: doc.id, hasFields: false });
+                      }
                     } else {
                       stageCols += 1;
-                      subHeaders.push({ type: 'doc', name: doc.name, id: doc.id, hasFields: doc.extractionSpecs?.length > 0 });
+                      const hasKycFields = doc.kycId && kycFieldsMap.has(doc.kycId) && kycFieldsMap.get(doc.kycId).length > 0;
+                      subHeaders.push({ type: 'doc', name: doc.name, id: doc.id, hasFields: hasKycFields });
                     }
                   });
                 } else {
@@ -932,7 +1078,13 @@ export default function DepartmentTasksManager({
                     if (!isStageApplicableToTask(stage, task, departments)) {
                       let stageCols = 1;
                       if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
-                        stageCols = stage.documents.reduce((acc, doc) => acc + (expandedDocuments.has(doc.id) && doc.extractionSpecs?.length > 0 ? doc.extractionSpecs.length : 1), 0);
+                        stageCols = stage.documents.reduce((acc, doc) => {
+                          if (expandedDocuments.has(doc.id) && doc.kycId) {
+                            const kycFields = kycFieldsMap.get(doc.kycId) || [];
+                            return acc + (kycFields.length || 1);
+                          }
+                          return acc + 1;
+                        }, 0);
                       }
                       return <TableCell key={`${stage.id}-na`} colSpan={Math.max(1, stageCols)} className="border-r border-slate-200 text-center text-slate-400 italic text-xs align-middle">N/A</TableCell>
                     }
@@ -943,10 +1095,11 @@ export default function DepartmentTasksManager({
 
                     return stage.documents.map(doc => {
                       const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
-                      if (!expandedDocuments.has(doc.id) || !doc.extractionSpecs || doc.extractionSpecs.length === 0) {
+                      if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId)) {
                         return <TableCell key={`${doc.id}`} className="border-r border-slate-200 p-1 align-middle"><EditableStageCell stage={{ ...stage, documents: [doc] }} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onViewDocument={handleViewDocument} /></TableCell>
                       } else {
-                        return doc.extractionSpecs.map(field => (
+                        const kycFields = kycFieldsMap.get(doc.kycId) || [];
+                        return kycFields.map(field => (
                           <TableCell key={`${field.id || field.fieldName}`} className="border-r border-slate-200 p-1 align-middle"><DocumentFieldCell document={document} field={field} /></TableCell>
                         ))
                       }
@@ -966,8 +1119,7 @@ export default function DepartmentTasksManager({
         </Table>
       </div>
     )
-  }, [stages, tasksLoading, departmentsLoading, companiesLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, getDocumentForTaskStage, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion])
-
+  }, [stages, tasksLoading, departmentsLoading, companiesLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, getDocumentForTaskStage, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields])
 
   if (departmentsLoading) {
     return (

@@ -247,14 +247,14 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
     try {
       const targetDepartment = getTargetDepartmentName()
 
-      // Process documents - handle linked vs new documents properly
-      const processedDocs = await Promise.all(
+      // First process all KYC document operations with extractionSpecs
+      const docsWithKyc = await Promise.all(
         (formData.documents || []).map(async (doc) => {
           if (!doc.name.trim()) {
             return doc
           }
 
-          // If this is a linked document, return it as-is without any KYC operations
+          // Skip KYC operations for linked documents
           if (doc.linkedKycDocument) {
             console.log('Linked document detected, skipping KYC operations:', doc.name)
             return doc
@@ -280,7 +280,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                   entityName: doc.entityName
                 } : undefined
               })
-              return { ...doc, kycId }
+              return { ...doc, kycId, linkedKycDocument: kycId }
             } catch (error) {
               console.error('Error creating KYC document:', error)
               return doc
@@ -313,11 +313,13 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
         })
       )
 
+      // Prepare the stage data for tm_departments by removing extractionSpecs
       const updatedStage = {
         ...formData,
         name: trimmedName,
         description: formData.description?.trim() || undefined,
-        documents: processedDocs,
+        // Remove extractionSpecs from all documents before saving to tm_departments
+        documents: docsWithKyc.map(({ extractionSpecs, ...doc }) => doc),
         timeConfigs: formData.timeConfigs?.map(tc => ({
           ...tc,
           applicationType: tc.applicationType || 'Default',
@@ -410,6 +412,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
       description: '',
       isRequired: false,
       documentType: 'both',
+      inputType: 'file',
       extractionSpecs: [],
       isSpecial,
       linkedKycDocument: undefined,
