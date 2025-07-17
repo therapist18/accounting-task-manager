@@ -7,9 +7,9 @@ import { TruncatedText } from "@/app/(dashboard)/dashboard/departments/documents
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Eye, ChevronDown, Plus, Minus } from "lucide-react"
+import { Eye, ChevronDown, Plus, Minus, Loader2, Settings, Search, Users, X, TableProperties, RotateCcw } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AlertTriangle, FileText, Edit, Trash2, Download, Building, RotateCcw, TableProperties, Search, Upload, Users, Briefcase } from "lucide-react"
+import { AlertTriangle, FileText, Edit, Trash2, Download, Building, Upload, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
 import { format, parseISO } from "date-fns"
 import { toast } from "@/hooks/use-toast"
@@ -20,6 +20,9 @@ import { DepartmentTasksManagerProps, Task } from "./components/types"
 import { StageUploadDialog } from "./components/StageUploadDialog"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
 import EditableStageCell from "./components/EditableStageCell"
 import ExtractionPreview from "@/components/ExtractionPreview"
 
@@ -43,13 +46,31 @@ const transformKycFields = (fields: any[]): any[] => {
     if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
       transformedField.arrayConfig = {
         maxItems: field.arrayConfig.maxItems,
-        // Recursive call for nested fields
         fields: transformKycFields(field.arrayConfig.fields)
       }
     }
-    
+
     return transformedField
   })
+}
+
+// Function to fetch KYC fields for a document type
+const getKycFields = async (documentConfig: any) => {
+  if (!documentConfig?.kycId) return [];
+
+  try {
+    const { data: kycFields, error } = await supabase
+      .from('acc_portal_kyc_fields')
+      .select('*')
+      .eq('document_type_id', documentConfig.kycId);
+
+    if (error) throw error;
+
+    return transformKycFields(kycFields || []);
+  } catch (error) {
+    console.error('Error fetching KYC fields:', error);
+    return [];
+  }
 }
 
 // Document field cell component
@@ -70,6 +91,25 @@ function DocumentFieldCell({ document, field }) {
     </div>
   )
 }
+
+// Header visibility options
+const TABLE_HEADERS = [
+  { id: 'id', label: 'ID', default: false, width: 'w-20' },
+  { id: 'applicant_name', label: 'Applicant Name', default: true, width: 'w-48' },
+  { id: 'company_name', label: 'Company Name', default: true, width: 'w-48' },
+  { id: 'job_level', label: 'Job Level', default: true, width: 'w-32' },
+  { id: 'renewal_new', label: 'Renewal/New', default: false, width: 'w-28' },
+  { id: 'case_status', label: 'Case Status', default: false, width: 'w-28' },
+  { id: 'nationality', label: 'Nationality', default: false, width: 'w-32' },
+  { id: 'age', label: 'Age', default: false, width: 'w-20' },
+]
+
+// Stats options
+const STATS_HEADERS = [
+  { id: 'stats_completed', label: 'Completed Stages', default: true },
+  { id: 'stats_pending', label: 'Pending Stages', default: true },
+  { id: 'stats_na', label: 'N/A Stages', default: false },
+]
 
 export default function DepartmentTasksManager({
   error,
@@ -99,11 +139,25 @@ export default function DepartmentTasksManager({
   const [isEnquiryDialogOpen, setIsEnquiryDialogOpen] = useState(false)
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null)
   const [isStageUploadDialogOpen, setIsStageUploadDialogOpen] = useState(false)
+
+  // Global search state
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
-  
-  // NEW: KYC documents cache
+
+  // Header visibility state
+  const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(
+    new Set(TABLE_HEADERS.filter(h => h.default).map(h => h.id))
+  )
+
+  // Stats visibility state
+  const [visibleStats, setVisibleStats] = useState<Set<string>>(
+    new Set(STATS_HEADERS.filter(h => h.default).map(h => h.id))
+  )
+
+  // Dependants expansion state
+  const [expandedDependants, setExpandedDependants] = useState<Set<string>>(new Set())
+
+  // KYC documents cache
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map())
-  const [kycDocumentsLoading, setKycDocumentsLoading] = useState(false)
 
   // State for document preview
   const [previewDocument, setPreviewDocument] = useState<any>(null);
@@ -113,7 +167,7 @@ export default function DepartmentTasksManager({
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
 
-  // NEW: Fetch KYC document by kycId
+  // Fetch KYC document by kycId
   const fetchKycDocument = useCallback(async (kycId: string) => {
     if (kycDocuments.has(kycId)) {
       return kycDocuments.get(kycId)
@@ -141,7 +195,7 @@ export default function DepartmentTasksManager({
     }
   }, [kycDocuments])
 
-  // NEW: Get KYC fields for a document
+  // Get KYC fields for a document
   const getKycFields = useCallback(async (doc: any) => {
     if (!doc.kycId) {
       return []
@@ -175,7 +229,6 @@ export default function DepartmentTasksManager({
   const getDocumentForTaskStage = useCallback((task: any, stage: any) => {
     if (!task.individual_id || !stage.documents?.[0]?.kycId) return null
 
-    // Find the latest document for this director and document type
     const relevantDocs = allDocuments.filter(doc =>
       doc.director_id === task.individual_id &&
       doc.document_id === stage.documents[0].kycId
@@ -183,9 +236,7 @@ export default function DepartmentTasksManager({
 
     if (relevantDocs.length === 0) return null;
 
-    // Assuming the latest is the one with the most recent created_at
     return relevantDocs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-
   }, [allDocuments])
 
   // Section toggle functions
@@ -226,9 +277,22 @@ export default function DepartmentTasksManager({
     })
   }
 
+  // Toggle dependants expansion
+  const toggleDependantsExpansion = (taskId: string) => {
+    setExpandedDependants(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(taskId)) {
+        newSet.delete(taskId)
+      } else {
+        newSet.add(taskId)
+      }
+      return newSet
+    })
+  }
+
   // Expand/Collapse all functions
   const expandAll = () => {
-    setExpandedSections(new Set(['case_details', 'stages']))
+    setExpandedSections(new Set(['case_details', 'stages', 'stats']))
     const allStageIds = stages.map(s => s.id)
     setExpandedStages(new Set(allStageIds))
 
@@ -240,6 +304,33 @@ export default function DepartmentTasksManager({
     setExpandedSections(new Set())
     setExpandedStages(new Set())
     setExpandedDocuments(new Set())
+    setExpandedDependants(new Set())
+  }
+
+  // Handle header visibility toggle
+  const toggleHeaderVisibility = (headerId: string) => {
+    setVisibleHeaders(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(headerId)) {
+        newSet.delete(headerId)
+      } else {
+        newSet.add(headerId)
+      }
+      return newSet
+    })
+  }
+
+  // Handle stats visibility toggle
+  const toggleStatsVisibility = (statId: string) => {
+    setVisibleStats(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(statId)) {
+        newSet.delete(statId)
+      } else {
+        newSet.add(statId)
+      }
+      return newSet
+    })
   }
 
   // Handle document upload
@@ -277,7 +368,7 @@ export default function DepartmentTasksManager({
     setIsStageUploadDialogOpen(true)
   }, [departments])
 
-  // UPDATED: Handle document view using KYC fields
+  // Handle document view using KYC fields
   const handleViewDocument = useCallback(async (task: any, stage: any) => {
     try {
       const document = getDocumentForTaskStage(task, stage);
@@ -295,7 +386,6 @@ export default function DepartmentTasksManager({
 
         const fileName = document.file_path?.split('/').pop() || documentName;
 
-        // NEW: Get fields from KYC document instead of extractionSpecs
         const kycFields = await getKycFields(stage.documents?.[0] || {});
         const fields = kycFields.map(field => ({
           id: field.id || field.fieldName,
@@ -563,10 +653,48 @@ export default function DepartmentTasksManager({
     })
   }, [getFilteredTasks, stages])
 
-  // Memoized task lists
-  const enquiryTasks = useMemo(() => getFilteredTasks('enquiry'), [getFilteredTasks])
-  const wipTasks = useMemo(() => getWIPTasksByFollowUp(activeFollowUpFilter), [getWIPTasksByFollowUp, activeFollowUpFilter])
-  const completedTasks = useMemo(() => getFilteredTasks('completed'), [getFilteredTasks])
+  // Global search functionality
+  const filterTasksBySearch = useCallback((tasks: any[]) => {
+    if (!globalSearchTerm.trim()) return tasks
+
+    const searchTerm = globalSearchTerm.toLowerCase()
+
+    return tasks.filter(task => {
+      // Search in basic task fields
+      const basicFields = [
+        task.id?.toString(),
+        task.applicant_name,
+        task.job_description,
+        task.status,
+        task.renewal_status,
+        task.nationality,
+        task.age?.toString(),
+        companies.get(task.company_id),
+        getTaskHierarchy(task)?.department?.name,
+        getTaskHierarchy(task)?.subdepartment?.name,
+        getTaskHierarchy(task)?.class?.name,
+        getTaskHierarchy(task)?.subclass?.name
+      ].filter(Boolean).join(' ').toLowerCase()
+
+      if (basicFields.includes(searchTerm)) return true
+
+      // Search in dependants
+      if (task.dependnats_members && Array.isArray(task.dependnats_members)) {
+        const dependantsText = task.dependnats_members.map(dep =>
+          [dep.name, dep.nationality, dep.age?.toString(), dep.relationship].filter(Boolean).join(' ')
+        ).join(' ').toLowerCase()
+
+        if (dependantsText.includes(searchTerm)) return true
+      }
+
+      return false
+    })
+  }, [globalSearchTerm, companies, getTaskHierarchy])
+
+  // Memoized task lists with search filtering
+  const enquiryTasks = useMemo(() => filterTasksBySearch(getFilteredTasks('enquiry')), [getFilteredTasks, filterTasksBySearch])
+  const wipTasks = useMemo(() => filterTasksBySearch(getWIPTasksByFollowUp(activeFollowUpFilter)), [getWIPTasksByFollowUp, activeFollowUpFilter, filterTasksBySearch])
+  const completedTasks = useMemo(() => filterTasksBySearch(getFilteredTasks('completed')), [getFilteredTasks, filterTasksBySearch])
 
   // Task actions handlers
   const handleTaskEdit = (task: any) => { setEditingTask(task); setEditDialogOpen(true) }
@@ -581,38 +709,100 @@ export default function DepartmentTasksManager({
     toast({ title: "Export Successful", description: `${tableType} data exported.` })
   }, [])
 
-  // UPDATED: Generate enhanced table rows for transposed view using KYC fields
+  // Generate enhanced table rows for transposed view using KYC fields
   const generateEnhancedTableRows = useCallback(async (tasks: Task[]) => {
     if (!tasks.length) return []
 
     const allStages = stages.filter(stage => stage).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
     const rows = []
 
+    // Case Details Section
     rows.push({ key: 'section_header_case_details', type: 'section_header', label: 'Case Details', id: 'case_details', icon: Users });
 
     if (expandedSections.has('case_details')) {
-      rows.push({ key: 'task_id', label: 'Task ID', type: 'basic', getValue: (task: any) => `${task.id}` })
-      rows.push({ key: 'job_description', label: 'Job Description', type: 'basic', getValue: (task: any) => task.job_description || 'N/A' })
-      rows.push({ key: 'status', label: 'Status', type: 'badge', getValue: (task: any) => task.status || 'pending' })
-      rows.push({ key: 'applicant_name', label: 'Applicant Name', type: 'basic', getValue: (task: any) => task.applicant_name || 'N/A' })
-      rows.push({ key: 'company_name', label: 'Company Name', type: 'basic', getValue: (task: any) => companies.get(task.company_id) || 'N/A' })
-      rows.push({ key: 'department', label: 'Department', type: 'basic', getValue: (task: any) => getTaskHierarchy(task)?.department?.name || 'N/A' })
-      rows.push({ key: 'subdepartment', label: 'Subdepartment', type: 'basic', getValue: (task: any) => getTaskHierarchy(task)?.subdepartment?.name || 'N/A' })
-      rows.push({ key: 'task_manager', label: 'Task Manager', type: 'basic', getValue: (task: any) => task.task_manager?.name || task.task_manager?.email || 'Unassigned' })
-      rows.push({ key: 'renewal_status', label: 'New/Renewal', type: 'badge', getValue: (task: any) => task.renewal_status || 'New' })
-      rows.push({ key: 'created_at', label: 'Created Date', type: 'date', getValue: (task: any) => task.created_at ? format(parseISO(task.created_at), 'dd MMM, yyyy') : 'N/A' })
+      // Add header fields based on visibility
+      if (visibleHeaders.has('id')) {
+        rows.push({ key: 'task_id', label: 'ID', type: 'basic', getValue: (task: any) => `${task.id}` })
+      }
+      if (visibleHeaders.has('applicant_name')) {
+        rows.push({ key: 'applicant_name', label: 'Applicant Name', type: 'basic', getValue: (task: any) => task.applicant_name || 'N/A' })
+      }
+      if (visibleHeaders.has('company_name')) {
+        rows.push({ key: 'company_name', label: 'Company Name', type: 'basic', getValue: (task: any) => companies.get(task.company_id) || 'N/A' })
+      }
+      if (visibleHeaders.has('job_level')) {
+        rows.push({ key: 'job_level', label: 'Job Level', type: 'basic', getValue: (task: any) => getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || getTaskHierarchy(task)?.subdepartment?.name || 'N/A' })
+      }
+      if (visibleHeaders.has('renewal_new')) {
+        rows.push({ key: 'renewal_new', label: 'Renewal/New', type: 'badge', getValue: (task: any) => task.renewal_status || 'New' })
+      }
+      if (visibleHeaders.has('case_status')) {
+        rows.push({ key: 'case_status', label: 'Case Status', type: 'badge', getValue: (task: any) => task.status || 'pending' })
+      }
+      if (visibleHeaders.has('nationality')) {
+        rows.push({ key: 'nationality', label: 'Nationality', type: 'basic', getValue: (task: any) => task.nationality || 'N/A' })
+      }
+      if (visibleHeaders.has('age')) {
+        rows.push({ key: 'age', label: 'Age', type: 'basic', getValue: (task: any) => task.age?.toString() || 'N/A' })
+      }
     }
 
+    // Stats Section
+    rows.push({ key: 'section_header_stats', type: 'section_header', label: 'Statistics', id: 'stats', icon: Briefcase });
+
+    if (expandedSections.has('stats')) {
+      // Calculate stats for each task with visibility toggle
+      if (visibleStats.has('stats_completed')) {
+        rows.push({
+          key: 'stats_completed',
+          label: 'Completed Stages',
+          type: 'stat',
+          getValue: (task: any) => {
+            const applicableStages = allStages.filter(stage => isStageApplicableToTask(stage, task, departments))
+            const completedStages = applicableStages.filter(stage => task.stages?.[stage.id]?.status === 'completed')
+            return `${completedStages.length}/${applicableStages.length}`
+          }
+        })
+      }
+      if (visibleStats.has('stats_pending')) {
+        rows.push({
+          key: 'stats_pending',
+          label: 'Pending Stages',
+          type: 'stat',
+          getValue: (task: any) => {
+            const applicableStages = allStages.filter(stage => isStageApplicableToTask(stage, task, departments))
+            const pendingStages = applicableStages.filter(stage => !task.stages?.[stage.id] || task.stages?.[stage.id]?.status === 'pending')
+            return `${pendingStages.length}/${applicableStages.length}`
+          }
+        })
+      }
+      if (visibleStats.has('stats_na')) {
+        rows.push({
+          key: 'stats_na',
+          label: 'N/A Stages',
+          type: 'stat',
+          getValue: (task: any) => {
+            const totalStages = allStages.length
+            const applicableStages = allStages.filter(stage => isStageApplicableToTask(stage, task, departments))
+            const naStages = totalStages - applicableStages.length
+            return `${naStages}/${totalStages}`
+          }
+        })
+      }
+    }
+
+    // Stages Section
     rows.push({ key: 'section_header_stages', type: 'section_header', label: 'Stages', id: 'stages', icon: Briefcase });
 
     if (expandedSections.has('stages')) {
       for (const stage of allStages) {
-        const stageIndex = allStages.indexOf(stage);
         rows.push({
           key: `stage_${stage.id}`,
-          label: `S${stage.order_num || stageIndex + 1}. ${stage.name}`,
+          label: `${stage.name}`,
           type: 'stage',
           stage,
+          stageId: stage.id,
+          stageOrder: stage.order_num || 0,
           getValue: (task: Task) => isStageApplicableToTask(stage, task, departments) ? task.stages?.[stage.id] : 'N/A'
         })
 
@@ -629,7 +819,6 @@ export default function DepartmentTasksManager({
             })
 
             if (expandedDocuments.has(doc.id) && doc.kycId) {
-              // NEW: Get KYC fields instead of extractionSpecs
               const kycFields = await getKycFields(doc);
               if (kycFields && kycFields.length > 0) {
                 kycFields.forEach(field => {
@@ -659,29 +848,27 @@ export default function DepartmentTasksManager({
     rows.push({ key: 'actions_row', label: 'Actions', type: 'actions' })
 
     return rows
-  }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getDocumentForTaskStage, getKycFields])
+  }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getDocumentForTaskStage, getKycFields, visibleHeaders, visibleStats])
 
   // Format date to dd/MM/yyyy format
   const formatDateValue = (dateString: string | Date | null | undefined) => {
     if (!dateString) return 'N/A';
     try {
       let date: Date;
-      
+
       if (typeof dateString === 'string') {
         if (dateString.includes('/')) {
-          // Already in dd/MM/yyyy format
           return dateString;
         }
         date = new Date(dateString);
       } else {
         date = dateString;
       }
-      
-      // Format to dd/MM/yyyy
+
       const day = String(date.getDate()).padStart(2, '0');
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const year = date.getFullYear();
-      
+
       return `${day}/${month}/${year}`;
     } catch (e) {
       console.error('Error formatting date:', dateString, e);
@@ -719,23 +906,26 @@ export default function DepartmentTasksManager({
 
     switch (row.type) {
       case 'basic': return <span className="text-sm font-medium text-slate-800">{value}</span>;
-      case 'badge': return <Badge variant={value === 'completed' ? 'success' : value === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{value}</Badge>;
+      case 'badge': return <Badge variant={value === 'completed' ? 'default' : value === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{value}</Badge>;
       case 'date': return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
+      case 'stat': return <Badge variant="outline" className="text-xs font-semibold">{value}</Badge>;
       case 'stage':
         return (
           <EditableStageCell
+            key={row.stage.id}
             stage={row.stage}
             task={task}
-            value={value}
+            value={task.stages?.[row.stage.id]?.status}
             onSave={handleStageStatusSave}
             onDocumentUpload={handleStageDocumentUpload}
-            onViewDocument={handleViewDocument}
+            onShowDocuments={handleViewDocument}
+            getKycFields={getKycFields}
           />
         )
       case 'document':
         return (
           <div className="flex items-center gap-2 justify-center">
-            <Badge variant={value === 'Uploaded' ? 'success' : 'outline'} className="text-xs">
+            <Badge variant={value === 'Uploaded' ? 'default' : 'outline'} className="text-xs">
               {value}
             </Badge>
             {value === 'Uploaded' && (
@@ -760,11 +950,11 @@ export default function DepartmentTasksManager({
       )
       default: return <span className="text-sm text-slate-800">{value}</span>
     }
-  }, [allDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, handleStageStatusSave])
+  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, handleStageStatusSave])
 
   // State for enhanced table rendering
   const [tableRows, setTableRows] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   // Function to load rows for enhanced table
   const loadRows = useCallback(async (tasks: any[]) => {
@@ -772,177 +962,14 @@ export default function DepartmentTasksManager({
     const rows = await generateEnhancedTableRows(tasks);
     setTableRows(rows);
     setLoading(false);
-  }, [expandedSections, expandedStages, expandedDocuments, generateEnhancedTableRows]);
+  }, [generateEnhancedTableRows]);
 
   // Effect to load rows when tasks change
   useEffect(() => {
     loadRows(tasks);
-  }, [tasks, loadRows]);
+  }, [tasks, loadRows, expandedSections, expandedStages, expandedDocuments, visibleHeaders, visibleStats]);
 
-  // Render function for enhanced table
-  const renderEnhancedTransposedTable = useCallback((tasks: any[], tableType: string) => {
-    if (loading) {
-      return (
-        <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
-          <div className="h-8 w-8 border-2 border-t-slate-600 border-slate-200 rounded-full animate-spin mb-4"></div>
-          <p className="font-semibold text-slate-700">Loading table data...</p>
-          <p className="text-sm text-slate-500">Fetching KYC field configurations...</p>
-        </div>
-      );
-    }
-
-    if (!tasks.length) {
-      return (
-        <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
-          <FileText className="h-12 w-12 text-slate-400" />
-          <p className="mt-4 font-semibold text-slate-700">No {tableType} found</p>
-          <p className="text-sm text-slate-500">Tasks with this status will appear here.</p>
-        </div>
-      )
-    }
-
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center gap-2 mb-4">
-          <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={expandAll}><Plus className="h-4 w-4" />Expand All</Button>
-          <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={collapseAll}><Minus className="h-4 w-4" />Collapse All</Button>
-        </div>
-
-        <div className="border border-slate-200 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 400px)' }}>
-          <Table className="min-w-full">
-            <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
-              <TableRow className="border-b-2 border-slate-300">
-                <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r border-slate-300">#</TableHead>
-                <TableHead className="sticky left-[60px] z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r border-slate-300 min-w-[300px]">Fields</TableHead>
-                {tasks.map((task) => (
-                  <TableHead key={`header-${task.id}`} className="font-semibold bg-blue-500 text-white min-w-[200px] text-center text-sm py-2 border-r border-slate-500">
-                    <div className="flex flex-col items-center">
-                      <span className="font-bold">{task.applicant_name || `Task ${task.id}`}</span>
-                      <span className="text-xs opacity-80">{companies.get(task.company_id) || 'No Company'}</span>
-                    </div>
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-
-            <TableBody className="divide-y divide-slate-100">
-              {(tasksLoading || departmentsLoading || companiesLoading) ? (
-                <TableRow>
-                  <TableCell colSpan={tasks.length + 1} className="h-32 text-center">
-                    <div className="flex justify-center items-center gap-2 text-slate-600">
-                      <div className="h-5 w-5 border-2 border-t-slate-600 border-slate-200 rounded-full animate-spin"></div>
-                      Loading {tableType}...
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : error ? (
-                <TableRow>
-                  <TableCell colSpan={tasks.length + 1} className="h-32 text-center text-red-600">
-                    <div className="flex justify-center items-center gap-2"><AlertTriangle className="h-5 w-5" />{error}</div>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                tableRows.map((row, index) => {
-                  const rowBg = row.isSubSubRow ? 'bg-slate-100/50' : row.isSubRow ? 'bg-slate-50/60' : 'bg-white';
-                  const hoverBg = 'hover:bg-blue-50/50';
-
-                  if (row.type === 'section_header') {
-                    const Icon = row.icon;
-                    return (
-                      <TableRow key={row.key} className="bg-slate-100 border-y-2 border-slate-300 hover:bg-slate-100">
-                        <TableCell className={`sticky left-0 z-10 ${rowBg} group-hover:${hoverBg.replace('hover:', '')}-50 border-r border-gray-200 text-center text-sm text-slate-600 py-2 w-[60px]`}>
-                          {row.type === 'basic' || row.type === 'badge' || row.type === 'date' ? (index + 1) : ''}
-                        </TableCell>
-                        <TableCell colSpan={2} className="py-0 px-0">
-                          <div className="flex items-center justify-between px-3 py-2">
-                            <div className="flex items-center gap-3">
-                              <Icon className="h-5 w-5 text-slate-600" />
-                              <span className="font-bold text-slate-700 text-lg">{row.label}</span>
-                            </div>
-                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleSectionExpansion(row.id)}>
-                              {expandedSections.has(row.id) ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                            </Button>
-                          </div>
-                        </TableCell>
-                        <TableCell colSpan={tasks.length + 1} className="py-0 px-0"></TableCell>
-                      </TableRow>
-                    )
-                  }
-
-                  return (
-                    <TableRow key={row.key} className={`${rowBg} ${hoverBg} group`}>
-                      <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:${hoverBg.replace('hover:', '')}-50 border-r border-slate-200 font-medium text-sm text-slate-700 p-2`}>{row.type === 'basic' || row.type === 'badge' || row.type === 'date' ? (index + 1) : ''}</TableCell>
-                      <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border-r border-slate-200 font-medium text-sm text-slate-700 p-2`}>
-                        <div className="flex items-center gap-2">
-                          <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }}>
-                            <span className={row.type === 'stage' ? 'font-semibold' : ''}>{row.label}</span>
-                          </div>
-                          {row.type === 'stage' && row.stage?.documents?.length > 0 && (
-                            <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-500 hover:text-slate-800" onClick={() => toggleStageExpansion(row.stage.id)}>
-                              {expandedStages.has(row.stage.id) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-                            </Button>
-                          )}
-                          {row.type === 'document' && row.document?.kycId && (
-                            <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-500 hover:text-slate-800" onClick={() => toggleDocumentExpansion(row.document.id)}>
-                              {expandedDocuments.has(row.document.id) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                      {tasks.map(task => (
-                        <TableCell key={`${row.key}-${task.id}`} className="text-center text-sm py-1 px-2 align-middle">
-                          {renderCellContent(row, task)}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  )
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-    )
-  }, [generateEnhancedTableRows, tasksLoading, departmentsLoading, companiesLoading, error, renderCellContent, expandedSections, expandedStages, expandedDocuments, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies])
-
-  // UPDATED: Enhanced normal table with KYC fields
-  const renderEnhancedNormalTable = useCallback((tasks: any[], tableType: string) => {
-    const [kycFieldsMap, setKycFieldsMap] = useState(new Map());
-    const [fieldsLoading, setFieldsLoading] = useState(true);
-
-    useEffect(() => {
-      const loadKycFields = async () => {
-        setFieldsLoading(true);
-        const fieldsMap = new Map();
-        
-        for (const stage of stages) {
-          if (stage.documents) {
-            for (const doc of stage.documents) {
-              if (doc.kycId && !fieldsMap.has(doc.kycId)) {
-                const fields = await getKycFields(doc);
-                fieldsMap.set(doc.kycId, fields);
-              }
-            }
-          }
-        }
-        
-        setKycFieldsMap(fieldsMap);
-        setFieldsLoading(false);
-      };
-      
-      loadKycFields();
-    }, [stages, getKycFields]);
-
-    if (fieldsLoading) {
-      return (
-        <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
-          <div className="h-8 w-8 border-2 border-t-slate-600 border-slate-200 rounded-full animate-spin mb-4"></div>
-          <p className="font-semibold text-slate-700">Loading KYC configurations...</p>
-          <p className="text-sm text-slate-500">Fetching document field specifications...</p>
-        </div>
-      );
-    }
-
+  const renderStandardTable = useCallback((tasks: any[], tableType: string) => {
     if (!tasks.length) {
       return (
         <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
@@ -1067,12 +1094,12 @@ export default function DepartmentTasksManager({
             ) : (
               tasks.map((task) => (
                 <TableRow key={task.id} className="group bg-white hover:bg-blue-50/50">
-                  <TableCell className="sticky left-0 z-10 group-hover:bg-blue-50/50 bg-white border-r border-slate-200 font-medium text-sm text-slate-800 p-2 align-middle">
+                  <TableCell className="sticky left-0 z-10 group-hover:bg-blue-50/50 bg-white border border-gray-100 font-medium text-sm text-slate-800 p-2 align-middle">
                     <div className="truncate" title={task.applicant_name}>{task.applicant_name || 'N/A'}</div>
                     <div className="text-xs text-slate-500">ID: {task.id}</div>
                   </TableCell>
-                  <TableCell className="border-r border-slate-200 text-center text-sm p-2 align-middle"><div className="max-w-[160px] mx-auto truncate" title={companies.get(task.company_id)}>{companies.get(task.company_id) || 'N/A'}</div></TableCell>
-                  <TableCell className="border-r border-slate-200 text-center text-sm p-2 align-middle"><Badge variant={task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{task.status || 'pending'}</Badge></TableCell>
+                  <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle"><div className="max-w-[160px] mx-auto truncate" title={companies.get(task.company_id)}>{companies.get(task.company_id) || 'N/A'}</div></TableCell>
+                  <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle"><Badge variant={task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{task.status || 'pending'}</Badge></TableCell>
 
                   {visibleStages.map(stage => {
                     if (!isStageApplicableToTask(stage, task, departments)) {
@@ -1086,21 +1113,21 @@ export default function DepartmentTasksManager({
                           return acc + 1;
                         }, 0);
                       }
-                      return <TableCell key={`${stage.id}-na`} colSpan={Math.max(1, stageCols)} className="border-r border-slate-200 text-center text-slate-400 italic text-xs align-middle">N/A</TableCell>
+                      return <TableCell key={`${stage.id}-na`} colSpan={Math.max(1, stageCols)} className="border border-gray-100 text-center text-slate-400 italic text-xs align-middle">N/A</TableCell>
                     }
 
                     if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
-                      return <TableCell key={stage.id} className="border-r border-slate-200 p-1 align-middle"><EditableStageCell stage={stage} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onViewDocument={handleViewDocument} /></TableCell>
+                      return <TableCell key={stage.id} className="border border-gray-100 p-1 align-middle"><EditableStageCell stage={stage} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onViewDocument={handleViewDocument} /></TableCell>
                     }
 
                     return stage.documents.map(doc => {
                       const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
                       if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId)) {
-                        return <TableCell key={`${doc.id}`} className="border-r border-slate-200 p-1 align-middle"><EditableStageCell stage={{ ...stage, documents: [doc] }} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onViewDocument={handleViewDocument} /></TableCell>
+                        return <TableCell key={`${doc.id}`} className="border border-gray-100 p-1 align-middle"><EditableStageCell stage={{ ...stage, documents: [doc] }} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onViewDocument={handleViewDocument} /></TableCell>
                       } else {
                         const kycFields = kycFieldsMap.get(doc.kycId) || [];
                         return kycFields.map(field => (
-                          <TableCell key={`${field.id || field.fieldName}`} className="border-r border-slate-200 p-1 align-middle"><DocumentFieldCell document={document} field={field} /></TableCell>
+                          <TableCell key={`${field.id || field.fieldName}`} className="border border-gray-100 p-1 align-middle"><DocumentFieldCell document={document} field={field} /></TableCell>
                         ))
                       }
                     }).flat()
@@ -1121,11 +1148,167 @@ export default function DepartmentTasksManager({
     )
   }, [stages, tasksLoading, departmentsLoading, companiesLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, getDocumentForTaskStage, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields])
 
+  // Render function for enhanced table
+  const renderEnhancedTransposedTable = useCallback((tasks: any[], tableType: string) => {
+    if (!tasks.length) {
+      return (
+        <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
+          <FileText className="h-12 w-12 text-slate-400" />
+          <p className="mt-4 font-semibold text-slate-700">No {tableType} found</p>
+          <p className="text-sm text-slate-500">Tasks with this status will appear here.</p>
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-4">
+        <div className="border-2 border-slate-300 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 400px)' }}>
+          <Table className="min-w-full border-separate border-spacing-0">
+            <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
+              <TableRow className="border-b-2 border-slate-400">
+                <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-20">
+                  Stage Order
+                </TableHead>
+                <TableHead className="sticky left-20 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-[300px]">
+                  Fields
+                </TableHead>
+                {tasks.map((task) => (
+                  <TableHead key={`header-${task.id}`} className="font-semibold bg-blue-500 text-white min-w-[200px] text-center text-sm py-2 border-r border-slate-400">
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="flex items-center gap-1">
+                        <span className="font-bold">{task.applicant_name || `Task ${task.id}`}</span>
+                        {task.dependnats_members && Array.isArray(task.dependnats_members) && task.dependnats_members.length > 0 && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-5 w-5 p-0 text-white hover:bg-blue-600"
+                            onClick={() => toggleDependantsExpansion(task.id.toString())}
+                          >
+                            <Plus className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                      <span className="text-xs opacity-80">{companies.get(task.company_id) || 'No Company'}</span>
+                    </div>
+                  </TableHead>
+                ))}
+                {/* Render dependants columns */}
+                {tasks.map((task) => {
+                  if (!expandedDependants.has(task.id.toString()) || !task.dependnats_members?.length) return null;
+
+                  return task.dependnats_members.map((dep, depIndex) => (
+                    <TableHead key={`dep-${task.id}-${depIndex}`} className="font-semibold bg-orange-500 text-white min-w-[180px] text-center text-sm py-2 border-r border-slate-400">
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="font-bold text-xs">{dep.name || `Dependant ${depIndex + 1}`}</span>
+                        <span className="text-xs opacity-80">{dep.relationship || 'Dependant'}</span>
+                      </div>
+                    </TableHead>
+                  ));
+                })}
+              </TableRow>
+            </TableHeader>
+
+            <TableBody className="divide-y divide-slate-200">
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={tasks.length + 2} className="h-32 text-center">
+                    <div className="flex justify-center items-center gap-2 text-slate-600">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      Loading table data...
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : error ? (
+                <TableRow>
+                  <TableCell colSpan={tasks.length + 2} className="h-32 text-center text-red-600 border border-gray-100">
+                    <div className="flex justify-center items-center gap-2"><AlertTriangle className="h-5 w-5" />{error}</div>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                tableRows.map((row, index) => {
+                  const rowBg = row.isSubSubRow ? 'bg-slate-100/50' : row.isSubRow ? 'bg-slate-50/60' : 'bg-white';
+                  const hoverBg = 'hover:bg-blue-50/50';
+
+                  if (row.type === 'section_header') {
+                    const Icon = row.icon;
+                    return (
+                      <TableRow key={row.key} className="bg-slate-200 border-y-2 border-slate-400 hover:bg-slate-200">
+                        <TableCell className="sticky left-0 z-10 bg-slate-200 border border-gray-100 text-center text-sm text-slate-600 py-2 w-20">
+                          {row.id === 'stages' ? 'S#' : '#'}
+                        </TableCell>
+                        <TableCell colSpan={2} className="py-0 px-0">
+                          <div className="flex items-center justify-between px-3 py-2">
+                            <div className="flex items-center gap-3">
+                              <Icon className="h-5 w-5 text-slate-600" />
+                              <span className="font-bold text-slate-700 text-lg">{row.label}</span>
+                            </div>
+                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleSectionExpansion(row.id)}>
+                              {expandedSections.has(row.id) ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                            </Button>
+                          </div>
+                        </TableCell>
+                        <TableCell colSpan={tasks.length + 10} className="py-0 px-0"></TableCell>
+                      </TableRow>
+                    )
+                  }
+
+                  return (
+                    <TableRow key={row.key} className={`${rowBg} ${hoverBg} group border-b border-slate-200`}>
+                      <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center w-20`}>
+                        {row.stageOrder || (row.type === 'basic' || row.type === 'badge' || row.type === 'date' || row.type === 'stat' ? (index + 1) : '')}
+                      </TableCell>
+                      <TableCell className={`sticky left-20 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 min-w-[400px]`}>
+                        <div className="flex items-center gap-2">
+                          <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }}>
+                            <span className={row.type === 'stage' ? 'font-semibold' : ''}>{row.label}</span>
+                          </div>
+                          {row.type === 'stage' && row.stage?.documents?.length > 0 && (
+                            <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-500 hover:text-slate-800" onClick={() => toggleStageExpansion(row.stage.id)}>
+                              {expandedStages.has(row.stage.id) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                            </Button>
+                          )}
+                          {row.type === 'document' && row.document?.kycId && (
+                            <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-500 hover:text-slate-800" onClick={() => toggleDocumentExpansion(row.document.id)}>
+                              {expandedDocuments.has(row.document.id) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                      {tasks.map(task => (
+                        <TableCell key={`${row.key}-${task.id}`} className="text-center text-sm py-1 px-2 align-middle border border-gray-100 w-[200px]">
+                          {renderCellContent(row, task)}
+                        </TableCell>
+                      ))}
+                      {/* Render dependants data */}
+                      {tasks.map((task) => {
+                        if (!expandedDependants.has(task.id.toString()) || !task.dependnats_members?.length) return null;
+
+                        return task.dependnats_members.map((dep, depIndex) => (
+                          <TableCell key={`dep-data-${task.id}-${depIndex}-${row.key}`} className="text-center text-sm py-1 px-2 align-middle border border-gray-100 w-[180px]">
+                            {row.type === 'applicant_name' && dep.name ? dep.name :
+                              row.type === 'nationality' && dep.nationality ? dep.nationality :
+                                row.type === 'age' && dep.age ? dep.age :
+                                  row.type === 'case_status' ? 'Dependant' :
+                                    <span className="text-xs text-gray-400">-</span>}
+                          </TableCell>
+                        ));
+                      })}
+                    </TableRow>
+                  )
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+    )
+  }, [loading, error, renderCellContent, expandedSections, expandedStages, expandedDocuments, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies, expandedDependants, toggleDependantsExpansion])
+
   if (departmentsLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-slate-50/30">
         <div className="text-center space-y-3">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-300 mx-auto"></div>
+          <Loader2 className="h-12 w-12 animate-spin text-slate-600 mx-auto" />
           <p className="font-semibold text-slate-800">Loading Workspace...</p>
           <p className="text-sm text-slate-600">Fetching departments and tasks.</p>
         </div>
@@ -1152,11 +1335,6 @@ export default function DepartmentTasksManager({
 
   return (
     <div className="flex-1 space-y-4 p-4 md:p-6 bg-slate-50/30 min-h-screen">
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">Task Manager</h2>
-        </div>
-      </div>
 
       <Tabs value={activeDepartmentTab} onValueChange={setActiveDepartmentTab} className="space-y-4">
         <TabsList className="grid w-full rounded-lg p-1 shadow-sm" style={{ gridTemplateColumns: `repeat(${departments.length}, 1fr)` }}>
@@ -1175,7 +1353,7 @@ export default function DepartmentTasksManager({
                   Enquiries <Badge variant="secondary">{enquiryTasks.length}</Badge>
                 </TabsTrigger>
                 <TabsTrigger value="wip-stages" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                  WIP Stages <Badge variant="secondary">{getFilteredTasks('in_progress').length}</Badge>
+                  WIP Stages <Badge variant="secondary">{wipTasks.length}</Badge>
                 </TabsTrigger>
                 <TabsTrigger value="completed" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
                   Completed <Badge variant="secondary">{completedTasks.length}</Badge>
@@ -1198,17 +1376,136 @@ export default function DepartmentTasksManager({
                           <div>
                             <CardTitle className="text-lg text-slate-800">{title} - {dept.name}</CardTitle>
                             <CardDescription className="text-slate-600">
-                              {isTransposedView ? 'Transposed column view' : 'Standard row-based view'}.
+                              Showing {tasksToRender.length} {globalSearchTerm ? 'filtered ' : ''}tasks {isTransposedView ? '(Transposed View)' : '(Standard View)'}
                             </CardDescription>
                           </div>
                           <div className="flex items-center gap-2">
                             {tabValue === 'enquiries' && <Button className="flex items-center gap-2" onClick={() => setIsEnquiryDialogOpen(true)}><Plus className="h-4 w-4" />New Enquiry</Button>}
-                            <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => setIsTransposedView(!isTransposedView)}>
+                            <div className="relative">
+                              <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
+                              <Input
+                                placeholder="Search tasks, applicants, companies..."
+                                value={globalSearchTerm}
+                                onChange={(e) => setGlobalSearchTerm(e.target.value)}
+                                className="pl-8 w-64"
+                              />
+                              {globalSearchTerm && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="absolute right-1 top-1 h-6 w-6"
+                                  onClick={() => setGlobalSearchTerm('')}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+
+                            {isTransposedView && (
+                              <>
+                                <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={expandAll}><Plus className="h-4 w-4" />Expand All</Button>
+                                <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={collapseAll}><Minus className="h-4 w-4" />Collapse All</Button>
+                              </>
+                            )}
+
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-2"
+                              onClick={() => setIsTransposedView(!isTransposedView)}
+                            >
                               {isTransposedView ? <TableProperties className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
                               {isTransposedView ? 'Standard View' : 'Transposed View'}
                             </Button>
+
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                                  <Settings className="h-4 w-4" />
+                                  {isTransposedView ? `Fields (${visibleHeaders.size + visibleStats.size})` : `Columns (${visibleHeaders.size})`}
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-80">
+                                <div className="space-y-4">
+                                  <div className="space-y-2">
+                                    <h4 className="font-medium">
+                                      {isTransposedView ? 'Visible Fields' : 'Visible Columns'}
+                                    </h4>
+                                    <p className="text-sm text-muted-foreground">
+                                      {isTransposedView ? 'Select which fields to display as rows' : 'Select which columns to display in the table'}
+                                    </p>
+                                  </div>
+
+                                  {/* Case Details Fields */}
+                                  <div className="space-y-2">
+                                    <h5 className="text-sm font-medium text-slate-700">Case Details</h5>
+                                    {TABLE_HEADERS.map((header) => (
+                                      <div key={header.id} className="flex items-center space-x-2">
+                                        <Checkbox
+                                          id={header.id}
+                                          checked={visibleHeaders.has(header.id)}
+                                          onCheckedChange={() => toggleHeaderVisibility(header.id)}
+                                        />
+                                        <Label
+                                          htmlFor={header.id}
+                                          className="text-sm font-normal cursor-pointer"
+                                        >
+                                          {header.label}
+                                        </Label>
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  {/* Stats Fields (only in transposed view) */}
+                                  {isTransposedView && (
+                                    <div className="space-y-2 border-t pt-2">
+                                      <h5 className="text-sm font-medium text-slate-700">Statistics</h5>
+                                      {STATS_HEADERS.map((stat) => (
+                                        <div key={stat.id} className="flex items-center space-x-2">
+                                          <Checkbox
+                                            id={stat.id}
+                                            checked={visibleStats.has(stat.id)}
+                                            onCheckedChange={() => toggleStatsVisibility(stat.id)}
+                                          />
+                                          <Label
+                                            htmlFor={stat.id}
+                                            className="text-sm font-normal cursor-pointer"
+                                          >
+                                            {stat.label}
+                                          </Label>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  <div className="flex gap-2 pt-2 border-t">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        setVisibleHeaders(new Set(TABLE_HEADERS.map(h => h.id)))
+                                        if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.map(s => s.id)))
+                                      }}
+                                    >
+                                      Show All
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        setVisibleHeaders(new Set(TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
+                                        if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.filter(s => s.default).map(s => s.id)))
+                                      }}
+                                    >
+                                      Reset
+                                    </Button>
+                                  </div>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+
                             <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(tasksToRender, title)}>
-                              <Download className="h-4 w-4" />Export
+                              <Download className="h-4 w-4" />Export to Excel
                             </Button>
                           </div>
                         </div>
@@ -1217,7 +1514,7 @@ export default function DepartmentTasksManager({
                           <div className="mt-4">
                             <Tabs value={activeFollowUpFilter} onValueChange={setActiveFollowUpFilter}>
                               <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
-                                <TabsTrigger value="all" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">All <Badge variant="outline">{getWIPTasksByFollowUp('all').length}</Badge></TabsTrigger>
+                                <TabsTrigger value="all" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">All <Badge variant="outline">{wipTasks.length}</Badge></TabsTrigger>
                                 <TabsTrigger value="bcl" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">BCL <Badge variant="outline">{getWIPTasksByFollowUp('bcl').length}</Badge></TabsTrigger>
                                 <TabsTrigger value="officer" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Officer <Badge variant="outline">{getWIPTasksByFollowUp('officer').length}</Badge></TabsTrigger>
                                 <TabsTrigger value="client" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Client <Badge variant="outline">{getWIPTasksByFollowUp('client').length}</Badge></TabsTrigger>
@@ -1227,7 +1524,7 @@ export default function DepartmentTasksManager({
                         )}
                       </CardHeader>
                       <CardContent className="p-2 sm:p-4">
-                        {isTransposedView ? renderEnhancedTransposedTable(tasksToRender, title) : renderEnhancedNormalTable(tasksToRender, title)}
+                        {isTransposedView ? renderEnhancedTransposedTable(tasksToRender, title) : renderStandardTable(tasksToRender, title)}
                       </CardContent>
                     </Card>
                   </TabsContent>
@@ -1278,9 +1575,7 @@ export default function DepartmentTasksManager({
               onClose={() => setPreviewDocument(null)}
               onSave={(updatedData) => {
                 console.log("Saving updated data:", updatedData);
-                // Here you would typically call a function to update the database
-                // e.g., onUpdateExtractedData(previewDocument.documentId, updatedData)
-                setPreviewDocument(null); // Close the dialog on save
+                setPreviewDocument(null);
                 toast({ title: "Success", description: "Document details saved." });
               }}
               file={previewDocument.file}

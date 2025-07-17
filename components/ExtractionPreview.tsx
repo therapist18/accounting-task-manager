@@ -14,7 +14,11 @@ import {
   Loader2, 
   Plus, 
   Minus,
-  Download // Added icon
+  Download,
+  ZoomIn,
+  ZoomOut,
+  RotateCw,
+  Image as ImageIcon
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose, DialogFooter } from '@/components/ui/dialog'
 import Image from 'next/image'
@@ -75,39 +79,188 @@ interface DocumentData {
   type?: string;
 }
 
-// Inlined and restyled Document Preview component
+// Enhanced Image Viewer component
+const ImageViewer = ({ fileUrl, fileName, documentName }) => {
+  const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
+  const [imageError, setImageError] = useState(false);
+  const [imageLoading, setImageLoading] = useState(true);
+
+  const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.25, 3));
+  const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.25, 0.25));
+  const handleRotate = () => setRotation(prev => (prev + 90) % 360);
+  const handleReset = () => {
+    setZoom(1);
+    setRotation(0);
+  };
+
+  if (imageError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-secondary/20 rounded-md border">
+        <ImageIcon className="h-16 w-16 mb-4" />
+        <p className="text-lg font-medium">Failed to load image</p>
+        <p className="text-sm">The image file could not be displayed</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative w-full h-full">
+      {/* Image Controls */}
+      <div className="absolute top-2 right-2 z-10 flex gap-1 bg-background/80 backdrop-blur-sm rounded-md p-1 border">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={handleZoomOut}
+          disabled={zoom <= 0.25}
+        >
+          <ZoomOut className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={handleZoomIn}
+          disabled={zoom >= 3}
+        >
+          <ZoomIn className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={handleRotate}
+        >
+          <RotateCw className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={handleReset}
+          disabled={zoom === 1 && rotation === 0}
+        >
+          <RefreshCw className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {/* Zoom Level Indicator */}
+      {zoom !== 1 && (
+        <div className="absolute top-2 left-2 z-10 bg-background/80 backdrop-blur-sm rounded-md px-2 py-1 border text-xs font-medium">
+          {Math.round(zoom * 100)}%
+        </div>
+      )}
+
+      {/* Image Container */}
+      <div className="w-full h-full overflow-auto bg-secondary/30 rounded-md border flex items-center justify-center">
+        <div 
+          className="transition-transform duration-200 ease-in-out"
+          style={{
+            transform: `scale(${zoom}) rotate(${rotation}deg)`,
+            transformOrigin: 'center center'
+          }}
+        >
+          {imageLoading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-secondary/50">
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
+          )}
+          <Image
+            src={fileUrl}
+            alt={documentName}
+            width={800}
+            height={600}
+            className="max-w-none object-contain"
+            style={{
+              width: 'auto',
+              height: 'auto',
+              maxWidth: zoom === 1 ? '100%' : 'none',
+              maxHeight: zoom === 1 ? '100%' : 'none'
+            }}
+            onLoad={() => setImageLoading(false)}
+            onError={() => {
+              setImageError(true);
+              setImageLoading(false);
+            }}
+            priority
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Enhanced Document Viewer component
 const DocumentViewer = ({ fileUrl, fileName, documentName }) => {
-  const isPDF = fileName?.toLowerCase().endsWith('.pdf');
+  const getFileType = (fileName: string) => {
+    if (!fileName) return 'unknown';
+    const extension = fileName.toLowerCase().split('.').pop();
+    
+    if (extension === 'pdf') return 'pdf';
+    if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension)) return 'image';
+    return 'unknown';
+  };
+
+  const fileType = getFileType(fileName);
 
   return (
     <Card className="w-full h-full flex flex-col min-h-[70vh]">
       <CardHeader>
-        <CardTitle className="text-lg">Document Preview</CardTitle>
-        <CardDescription>Visual representation of the uploaded file.</CardDescription>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-lg">Document Preview</CardTitle>
+            <CardDescription>
+              Visual representation of the uploaded {fileType === 'pdf' ? 'PDF' : fileType === 'image' ? 'image' : 'file'}.
+            </CardDescription>
+          </div>
+          {fileName && (
+            <Badge variant="outline" className="text-xs">
+              {fileName.split('.').pop()?.toUpperCase()}
+            </Badge>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="flex-1 p-2">
-        <div className="relative w-full max-h-[70vh] bg-secondary/30 rounded-md border">
+        <div className="relative w-full h-[65vh]">
           {fileUrl ? (
-            isPDF ? (
+            fileType === 'pdf' ? (
               <PDFViewer url={fileUrl} />
+            ) : fileType === 'image' ? (
+              <ImageViewer 
+                fileUrl={fileUrl} 
+                fileName={fileName} 
+                documentName={documentName} 
+              />
             ) : (
-              <div className="relative w-full h-full">
-                <Image
-                  src={fileUrl}
-                  alt={documentName}
-                  fill
-                  className="object-contain"
-                />
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-secondary/30 rounded-md border">
+                <FileText className="h-16 w-16 mb-4" />
+                <p className="text-lg font-medium">Unsupported File Type</p>
+                <p className="text-sm">This file type cannot be previewed</p>
+                {fileName && (
+                  <p className="text-xs mt-2 opacity-70">{fileName}</p>
+                )}
               </div>
             )
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-              <FileText className="h-16 w-16" />
-              <p className="mt-2 text-sm">No preview available</p>
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-secondary/30 rounded-md border">
+              <FileText className="h-16 w-16 mb-4" />
+              <p className="text-lg font-medium">No Preview Available</p>
+              <p className="text-sm">No file has been uploaded yet</p>
             </div>
           )}
         </div>
       </CardContent>
+      {fileName && (
+        <CardFooter className="text-xs text-muted-foreground border-t bg-muted/50">
+          <div className="flex items-center justify-between w-full">
+            <span>File: {fileName}</span>
+            {fileType === 'image' && (
+              <span>Use controls to zoom and rotate the image</span>
+            )}
+          </div>
+        </CardFooter>
+      )}
     </Card>
   );
 };
@@ -374,7 +527,7 @@ const ExtractionPreview = ({
                 )}
               </div>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-6 max-h-[65vh] overflow-y-auto">
               {doc.fields?.length > 0 ? doc.fields.map((field) => renderField(field, index)) : (
                 <div className="flex flex-col items-center justify-center text-center py-10 text-muted-foreground">
                   <FileText className="h-12 w-12 mb-4" />
@@ -384,7 +537,7 @@ const ExtractionPreview = ({
               )}
             </CardContent>
             {showSaveButton && !viewMode && (
-              <CardFooter>
+              <CardFooter className="border-t bg-muted/50">
                 <Button onClick={onVerify} className="w-full sm:w-auto">
                   <Save className="mr-2 h-4 w-4" /> Save Changes
                 </Button>

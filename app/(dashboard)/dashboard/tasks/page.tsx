@@ -65,9 +65,9 @@ export default function Page() {
         .from('tm_tasks')
         .select('*')
         .order('created_at', { ascending: false });
-      
+
       if (tasksError) throw tasksError;
-      
+
       setTasks(tasksData || []);
       return Promise.resolve()
     } catch (error) {
@@ -77,19 +77,26 @@ export default function Page() {
   }
 
   return (
-    <Tabs defaultValue="overall">
-      <TabsList>
-        <TabsTrigger value="overall">OverallView</TabsTrigger>
-        <TabsTrigger value="department">Department-Wise</TabsTrigger>
-      </TabsList>
-      <TabsContent value="overall">
-        <DepartmentTasksManager
-          handleStageStatusSave={handleStageStatusSave}
-        />
-      </TabsContent>
-      <TabsContent value="department">
-        <TasksPage />
-      </TabsContent>
-    </Tabs>
+    <>
+      <Tabs defaultValue="overall">
+        <div className="flex justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">Task Manager</h2>
+          </div>
+          <TabsList>
+            <TabsTrigger value="overall">OverallView</TabsTrigger>
+            <TabsTrigger value="department">Department-Wise</TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="overall">
+          <DepartmentTasksManager
+            handleStageStatusSave={handleStageStatusSave}
+          />
+        </TabsContent>
+        <TabsContent value="department">
+          <TasksPage />
+        </TabsContent>
+      </Tabs>
+    </>
   )
 }

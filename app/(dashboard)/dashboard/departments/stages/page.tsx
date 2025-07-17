@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useEffect, useMemo } from "react"
+import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -27,6 +27,37 @@ const generateId = () => {
     const r = Math.random() * 16 | 0
     const v = c === 'x' ? r : (r & 0x3 | 0x8)
     return v.toString(16)
+  })
+}
+
+// Enhanced recursive helper to transform KYC fields, handling nested arrays
+const transformKycFields = (fields: any[]): any[] => {
+  if (!Array.isArray(fields)) return []
+
+  return fields.map((field: any) => {
+    // Check for array type more comprehensively
+    const isArray = field.type === 'array' || field.isArray === true
+
+    const transformedField: any = {
+      id: field.id || field.fieldName || '',
+      fieldName: field.name || field.fieldName || '',
+      description: field.description || '',
+      isRequired: field.isRequired !== false,
+      fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
+      parentField: field.parentField,
+      isArray: isArray,
+    }
+
+    // Handle array configuration for nested fields
+    if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
+      transformedField.arrayConfig = {
+        maxItems: field.arrayConfig.maxItems || 10,
+        // Recursive call for nested fields
+        fields: transformKycFields(field.arrayConfig.fields)
+      }
+    }
+
+    return transformedField
   })
 }
 
@@ -95,6 +126,151 @@ export default function Stages() {
   const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false)
   const { toast } = useToast()
 
+  // State for KYC documents
+  const [allKycDocuments, setAllKycDocuments] = useState<Map<string, any>>(new Map())
+  const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map())
+  const [kycDocumentsLoading, setKycDocumentsLoading] = useState(false)
+
+  // Effect to fetch all KYC documents
+  useEffect(() => {
+    const fetchAllKycDocuments = async () => {
+      try {
+        setKycDocumentsLoading(true)
+        
+        // Fetch ALL KYC documents from acc_portal_kyc table
+        const { data, error } = await supabase
+          .from('acc_portal_kyc')
+          .select('*')
+
+        if (error) throw error
+
+        // Transform and cache all documents
+        const documentsMap = new Map()
+        data?.forEach(doc => {
+          const transformedDoc = {
+            ...doc,
+            fields: transformKycFields(doc.fields || [])
+          }
+          documentsMap.set(doc.id, transformedDoc)
+        })
+
+        setAllKycDocuments(documentsMap)
+        console.log(`Loaded ${documentsMap.size} KYC documents`)
+      } catch (error) {
+        console.error('Error fetching KYC documents:', error)
+        toast({
+          title: "Warning",
+          description: "Failed to load KYC documents. Some document information may be incomplete.",
+          variant: "destructive"
+        })
+      } finally {
+        setKycDocumentsLoading(false)
+      }
+    }
+
+    fetchAllKycDocuments()
+  }, [])
+
+  // Effect to update filtered KYC documents when departments change
+  useEffect(() => {
+    updateKycDocumentsMap()
+  }, [departments, allKycDocuments])
+
+  // Helper function to update the filtered KYC documents map
+  const updateKycDocumentsMap = () => {
+    const filteredDocuments = new Map()
+    
+    // Get all unique kycIds from documents
+    const allKycIds = new Set<string>()
+    departments.forEach(dept => {
+      dept.subdepartments?.forEach(subdept => {
+        subdept.classes?.forEach(cls => {
+          cls.subClasses?.forEach(subCls => {
+            subCls.documents?.forEach(doc => {
+              if (doc.kycId) {
+                allKycIds.add(doc.kycId)
+              }
+            })
+          })
+        })
+      })
+    })
+
+    // Add stages documents too
+    departments.forEach(dept => {
+      dept.stages?.forEach(stage => {
+        stage.documents?.forEach(doc => {
+          if (doc.kycId) {
+            allKycIds.add(doc.kycId)
+          }
+        })
+      })
+    })
+
+    // Filter and add only the required documents
+    allKycIds.forEach(kycId => {
+      const doc = allKycDocuments.get(kycId)
+      if (doc) {
+        filteredDocuments.set(kycId, doc)
+      }
+    })
+
+    setKycDocuments(filteredDocuments)
+  }
+
+  // Enhanced function to get KYC fields for a document
+  const getKycFields = useCallback((doc: any) => {
+    if (!doc.kycId) {
+      // Fallback to extractionSpecs only if no kycId is provided
+      console.warn(`Document ${doc.name || 'Unknown'} has no kycId, falling back to extractionSpecs`)
+      return transformKycFields(doc.extractionSpecs || [])
+    }
+
+    const kycDoc = kycDocuments.get(doc.kycId)
+    if (!kycDoc) {
+      console.warn(`KYC document not found for kycId: ${doc.kycId}`)
+      return transformKycFields(doc.extractionSpecs || [])
+    }
+
+    return kycDoc.fields || []
+  }, [kycDocuments])
+
+  // Enhanced function to get document information from KYC
+  const getDocumentInfo = useCallback((doc: any) => {
+    if (!doc.kycId) {
+      return {
+        displayName: doc.name || 'Unknown Document',
+        documentType: doc.documentType || 'document',
+        category: doc.category || '',
+        subcategory: doc.subcategory || '',
+        isKycSynced: false,
+        kycDoc: null
+      }
+    }
+
+    const kycDoc = allKycDocuments.get(doc.kycId)
+    if (!kycDoc) {
+      console.warn(`KYC document not found for kycId: ${doc.kycId}`)
+      return {
+        displayName: doc.name || 'Unknown Document',
+        documentType: doc.documentType || 'document',
+        category: doc.category || '',
+        subcategory: doc.subcategory || '',
+        isKycSynced: false,
+        kycDoc: null
+      }
+    }
+
+    return {
+      displayName: kycDoc.display_name || kycDoc.name || doc.name || 'Unknown Document',
+      documentType: kycDoc.document_type || doc.documentType || 'document',
+      category: kycDoc.category || doc.category || '',
+      subcategory: kycDoc.subcategory || doc.subcategory || '',
+      isKycSynced: true,
+      kycDoc: kycDoc
+    }
+  }, [allKycDocuments])
+
   // Column visibility state
   const [columnVisibility, setColumnVisibility] = useState({
     index: true,
@@ -107,6 +283,261 @@ export default function Stages() {
 
   // Entity visibility state
   const [entityVisibility, setEntityVisibility] = useState<Record<string, boolean>>({})
+
+  // Enhanced document display component using KYC data exclusively
+  const DocumentDisplay = useCallback(({ doc, stage }: { doc: any, stage: any }) => {
+    const [kycFields, setKycFields] = useState([])
+    const [fieldsLoading, setFieldsLoading] = useState(true)
+
+    const documentInfo = getDocumentInfo(doc)
+
+    useEffect(() => {
+      const loadKycFields = async () => {
+        setFieldsLoading(true)
+        try {
+          const fields = getKycFields(doc)
+          setKycFields(fields)
+        } catch (error) {
+          console.error('Error loading KYC fields:', error)
+          setKycFields([])
+        } finally {
+          setFieldsLoading(false)
+        }
+      }
+      loadKycFields()
+    }, [doc.kycId, doc.extractionSpecs])
+
+    const renderArrayField = (field: any, depth: number = 0) => {
+      const indentClass = depth > 0 ? `ml-${depth * 4}` : ''
+      
+      return (
+        <div key={field.id} className={cn(
+          "bg-white p-3 rounded-lg border-l-4 border-purple-400 space-y-2",
+          indentClass
+        )}>
+          <div className="flex items-center justify-between">
+            <span className="font-medium text-sm flex items-center gap-2">
+              {field.fieldName}
+              <Badge variant="outline" className="text-xs py-0 bg-purple-50 text-purple-700 border-purple-200">
+                Array
+              </Badge>
+              {field.arrayConfig?.maxItems && (
+                <Badge variant="outline" className="text-xs py-0 bg-blue-50 text-blue-700 border-blue-200">
+                  Max: {field.arrayConfig.maxItems}
+                </Badge>
+              )}
+            </span>
+            <div className="flex items-center gap-1">
+              {field.isRequired && (
+                <Badge variant="destructive" className="text-xs py-0">
+                  Required
+                </Badge>
+              )}
+            </div>
+          </div>
+          
+          {field.description && (
+            <div className="text-gray-600 text-xs">
+              {field.description}
+            </div>
+          )}
+
+          {/* Array sub-fields */}
+          {field.arrayConfig?.fields && field.arrayConfig.fields.length > 0 && (
+            <div className="space-y-2 border-l-2 border-gray-200 pl-3 ml-2">
+              <div className="text-xs font-medium text-gray-500 mb-2">
+                Array contains {field.arrayConfig.fields.length} field{field.arrayConfig.fields.length !== 1 ? 's' : ''}:
+              </div>
+              {field.arrayConfig.fields.map((subField: any) => {
+                if (subField.isArray) {
+                  return renderArrayField(subField, depth + 1)
+                }
+                
+                return (
+                  <div key={subField.id} className="bg-gray-50 p-2 rounded text-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">{subField.fieldName}</span>
+                      <div className="flex items-center gap-1">
+                        <Badge variant="outline" className="text-xs py-0">
+                          {subField.fieldType}
+                        </Badge>
+                        {subField.isRequired && (
+                          <Badge variant="destructive" className="text-xs py-0">
+                            Required
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    {subField.description && (
+                      <div className="text-gray-600">
+                        {subField.description}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    const renderRegularField = (field: any) => (
+      <div key={field.id} className="bg-white p-2 rounded text-xs space-y-1">
+        <div className="flex items-center justify-between">
+          <span className="font-medium">{field.fieldName}</span>
+          <div className="flex items-center gap-1">
+            <Badge variant="outline" className="text-xs py-0">
+              {field.fieldType}
+            </Badge>
+            {field.isRequired && (
+              <Badge variant="destructive" className="text-xs py-0">
+                Required
+              </Badge>
+            )}
+          </div>
+        </div>
+        {field.description && (
+          <div className="text-gray-600">
+            {field.description}
+          </div>
+        )}
+      </div>
+    )
+
+    return (
+      <div className={cn(
+        "p-3 rounded-lg space-y-3",
+        doc.isSpecial ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50'
+      )}>
+        <div className="flex items-start justify-between">
+          <div className="space-y-2">
+            <div className="font-medium flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              {documentInfo.displayName}
+              {doc.isSpecial && <Star className="h-4 w-4 text-amber-500" />}
+            </div>
+            
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant={doc.isRequired ? "default" : "secondary"} className="text-xs">
+                {doc.isRequired ? "Required" : "Optional"}
+              </Badge>
+              <Badge variant="outline" className="text-xs">
+                {documentInfo.documentType}
+              </Badge>
+              {doc.inputType && (
+                <Badge variant="outline" className="text-xs">
+                  {doc.inputType}
+                </Badge>
+              )}
+              {documentInfo.isKycSynced ? (
+                <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                  KYC Synced
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-200">
+                  Legacy Data
+                </Badge>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-2 flex-wrap">
+              {documentInfo.category && (
+                <Badge variant="outline" className="text-xs">
+                  {documentInfo.category}
+                </Badge>
+              )}
+              {documentInfo.subcategory && (
+                <Badge variant="outline" className="text-xs">
+                  {documentInfo.subcategory}
+                </Badge>
+              )}
+            </div>
+            
+            {/* Special document target entities info */}
+            {doc.isSpecial && doc.targetEntities && doc.targetEntities.length > 0 && (
+              <div className="space-y-1">
+                <div className="flex items-center gap-1 text-xs text-amber-700 font-medium">
+                  <Info className="h-3 w-3" />
+                  <span>Target Entities ({doc.targetEntities.length}):</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {doc.targetEntities.map((entity, entityIndex) => (
+                    <Badge key={entityIndex} variant="outline" className="text-xs">
+                      {entity.entityName}
+                      <span className="ml-1 text-amber-600">({entity.entityType})</span>
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {doc.description && (
+          <div className="text-gray-600 text-xs">
+            {doc.description}
+          </div>
+        )}
+
+        {/* Enhanced KYC Fields display */}
+        {fieldsLoading ? (
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <div className="h-3 w-3 border-2 border-t-gray-600 border-gray-200 rounded-full animate-spin"></div>
+            Loading field specifications...
+          </div>
+        ) : kycFields && kycFields.length > 0 ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-xs font-medium">
+              <Info className="h-3 w-3" />
+              {documentInfo.isKycSynced ? 'KYC Fields' : 'Legacy Fields'} ({kycFields.length})
+              {documentInfo.isKycSynced && (
+                <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                  From KYC System
+                </Badge>
+              )}
+            </div>
+            
+            <div className="space-y-2">
+              {kycFields.map((field) => {
+                if (field.isArray) {
+                  return renderArrayField(field)
+                }
+                return renderRegularField(field)
+              })}
+            </div>
+          </div>
+        ) : (
+          doc.kycId ? (
+            <div className="text-xs text-gray-500 italic">
+              No fields configured for this KYC document (ID: {doc.kycId}).
+            </div>
+          ) : (
+            <div className="text-xs text-gray-500 italic">
+              No field specifications available for this document.
+            </div>
+          )
+        )}
+
+        {/* Additional KYC metadata if available */}
+        {documentInfo.kycDoc && (
+          <div className="pt-2 border-t border-gray-200">
+            <div className="text-xs text-gray-500 space-y-1">
+              {documentInfo.kycDoc.validity_days && (
+                <div>Validity: {documentInfo.kycDoc.validity_days} days</div>
+              )}
+              {documentInfo.kycDoc.reminder_days && (
+                <div>Reminder: {documentInfo.kycDoc.reminder_days} days before expiry</div>
+              )}
+              {documentInfo.kycDoc.main_category && (
+                <div>Category: {documentInfo.kycDoc.main_category}</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }, [getKycFields, getDocumentInfo])
 
   // Memoized column visibility options
   const columnVisibilityOptions: ColumnVisibilityOption[] = useMemo(() => [
@@ -1282,17 +1713,20 @@ export default function Stages() {
       return;
     }
 
-    // Create workbook
+    // Create workbook with enhanced KYC-aware export
     const wb = XLSX.utils.book_new();
 
     // Create header structure exactly like the table
     const headerRows = [];
 
-    // Row 1: Stage Names
+    // Row 1: Stage Names with KYC document count
     const stageNameRow = ['Department', '#', 'Entity'];
     currentDept.stages.forEach(stage => {
+      const docCount = stage.documents?.length || 0;
+      const kycCount = stage.documents?.filter(doc => doc.kycId).length || 0;
+      const stageName = `${stage.order_num}. ${stage.name}${docCount > 0 ? ` (${kycCount}/${docCount} KYC)` : ''}`;
       stageNameRow.push(
-        `${stage.order_num}. ${stage.name}`,
+        stageName,
         '', '', '', '' // Empty cells for merging
       );
     });
@@ -1463,7 +1897,7 @@ export default function Stages() {
 
     // Stage columns
     for (let i = 0; i < currentDept.stages.length; i++) {
-      colWidths.push({ wch: 15 }); // Stage name
+      colWidths.push({ wch: 20 }); // Stage name (wider for KYC info)
       colWidths.push({ wch: 10 }); // Duration
       colWidths.push({ wch: 10 }); // Follow up
       colWidths.push({ wch: 10 }); // Applicable
@@ -1478,12 +1912,14 @@ export default function Stages() {
     // Add the worksheet to workbook
     XLSX.utils.book_append_sheet(wb, ws, 'Stages Overview');
 
-    // Generate file
-    XLSX.writeFile(wb, `${currentDept.name}_Stages_Overview_${new Date().toISOString().split('T')[0]}.xlsx`);
+    // Generate file with KYC indicator
+    const kycDocCount = allKycDocuments.size;
+    const fileName = `${currentDept.name}_Stages_Overview_KYC_${kycDocCount}_docs_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, fileName);
 
     toast({
       title: "Export Successful",
-      description: `Exported ${dataToExport.length} rows with ${currentDept.stages.length} stages to Excel`,
+      description: `Exported ${dataToExport.length} rows with ${currentDept.stages.length} stages and ${kycDocCount} KYC documents to Excel`,
     });
   };
 
@@ -1491,7 +1927,7 @@ export default function Stages() {
     return (
       <div className="p-12 text-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-        <p className="mt-4 text-gray-600">Loading stages...</p>
+        <p className="mt-4 text-gray-600">Loading stages and KYC documents...</p>
       </div>
     )
   }
@@ -1533,7 +1969,16 @@ export default function Stages() {
         <div className="flex justify-between items-center mb-4">
           <div>
             <h1 className="text-3xl font-semibold text-gray-900">Stages Management</h1>
-            <p className="text-gray-600 mt-1">Configure workflow stages and their allocations</p>
+            <p className="text-gray-600 mt-1">
+              Configure workflow stages and their allocations 
+              {kycDocumentsLoading ? (
+                <span className="ml-2 text-blue-600">Loading KYC documents...</span>
+              ) : (
+                <span className="ml-2 text-green-600">
+                  • {allKycDocuments.size} KYC documents loaded
+                </span>
+              )}
+            </p>
           </div>
           <div className="flex items-center gap-3">
             {/* Expand/Collapse All Buttons */}
@@ -1567,17 +2012,6 @@ export default function Stages() {
               title="Row Visibility"
               description="Control which departments, classes, and subclasses are visible"
             />
-
-            {/* Column Visibility Control
-            <ColumnVisibilityControl
-              columns={columnVisibilityOptions}
-              onVisibilityChange={handleColumnVisibilityChange}
-              onShowAll={handleShowAllColumns}
-              onHideAll={handleHideAllColumns}
-              onResetToDefault={handleResetToDefault}
-              title="Column Visibility"
-              description="Toggle stage table columns"
-            /> */}
 
             <Button
               variant="outline"
@@ -1679,6 +2113,12 @@ export default function Stages() {
                                               {stage.documents.length}
                                             </div>
                                           </Badge>
+                                          {/* KYC sync indicator */}
+                                          {stage.documents.some(doc => doc.kycId) && (
+                                            <div className="absolute -bottom-1 -left-1 h-3 w-3 bg-green-500 rounded-full p-0.5 flex items-center justify-center">
+                                              <span className="text-white text-xs font-bold">K</span>
+                                            </div>
+                                          )}
                                           {/* Special document indicator */}
                                           {stage.documents.some(doc => doc.isSpecial) && (
                                             <Star className="absolute -bottom-1 -left-1 h-3 w-3 text-amber-400 bg-white rounded-full p-0.5" />
@@ -1693,6 +2133,11 @@ export default function Stages() {
                                               <Badge variant="outline" className="text-xs">
                                                 {stage.documents.length} document{stage.documents.length > 1 ? 's' : ''}
                                               </Badge>
+                                              {stage.documents.some(doc => doc.kycId) && (
+                                                <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                                  {stage.documents.filter(doc => doc.kycId).length} KYC Synced
+                                                </Badge>
+                                              )}
                                               {stage.documents.some(doc => doc.isSpecial) && (
                                                 <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200">
                                                   <Star className="h-3 w-3 mr-1" />
@@ -1704,92 +2149,7 @@ export default function Stages() {
 
                                           <div className="space-y-3">
                                             {stage.documents.map((doc, i) => (
-                                              <div key={doc.id || i} className={`p-3 rounded-lg space-y-2 ${doc.isSpecial ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50'}`}>
-                                                <div className="flex items-start justify-between">
-                                                  <div className="space-y-1">
-                                                    <div className="font-medium flex items-center gap-2">
-                                                      <FileText className="h-4 w-4" />
-                                                      {doc.name}
-                                                      {doc.isSpecial && <Star className="h-4 w-4 text-amber-500" />}
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                      <Badge variant={doc.isRequired ? "default" : "secondary"} className="text-xs">
-                                                        {doc.isRequired ? "Required" : "Optional"}
-                                                      </Badge>
-                                                      <Badge variant="outline" className="text-xs">
-                                                        {doc.documentType}
-                                                      </Badge>
-                                                      {doc.inputType && (
-                                                        <Badge variant="outline" className="text-xs">
-                                                          {doc.inputType}
-                                                        </Badge>
-                                                      )}
-                                                      {doc.kycId && (
-                                                        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                                                          KYC Synced
-                                                        </Badge>
-                                                      )}
-                                                    </div>
-                                                    {/* Special document target entities info */}
-                                                    {doc.isSpecial && doc.targetEntities && doc.targetEntities.length > 0 && (
-                                                      <div className="space-y-1">
-                                                        <div className="flex items-center gap-1 text-xs text-amber-700 font-medium">
-                                                          <Info className="h-3 w-3" />
-                                                          <span>Target Entities ({doc.targetEntities.length}):</span>
-                                                        </div>
-                                                        <div className="flex flex-wrap gap-1">
-                                                          {doc.targetEntities.map((entity, entityIndex) => (
-                                                            <Badge key={entityIndex} variant="outline" className="text-xs">
-                                                              {entity.entityName}
-                                                              <span className="ml-1 text-amber-600">({entity.entityType})</span>
-                                                            </Badge>
-                                                          ))}
-                                                        </div>
-                                                      </div>
-                                                    )}
-                                                  </div>
-                                                </div>
-
-                                                {doc.description && (
-                                                  <div className="text-gray-600 text-xs">
-                                                    {doc.description}
-                                                  </div>
-                                                )}
-
-                                                {/* Extraction specs display */}
-                                                {doc.extractionSpecs && doc.extractionSpecs.length > 0 && (
-                                                  <div className="space-y-2">
-                                                    <div className="flex items-center gap-1 text-xs font-medium">
-                                                      <Info className="h-3 w-3" />
-                                                      Extraction Fields ({doc.extractionSpecs.length})
-                                                    </div>
-                                                    <div className="grid grid-cols-1 gap-1">
-                                                      {doc.extractionSpecs.map((spec, specIndex) => (
-                                                        <div key={spec.id || specIndex} className="bg-white p-2 rounded text-xs">
-                                                          <div className="flex items-center justify-between">
-                                                            <span className="font-medium">{spec.fieldName}</span>
-                                                            <div className="flex items-center gap-1">
-                                                              <Badge variant="outline" className="text-xs py-0">
-                                                                {spec.fieldType}
-                                                              </Badge>
-                                                              {spec.isRequired && (
-                                                                <Badge variant="destructive" className="text-xs py-0">
-                                                                  Required
-                                                                </Badge>
-                                                              )}
-                                                            </div>
-                                                          </div>
-                                                          {spec.description && (
-                                                            <div className="text-gray-600 mt-1">
-                                                              {spec.description}
-                                                            </div>
-                                                          )}
-                                                        </div>
-                                                      ))}
-                                                    </div>
-                                                  </div>
-                                                )}
-                                              </div>
+                                              <DocumentDisplay key={doc.id || i} doc={doc} stage={stage} />
                                             ))}
                                           </div>
 

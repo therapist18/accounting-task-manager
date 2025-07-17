@@ -1,8 +1,9 @@
 // @ts-nocheck
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
+
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import ExtractionPreview from "@/components/ExtractionPreview"
 import { Input } from "@/components/ui/input"
@@ -19,6 +20,7 @@ interface EditableStageCellProps {
   onSave?: (stageId: string, taskId: string, value: string) => Promise<void> | void
   onDocumentUpload?: (task: any, stage: any) => void
   onShowDocuments?: (doc: any) => void
+  getKycFields?: (documentConfig: any) => Promise<any[]>
 }
 
 export default function EditableStageCell({
@@ -27,7 +29,8 @@ export default function EditableStageCell({
   value,
   onSave,
   onDocumentUpload,
-  onShowDocuments
+  onShowDocuments,
+  getKycFields
 }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
@@ -282,11 +285,13 @@ export default function EditableStageCell({
     }
   };
 
-  const handleViewDocument = async (e?: React.MouseEvent) => {
-    // Prevent event bubbling to avoid triggering parent click handlers
-    e?.stopPropagation();
-    
+  const handleViewDocument = useCallback(async (e?: React.MouseEvent) => {
+    if (!getKycFields) {
+      throw new Error('getKycFields function not provided');
+    }
     try {
+      // Prevent event bubbling to avoid triggering parent click handlers
+      e?.stopPropagation();
       // If we already have a preview document and the dialog is open, just toggle it
       if (previewDocument) {
         setPreviewDocument(null);
@@ -343,15 +348,18 @@ export default function EditableStageCell({
         const fileName = doc.file_path?.split('/').pop() || documentName;
         const fileType = fileName.split('.').pop()?.toLowerCase() || 'pdf';
         
-        // Map extraction fields to the expected format
-        const fields = (documentConfig.extractionSpecs || []).map(spec => ({
-          id: spec.fieldName,
-          name: spec.fieldName,
-          type: spec.fieldType,
-          required: spec.isRequired,
-          description: spec.description,
-          // Add any additional field configuration needed by ExtractionPreview
-          ...(spec.extractionRules || {})
+        // Fetch KYC fields for this document type
+        const kycFields = await getKycFields(documentConfig);
+        
+        // Map KYC fields to the expected format
+        const fields = kycFields.map(field => ({
+          id: field.id || field.fieldName,
+          name: field.fieldName,
+          type: field.fieldType,
+          required: field.isRequired,
+          description: field.description,
+          isArray: field.isArray,
+          arrayConfig: field.arrayConfig
         }));
 
         // Prepare extracted data, ensuring all fields have values
@@ -400,11 +408,14 @@ export default function EditableStageCell({
       console.error('Error fetching documents:', error);
       toast({
         title: 'Error',
-        description: 'Failed to load documents',
+        description: `Failed to load document: ${error.message}`,
         variant: 'destructive',
       });
+    } finally {
+      setIsLoading(false);
     }
-  };
+  }, [stage, task, getKycFields]);
+       
 
   const handleClick = () => {
     if (requiresUpload) {

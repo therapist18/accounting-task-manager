@@ -250,7 +250,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
       // First process all KYC document operations with extractionSpecs
       const docsWithKyc = await Promise.all(
         (formData.documents || []).map(async (doc) => {
-          if (!doc.name.trim()) {
+          if (!doc.name?.trim()) {
             return doc
           }
 
