@@ -311,12 +311,42 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             const employmentHistory = individualData?.employment_history || [];
             const individualBillTo = individualData?.bill_to || null;
 
+            // If employment history is empty, use bill_to company
             if (!employmentHistory || employmentHistory.length === 0) {
-                setCompanies([]);
-                setSelectedCompany('');
-                setUnderstudies([]);
-                setSelectedUnderstudy('');
-                return;
+                if (individualBillTo?.company) {
+                    const { data: companiesData, error: companiesError } = await supabase
+                        .from('acc_portal_company_duplicate')
+                        .select('id, company_name')
+                        .eq('id', individualBillTo.company)
+                        .single();
+
+                    if (companiesError) throw companiesError;
+
+                    if (companiesData) {
+                        setCompanies([
+                            {
+                                ...companiesData,
+                                id: companiesData.id.toString(),
+                                company_name: companiesData.company_name || 'Unnamed Company',
+                                is_bill_to: true
+                            }
+                        ]);
+                        setSelectedCompany(companiesData.id.toString());
+                        fetchUnderstudies(companiesData.id.toString());
+                    } else {
+                        setCompanies([]);
+                        setSelectedCompany('');
+                        setUnderstudies([]);
+                        setSelectedUnderstudy('');
+                    }
+                    return;
+                } else {
+                    setCompanies([]);
+                    setSelectedCompany('');
+                    setUnderstudies([]);
+                    setSelectedUnderstudy('');
+                    return;
+                }
             }
 
             // Filter for director roles and get unique company IDs

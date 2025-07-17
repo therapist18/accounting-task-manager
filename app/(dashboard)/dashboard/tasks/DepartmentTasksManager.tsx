@@ -1,15 +1,15 @@
 // @ts-nocheck
 "use client"
 
-import { useState, useMemo, useCallback, useEffect } from "react"
+import React, { useState, useMemo, useCallback, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { TruncatedText } from "@/app/(dashboard)/dashboard/departments/documents+fields/types"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Eye, ChevronDown, ChevronRight, Expand, Shrink, EyeOff, Plus, Minus } from "lucide-react"
+import { Eye, ChevronDown, Plus, Minus } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AlertTriangle, FileText, Edit, Trash2, Download, Building, RotateCcw, TableProperties, Search, Hash, Upload, Users, Briefcase } from "lucide-react"
+import { AlertTriangle, FileText, Edit, Trash2, Download, Building, RotateCcw, TableProperties, Search, Upload, Users, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
 import { format, parseISO } from "date-fns"
 import { toast } from "@/hooks/use-toast"
@@ -19,14 +19,13 @@ import { fetchDepartments } from "../departments/departments/database"
 import { DepartmentTasksManagerProps, Task } from "./components/types"
 import { StageUploadDialog } from "./components/StageUploadDialog"
 import { Input } from "@/components/ui/input"
-import { Dialog, DialogContent } from "@/components/ui/dialog"
-import { ExtractionPreview } from "@/components/ExtractionPreview"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import EditableStageCell from "./components/EditableStageCell"
-
+import ExtractionPreview from "@/components/ExtractionPreview"
 
 
 // Document field cell component
-function DocumentFieldCell({ document, field, task }) {
+function DocumentFieldCell({ document, field }) {
   if (!document || !document.extracted_details) {
     return <span className="text-xs text-gray-400">-</span>
   }
@@ -74,11 +73,13 @@ export default function DepartmentTasksManager({
   const [isStageUploadDialogOpen, setIsStageUploadDialogOpen] = useState(false)
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
 
+  // State for document preview
+  const [previewDocument, setPreviewDocument] = useState<any>(null);
+
   // Enhanced state management for expansions
   const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set())
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
-  const [showTableHeaders, setShowTableHeaders] = useState<boolean>(true)
 
   // Fetch all documents once
   const fetchAllDocuments = useCallback(async () => {
@@ -104,10 +105,17 @@ export default function DepartmentTasksManager({
   const getDocumentForTaskStage = useCallback((task: any, stage: any) => {
     if (!task.individual_id || !stage.documents?.[0]?.kycId) return null
 
-    return allDocuments.find(doc =>
+    // Find the latest document for this director and document type
+    const relevantDocs = allDocuments.filter(doc =>
       doc.director_id === task.individual_id &&
       doc.document_id === stage.documents[0].kycId
-    )
+    );
+
+    if (relevantDocs.length === 0) return null;
+
+    // Assuming the latest is the one with the most recent created_at
+    return relevantDocs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+
   }, [allDocuments])
 
   // Section toggle functions
@@ -200,37 +208,23 @@ export default function DepartmentTasksManager({
   }, [departments])
 
   // Handle document view
-  const [previewDocument, setPreviewDocument] = useState<any>(null);
-
   const handleViewDocument = useCallback(async (task: any, stage: any) => {
     try {
-      console.log('[handleViewDocument] Started', { taskId: task?.id, stageId: stage?.id });
-      console.log('[handleViewDocument] Getting document for task stage', { 
-        taskId: task?.id, 
-        stageId: stage?.id,
-        documentId: stage?.documents?.[0]?.id,
-        documentName: stage?.documents?.[0]?.name
-      });
-      
       const document = getDocumentForTaskStage(task, stage);
-      console.log('[handleViewDocument] Retrieved document', { 
-        documentId: document?.id,
-        hasExtractedDetails: !!document?.extracted_details,
-        documentPath: document?.file_path
-      });
 
       if (document) {
-        // Prepare document data for preview
         const documentName = stage.documents?.[0]?.name || 'Document';
         const bucketName = 'kyc-documents';
-        const filePath = document.file_path?.startsWith(bucketName) 
-          ? document.file_path 
+        const filePath = document.file_path?.startsWith(bucketName)
+          ? document.file_path
           : `${bucketName}/${document.file_path}`;
-        
-        const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+
+        const { data: signedUrlData, error: signedUrlError } = await supabase.storage.from(bucketName).createSignedUrl(document.file_path, 60);
+
+        if (signedUrlError) throw signedUrlError;
+
         const fileName = document.file_path?.split('/').pop() || documentName;
-        
-        // Map extraction fields to the expected format
+
         const fields = (stage.documents?.[0]?.extractionSpecs || []).map(spec => ({
           id: spec.fieldName,
           name: spec.fieldName,
@@ -240,7 +234,6 @@ export default function DepartmentTasksManager({
           ...(spec.extractionRules || {})
         }));
 
-        // Prepare extracted data, ensuring all fields have values
         const extractedData = { ...(document.extracted_details || {}) };
         fields.forEach(field => {
           if (extractedData[field.id] === undefined) {
@@ -248,10 +241,10 @@ export default function DepartmentTasksManager({
           }
         });
 
-        // Prepare the document preview data
         const previewData = {
+          documentId: document.id,
           documentName,
-          fileUrl,
+          fileUrl: signedUrlData.signedUrl,
           fileName,
           extractedData,
           fields,
@@ -259,43 +252,28 @@ export default function DepartmentTasksManager({
           file: {
             name: fileName,
             type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
-            url: fileUrl
+            url: signedUrlData.signedUrl
           }
         };
 
         setPreviewDocument(previewData);
-        console.log('[handleViewDocument] Preview document set successfully');
       } else {
-        const errorMessage = `No ${stage.documents?.[0]?.name || 'documents'} uploaded for this stage yet.`;
-        console.warn('[handleViewDocument] No document found', { 
-          taskId: task?.id, 
-          stageId: stage?.id,
-          error: errorMessage
-        });
-        
         toast({
           title: 'No documents found',
-          description: errorMessage,
+          description: `No ${stage.documents?.[0]?.name || 'documents'} uploaded for this stage yet.`,
           variant: 'default',
         });
       }
     } catch (error) {
-      console.error('[handleViewDocument] Error:', error, { 
-        taskId: task?.id, 
-        stageId: stage?.id,
-        errorMessage: error?.message,
-        errorStack: error?.stack
-      });
-      
+      console.error('Error preparing document for view:', error);
       toast({
         title: 'Error',
-        description: 'Failed to load document',
+        description: `Failed to load document: ${error.message}`,
         variant: 'destructive',
       });
-    } finally {
-      console.log('[handleViewDocument] Completed', { taskId: task?.id, stageId: stage?.id });
     }
   }, [getDocumentForTaskStage]);
+
 
   // Fetch companies
   const fetchCompanies = async () => {
@@ -418,7 +396,7 @@ export default function DepartmentTasksManager({
   }, [fetchAllDocuments])
 
   // Handle task actions
-  const handleTaskAction = useCallback((action: { type: string; taskId?: string | number; [key: string]: any }) => {
+  const handleTaskAction = useCallback((action: { type: string; taskId?: string | number;[key: string]: any }) => {
     switch (action.type) {
       case 'refresh':
       case 'refresh-data':
@@ -556,10 +534,10 @@ export default function DepartmentTasksManager({
     rows.push({ key: 'section_header_stages', type: 'section_header', label: 'Stages', id: 'stages', icon: Briefcase });
 
     if (expandedSections.has('stages')) {
-      allStages.forEach(stage => {
+      allStages.forEach((stage, index) => {
         rows.push({
           key: `stage_${stage.id}`,
-          label: `${stage.name}`,
+          label: `S${stage.order_num || index + 1}. ${stage.name}`,
           type: 'stage',
           stage,
           getValue: (task: Task) => isStageApplicableToTask(stage, task, departments) ? task.stages?.[stage.id] : 'N/A'
@@ -600,24 +578,72 @@ export default function DepartmentTasksManager({
         }
       })
     }
-    
+
     rows.push({ key: 'actions_row', label: 'Actions', type: 'actions' })
 
     return rows
   }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getDocumentForTaskStage])
 
+  // Format date to dd/MM/yyyy format
+  const formatDateValue = (dateString: string | Date | null | undefined) => {
+    if (!dateString) return 'N/A';
+    try {
+      let date: Date;
+      
+      if (typeof dateString === 'string') {
+        if (dateString.includes('/')) {
+          // Already in dd/MM/yyyy format
+          return dateString;
+        }
+        date = new Date(dateString);
+      } else {
+        date = dateString;
+      }
+      
+      // Format to dd/MM/yyyy
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      
+      return `${day}/${month}/${year}`;
+    } catch (e) {
+      console.error('Error formatting date:', dateString, e);
+      return 'Invalid Date';
+    }
+  };
+
   // Render cell content for transposed view
   const renderCellContent = useCallback((row: any, task: any) => {
-    const value = row.getValue ? row.getValue(task) : ''
+    const value = row.getValue ? row.getValue(task) : '';
 
     if (value === 'N/A') {
-      return <span className="text-sm text-gray-400 italic">N/A</span>
+      return <span className="text-sm text-gray-400 italic">N/A</span>;
+    }
+
+    // Handle stage dates if this is a stage cell
+    if (row.type === 'stage' && row.stage && task.stages?.[row.stage.id]) {
+      const stageData = task.stages[row.stage.id];
+      return (
+        <div className="flex flex-col items-center gap-0.5">
+          {stageData.date && (
+            <span className="text-xs font-medium text-slate-800">
+              {formatDateValue(stageData.date)}
+            </span>
+          )}
+                 </div>
+      );
+    }
+
+    // Handle document field dates
+    if (row.type === 'field' && row.field?.fieldType?.toLowerCase() === 'date') {
+      const formattedDate = formatDateValue(value);
+      return <span className="text-xs text-slate-700" title={formattedDate}>{formattedDate}</span>;
     }
 
     switch (row.type) {
-      case 'basic': return <span className="text-sm font-medium text-slate-800">{value}</span>
-      case 'badge': return <Badge variant={value === 'completed' ? 'success' : value === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{value}</Badge>
-      case 'date': return <span className="text-sm text-slate-600">{value}</span>
+      case 'basic': return <span className="text-sm font-medium text-slate-800">{value}</span>;
+      case 'badge': return <Badge variant={value === 'completed' ? 'success' : value === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{value}</Badge>;
+      case 'date': return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
       case 'stage':
         return (
           <EditableStageCell
@@ -626,7 +652,7 @@ export default function DepartmentTasksManager({
             value={value}
             onSave={handleStageStatusSave}
             onDocumentUpload={handleStageDocumentUpload}
-            // onShowDocuments={onViewStageDocument}
+            onViewDocument={handleViewDocument}
           />
         )
       case 'document':
@@ -652,12 +678,12 @@ export default function DepartmentTasksManager({
       case 'actions': return (
         <div className="flex items-center justify-center gap-1">
           <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100"><Edit className="h-4 w-4" /></Button>
-          <Button variant="ghost" size="icon" onClick={() => onTaskAction?.({type: 'delete', task})} className="h-8 w-8 text-red-600 hover:bg-red-100"><Trash2 className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" onClick={() => onTaskAction?.({ type: 'delete', task })} className="h-8 w-8 text-red-600 hover:bg-red-100"><Trash2 className="h-4 w-4" /></Button>
         </div>
       )
       default: return <span className="text-sm text-slate-800">{value}</span>
     }
-  }, [allDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit])
+  }, [allDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, handleStageStatusSave])
 
   // Render enhanced transposed table
   const renderEnhancedTransposedTable = useCallback((tasks: any[], tableType: string) => {
@@ -665,10 +691,10 @@ export default function DepartmentTasksManager({
 
     if (!tasks.length) {
       return (
-        <div className="flex flex-col items-center justify-center p-16 bg-blue-50/30 rounded-lg border-2 border-dashed border-gray-200">
-          <FileText className="h-12 w-12 text-gray-400" />
-          <p className="mt-4 font-semibold text-gray-700">No {tableType} found</p>
-          <p className="text-sm text-gray-500">Tasks with this status will appear here.</p>
+        <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
+          <FileText className="h-12 w-12 text-slate-400" />
+          <p className="mt-4 font-semibold text-slate-700">No {tableType} found</p>
+          <p className="text-sm text-slate-500">Tasks with this status will appear here.</p>
         </div>
       )
     }
@@ -680,29 +706,29 @@ export default function DepartmentTasksManager({
           <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={collapseAll}><Minus className="h-4 w-4" />Collapse All</Button>
         </div>
 
-        <div className="border border-gray-200 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 400px)' }}>
+        <div className="border border-slate-200 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 400px)' }}>
           <Table className="min-w-full">
-            <TableHeader className="sticky top-0 z-20 bg-blue-100/80 backdrop-blur-sm">
-              <TableRow className="border-b-2 border-gray-200">
-                <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r border-blue-500 w-[60px] text-center">#</TableHead>
-                <TableHead className="sticky left-[60px] z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r border-blue-500 min-w-[250px]">Fields</TableHead>
-                {tasks.map((task, index) => (
-                  <TableHead key={`header-${task.id}`} className="font-semibold bg-blue-700 text-white min-w-[180px] text-center text-sm py-2 border-r border-blue-500">
+            <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
+              <TableRow className="border-b-2 border-slate-300">
+                <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r border-slate-300">#</TableHead>
+                <TableHead className="sticky left-[60px] z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r border-slate-300 min-w-[300px]">Fields</TableHead>
+                {tasks.map((task) => (
+                  <TableHead key={`header-${task.id}`} className="font-semibold bg-blue-500 text-white min-w-[200px] text-center text-sm py-2 border-r border-slate-500">
                     <div className="flex flex-col items-center">
-                       <span>{task.applicant_name || `Task ${task.id}`}</span>
-                       <span className="text-xs opacity-75">{companies.get(task.company_id) || 'No Company'}</span>
+                      <span className="font-bold">{task.applicant_name || `Task ${task.id}`}</span>
+                      <span className="text-xs opacity-80">{companies.get(task.company_id) || 'No Company'}</span>
                     </div>
                   </TableHead>
                 ))}
               </TableRow>
             </TableHeader>
-            
-            <TableBody>
+
+            <TableBody className="divide-y divide-slate-100">
               {(tasksLoading || departmentsLoading || companiesLoading) ? (
                 <TableRow>
                   <TableCell colSpan={tasks.length + 1} className="h-32 text-center">
-                    <div className="flex justify-center items-center gap-2 text-blue-600">
-                      <div className="h-5 w-5 border-2 border-t-blue-600 border-gray-200 rounded-full animate-spin"></div>
+                    <div className="flex justify-center items-center gap-2 text-slate-600">
+                      <div className="h-5 w-5 border-2 border-t-slate-600 border-slate-200 rounded-full animate-spin"></div>
                       Loading {tableType}...
                     </div>
                   </TableCell>
@@ -715,58 +741,59 @@ export default function DepartmentTasksManager({
                 </TableRow>
               ) : (
                 rows.map((row, index) => {
-                    if (row.type === 'section_header') {
-                        const Icon = row.icon;
-                        return (
-                            <TableRow key={row.key} className="bg-gradient-to-r from-slate-100 to-slate-50 border-y-2 border-slate-300">
-                                <TableCell colSpan={2} className="py-0 px-0 border-r border-slate-200">
-                                  <div className="flex items-center justify-between px-3 py-2">
-                                    <div className="flex items-center gap-3">
-                                        <Icon className="h-5 w-5 text-slate-600" />
-                                        <span className="font-bold text-slate-700 text-lg">{row.label}</span>
-                                    </div>
-                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleSectionExpansion(row.id)}>
-                                        {expandedSections.has(row.id) ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                             <TableCell  colSpan={tasks.length + 1} className="py-0 px-0 border-r border-slate-200"></TableCell>
-                            </TableRow>
-                        )
-                    }
+                  const rowBg = row.isSubSubRow ? 'bg-slate-100/50' : row.isSubRow ? 'bg-slate-50/60' : 'bg-white';
+                  const hoverBg = 'hover:bg-blue-50/50';
 
-                    const rowBg = row.isSubSubRow ? 'bg-blue-25' : row.isSubRow ? 'bg-blue-50' : 'bg-white';
-                    const hoverBg = row.isSubSubRow ? 'hover:bg-blue-50' : row.isSubRow ? 'hover:bg-blue-100' : 'hover:bg-slate-50';
-                    
+                  if (row.type === 'section_header') {
+                    const Icon = row.icon;
                     return (
-                        <TableRow key={row.key} className={`${rowBg} ${hoverBg} border-b border-gray-100 group`}>
-                            <TableCell className={`sticky left-0 z-10 ${rowBg} group-hover:${hoverBg.replace('hover:','')}-50 border-r border-gray-200 text-center text-sm text-slate-600 py-2 w-[60px]`}>
-                              {row.type === 'basic' || row.type === 'badge' || row.type === 'date' ? (index + 1) : ''}
-                            </TableCell>
-                            <TableCell className={`sticky left-[60px] z-10 ${rowBg} group-hover:${hoverBg.replace('hover:','')}-50 border-r border-gray-200 font-semibold text-sm text-slate-700 py-2`}>
-                                <div className="flex items-center gap-2">
-                                  <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }}>
-                                    <TruncatedText text={row.label} maxLength={35} className="text-slate-700" />
-                                  </div>
-                                    {row.type === 'stage' && row.stage?.documents?.length > 0 && (
-                                        <Button variant="ghost" size="sm" className="h-4 w-4 p-0 text-slate-600 hover:bg-slate-100" onClick={() => toggleStageExpansion(row.stage.id)}>
-                                            {expandedStages.has(row.stage.id) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-                                        </Button>
-                                    )}
-                                    {row.type === 'document' && row.document?.extractionSpecs?.length > 0 && (
-                                        <Button variant="ghost" size="sm" className="h-4 w-4 p-0 text-slate-600 hover:bg-slate-100" onClick={() => toggleDocumentExpansion(row.document.id)}>
-                                            {expandedDocuments.has(row.document.id) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-                                        </Button>
-                                    )}
-                                </div>
-                            </TableCell>
-                            {tasks.map(task => (
-                                <TableCell key={`${row.key}-${task.id}`} className="border-r border-gray-100 text-center text-sm py-2 px-3">
-                                    {renderCellContent(row, task)}
-                                </TableCell>
-                            ))}
-                        </TableRow>
+                      <TableRow key={row.key} className="bg-slate-100 border-y-2 border-slate-300 hover:bg-slate-100">
+                        <TableCell className={`sticky left-0 z-10 ${rowBg} group-hover:${hoverBg.replace('hover:', '')}-50 border-r border-gray-200 text-center text-sm text-slate-600 py-2 w-[60px]`}>
+                          {row.type === 'basic' || row.type === 'badge' || row.type === 'date' ? (index + 1) : ''}
+                        </TableCell>
+                        <TableCell colSpan={2} className="py-0 px-0">
+                          <div className="flex items-center justify-between px-3 py-2">
+                            <div className="flex items-center gap-3">
+                              <Icon className="h-5 w-5 text-slate-600" />
+                              <span className="font-bold text-slate-700 text-lg">{row.label}</span>
+                            </div>
+                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleSectionExpansion(row.id)}>
+                              {expandedSections.has(row.id) ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                            </Button>
+                          </div>
+                        </TableCell>
+                        <TableCell colSpan={tasks.length + 1} className="py-0 px-0"></TableCell>
+                      </TableRow>
                     )
+                  }
+
+                  return (
+                    <TableRow key={row.key} className={`${rowBg} ${hoverBg} group`}>
+                    <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:${hoverBg.replace('hover:', '')}-50 border-r border-slate-200 font-medium text-sm text-slate-700 p-2`}>{row.type === 'basic' || row.type === 'badge' || row.type === 'date' ? (index + 1) : ''}</TableCell>
+                      <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border-r border-slate-200 font-medium text-sm text-slate-700 p-2`}>
+                        <div className="flex items-center gap-2">
+                          <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }}>
+                            <span className={row.type === 'stage' ? 'font-semibold' : ''}>{row.label}</span>
+                          </div>
+                          {row.type === 'stage' && row.stage?.documents?.length > 0 && (
+                            <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-500 hover:text-slate-800" onClick={() => toggleStageExpansion(row.stage.id)}>
+                              {expandedStages.has(row.stage.id) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                            </Button>
+                          )}
+                          {row.type === 'document' && row.document?.extractionSpecs?.length > 0 && (
+                            <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-500 hover:text-slate-800" onClick={() => toggleDocumentExpansion(row.document.id)}>
+                              {expandedDocuments.has(row.document.id) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                      {tasks.map(task => (
+                        <TableCell key={`${row.key}-${task.id}`} className="text-center text-sm py-1 px-2 align-middle">
+                          {renderCellContent(row, task)}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  )
                 })
               )}
             </TableBody>
@@ -780,10 +807,10 @@ export default function DepartmentTasksManager({
   const renderEnhancedNormalTable = useCallback((tasks: any[], tableType: string) => {
     if (!tasks.length) {
       return (
-        <div className="flex flex-col items-center justify-center p-16 bg-blue-50/30 rounded-lg border-2 border-dashed border-gray-200">
-          <FileText className="h-12 w-12 text-gray-400" />
-          <p className="mt-4 font-semibold text-gray-700">No {tableType} found</p>
-          <p className="text-sm text-gray-500">Tasks with this status will appear here.</p>
+        <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
+          <FileText className="h-12 w-12 text-slate-400" />
+          <p className="mt-4 font-semibold text-slate-700">No {tableType} found</p>
+          <p className="text-sm text-slate-500">Tasks with this status will appear here.</p>
         </div>
       )
     }
@@ -791,39 +818,37 @@ export default function DepartmentTasksManager({
     const visibleStages = stages.filter(stage => stage).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
 
     const totalStageColumns = visibleStages.reduce((total, stage) => {
-        let stageCols = 0;
-        if (expandedStages.has(stage.id) && stage.documents && stage.documents.length > 0) {
-            stage.documents.forEach(doc => {
-                if (expandedDocuments.has(doc.id) && doc.extractionSpecs && doc.extractionSpecs.length > 0) {
-                    stageCols += doc.extractionSpecs.length;
-                } else {
-                    stageCols += 1;
-                }
-            });
-        } else {
-            stageCols = 1;
-        }
-        return total + Math.max(1, stageCols);
+      let stageCols = 0;
+      if (expandedStages.has(stage.id) && stage.documents && stage.documents.length > 0) {
+        stage.documents.forEach(doc => {
+          if (expandedDocuments.has(doc.id) && doc.extractionSpecs && doc.extractionSpecs.length > 0) {
+            stageCols += doc.extractionSpecs.length;
+          } else {
+            stageCols += 1;
+          }
+        });
+      } else {
+        stageCols = 1;
+      }
+      return total + Math.max(1, stageCols);
     }, 0);
 
     return (
-      <div className="border border-gray-200 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 350px)' }}>
+      <div className="border border-slate-200 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 400px)' }}>
         <Table className="min-w-full border-separate border-spacing-0">
-          <TableHeader className="sticky top-0 z-20 bg-blue-100/80 backdrop-blur-sm">
+          <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
             <TableRow className="h-12">
-              <TableHead rowSpan={2} className="sticky left-0 bg-blue-600 border-r border-blue-500 w-[40px] z-30 text-white font-semibold text-center">#</TableHead>
-              <TableHead rowSpan={2} className="sticky left-[40px] bg-blue-600 border-r border-blue-500 w-[80px] z-30 text-white font-semibold">ID</TableHead>
-              <TableHead rowSpan={2} className="sticky left-[80px] bg-blue-600 border-r border-blue-500 w-[150px] z-30 text-white font-semibold">Applicant</TableHead>
-              <TableHead rowSpan={2} className="bg-blue-600 border-r border-blue-500 text-white font-semibold text-center min-w-[120px]">Company</TableHead>
-              <TableHead rowSpan={2} className="bg-blue-600 border-r border-blue-500 text-white font-semibold text-center min-w-[100px]">Status</TableHead>
-              <TableHead colSpan={totalStageColumns} className="bg-blue-700 border-r border-blue-500 text-white text-center font-bold px-2">
-                 <div className="flex items-center justify-center gap-2">
+              <TableHead rowSpan={2} className="sticky left-0 bg-blue-600 border-r border-slate-300 w-[200px] z-30 text-white font-semibold p-2">Applicant</TableHead>
+              <TableHead rowSpan={2} className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[180px]">Company</TableHead>
+              <TableHead rowSpan={2} className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[100px]">Status</TableHead>
+              <TableHead colSpan={totalStageColumns} className="bg-blue-600 border-r border-slate-300 text-white text-center font-bold px-2">
+                <div className="flex items-center justify-center gap-2">
                   WORKFLOW STAGES
-                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-white hover:bg-blue-500" onClick={expandAll} title="Expand All"><Plus className="h-3 w-3" /></Button>
-                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-white hover:bg-blue-500" onClick={collapseAll} title="Collapse All"><Minus className="h-3 w-3" /></Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 p-0 text-white hover:bg-blue-600" onClick={expandAll} title="Expand All"><Plus className="h-4 w-4" /></Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 p-0 text-white hover:bg-blue-600" onClick={collapseAll} title="Collapse All"><Minus className="h-4 w-4" /></Button>
                 </div>
               </TableHead>
-              <TableHead rowSpan={2} className="bg-blue-600 border-r border-blue-500 text-white font-semibold text-center min-w-[100px]">Actions</TableHead>
+              <TableHead rowSpan={2} className="bg-blue-600 border-r-0 text-white font-semibold text-center w-[100px]">Actions</TableHead>
             </TableRow>
             <TableRow className="h-14">
               {visibleStages.map((stage) => {
@@ -831,108 +856,107 @@ export default function DepartmentTasksManager({
                 let subHeaders = [];
 
                 if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
-                    stage.documents.forEach(doc => {
-                        if (expandedDocuments.has(doc.id) && doc.extractionSpecs?.length > 0) {
-                            stageCols += doc.extractionSpecs.length;
-                            doc.extractionSpecs.forEach(field => subHeaders.push({type: 'field', name: field.fieldName}));
-                        } else {
-                            stageCols += 1;
-                            subHeaders.push({type: 'doc', name: doc.name, id: doc.id, hasFields: doc.extractionSpecs?.length > 0 });
-                        }
-                    });
+                  stage.documents.forEach(doc => {
+                    if (expandedDocuments.has(doc.id) && doc.extractionSpecs?.length > 0) {
+                      stageCols += doc.extractionSpecs.length;
+                      doc.extractionSpecs.forEach(field => subHeaders.push({ type: 'field', name: field.fieldName }));
+                    } else {
+                      stageCols += 1;
+                      subHeaders.push({ type: 'doc', name: doc.name, id: doc.id, hasFields: doc.extractionSpecs?.length > 0 });
+                    }
+                  });
                 } else {
-                    stageCols = 1;
+                  stageCols = 1;
                 }
                 stageCols = Math.max(1, stageCols);
-                
+
                 if (!expandedStages.has(stage.id) || stage.documents?.length === 0) {
-                    return (
-                         <TableHead key={stage.id} className="bg-blue-500 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2">
-                             <div className="flex items-center justify-center gap-2">
-                                <span className="truncate max-w-[100px]" title={stage.name}>{stage.name}</span>
-                                {stage.documents?.length > 0 && (
-                                    <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-white hover:bg-blue-400" onClick={() => toggleStageExpansion(stage.id)}>
-                                        <Plus className="h-3 w-3" />
-                                    </Button>
-                                )}
-                            </div>
-                         </TableHead>
-                    );
+                  return (
+                    <TableHead key={stage.id} className="bg-blue-500 border-r border-slate-500 text-white text-center font-semibold min-w-[150px] px-2 py-2 align-middle">
+                      <div className="flex items-center justify-center gap-2">
+                        <span className="truncate max-w-[100px]" title={stage.name}>{stage.name}</span>
+                        {stage.documents?.length > 0 && (
+                          <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-white hover:bg-slate-500" onClick={() => toggleStageExpansion(stage.id)}>
+                            <Plus className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableHead>
+                  );
                 } else {
-                    return (
-                        <TableHead key={stage.id} colSpan={stageCols} className="bg-blue-500 border-r border-blue-400 text-white text-center font-semibold p-0">
-                           <div className="flex flex-col h-full">
-                                <div className="flex items-center justify-center gap-2 px-2 py-1 border-b border-blue-400">
-                                    <span className="truncate max-w-[100px]" title={stage.name}>{stage.name}</span>
-                                    <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-white hover:bg-blue-400" onClick={() => toggleStageExpansion(stage.id)}>
-                                        <Minus className="h-3 w-3" />
-                                    </Button>
-                                </div>
-                                <div className="flex-grow grid" style={{gridTemplateColumns: `repeat(${stageCols}, 1fr)`}}>
-                                    {subHeaders.map((sub, i) => (
-                                        <div key={i} className="text-xs font-normal bg-blue-400 border-r border-blue-300 last:border-r-0 flex items-center justify-center p-1 gap-1">
-                                            <span className="truncate" title={sub.name}>{sub.name}</span>
-                                            {sub.type === 'doc' && sub.hasFields && (
-                                                 <Button variant="ghost" size="icon" className="h-4 w-4 p-0 text-white hover:bg-blue-300" onClick={() => toggleDocumentExpansion(sub.id)}>
-                                                    <Plus className="h-2 w-2" />
-                                                </Button>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                           </div>
-                        </TableHead>
-                    );
+                  return (
+                    <TableHead key={stage.id} colSpan={stageCols} className="bg-blue-500 border-r border-slate-500 text-white text-center font-semibold p-0 align-top">
+                      <div className="flex flex-col h-full">
+                        <div className="flex items-center justify-center gap-2 px-2 py-1 border-b border-slate-500">
+                          <span className="truncate max-w-[100px]" title={stage.name}>{stage.name}</span>
+                          <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-white hover:bg-slate-500" onClick={() => toggleStageExpansion(stage.id)}>
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <div className="flex-grow grid" style={{ gridTemplateColumns: `repeat(${stageCols}, 1fr)` }}>
+                          {subHeaders.map((sub, i) => (
+                            <div key={i} className="text-xs font-normal bg-slate-500 border-r border-slate-400 last:border-r-0 flex items-center justify-center p-1 gap-1 min-w-[120px]">
+                              <span className="truncate" title={sub.name}>{sub.name}</span>
+                              {sub.type === 'doc' && sub.hasFields && (
+                                <Button variant="ghost" size="icon" className="h-4 w-4 p-0 text-white hover:bg-slate-400" onClick={() => toggleDocumentExpansion(sub.id)}>
+                                  <Plus className="h-2 w-2" />
+                                </Button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </TableHead>
+                  );
                 }
               })}
             </TableRow>
           </TableHeader>
 
-          <TableBody className="divide-y divide-gray-200">
+          <TableBody className="divide-y divide-slate-200">
             {(tasksLoading || departmentsLoading || companiesLoading) ? (
-              <TableRow><TableCell colSpan={20} className="h-32 text-center text-gray-500">Loading...</TableCell></TableRow>
+              <TableRow><TableCell colSpan={20} className="h-32 text-center text-slate-500">Loading...</TableCell></TableRow>
             ) : error ? (
               <TableRow><TableCell colSpan={20} className="h-32 text-center text-destructive">{error}</TableCell></TableRow>
             ) : (
               tasks.map((task) => (
-                <TableRow key={task.id} className="group bg-white hover:bg-blue-50">
-                  <TableCell className="sticky left-0 z-10 group-hover:bg-blue-50 bg-white border-r border-gray-200 text-sm text-slate-600 py-2 text-center">
-                    {tasks.indexOf(task) + 1}
+                <TableRow key={task.id} className="group bg-white hover:bg-blue-50/50">
+                  <TableCell className="sticky left-0 z-10 group-hover:bg-blue-50/50 bg-white border-r border-slate-200 font-medium text-sm text-slate-800 p-2 align-middle">
+                    <div className="truncate" title={task.applicant_name}>{task.applicant_name || 'N/A'}</div>
+                    <div className="text-xs text-slate-500">ID: {task.id}</div>
                   </TableCell>
-                  <TableCell className="sticky left-[40px] z-10 group-hover:bg-blue-50 bg-white border-r border-gray-200 font-semibold text-sm text-slate-700 py-2">#{task.id}</TableCell>
-                  <TableCell className="sticky left-[80px] z-10 group-hover:bg-blue-50 bg-white border-r border-gray-200 font-medium text-sm text-slate-700 py-2"><div className="max-w-[130px] truncate" title={task.applicant_name}>{task.applicant_name || 'N/A'}</div></TableCell>
-                  <TableCell className="border-r border-gray-200 text-center text-sm py-2 px-3"><div className="max-w-[110px] truncate" title={companies.get(task.company_id)}>{companies.get(task.company_id) || 'N/A'}</div></TableCell>
-                  <TableCell className="border-r border-gray-200 text-center text-sm py-2 px-3"><Badge variant={task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{task.status || 'pending'}</Badge></TableCell>
+                  <TableCell className="border-r border-slate-200 text-center text-sm p-2 align-middle"><div className="max-w-[160px] mx-auto truncate" title={companies.get(task.company_id)}>{companies.get(task.company_id) || 'N/A'}</div></TableCell>
+                  <TableCell className="border-r border-slate-200 text-center text-sm p-2 align-middle"><Badge variant={task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{task.status || 'pending'}</Badge></TableCell>
 
                   {visibleStages.map(stage => {
-                      if (!isStageApplicableToTask(stage, task, departments)) {
-                        let stageCols = 1;
-                         if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
-                           stageCols = stage.documents.reduce((acc, doc) => acc + (expandedDocuments.has(doc.id) && doc.extractionSpecs?.length > 0 ? doc.extractionSpecs.length : 1), 0);
-                         }
-                        return <TableCell key={`${stage.id}-na`} colSpan={Math.max(1, stageCols)} className="border-r border-gray-200 text-center text-gray-400 italic text-xs">N/A</TableCell>
+                    if (!isStageApplicableToTask(stage, task, departments)) {
+                      let stageCols = 1;
+                      if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
+                        stageCols = stage.documents.reduce((acc, doc) => acc + (expandedDocuments.has(doc.id) && doc.extractionSpecs?.length > 0 ? doc.extractionSpecs.length : 1), 0);
                       }
+                      return <TableCell key={`${stage.id}-na`} colSpan={Math.max(1, stageCols)} className="border-r border-slate-200 text-center text-slate-400 italic text-xs align-middle">N/A</TableCell>
+                    }
 
-                      if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
-                        return <TableCell key={stage.id} className="border-r border-gray-200"><EditableStageCell stage={stage} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onViewDocument={handleViewDocument} /></TableCell>
+                    if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
+                      return <TableCell key={stage.id} className="border-r border-slate-200 p-1 align-middle"><EditableStageCell stage={stage} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onViewDocument={handleViewDocument} /></TableCell>
+                    }
+
+                    return stage.documents.map(doc => {
+                      const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
+                      if (!expandedDocuments.has(doc.id) || !doc.extractionSpecs || doc.extractionSpecs.length === 0) {
+                        return <TableCell key={`${doc.id}`} className="border-r border-slate-200 p-1 align-middle"><EditableStageCell stage={{ ...stage, documents: [doc] }} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onViewDocument={handleViewDocument} /></TableCell>
+                      } else {
+                        return doc.extractionSpecs.map(field => (
+                          <TableCell key={`${field.id || field.fieldName}`} className="border-r border-slate-200 p-1 align-middle"><DocumentFieldCell document={document} field={field} /></TableCell>
+                        ))
                       }
-
-                      return stage.documents.map(doc => {
-                        const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
-                        if (!expandedDocuments.has(doc.id) || !doc.extractionSpecs || doc.extractionSpecs.length === 0) {
-                            return <TableCell key={`${doc.id}`} className="border-r border-gray-200"><EditableStageCell stage={{ ...stage, documents: [doc] }} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onViewDocument={handleViewDocument}/></TableCell>
-                        } else {
-                            return doc.extractionSpecs.map(field => (
-                                <TableCell key={`${field.id || field.fieldName}`} className="border-r border-gray-200"><DocumentFieldCell document={document} field={field} task={task} /></TableCell>
-                            ))
-                        }
-                      }).flat()
+                    }).flat()
                   })}
 
-                  <TableCell className="border-r border-gray-200 text-center text-sm py-2 px-3">
+                  <TableCell className="text-center text-sm p-2 align-middle">
                     <div className="flex items-center justify-center gap-1">
                       <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100"><Edit className="h-4 w-4" /></Button>
-                      <Button variant="ghost" size="icon" onClick={() => onTaskAction?.({type: 'delete', task})} className="h-8 w-8 text-red-600 hover:bg-red-100"><Trash2 className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="icon" onClick={() => onTaskAction?.({ type: 'delete', task })} className="h-8 w-8 text-red-600 hover:bg-red-100"><Trash2 className="h-4 w-4" /></Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -947,11 +971,11 @@ export default function DepartmentTasksManager({
 
   if (departmentsLoading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-blue-50/30">
+      <div className="flex items-center justify-center h-screen bg-slate-50/30">
         <div className="text-center space-y-3">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-600 mx-auto"></div>
-          <p className="font-semibold text-blue-800">Loading Workspace...</p>
-          <p className="text-sm text-blue-600">Fetching departments and tasks.</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-300 mx-auto"></div>
+          <p className="font-semibold text-slate-800">Loading Workspace...</p>
+          <p className="text-sm text-slate-600">Fetching departments and tasks.</p>
         </div>
       </div>
     )
@@ -959,12 +983,12 @@ export default function DepartmentTasksManager({
 
   if (!departments.length) {
     return (
-      <div className="flex-1 p-8 bg-blue-50/30">
-        <Card className="border-2 border-dashed border-gray-300 bg-white">
+      <div className="flex-1 p-8 bg-slate-50/30">
+        <Card className="border-2 border-dashed border-slate-300 bg-white">
           <CardHeader className="text-center items-center">
-            <Building className="h-12 w-12 text-blue-400 mb-2" />
+            <Building className="h-12 w-12 text-slate-400 mb-2" />
             <CardTitle className="text-xl">No Departments Found</CardTitle>
-            <CardDescription className="text-blue-700">Please add departments via the Admin panel to start managing tasks.</CardDescription>
+            <CardDescription className="text-slate-700">Please add departments via the Admin panel to start managing tasks.</CardDescription>
           </CardHeader>
           <CardContent className="text-center">
             <Button onClick={() => window.location.href = '/dashboard/departments'}>Go to Departments</Button>
@@ -975,10 +999,10 @@ export default function DepartmentTasksManager({
   }
 
   return (
-    <div className="flex-1 space-y-4 p-4 md:p-6 bg-blue-50/30 min-h-screen">
+    <div className="flex-1 space-y-4 p-4 md:p-6 bg-slate-50/30 min-h-screen">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Enhanced Task Manager</h2>
+          <h2 className="text-2xl font-bold text-slate-900">Task Manager</h2>
         </div>
       </div>
 
@@ -996,120 +1020,67 @@ export default function DepartmentTasksManager({
             <Tabs value={activeSubTab} onValueChange={setActiveSubTab}>
               <TabsList className="rounded-lg p-1 shadow-sm">
                 <TabsTrigger value="enquiries" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                  Enquiries
-                  <Badge variant="secondary">{enquiryTasks.length}</Badge>
+                  Enquiries <Badge variant="secondary">{enquiryTasks.length}</Badge>
                 </TabsTrigger>
                 <TabsTrigger value="wip-stages" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                  WIP Stages
-                  <Badge variant="secondary">{getFilteredTasks('in_progress').length}</Badge>
+                  WIP Stages <Badge variant="secondary">{getFilteredTasks('in_progress').length}</Badge>
                 </TabsTrigger>
                 <TabsTrigger value="completed" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                  Completed
-                  <Badge variant="secondary">{completedTasks.length}</Badge>
+                  Completed <Badge variant="secondary">{completedTasks.length}</Badge>
                 </TabsTrigger>
               </TabsList>
 
-              {/* WIP Stages Tab */}
-              <TabsContent value="wip-stages" className="mt-4">
-                <Card className="bg-white/80 backdrop-blur-sm shadow-md border-gray-100">
-                  <CardHeader className="border-b border-gray-100 bg-white">
-                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
-                      <div>
-                        <CardTitle className="text-lg text-slate-800">Enhanced WIP Stages - {dept.name}</CardTitle>
-                        <CardDescription className="text-slate-600">
-                          {isTransposedView ? 'Transposed view with expandable sections' : 'Interactive view with expandable documents and extraction fields'}.
-                        </CardDescription>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="relative flex-1 md:w-80">
-                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                          <Input
-                            placeholder="Search tasks, names, companies..."
-                            value={globalSearchTerm}
-                            onChange={(e) => setGlobalSearchTerm(e.target.value)}
-                            className="pl-10 pr-4"
-                          />
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex items-center gap-2"
-                          onClick={() => setIsTransposedView(!isTransposedView)}
-                        >
-                          {isTransposedView ? <TableProperties className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
-                          {isTransposedView ? 'Standard View' : 'Transposed View'}
-                        </Button>
-                        <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(wipTasks, 'wip-stages')}>
-                          <Download className="h-4 w-4" />Export
-                        </Button>
-                      </div>
-                    </div>
+              {/* All Tabs Content */}
+              {['enquiries', 'wip-stages', 'completed'].map(tabValue => {
+                const isWipTab = tabValue === 'wip-stages';
+                let tasksToRender, title;
+                if (tabValue === 'enquiries') { tasksToRender = enquiryTasks; title = 'Enquiries'; }
+                else if (tabValue === 'wip-stages') { tasksToRender = wipTasks; title = 'WIP Stages'; }
+                else { tasksToRender = completedTasks; title = 'Completed Tasks'; }
 
-                    <div className="mt-4">
-                      <Tabs value={activeFollowUpFilter} onValueChange={setActiveFollowUpFilter}>
-                        <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
-                          <TabsTrigger value="all" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">All <Badge variant="outline">{getWIPTasksByFollowUp('all').length}</Badge></TabsTrigger>
-                          <TabsTrigger value="bcl" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">BCL <Badge variant="outline">{getWIPTasksByFollowUp('bcl').length}</Badge></TabsTrigger>
-                          <TabsTrigger value="officer" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Officer <Badge variant="outline">{getWIPTasksByFollowUp('officer').length}</Badge></TabsTrigger>
-                          <TabsTrigger value="client" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Client <Badge variant="outline">{getWIPTasksByFollowUp('client').length}</Badge></TabsTrigger>
-                        </TabsList>
-                      </Tabs>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-2 sm:p-4">
-                    {isTransposedView ? renderEnhancedTransposedTable(wipTasks, 'WIP Stages') : renderEnhancedNormalTable(wipTasks, 'WIP Stages')}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              
-              {/* Other Tabs (Enquiries, Completed) follow a similar structure */}
-              <TabsContent value="enquiries" className="mt-4">
-                 <Card className="bg-white/80 backdrop-blur-sm shadow-md border-gray-100">
-                   <CardHeader className="border-b border-gray-100 bg-white">
-                      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
-                        <div>
-                          <CardTitle className="text-lg text-slate-800">Enquiries - {dept.name}</CardTitle>
-                          <CardDescription className="text-slate-600">{isTransposedView ? 'Transposed view' : 'Standard view'}</CardDescription>
+                return (
+                  <TabsContent key={tabValue} value={tabValue} className="mt-4">
+                    <Card className="bg-white/80 backdrop-blur-sm shadow-lg border-slate-100">
+                      <CardHeader className="border-b border-slate-100 bg-white">
+                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
+                          <div>
+                            <CardTitle className="text-lg text-slate-800">{title} - {dept.name}</CardTitle>
+                            <CardDescription className="text-slate-600">
+                              {isTransposedView ? 'Transposed column view' : 'Standard row-based view'}.
+                            </CardDescription>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {tabValue === 'enquiries' && <Button className="flex items-center gap-2" onClick={() => setIsEnquiryDialogOpen(true)}><Plus className="h-4 w-4" />New Enquiry</Button>}
+                            <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => setIsTransposedView(!isTransposedView)}>
+                              {isTransposedView ? <TableProperties className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
+                              {isTransposedView ? 'Standard View' : 'Transposed View'}
+                            </Button>
+                            <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(tasksToRender, title)}>
+                              <Download className="h-4 w-4" />Export
+                            </Button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                           <Button className="flex items-center gap-2" onClick={() => setIsEnquiryDialogOpen(true)}><Plus className="h-4 w-4" />New Enquiry</Button>
-                           <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => setIsTransposedView(!isTransposedView)}>
-                             {isTransposedView ? <TableProperties className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
-                             {isTransposedView ? 'Standard View' : 'Transposed View'}
-                           </Button>
-                           <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(enquiryTasks, 'enquiries')}><Download className="h-4 w-4" />Export</Button>
-                        </div>
-                      </div>
-                   </CardHeader>
-                   <CardContent className="p-2 sm:p-4">
-                      {isTransposedView ? renderEnhancedTransposedTable(enquiryTasks, 'Enquiries') : renderEnhancedNormalTable(enquiryTasks, 'Enquiries')}
-                   </CardContent>
-                 </Card>
-              </TabsContent>
 
-              <TabsContent value="completed" className="mt-4">
-                 <Card className="bg-white/80 backdrop-blur-sm shadow-md border-gray-100">
-                   <CardHeader className="border-b border-gray-100 bg-white">
-                      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
-                        <div>
-                          <CardTitle className="text-lg text-slate-800">Completed Tasks - {dept.name}</CardTitle>
-                          <CardDescription className="text-slate-600">{isTransposedView ? 'Transposed view' : 'Standard view'}</CardDescription>
-                        </div>
-                        <div className="flex items-center gap-2">
-                           <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => setIsTransposedView(!isTransposedView)}>
-                             {isTransposedView ? <TableProperties className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
-                             {isTransposedView ? 'Standard View' : 'Transposed View'}
-                           </Button>
-                           <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(completedTasks, 'completed')}><Download className="h-4 w-4" />Export</Button>
-                        </div>
-                      </div>
-                   </CardHeader>
-                   <CardContent className="p-2 sm:p-4">
-                      {isTransposedView ? renderEnhancedTransposedTable(completedTasks, 'Completed Tasks') : renderEnhancedNormalTable(completedTasks, 'Completed Tasks')}
-                   </CardContent>
-                 </Card>
-              </TabsContent>
-
+                        {isWipTab && (
+                          <div className="mt-4">
+                            <Tabs value={activeFollowUpFilter} onValueChange={setActiveFollowUpFilter}>
+                              <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
+                                <TabsTrigger value="all" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">All <Badge variant="outline">{getWIPTasksByFollowUp('all').length}</Badge></TabsTrigger>
+                                <TabsTrigger value="bcl" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">BCL <Badge variant="outline">{getWIPTasksByFollowUp('bcl').length}</Badge></TabsTrigger>
+                                <TabsTrigger value="officer" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Officer <Badge variant="outline">{getWIPTasksByFollowUp('officer').length}</Badge></TabsTrigger>
+                                <TabsTrigger value="client" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Client <Badge variant="outline">{getWIPTasksByFollowUp('client').length}</Badge></TabsTrigger>
+                              </TabsList>
+                            </Tabs>
+                          </div>
+                        )}
+                      </CardHeader>
+                      <CardContent className="p-2 sm:p-4">
+                        {isTransposedView ? renderEnhancedTransposedTable(tasksToRender, title) : renderEnhancedNormalTable(tasksToRender, title)}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+                );
+              })}
             </Tabs>
           </TabsContent>
         ))}
@@ -1137,6 +1108,35 @@ export default function DepartmentTasksManager({
         fuzzyMatch={() => false}
         onTaskAction={handleTaskAction}
       />
+
+      {/* Extraction Preview Dialog */}
+      <Dialog open={!!previewDocument} onOpenChange={(isOpen) => !isOpen && setPreviewDocument(null)}>
+        <DialogContent className="max-w-none w-full h-full p-0 m-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Document Preview</DialogTitle>
+            <DialogDescription>Preview of the extracted document data</DialogDescription>
+          </DialogHeader>
+          {previewDocument && (
+            <ExtractionPreview
+              documentId={previewDocument.documentId}
+              documentName={previewDocument.documentName}
+              fileUrl={previewDocument.fileUrl}
+              extractedData={previewDocument.extractedData}
+              fields={previewDocument.fields}
+              onClose={() => setPreviewDocument(null)}
+              onSave={(updatedData) => {
+                console.log("Saving updated data:", updatedData);
+                // Here you would typically call a function to update the database
+                // e.g., onUpdateExtractedData(previewDocument.documentId, updatedData)
+                setPreviewDocument(null); // Close the dialog on save
+                toast({ title: "Success", description: "Document details saved." });
+              }}
+              file={previewDocument.file}
+              type={previewDocument.type}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

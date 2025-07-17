@@ -56,7 +56,7 @@ export default function EditableStageCell({
 
       if (documents && documents.length > 0) {
         const doc = documents[0];
-        const dateFields = ['application_date', 'date', 'upload_date', 'created_date'];
+        const dateFields = ['application_date', 'date', 'upload_date', 'created_date','date_generated', 'invoice_date_and_time' ];
         
         // Check extracted details for date fields
         if (doc.extracted_details) {
