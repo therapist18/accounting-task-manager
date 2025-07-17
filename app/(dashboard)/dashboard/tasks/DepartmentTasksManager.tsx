@@ -7,7 +7,7 @@ import { TruncatedText } from "@/app/(dashboard)/dashboard/departments/documents
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Eye, ChevronDown, Plus, Minus, Loader2, Settings, Search, Users, X, TableProperties, RotateCcw } from "lucide-react"
+import { Eye, ChevronDown, Plus, Minus, Loader2, Settings, Search, Users, X, TableProperties, RotateCcw, Pencil } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AlertTriangle, FileText, Edit, Trash2, Download, Building, Upload, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -716,37 +716,6 @@ export default function DepartmentTasksManager({
     const allStages = stages.filter(stage => stage).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
     const rows = []
 
-    // Case Details Section
-    rows.push({ key: 'section_header_case_details', type: 'section_header', label: 'Case Details', id: 'case_details', icon: Users });
-
-    if (expandedSections.has('case_details')) {
-      // Add header fields based on visibility
-      if (visibleHeaders.has('id')) {
-        rows.push({ key: 'task_id', label: 'ID', type: 'basic', getValue: (task: any) => `${task.id}` })
-      }
-      if (visibleHeaders.has('applicant_name')) {
-        rows.push({ key: 'applicant_name', label: 'Applicant Name', type: 'basic', getValue: (task: any) => task.applicant_name || 'N/A' })
-      }
-      if (visibleHeaders.has('company_name')) {
-        rows.push({ key: 'company_name', label: 'Company Name', type: 'basic', getValue: (task: any) => companies.get(task.company_id) || 'N/A' })
-      }
-      if (visibleHeaders.has('job_level')) {
-        rows.push({ key: 'job_level', label: 'Job Level', type: 'basic', getValue: (task: any) => getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || getTaskHierarchy(task)?.subdepartment?.name || 'N/A' })
-      }
-      if (visibleHeaders.has('renewal_new')) {
-        rows.push({ key: 'renewal_new', label: 'Renewal/New', type: 'badge', getValue: (task: any) => task.renewal_status || 'New' })
-      }
-      if (visibleHeaders.has('case_status')) {
-        rows.push({ key: 'case_status', label: 'Case Status', type: 'badge', getValue: (task: any) => task.status || 'pending' })
-      }
-      if (visibleHeaders.has('nationality')) {
-        rows.push({ key: 'nationality', label: 'Nationality', type: 'basic', getValue: (task: any) => task.nationality || 'N/A' })
-      }
-      if (visibleHeaders.has('age')) {
-        rows.push({ key: 'age', label: 'Age', type: 'basic', getValue: (task: any) => task.age?.toString() || 'N/A' })
-      }
-    }
-
     // Stats Section
     rows.push({ key: 'section_header_stats', type: 'section_header', label: 'Statistics', id: 'stats', icon: Briefcase });
 
@@ -791,6 +760,36 @@ export default function DepartmentTasksManager({
       }
     }
 
+    // Case Details Section
+    rows.push({ key: 'section_header_case_details', type: 'section_header', label: 'Case Details', id: 'case_details', icon: Users });
+
+    if (expandedSections.has('case_details')) {
+      // Add header fields based on visibility
+      if (visibleHeaders.has('id')) {
+        rows.push({ key: 'task_id', label: 'ID', type: 'basic', getValue: (task: any) => `${task.id}` })
+      }
+      if (visibleHeaders.has('applicant_name')) {
+        rows.push({ key: 'applicant_name', label: 'Applicant Name', type: 'basic', getValue: (task: any) => task.applicant_name || 'N/A' })
+      }
+      if (visibleHeaders.has('company_name')) {
+        rows.push({ key: 'company_name', label: 'Company Name', type: 'basic', getValue: (task: any) => companies.get(task.company_id) || 'N/A' })
+      }
+      if (visibleHeaders.has('job_level')) {
+        rows.push({ key: 'job_level', label: 'Job Level', type: 'basic', getValue: (task: any) => getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || getTaskHierarchy(task)?.subdepartment?.name || 'N/A' })
+      }
+      if (visibleHeaders.has('renewal_new')) {
+        rows.push({ key: 'renewal_new', label: 'Renewal/New', type: 'badge', getValue: (task: any) => task.renewal_status || 'New' })
+      }
+      if (visibleHeaders.has('case_status')) {
+        rows.push({ key: 'case_status', label: 'Case Status', type: 'badge', getValue: (task: any) => task.status || 'pending' })
+      }
+      if (visibleHeaders.has('nationality')) {
+        rows.push({ key: 'nationality', label: 'Nationality', type: 'basic', getValue: (task: any) => task.nationality || 'N/A' })
+      }
+      if (visibleHeaders.has('age')) {
+        rows.push({ key: 'age', label: 'Age', type: 'basic', getValue: (task: any) => task.age?.toString() || 'N/A' })
+      }
+    }
     // Stages Section
     rows.push({ key: 'section_header_stages', type: 'section_header', label: 'Stages', id: 'stages', icon: Briefcase });
 
@@ -845,7 +844,11 @@ export default function DepartmentTasksManager({
       }
     }
 
-    rows.push({ key: 'actions_row', label: 'Actions', type: 'actions' })
+    rows.push({ key: 'section_header_actions', type: 'section_header', label: 'Actions', id: 'actions', icon: Pencil })
+
+    if (expandedSections.has('actions')) {
+      rows.push({ key: 'actions_row', type: 'actions', label: 'Actions', id: 'actions' })
+    }
 
     return rows
   }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getDocumentForTaskStage, getKycFields, visibleHeaders, visibleStats])
@@ -1162,18 +1165,52 @@ export default function DepartmentTasksManager({
 
     return (
       <div className="space-y-4">
-        <div className="border-2 border-slate-300 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 400px)' }}>
+        <div className="border-2 border-slate-300 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 300px)' }}>
           <Table className="min-w-full border-separate border-spacing-0">
             <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
               <TableRow className="border-b-2 border-slate-400">
-                <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-20">
+                <TableHead rowSpan={4} className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-20">
                   Stage Order
                 </TableHead>
-                <TableHead className="sticky left-20 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-[300px]">
+                <TableHead rowSpan={4} className="sticky left-20 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-[300px]">
                   Fields
                 </TableHead>
                 {tasks.map((task) => (
-                  <TableHead key={`header-${task.id}`} className="font-semibold bg-blue-500 text-white min-w-[200px] text-center text-sm py-2 border-r border-slate-400">
+                  <TableHead key={`header-${task.id}`} className="font-semibold bg-blue-500 text-white min-w-[200px] text-center text-sm py-2 border-r border-slate-400 border-b">
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="flex items-center gap-1">
+                        <span className="font-bold">{`Task ${task.id}`}</span>
+                        {task.dependnats_members && Array.isArray(task.dependnats_members) && task.dependnats_members.length > 0 && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-5 w-5 p-0 text-white hover:bg-blue-600"
+                            onClick={() => toggleDependantsExpansion(task.id.toString())}
+                          >
+                            <Plus className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </TableHead>
+                ))}
+                {/* Render dependants columns */}
+                {tasks.map((task) => {
+                  if (!expandedDependants.has(task.id.toString()) || !task.dependnats_members?.length) return null;
+
+                  return task.dependnats_members.map((dep, depIndex) => (
+                    <TableHead key={`dep-${task.id}-${depIndex}`} className="font-semibold bg-orange-500 text-white min-w-[180px] text-center text-sm border-r border-slate-400 max-h-4">
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="font-bold text-xs">{dep.name || `Dependant ${depIndex + 1}`}</span>
+                        <span className="text-xs opacity-80">{dep.relationship || 'Dependant'}</span>
+                      </div>
+                    </TableHead>
+                  ));
+                })}
+              </TableRow>
+              <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
+                {tasks.map((task) => (
+                  <TableHead key={`header-${task.id}`} className="font-semibold bg-blue-500 text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b max-h-4">
                     <div className="flex flex-col items-center gap-1">
                       <div className="flex items-center gap-1">
                         <span className="font-bold">{task.applicant_name || `Task ${task.id}`}</span>
@@ -1188,23 +1225,27 @@ export default function DepartmentTasksManager({
                           </Button>
                         )}
                       </div>
-                      <span className="text-xs opacity-80">{companies.get(task.company_id) || 'No Company'}</span>
                     </div>
                   </TableHead>
                 ))}
-                {/* Render dependants columns */}
-                {tasks.map((task) => {
-                  if (!expandedDependants.has(task.id.toString()) || !task.dependnats_members?.length) return null;
-
-                  return task.dependnats_members.map((dep, depIndex) => (
-                    <TableHead key={`dep-${task.id}-${depIndex}`} className="font-semibold bg-orange-500 text-white min-w-[180px] text-center text-sm py-2 border-r border-slate-400">
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="font-bold text-xs">{dep.name || `Dependant ${depIndex + 1}`}</span>
-                        <span className="text-xs opacity-80">{dep.relationship || 'Dependant'}</span>
-                      </div>
-                    </TableHead>
-                  ));
-                })}
+              </TableRow>
+              <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
+                {tasks.map((task) => (
+                  <TableHead key={`header-${task.id}`} className="font-semibold bg-blue-500 text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b max-h-4">
+                    <div className="flex flex-col items-center gap-1">
+                      <span className="font-medium">{companies.get(task.company_id) || 'No Company'}</span>
+                    </div>
+                  </TableHead>
+                ))}
+              </TableRow>
+              <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
+                {tasks.map((task) => (
+                  <TableHead key={`header-${task.id}`} className="font-semibold bg-blue-500 text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b max-h-4">
+                    <div className="flex flex-col items-center gap-1">
+                      <span className="font-medium">{getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || getTaskHierarchy(task)?.subdepartment?.name || 'N/A'}</span>
+                    </div>
+                  </TableHead>
+                ))}
               </TableRow>
             </TableHeader>
 
@@ -1232,19 +1273,21 @@ export default function DepartmentTasksManager({
                   if (row.type === 'section_header') {
                     const Icon = row.icon;
                     return (
-                      <TableRow key={row.key} className="bg-slate-200 border-y-2 border-slate-400 hover:bg-slate-200">
-                        <TableCell className="sticky left-0 z-10 bg-slate-200 border border-gray-100 text-center text-sm text-slate-600 py-2 w-20">
+                      <TableRow key={row.key} className="bg-slate-200 border-y-2 border-slate-400 hover:bg-slate-200 border-b">
+                        {/* <TableCell className="sticky left-0 z-10 bg-slate-200 border border-gray-100 text-center text-sm text-slate-600 py-2 w-20">
                           {row.id === 'stages' ? 'S#' : '#'}
-                        </TableCell>
-                        <TableCell colSpan={2} className="py-0 px-0">
-                          <div className="flex items-center justify-between px-3 py-2">
-                            <div className="flex items-center gap-3">
+                        </TableCell> */}
+                        <TableCell className="py-0 px-0" colSpan={2}>
+                          <div className="flex items-center justify-between px-3 py-2 grid grid-cols-3">
+                            <div className="flex items-center gap-3 col-span-2">
                               <Icon className="h-5 w-5 text-slate-600" />
                               <span className="font-bold text-slate-700 text-lg">{row.label}</span>
                             </div>
-                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleSectionExpansion(row.id)}>
-                              {expandedSections.has(row.id) ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                            </Button>
+                            <div className="py-0 px-0 text-right">
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleSectionExpansion(row.id)}>
+                                {expandedSections.has(row.id) ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                              </Button>
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell colSpan={tasks.length + 10} className="py-0 px-0"></TableCell>
@@ -1258,7 +1301,7 @@ export default function DepartmentTasksManager({
                         {row.stageOrder || (row.type === 'basic' || row.type === 'badge' || row.type === 'date' || row.type === 'stat' ? (index + 1) : '')}
                       </TableCell>
                       <TableCell className={`sticky left-20 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 min-w-[400px]`}>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 justify-between">
                           <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }}>
                             <span className={row.type === 'stage' ? 'font-semibold' : ''}>{row.label}</span>
                           </div>
@@ -1334,9 +1377,8 @@ export default function DepartmentTasksManager({
   }
 
   return (
-    <div className="flex-1 space-y-4 p-4 md:p-6 bg-slate-50/30 min-h-screen">
-
-      <Tabs value={activeDepartmentTab} onValueChange={setActiveDepartmentTab} className="space-y-4">
+    <div className="flex-1 space-y-2 p-2 bg-slate-50/30 min-h-screen">
+      <Tabs value={activeDepartmentTab} onValueChange={setActiveDepartmentTab} className="space-y-2">
         <TabsList className="grid w-full rounded-lg p-1 shadow-sm" style={{ gridTemplateColumns: `repeat(${departments.length}, 1fr)` }}>
           {departments.map(dept => (
             <TabsTrigger key={dept.id} value={dept.id.toString()} className="text-sm font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
@@ -1435,27 +1477,6 @@ export default function DepartmentTasksManager({
                                       {isTransposedView ? 'Select which fields to display as rows' : 'Select which columns to display in the table'}
                                     </p>
                                   </div>
-
-                                  {/* Case Details Fields */}
-                                  <div className="space-y-2">
-                                    <h5 className="text-sm font-medium text-slate-700">Case Details</h5>
-                                    {TABLE_HEADERS.map((header) => (
-                                      <div key={header.id} className="flex items-center space-x-2">
-                                        <Checkbox
-                                          id={header.id}
-                                          checked={visibleHeaders.has(header.id)}
-                                          onCheckedChange={() => toggleHeaderVisibility(header.id)}
-                                        />
-                                        <Label
-                                          htmlFor={header.id}
-                                          className="text-sm font-normal cursor-pointer"
-                                        >
-                                          {header.label}
-                                        </Label>
-                                      </div>
-                                    ))}
-                                  </div>
-
                                   {/* Stats Fields (only in transposed view) */}
                                   {isTransposedView && (
                                     <div className="space-y-2 border-t pt-2">
@@ -1477,6 +1498,25 @@ export default function DepartmentTasksManager({
                                       ))}
                                     </div>
                                   )}
+                                  {/* Case Details Fields */}
+                                  <div className="space-y-2">
+                                    <h5 className="text-sm font-medium text-slate-700">Case Details</h5>
+                                    {TABLE_HEADERS.map((header) => (
+                                      <div key={header.id} className="flex items-center space-x-2">
+                                        <Checkbox
+                                          id={header.id}
+                                          checked={visibleHeaders.has(header.id)}
+                                          onCheckedChange={() => toggleHeaderVisibility(header.id)}
+                                        />
+                                        <Label
+                                          htmlFor={header.id}
+                                          className="text-sm font-normal cursor-pointer"
+                                        >
+                                          {header.label}
+                                        </Label>
+                                      </div>
+                                    ))}
+                                  </div>
 
                                   <div className="flex gap-2 pt-2 border-t">
                                     <Button
