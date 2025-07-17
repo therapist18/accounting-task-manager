@@ -9,7 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { AlertTriangle, FileText, ChevronDown, Edit, Trash2, Eye, Upload, Users } from "lucide-react"
 import { format, parseISO, parse } from "date-fns"
 import { StageTimer } from "@/components/stage-timer"
-import { EditableStageCell } from "./EditableStageCell"
+import EditableStageCell from "./EditableStageCell"
 
 interface EnquiryTableProps {
   tasks: any[]

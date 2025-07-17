@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { ComboBox } from "@/components/ui/combobox"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -94,9 +95,9 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
         .select('id, name, display_name, department, category, fields, document_type')
         .order('name')
   
-      if (departmentName) {
-        query = query.eq('department', departmentName)
-      }
+      // if (departmentName) {
+      //   query = query.eq('department', departmentName)
+      // }
   
       const { data, error } = await query
   
@@ -1222,34 +1223,20 @@ function DocumentCard({
           {documentMode === 'existing' && (
             <div className="space-y-2">
               <Label className="text-sm">Select Existing Document</Label>
-              <Select
+              <ComboBox
+                options={kycDocuments.map(doc => ({
+                  value: doc.id,
+                  label: doc.display_name || doc.name,
+                  description: `${doc.department} • ${doc.category} • ${doc.fields?.length || 0} fields`
+                }))}
                 value={doc.linkedKycDocument || ''}
                 onValueChange={handleKycDocumentSelect}
+                placeholder={loadingKycDocs ? "Loading documents..." : "Choose an existing document"}
+                emptyText="No documents found"
                 disabled={loadingKycDocs}
-              >
-                <SelectTrigger>
-                  <SelectValue 
-                    placeholder={loadingKycDocs ? "Loading documents..." : "Choose an existing document"} 
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {kycDocuments.map((kycDoc) => (
-                    <SelectItem key={kycDoc.id} value={kycDoc.id}>
-                      <div className="flex flex-col">
-                        <span className="font-medium">{kycDoc.display_name || kycDoc.name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {kycDoc.department} • {kycDoc.category} • {kycDoc.fields?.length || 0} fields
-                        </span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                  {kycDocuments.length === 0 && !loadingKycDocs && (
-                    <SelectItem value="" disabled>
-                      No existing documents found
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
+                loading={loadingKycDocs}
+                className="w-full"
+              />
               {doc.linkedKycDocument && (
                 <p className="text-xs text-muted-foreground">
                   ✓ Document linked successfully. Extraction fields have been populated automatically.
