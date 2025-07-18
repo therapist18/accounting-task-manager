@@ -378,36 +378,8 @@ export default function EditableStageCell({
         throw new Error('No document type (kycId) configured for this stage');
       }
 
-      // Show loading state
-      toast({
-        title: "Loading document...",
-        description: "Please wait while we load the document",
-        variant: "default"
-      });
-
       // Get the most recent document from allDocuments
-      console.log('Viewing document for stage:', {
-        stageId: stage.id,
-        individualId: directorId,
-        stageDocuments: stage.documents?.map(doc => ({
-          id: doc.id,
-          name: doc.name,
-          kycId: doc.kycId
-        }))
-      });
-
       const stageDocuments = filterDocumentsForStage(allDocuments, directorId, stage.documents || []);
-      console.log('Filtered documents for view:', {
-        count: stageDocuments.length,
-        documents: stageDocuments.map(doc => ({
-          id: doc.id,
-          director_id: doc.director_id,
-          document_id: doc.document_id,
-          kyc_document_id: doc.kyc_document_id,
-          file_path: doc.file_path
-        }))
-      });
-
       if (!stageDocuments.length) {
         throw new Error('No documents found for this stage');
       }
@@ -482,13 +454,6 @@ export default function EditableStageCell({
       }
     } catch (error) {
       console.error('Error viewing document:', error);
-      toast({
-        title: 'Error',
-        description: `Failed to load document: ${error.message}`,
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
     }
   }, [stage, task, getKycFields, allDocuments]);
        
