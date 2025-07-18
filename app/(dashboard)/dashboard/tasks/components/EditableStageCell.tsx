@@ -21,7 +21,23 @@ interface EditableStageCellProps {
   onDocumentUpload?: (task: any, stage: any) => void
   onShowDocuments?: (doc: any) => void
   getKycFields?: (documentConfig: any) => Promise<any[]>
+  allDocuments?: any[]
 }
+
+// Helper function to filter documents for a specific stage and director
+const filterDocumentsForStage = (documents: any[], directorId: number | string, stageDocuments: any[]): any[] => {
+  if (!documents || documents.length === 0) return [];
+
+  // Get all kycIds from stage documents
+  const stageKycIds = stageDocuments?.map(doc => doc.kycId) || [];
+
+  // Filter documents that match both director_id and kycId
+  return documents.filter(doc => {
+    const matchesDirector = doc.director_id === directorId;
+    const matchesKycId = stageKycIds.includes(doc.document_id || doc.kyc_document_id);
+    return matchesDirector && matchesKycId;
+  });
+};
 
 export default function EditableStageCell({
   stage,
@@ -30,90 +46,142 @@ export default function EditableStageCell({
   onSave,
   onDocumentUpload,
   onShowDocuments,
-  getKycFields
+  getKycFields,
+  allDocuments = []
 }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [hasDocuments, setHasDocuments] = useState(false)
   const [previewDocument, setPreviewDocument] = useState<any>(null)
-  const [stageDate, setStageDate] = useState('');
+  const [stageDate, setStageDate] = useState('')
+  const [cachedDocuments, setCachedDocuments] = useState<any[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
 
   const requiresUpload = stage.documents && stage.documents.length > 0;
 
-  // Get extracted date from document details
-  const getExtractedDate = async (): Promise<string> => {
-    if (!requiresUpload || !task.individual_id || !stage.documents?.[0]?.kycId) return '';
-
-    try {
-      const { data: documents, error } = await supabase
-        .from('acc_portal_directors_documents')
-        .select('extracted_details')
-        .eq('director_id', task.individual_id)
-        .eq('document_id', stage.documents[0].kycId)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (error) throw error;
-
-      if (documents && documents.length > 0) {
-        const doc = documents[0];
-        const dateFields = ['application_date', 'date', 'upload_date', 'created_date','date_generated', 'invoice_date_and_time' ];
-        
-        // Check extracted details for date fields
-        if (doc.extracted_details) {
-          for (const field of dateFields) {
-            if (doc.extracted_details[field]) {
-              return doc.extracted_details[field];
-            }
-          }
-        }
-      }
-      return '';
-    } catch (error) {
-      console.error('Error getting extracted date:', error);
-      return '';
-    }
+  // Helper function to find matching document in cache
+  const findMatchingDocument = (documentId: string, directorId: string): any => {
+    return cachedDocuments.find(doc => 
+      doc.document_id === documentId && 
+      doc.director_id === directorId
+    );
   };
 
-  // Get initial extracted date
+  // Helper function to filter documents for a specific director and stage
+  const filterDocumentsForStage = (documents: any[], directorId: string, stageDocs: any[]): any[] => {
+    return documents.filter(doc => 
+      doc.director_id === directorId &&
+      stageDocs.some(stageDoc => stageDoc.kycId === doc.document_id)
+    );
+  };
+
+  // Initialize documents using passed allDocuments
   useEffect(() => {
-    const fetchDate = async () => {
-      const date = await getExtractedDate();
-      setStageDate(date);
-    };
-    fetchDate();
-  }, [task.individual_id, stage.documents, requiresUpload]);
+    console.log('Initializing documents for stage:', {
+      stageId: stage.id,
+      stageName: stage.name,
+      individualId: task.individual_id,
+      requiresUpload,
+      stageDocuments: stage.documents?.map(doc => ({
+        id: doc.id,
+        name: doc.name,
+        kycId: doc.kycId
+      }))
+    });
 
-  // Check for existing documents when component mounts or task/stage changes
-  useEffect(() => {
-    const checkForDocuments = async () => {
-      if (!requiresUpload || !task.individual_id || !stage.documents?.[0]?.kycId) {
-        setHasDocuments(false);
-        return;
-      }
+    if (!requiresUpload) {
+      console.log('No upload required for this stage');
+      setHasDocuments(false);
+      setStageDate('');
+      return;
+    }
 
-      try {
-        const { data: documents, error } = await supabase
-          .from('acc_portal_directors_documents')
-          .select('*')
-          .eq('director_id', task.individual_id)
-          .eq('document_id', stage.documents[0].kycId)
+    console.log('Filtering documents:', {
+      totalDocuments: allDocuments?.length,
+      directorId: task.individual_id,
+      stageKycIds: stage.documents?.map(doc => doc.kycId)
+    });
 
-        if (!error && documents && documents.length > 0) {
-          setHasDocuments(true);
-        } else {
-          setHasDocuments(false);
+    const stageDocuments = filterDocumentsForStage(allDocuments, task.individual_id, stage.documents || []);
+    console.log('Filtered documents:', {
+      matchedDocuments: stageDocuments?.map(doc => ({
+        id: doc.id,
+        director_id: doc.director_id,
+        document_id: doc.document_id,
+        kyc_document_id: doc.kyc_document_id,
+        file_path: doc.file_path
+      }))
+    });
+
+    if (stageDocuments.length > 0) {
+      const mostRecentDoc = stageDocuments[0];
+      setHasDocuments(true);
+
+      console.log('Found most recent document:', {
+        id: mostRecentDoc.id,
+        file_path: mostRecentDoc.file_path,
+        extracted_details: mostRecentDoc.extracted_details
+      });
+
+      // Extract date from most recent document
+      const dateFields = ['application_date', 'date', 'upload_date', 'created_date', 'date_generated', 'invoice_date_and_time'];
+      for (const field of dateFields) {
+        if (mostRecentDoc.extracted_details && mostRecentDoc.extracted_details[field]) {
+          setStageDate(mostRecentDoc.extracted_details[field]);
+          break;
         }
-      } catch (error) {
-        console.error('Error checking for documents:', error);
-        setHasDocuments(false);
       }
-    };
+    } else {
+      console.log('No documents found for this stage');
+      setHasDocuments(false);
+      setStageDate('');
+    }
+  }, [allDocuments, task.individual_id, stage.documents, requiresUpload]);
 
-    checkForDocuments();
-  }, [task.individual_id, stage.documents, requiresUpload]);
+  // Get extracted date from passed documents
+  const getExtractedDate = (): string => {
+    console.log('Getting extracted date for stage:', {
+      stageId: stage.id,
+      individualId: task.individual_id
+    });
+
+    if (!allDocuments.length) {
+      console.log('No documents available');
+      return '';
+    }
+
+    const stageDocuments = filterDocumentsForStage(allDocuments, task.individual_id, stage.documents || []);
+    console.log('Found stage documents:', {
+      count: stageDocuments.length,
+      documents: stageDocuments.map(doc => ({
+        id: doc.id,
+        director_id: doc.director_id,
+        document_id: doc.document_id,
+        kyc_document_id: doc.kyc_document_id
+      }))
+    });
+
+    if (!stageDocuments.length) {
+      console.log('No matching documents found');
+      return '';
+    }
+    
+    const mostRecentDoc = stageDocuments[0];
+    const dateFields = ['application_date', 'date', 'upload_date', 'created_date', 'date_generated', 'invoice_date_and_time'];
+    
+    if (mostRecentDoc.extracted_details) {
+      console.log('Document details:', mostRecentDoc.extracted_details);
+      for (const field of dateFields) {
+        if (mostRecentDoc.extracted_details[field]) {
+          console.log('Found date in field:', field, mostRecentDoc.extracted_details[field]);
+          return mostRecentDoc.extracted_details[field];
+        }
+      }
+    }
+    console.log('No date found in document details');
+    return '';
+  };
 
   const isEnquiryStage = stage.name === 'Enquiry';
   const isConfirmationStage = stage.name === 'Confirmation';
@@ -317,95 +385,103 @@ export default function EditableStageCell({
         variant: "default"
       });
 
-      // Fetch the document for this director and kycId
-      const { data: documents, error } = await supabase
-        .from('acc_portal_directors_documents')
-        .select('*')
-        .eq('director_id', directorId)
-        .eq('document_id', kycId)
-        .order('created_at', { ascending: false });
+      // Get the most recent document from allDocuments
+      console.log('Viewing document for stage:', {
+        stageId: stage.id,
+        individualId: directorId,
+        stageDocuments: stage.documents?.map(doc => ({
+          id: doc.id,
+          name: doc.name,
+          kycId: doc.kycId
+        }))
+      });
 
-      if (error) throw error;
+      const stageDocuments = filterDocumentsForStage(allDocuments, directorId, stage.documents || []);
+      console.log('Filtered documents for view:', {
+        count: stageDocuments.length,
+        documents: stageDocuments.map(doc => ({
+          id: doc.id,
+          director_id: doc.director_id,
+          document_id: doc.document_id,
+          kyc_document_id: doc.kyc_document_id,
+          file_path: doc.file_path
+        }))
+      });
 
-      if (documents && documents.length > 0) {
-        // Get the most recent document
-        const doc = documents[0];
-        const documentName = stage.documents?.[0]?.name || 'Document';
+      if (!stageDocuments.length) {
+        throw new Error('No documents found for this stage');
+      }
+
+      const doc = stageDocuments[0];
+      const documentName = stage.documents?.[0]?.name || 'Document';
+      
+      // Get the document configuration for this stage
+      const documentConfig = stage.documents?.[0];
+      if (!documentConfig) {
+        throw new Error('Document configuration not found for this stage');
+      }
+
+      // Format the file path and URL
+      const bucketName = 'kyc-documents';
+      const filePath = doc.file_path?.startsWith(bucketName) 
+        ? doc.file_path 
+        : `${bucketName}/${doc.file_path}`;
         
-        // Get the document configuration for this stage
-        const documentConfig = stage.documents?.[0];
-        if (!documentConfig) {
-          throw new Error('Document configuration not found for this stage');
+      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+      const fileName = doc.file_path?.split('/').pop() || documentName;
+      const fileType = fileName.split('.').pop()?.toLowerCase() || 'pdf';
+      
+      // Fetch KYC fields for this document type
+      const kycFields = await getKycFields(documentConfig);
+      
+      // Map KYC fields to the expected format
+      const fields = kycFields.map(field => ({
+        id: field.id || field.fieldName,
+        name: field.fieldName,
+        type: field.fieldType,
+        required: field.isRequired,
+        description: field.description,
+        isArray: field.isArray,
+        arrayConfig: field.arrayConfig
+      }));
+
+      // Prepare extracted data, ensuring all fields have values
+      const extractedData = { ...(doc.extracted_details || {}) };
+      
+      // Ensure all fields have values, using empty strings for missing ones
+      fields.forEach(field => {
+        if (extractedData[field.id] === undefined) {
+          extractedData[field.id] = '';
         }
-
-        // Format the file path and URL
-        const bucketName = 'kyc-documents';
-        const filePath = doc.file_path?.startsWith(bucketName) 
-          ? doc.file_path 
-          : `${bucketName}/${doc.file_path}`;
-          
-        const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
-        const fileName = doc.file_path?.split('/').pop() || documentName;
-        const fileType = fileName.split('.').pop()?.toLowerCase() || 'pdf';
-        
-        // Fetch KYC fields for this document type
-        const kycFields = await getKycFields(documentConfig);
-        
-        // Map KYC fields to the expected format
-        const fields = kycFields.map(field => ({
-          id: field.id || field.fieldName,
-          name: field.fieldName,
-          type: field.fieldType,
-          required: field.isRequired,
-          description: field.description,
-          isArray: field.isArray,
-          arrayConfig: field.arrayConfig
-        }));
-
-        // Prepare extracted data, ensuring all fields have values
-        const extractedData = { ...(doc.extracted_details || {}) };
-        
-        // Ensure all fields have values, using empty strings for missing ones
-        fields.forEach(field => {
-          if (extractedData[field.id] === undefined) {
-            extractedData[field.id] = '';
-          }
-        });
-        
-        const formattedDoc = {
-          documentName: documentConfig.name || documentName,
-          fileUrl,
-          fileName,
-          extractedData,
-          fields,
-          type: documentConfig.documentType || 'document',
-          file: {
-            name: fileName,
-            type: fileType,
-            url: fileUrl
-          }
-        };
-        
-        // Set the document for preview
-        setPreviewDocument(formattedDoc);
-
-        // Update stage date with extracted date
-        const dateFields = ['application_date', 'date', 'upload_date', 'created_date'];
-        for (const field of dateFields) {
-          if (doc.extracted_details && doc.extracted_details[field]) {
-            setStageDate(doc.extracted_details[field]);
-            break;
-          }
+      });
+      
+      const formattedDoc = {
+        documentName: documentConfig.name || documentName,
+        fileUrl,
+        fileName,
+        extractedData,
+        fields,
+        type: documentConfig.documentType || 'document',
+        file: {
+          name: fileName,
+          type: fileType,
+          url: fileUrl
         }
-      } else {
-        toast({
-          title: 'No documents found',
-          description: `No ${stage.documents?.[0]?.name || 'documents'} uploaded for this stage yet.`,
-          variant: 'default',
-        });
+      };
+      
+      // Set the document for preview
+      setPreviewDocument(formattedDoc);
+
+      // Update stage date with extracted date
+      const dateFields = ['application_date', 'date', 'upload_date', 'created_date'];
+      for (const field of dateFields) {
+        if (doc.extracted_details && doc.extracted_details[field]) {
+          setStageDate(doc.extracted_details[field]);
+          break;
+        }
       }
     } catch (error) {
-      console.error('Error fetching documents:', error);
+      console.error('Error viewing document:', error);
       toast({
         title: 'Error',
         description: `Failed to load document: ${error.message}`,
@@ -414,7 +490,7 @@ export default function EditableStageCell({
     } finally {
       setIsLoading(false);
     }
-  }, [stage, task, getKycFields]);
+  }, [stage, task, getKycFields, allDocuments]);
        
 
   const handleClick = () => {

@@ -68,7 +68,8 @@ const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolea
 
 // Document field cell component
 function DocumentFieldCell({ document, field, isOldDocument = false }) {
-  if (!document || !document.extracted_details) {
+  // Failsafe: Don't render if there's no document, no details, or an indicator is present
+  if (!document || !document.extracted_details || document.indicator === true) {
     return <span className="text-xs text-gray-400">-</span>
   }
 
@@ -115,6 +116,9 @@ function DocumentStageCell({ stage, task, onDocumentUpload, onShowDocuments, get
   if (!applicableDoc) {
     return <span className="text-xs text-gray-400 italic">N/A</span>
   }
+  
+  // Get display name from KYC document if available, falling back to name
+  const documentDisplayName = applicableDoc.display_name || applicableDoc.name || 'Document'
 
   const document = allDocuments.find(doc =>
     doc.director_id === task.individual_id &&
@@ -124,6 +128,9 @@ function DocumentStageCell({ stage, task, onDocumentUpload, onShowDocuments, get
   const hasDocument = !!document
   const isOldDocument = document && task.created_at && 
     isDocumentOlderThanTask(document.created_at, task.created_at)
+  
+  // Check if document has indicator (hide preview if true)
+  const hasIndicator = document?.indicator === true
 
   return (
     <div className="flex items-center justify-center gap-1">
@@ -132,18 +139,19 @@ function DocumentStageCell({ stage, task, onDocumentUpload, onShowDocuments, get
         size="icon"
         className="h-8 w-8 text-blue-600 hover:bg-blue-100"
         onClick={() => onDocumentUpload(task, stage)}
-        title="Upload document"
+        title={`Upload ${documentDisplayName}`}
       >
         <Upload className="h-4 w-4" />
       </Button>
-      {hasDocument && (
+      {/* Show preview button only if document exists AND has no indicator */}
+      {hasDocument && !hasIndicator && (
         <>
           <Button
             variant="ghost"
             size="icon"
             className="h-8 w-8 text-green-600 hover:bg-green-100"
             onClick={() => onShowDocuments(task, stage)}
-            title="View document"
+            title={`View ${documentDisplayName}`}
           >
             <Eye className="h-4 w-4" />
           </Button>
@@ -151,6 +159,10 @@ function DocumentStageCell({ stage, task, onDocumentUpload, onShowDocuments, get
             <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />
           )}
         </>
+      )}
+      {/* If document exists but has an indicator, show a message instead of the preview button */}
+      {hasDocument && hasIndicator && (
+        <span className="text-xs text-gray-500 ml-1" title="Preview is not available for this document.">No Preview</span>
       )}
     </div>
   )
@@ -289,6 +301,11 @@ export default function DepartmentTasksManager({
       })
     }
   }, [])
+
+  // Fetch documents when component mounts
+  useEffect(() => {
+    fetchAllDocuments()
+  }, [fetchAllDocuments])
 
   // Helper function to check if a document applies to the current task (similar to StageUploadDialog)
   const isDocumentApplicableToTask = useCallback((doc: any, task: any) => {
@@ -545,60 +562,75 @@ export default function DepartmentTasksManager({
     try {
       const document = getDocumentForTaskStage(task, stage);
 
-      if (document) {
-        const documentName = stage.documents?.[0]?.name || 'Document';
-        const bucketName = 'kyc-documents';
-        const filePath = document.file_path?.startsWith(bucketName)
-          ? document.file_path
-          : `${bucketName}/${document.file_path}`;
-
-        const { data: signedUrlData, error: signedUrlError } = await supabase.storage.from(bucketName).createSignedUrl(document.file_path, 60);
-
-        if (signedUrlError) throw signedUrlError;
-
-        const fileName = document.file_path?.split('/').pop() || documentName;
-
-        const kycFields = await getKycFields(stage.documents?.[0] || {});
-        const fields = kycFields.map(field => ({
-          id: field.id || field.fieldName,
-          name: field.fieldName,
-          type: field.fieldType,
-          required: field.isRequired,
-          description: field.description,
-          isArray: field.isArray,
-          arrayConfig: field.arrayConfig
-        }));
-
-        const extractedData = { ...(document.extracted_details || {}) };
-        fields.forEach(field => {
-          if (extractedData[field.id] === undefined) {
-            extractedData[field.id] = '';
-          }
-        });
-
-        const previewData = {
-          documentId: document.id,
-          documentName,
-          fileUrl: signedUrlData.signedUrl,
-          fileName,
-          extractedData,
-          fields,
-          type: stage.documents?.[0]?.documentType || 'document',
-          file: {
-            name: fileName,
-            type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
-            url: signedUrlData.signedUrl
-          }
-        };
-
-        setPreviewDocument(previewData);
-      } else {
+      if (!document) {
         toast({
           title: 'No documents found',
-          description: `No ${stage.documents?.[0]?.name || 'documents'} uploaded for this stage yet.`,
+          description: `No documents uploaded for this stage yet.`,
           variant: 'default',
         });
+        return;
       }
+
+      // Check if document has indicator and prevent preview
+      if (document.indicator) {
+        toast({
+          title: 'Preview not available',
+          description: 'Document preview is not available for this document.',
+          variant: 'default',
+        });
+        return;
+      }
+
+      // Get the document name from KYC, using display_name if available, otherwise fall back to name
+      const kycDoc = stage.documents?.[0];
+      const documentName = kycDoc?.display_name || kycDoc?.name || 'Document';
+      const bucketName = 'kyc-documents';
+      
+      // Generate signed URL for the document
+      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+        .from(bucketName)
+        .createSignedUrl(document.file_path, 60);
+
+      if (signedUrlError) throw signedUrlError;
+
+      const fileName = document.file_path?.split('/').pop() || documentName;
+
+      // Get KYC fields for the document
+      const kycFields = await getKycFields(kycDoc || {});
+      const fields = kycFields.map(field => ({
+        id: field.id || field.fieldName,
+        name: field.fieldName,
+        type: field.fieldType,
+        required: field.isRequired,
+        description: field.description,
+        isArray: field.isArray,
+        arrayConfig: field.arrayConfig
+      }));
+      // Prepare extracted data, ensuring all fields are present
+      const extractedData = { ...(document.extracted_details || {}) };
+      fields.forEach(field => {
+        if (extractedData[field.id] === undefined) {
+          extractedData[field.id] = '';
+        }
+      });
+
+      // Prepare preview data
+      const previewData = {
+        documentId: document.id,
+        documentName,
+        fileUrl: signedUrlData.signedUrl,
+        fileName,
+        extractedData,
+        fields,
+        type: kycDoc?.documentType || 'document',
+        file: {
+          name: fileName,
+          type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
+          url: signedUrlData.signedUrl
+        }
+      };
+
+      setPreviewDocument(previewData);
     } catch (error) {
       console.error('Error preparing document for view:', error);
       toast({
@@ -1027,26 +1059,34 @@ export default function DepartmentTasksManager({
 
         if (expandedStages.has(stage.id) && stage.documents && stage.documents.length > 0) {
           for (const doc of stage.documents) {
+            // Use display_name if available, otherwise fall back to name
+            const docDisplayName = doc.display_name || doc.name || 'Document';
+            
             rows.push({
               key: `doc_${stage.id}_${doc.id}`,
-              label: `${doc.name}`,
+              label: docDisplayName,
               type: 'document',
               stage,
               document: doc,
               isSubRow: true,
               getValue: (task: Task) => {
-                if (!isStageApplicableToTask(stage, task)) return 'N/A'
-                const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
+                if (!isStageApplicableToTask(stage, task)) return 'N/A';
+                
+                const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
                 const isOldDoc = document && task.created_at && 
-                  isDocumentOlderThanTask(document.created_at, task.created_at)
+                  isDocumentOlderThanTask(document.created_at, task.created_at);
+                const hasIndicator = document?.indicator === true;
+                
                 return {
                   hasDocument: !!document,
                   isOldDocument: isOldDoc,
-                  status: document ? 'Uploaded' : 'Not Uploaded'
-                }
+                  hasIndicator,
+                  status: hasIndicator ? 'Preview Not Available' : (document ? 'Uploaded' : 'Not Uploaded')
+                };
               }
             })
 
+            // Only show fields if document is expanded AND it does not have an indicator
             if (expandedDocuments.has(doc.id) && doc.kycId) {
               const kycFields = await getKycFields(doc);
               if (kycFields && kycFields.length > 0) {
@@ -1063,7 +1103,9 @@ export default function DepartmentTasksManager({
                     getValue: (task: Task) => {
                       if (!isStageApplicableToTask(stage, task)) return 'N/A'
                       const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
-                      if (!document || !document.extracted_details) return 'N/A'
+                      // Return N/A if no document, no details, OR if there's an indicator
+                      if (!document || !document.extracted_details || document.indicator === true) return 'N/A'
+                      
                       const value = document.extracted_details[field.fieldName] || document.extracted_details[field.id] || 'N/A'
                       const isOldDoc = document && task.created_at && 
                         isDocumentOlderThanTask(document.created_at, task.created_at)
@@ -1173,6 +1215,7 @@ export default function DepartmentTasksManager({
             onDocumentUpload={handleStageDocumentUpload}
             onShowDocuments={handleViewDocument}
             getKycFields={getKycFields}
+            allDocuments={allDocuments}
           />
         )
       case 'document':
@@ -1182,7 +1225,8 @@ export default function DepartmentTasksManager({
             <Badge variant={docValue.hasDocument ? 'default' : 'outline'} className="text-xs">
               {docValue.status}
             </Badge>
-            {docValue.hasDocument && (
+            {/* Conditionally render Eye button */}
+            {docValue.hasDocument && !docValue.hasIndicator && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -1284,6 +1328,7 @@ export default function DepartmentTasksManager({
 
                 if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
                   stage.documents.forEach(doc => {
+                    const docDisplayName = doc.display_name || doc.name;
                     if (expandedDocuments.has(doc.id) && doc.kycId) {
                       const kycFields = kycFieldsMap.get(doc.kycId) || [];
                       if (kycFields.length > 0) {
@@ -1291,12 +1336,12 @@ export default function DepartmentTasksManager({
                         kycFields.forEach(field => subHeaders.push({ type: 'field', name: field.fieldName }));
                       } else {
                         stageCols += 1;
-                        subHeaders.push({ type: 'doc', name: doc.name, id: doc.id, hasFields: false });
+                        subHeaders.push({ type: 'doc', name: docDisplayName, id: doc.id, hasFields: false });
                       }
                     } else {
                       stageCols += 1;
                       const hasKycFields = doc.kycId && kycFieldsMap.has(doc.kycId) && kycFieldsMap.get(doc.kycId).length > 0;
-                      subHeaders.push({ type: 'doc', name: doc.name, id: doc.id, hasFields: hasKycFields });
+                      subHeaders.push({ type: 'doc', name: docDisplayName, id: doc.id, hasFields: hasKycFields });
                     }
                   });
                 } else {
@@ -1385,8 +1430,10 @@ export default function DepartmentTasksManager({
                       const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
                       const isOldDoc = document && task.created_at && 
                         isDocumentOlderThanTask(document.created_at, task.created_at)
+                      const hasIndicator = document?.indicator === true;
                       
-                      if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0) {
+                      // Don't render fields if doc isn't expanded, has no fields, or has an indicator
+                      if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0 || hasIndicator) {
                         return (
                           <TableCell key={`${doc.id}`} className="border border-gray-100 p-1 align-middle">
                             <DocumentStageCell 
