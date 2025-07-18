@@ -235,6 +235,7 @@ export default function DepartmentTasksManager({
 
   // KYC documents cache
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map())
+  const [allKycFields, setAllKycFields] = useState<Record<string, any[]>>({})
 
   // State for document preview
   const [previewDocument, setPreviewDocument] = useState<any>(null);
@@ -272,16 +273,50 @@ export default function DepartmentTasksManager({
     }
   }, [kycDocuments])
 
-  // Get KYC fields for a document using the cache-aware fetcher
-  const getKycFields = useCallback(async (doc: any) => {
+  // Get KYC fields for a document from the pre-fetched fields
+  const getKycFields = useCallback((doc: any) => {
     if (!doc.kycId) {
-      return []
+      return Promise.resolve([]);
     }
-
-    const kycDoc = await fetchKycDocument(doc.kycId)
-    return kycDoc?.fields || []
-  }, [fetchKycDocument])
+    return Promise.resolve(allKycFields[doc.kycId] || []);
+  }, [allKycFields])
   
+  // Fetch all KYC fields for all document types
+  const fetchAllKycFields = useCallback(async () => {
+    try {
+      console.log('Fetching all KYC fields...');
+      const { data, error } = await supabase
+        .from('acc_portal_kyc')
+        .select('id, fields, name')
+      
+      if (error) throw error;
+      
+      const fieldsMap: Record<string, any[]> = {};
+      
+      // Transform and store fields by kycId
+      data?.forEach(doc => {
+        if (doc.id && doc.fields) {
+          fieldsMap[doc.id] = transformKycFields(doc.fields);
+        }
+      });
+      
+      console.log(`Fetched KYC fields for ${Object.keys(fieldsMap).length} document types`);
+      setAllKycFields(fieldsMap);
+    } catch (error) {
+      console.error('Error fetching KYC fields:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load KYC fields',
+        variant: 'destructive',
+      });
+    }
+  }, []);
+
+  // Fetch all required data when component mounts
+  useEffect(() => {
+    fetchAllKycFields();
+  }, [fetchAllKycFields]);
+
   // Optimized fetch all documents function - single fetch for all documents
   const fetchAllDocuments = useCallback(async () => {
     try {
@@ -748,6 +783,18 @@ export default function DepartmentTasksManager({
   }
 
   // Initial data loading
+  useEffect(() => {
+    const initializeData = async () => {
+      await Promise.all([
+        fetchDepartments(),
+        fetchAllDocuments(),
+        fetchAllKycFields(),
+      ]);
+    };
+
+    initializeData();
+  }, [fetchAllDocuments, fetchAllKycFields])
+
   useEffect(() => {
     const loadInitialData = async () => {
       setDepartmentsLoading(true)

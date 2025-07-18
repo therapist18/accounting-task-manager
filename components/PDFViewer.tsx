@@ -13,6 +13,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ url }) => {
         src={`${url}#view=FitH`}
         className="w-full h-full"
         title="PDF Viewer"
+        allow="fullscreen"
+        allowFullScreen
       />
     </div>
   )
