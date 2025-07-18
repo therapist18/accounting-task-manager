@@ -2,25 +2,42 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog"
 import { ComboBox } from "@/components/ui/combobox"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, X, Clock, FileText, User, Info, MessageSquare, Trash2, Star, Check } from "lucide-react"
+import { Plus, X, Clock, FileText, User, Info, MessageSquare, Trash2, Star, Check, Building2, FolderTree } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
-import { supabase } from "@/lib/supabase/client"
+import { supabase } from "@/lib/supabase/client" // Assuming these imports are correct in your environment
 import { DocumentExtraction, Stage, StageDocument, TimeConfig, NewStage, EntityOption, DepartmentOption } from "../stagesdb"
 import { createKYCDocument } from "../kycDocuments"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
 import { toast } from "@/hooks/use-toast"
+
+type DocumentExtraction = any; type Stage = any; type StageDocument = any; type TimeConfig = any; type NewStage = any; type EntityOption = any; type DepartmentOption = any;
+
+// Helper to create the titled sections, matching the card style in the image.
+const SectionWrapper = ({ title, icon, children, actionButton = null }: { title: string, icon: React.ReactNode, children: React.ReactNode, actionButton?: React.ReactNode }) => (
+    <Card className="bg-white rounded-lg shadow-sm border border-slate-200/90 overflow-hidden">
+      <div className="p-4 bg-blue-500 border-b border-slate-200/90 flex justify-between items-center">
+        <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+          {React.cloneElement(icon as React.ReactElement, { className: "h-5 w-5 text-blue-600" })}
+          {title}
+        </h3>
+        {actionButton}
+      </div>
+      <CardContent className="p-4 space-y-4">{children}</CardContent>
+    </Card>
+  );
+
 
 // Simple UUID generator
 const generateId = () => {
@@ -77,7 +94,7 @@ interface AddStageDialogProps {
   departments: DepartmentOption[]
 }
 
-export function AddStageDialog({ open, onOpenChange, onAddStages, departments }: AddStageDialogProps) {
+export function AddStageDialog({ open, onOpenChange, onAddStages, departments = [] }: AddStageDialogProps) {
   const [selectedDepartment, setSelectedDepartment] = useState<string>('')
   const [newStages, setNewStages] = useState<NewStage[]>([{
     id: generateId(),
@@ -114,7 +131,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
       setEntityOptions([])
       setKycDocuments([])
     }
-  }, [selectedDepartment])
+  }, [selectedDepartment, departments])
 
   const fetchKYCDocuments = async (departmentName?: string) => {
     setLoadingKycDocs(true)
@@ -422,6 +439,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
 
       await onAddStages(processedStages, selectedDepartment)
       
+      // Reset state on success
       setNewStages([{
         id: generateId(),
         name: '',
@@ -438,6 +456,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
       setActiveStageTab('')
       setEntityOptions([])
       setKycDocuments([])
+      onOpenChange(false); // Close dialog on success
     } catch (error) {
       console.error('Error adding stages:', error)
       toast({
@@ -456,33 +475,33 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button size="sm" className="gap-2">
+        <Button size="sm" className="gap-2 bg-blue-600 hover:bg-blue-700">
           <Plus className="h-4 w-4" />
           Add Stage
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-6xl max-h-[95vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Plus className="h-5 w-5" />
-            Add New Stage{newStages.length > 1 ? 's' : ''} ({newStages.length})
-          </DialogTitle>
+      {/* Updated DialogContent styling to match the image structure (p-0, bg-slate-50) */}
+      <DialogContent className="max-w-6xl max-h-[95vh] p-0 bg-slate-50 flex flex-col">
+        
+        {/* Updated DialogHeader styling */}
+        <DialogHeader className="p-6 border-b bg-white sticky top-0 z-10">
+            <DialogTitle className="text-xl font-bold text-gray-800">
+                Add New Stage{newStages.length > 1 ? 's' : ''} ({newStages.length})
+            </DialogTitle>
+            <p className="text-sm text-gray-500">
+                Configure the details, timing, and required documents for the new stage(s).
+            </p>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
-          {/* Department Selection */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <FileText className="h-5 w-5" />
-                Department Selection
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
+        {/* Main Content Area (Scrollable) */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          
+          {/* Department Selection - Using SectionWrapper */}
+          <SectionWrapper title="Department Selection" icon={<Building2 />}>
               <div className="space-y-2">
-                <Label htmlFor="department" className="flex items-center gap-1">
+                <Label htmlFor="department" className="text-xs font-medium text-gray-700">
                   Department
-                  <span className="text-destructive">*</span>
+                  <span className="text-destructive ml-1">*</span>
                 </Label>
                 <Select value={selectedDepartment} onValueChange={setSelectedDepartment}>
                   <SelectTrigger>
@@ -497,38 +516,34 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Documents will be created under this department in the KYC system
+                  Documents will be created under this department in the KYC system.
                 </p>
               </div>
-            </CardContent>
-          </Card>
+          </SectionWrapper>
 
-          {/* Stage Management */}
-          <Card>
-            <CardHeader>
-              <div className="flex justify-between items-center">
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Clock className="h-5 w-5" />
-                  Stage Configuration
-                </CardTitle>
+          {/* Stage Management - Using SectionWrapper */}
+          <SectionWrapper 
+            title="Stage Configuration" 
+            icon={<FolderTree />}
+            actionButton={
                 <Button
                   type="button"
                   variant="outline"
                   onClick={addNewStageRow}
-                  className="gap-2"
+                  className="gap-2 text-white bg-blue-600 border-blue-300 hover:bg-blue-50"
                   disabled={saving}
+                  size="sm"
                 >
                   <Plus className="h-4 w-4" />
-                  Add Stage
+                  Add Another Stage
                 </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
+            }
+          >
               {newStages.length > 1 ? (
                 <Tabs value={activeStageTab} onValueChange={setActiveStageTab} className="w-full">
-                  <TabsList className="flex w-full">
+                  <TabsList className="flex w-full overflow-x-auto">
                     {newStages.map((stage, index) => (
-                      <TabsTrigger key={stage.id} value={stage.id} className="relative">
+                      <TabsTrigger key={stage.id} value={stage.id} className="relative data-[state=active]:text-blue-600 data-[state=active]:border-blue-600">
                         <span className="mr-2">{index + 1}.</span>
                         {stage.name || `Stage ${index + 1}`}
                         {newStages.length > 1 && (
@@ -536,7 +551,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-4 w-4 ml-2 hover:bg-destructive hover:text-destructive-foreground"
+                            className="h-4 w-4 ml-2 hover:bg-destructive/20 text-gray-500 hover:text-destructive"
                             onClick={(e) => {
                               e.stopPropagation()
                               removeStageRow(stage.id)
@@ -552,7 +567,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                   {newStages.map((stage) => (
                     <TabsContent key={stage.id} value={stage.id} className="space-y-6 mt-6">
                       <StageForm stage={stage} onUpdate={(updates) => updateNewStage(stage.id, updates)} />
-                      <Separator />
+                      <Separator className="my-6" />
                       <DocumentsSection
                         stage={stage}
                         entityOptions={entityOptions}
@@ -573,7 +588,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                 currentStage && (
                   <div className="space-y-6">
                     <StageForm stage={currentStage} onUpdate={(updates) => updateNewStage(currentStage.id, updates)} />
-                    <Separator />
+                    <Separator className="my-6" />
                     <DocumentsSection
                       stage={currentStage}
                       entityOptions={entityOptions}
@@ -590,11 +605,11 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                   </div>
                 )
               )}
-            </CardContent>
-          </Card>
+          </SectionWrapper>
+        </div>
 
-          {/* Actions */}
-          <div className="flex justify-end gap-2 pt-4 border-t">
+        {/* Updated DialogFooter styling */}
+        <DialogFooter className="p-4 bg-white border-t sticky z-10">
             <Button
               type="button"
               variant="outline"
@@ -607,6 +622,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
               type="button"
               onClick={handleSubmit}
               disabled={!isFormValid || saving}
+              className="bg-blue-600 hover:bg-blue-700"
             >
               {saving ? (
                 <>
@@ -619,14 +635,13 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments }:
                 </>
               )}
             </Button>
-          </div>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )
 }
 
-// Stage Form Component
+// Stage Form Component (Styling updated for consistency)
 function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: Partial<NewStage>) => void }) {
   const addTimeConfig = () => {
     onUpdate({
@@ -652,11 +667,11 @@ function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: P
   return (
     <div className="space-y-6">
       {/* Basic Info */}
-      <div className="grid md:grid-cols-2 gap-4">
+      <div className="grid md:grid-cols-2 gap-5">
         <div className="space-y-2">
-          <Label htmlFor={`name-${stage.id}`} className="flex items-center gap-1">
+          <Label htmlFor={`name-${stage.id}`} className="text-xs font-medium text-gray-700">
             Stage Name
-            <span className="text-destructive">*</span>
+            <span className="text-destructive ml-1">*</span>
           </Label>
           <Input
             id={`name-${stage.id}`}
@@ -666,7 +681,7 @@ function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: P
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor={`description-${stage.id}`}>
+          <Label htmlFor={`description-${stage.id}`} className="text-xs font-medium text-gray-700">
             Description
           </Label>
           <Input
@@ -678,137 +693,10 @@ function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: P
         </div>
       </div>
 
-      {/* Special Time Requirements */}
-      <div className="space-y-4">
-        <div className="flex items-center space-x-2">
-          <Checkbox
-            id={`special-${stage.id}`}
-            checked={stage.isSpecial}
-            onCheckedChange={(checked) => onUpdate({ isSpecial: checked === true })}
-          />
-          <div>
-            <Label htmlFor={`special-${stage.id}`} className="font-medium flex items-center gap-2">
-              <Clock className="h-4 w-4" />
-              Variable Time Requirements
-            </Label>
-            <p className="text-sm text-muted-foreground">
-              {stage.isSpecial
-                ? 'Different time requirements by application type'
-                : 'Fixed time requirement for all applications'}
-            </p>
-          </div>
-        </div>
-
-        {stage.isSpecial ? (
-          <Card>
-            <CardHeader>
-              <div className="flex justify-between items-center">
-                <CardTitle className="text-sm">Time Configurations</CardTitle>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addTimeConfig}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Config
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {stage.timeConfigs.map((config, index) => (
-                <div key={index} className="grid md:grid-cols-6 gap-3 items-end p-3 border rounded-lg">
-                  <div className="md:col-span-2">
-                    <Label className="text-xs">Application Type</Label>
-                    <Input
-                      value={config.applicationType}
-                      onChange={(e) => updateTimeConfig(index, { applicationType: e.target.value })}
-                      placeholder="e.g., Standard, Express"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Days</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={config.days}
-                      onChange={(e) => updateTimeConfig(index, { days: parseInt(e.target.value) || 0 })}
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Hours</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      max="23"
-                      value={config.hours}
-                      onChange={(e) => updateTimeConfig(index, { hours: parseInt(e.target.value) || 0 })}
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Minutes</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      max="59"
-                      value={config.minutes}
-                      onChange={(e) => updateTimeConfig(index, { minutes: parseInt(e.target.value) || 0 })}
-                    />
-                  </div>
-                  <div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeTimeConfig(index)}
-                      disabled={stage.timeConfigs.length === 1}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid grid-cols-3 gap-3 max-w-md">
-            <div>
-              <Label className="text-sm">Days</Label>
-              <Input
-                type="number"
-                min="0"
-                value={stage.days}
-                onChange={(e) => onUpdate({ days: parseInt(e.target.value) || 0 })}
-              />
-            </div>
-            <div>
-              <Label className="text-sm">Hours</Label>
-              <Input
-                type="number"
-                min="0"
-                max="23"
-                value={stage.hours}
-                onChange={(e) => onUpdate({ hours: parseInt(e.target.value) || 0 })}
-              />
-            </div>
-            <div>
-              <Label className="text-sm">Minutes</Label>
-              <Input
-                type="number"
-                min="0"
-                max="59"
-                value={stage.minutes}
-                onChange={(e) => onUpdate({ minutes: parseInt(e.target.value) || 0 })}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Follow Up */}
-      <div className="space-y-2">
-        <Label className="flex items-center gap-2">
-          <User className="h-4 w-4" />
+       {/* Follow Up */}
+       <div className="space-y-2">
+        <Label className="text-xs font-medium text-gray-700 flex items-center gap-2">
+          <User className="h-4 w-4 text-blue-600" />
           Follow Up With
         </Label>
         <Select
@@ -826,6 +714,138 @@ function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: P
           </SelectContent>
         </Select>
       </div>
+
+      {/* Special Time Requirements */}
+      <div className="space-y-4 pt-4 border-t">
+        <div className="flex items-center space-x-3">
+          <Checkbox
+            id={`special-${stage.id}`}
+            checked={stage.isSpecial}
+            onCheckedChange={(checked) => onUpdate({ isSpecial: checked === true })}
+            className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+          />
+          <div>
+            <Label htmlFor={`special-${stage.id}`} className="font-medium flex items-center gap-2 text-gray-800">
+              <Clock className="h-4 w-4 text-blue-600" />
+              Variable Time Requirements
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              {stage.isSpecial
+                ? 'Set different time requirements by application type.'
+                : 'Set a fixed time requirement for all applications.'}
+            </p>
+          </div>
+        </div>
+
+        {stage.isSpecial ? (
+          <Card className="shadow-none border-slate-200">
+            <CardHeader className="p-4 bg-slate-50 border-b">
+              <div className="flex justify-between items-center">
+                <CardTitle className="text-sm font-semibold text-slate-800">Time Configurations</CardTitle>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addTimeConfig}
+                  className="text-white bg-blue-600 border-blue-300 hover:bg-blue-50"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Config
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 p-4">
+              {stage.timeConfigs.map((config, index) => (
+                <div key={index} className="grid md:grid-cols-6 gap-3 items-end p-3 border rounded-lg bg-slate-50/50">
+                  <div className="md:col-span-2">
+                    <Label className="text-xs text-gray-600">Application Type</Label>
+                    <Input
+                      value={config.applicationType}
+                      onChange={(e) => updateTimeConfig(index, { applicationType: e.target.value })}
+                      placeholder="e.g., Standard, Express"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-600">Days</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={config.days}
+                      onChange={(e) => updateTimeConfig(index, { days: parseInt(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-600">Hours</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      max="23"
+                      value={config.hours}
+                      onChange={(e) => updateTimeConfig(index, { hours: parseInt(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-600">Minutes</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      max="59"
+                      value={config.minutes}
+                      onChange={(e) => updateTimeConfig(index, { minutes: parseInt(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeTimeConfig(index)}
+                      disabled={stage.timeConfigs.length === 1}
+                      className="text-gray-500 hover:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-3 gap-3 max-w-md">
+            <div>
+              <Label className="text-xs text-gray-600">Days</Label>
+              <Input
+                type="number"
+                min="0"
+                value={stage.days}
+                onChange={(e) => onUpdate({ days: parseInt(e.target.value) || 0 })}
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-gray-600">Hours</Label>
+              <Input
+                type="number"
+                min="0"
+                max="23"
+                value={stage.hours}
+                onChange={(e) => onUpdate({ hours: parseInt(e.target.value) || 0 })}
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-gray-600">Minutes</Label>
+              <Input
+                type="number"
+                min="0"
+                max="59"
+                value={stage.minutes}
+                onChange={(e) => onUpdate({ minutes: parseInt(e.target.value) || 0 })}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+     
     </div>
   )
 }
@@ -863,18 +883,18 @@ function DocumentsSection({
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h4 className="font-medium flex items-center gap-2">
-            <FileText className="h-4 w-4" />
+          <h4 className="font-semibold flex items-center gap-2 text-gray-800">
+            <FileText className="h-5 w-5 text-blue-600" />
             Stage Documents ({stage.documents.length})
           </h4>
           <p className="text-sm text-muted-foreground">
-            Documents required for this stage will be created in the KYC system
+            Documents required for this stage will be created in the KYC system.
           </p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={() => onAddDocument(false)} size="sm" variant="outline">
+          <Button onClick={() => onAddDocument(false)} size="sm" variant="outline" className="text-white bg-blue-600 border-blue-300 hover:bg-blue-50">
             <Plus className="h-4 w-4 mr-2" />
-            Add Regular Document
+            Add Regular Doc
           </Button>
           <Button
             onClick={() => onAddDocument(true)}
@@ -882,9 +902,10 @@ function DocumentsSection({
             variant="outline"
             disabled={!entityOptions.length && !loadingEntities}
             title={!entityOptions.length ? "Select a department first to add special documents" : ""}
+            className="text-white bg-amber-600 border-amber-300 hover:bg-amber-50"
           >
             <Star className="h-4 w-4 mr-2" />
-            Add Special Document
+            Add Special Doc
           </Button>
         </div>
       </div>
@@ -893,8 +914,8 @@ function DocumentsSection({
       {regularDocuments.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <h5 className="font-medium">Regular Documents</h5>
-            <Badge variant="secondary" className="text-xs">
+            <h5 className="font-medium text-sm text-gray-700">Regular Documents</h5>
+            <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800">
               {regularDocuments.length}
             </Badge>
           </div>
@@ -921,11 +942,11 @@ function DocumentsSection({
       {specialDocuments.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <h5 className="font-medium flex items-center gap-2">
+            <h5 className="font-medium flex items-center gap-2 text-sm text-gray-700">
               <Star className="h-4 w-4 text-amber-500" />
               Special Documents
             </h5>
-            <Badge variant="secondary" className="text-xs">
+            <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-800">
               {specialDocuments.length}
             </Badge>
           </div>
@@ -949,14 +970,14 @@ function DocumentsSection({
       )}
 
       {stage.documents.length === 0 && (
-        <div className="text-center py-8 border-2 border-dashed border-muted rounded-lg">
-          <FileText className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
-          <h4 className="font-medium text-muted-foreground mb-1">No documents added yet</h4>
+        <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-white">
+          <FileText className="h-10 w-10 mx-auto mb-3 text-gray-400" />
+          <h4 className="font-medium text-gray-700 mb-1">No documents added yet</h4>
           <p className="text-sm text-muted-foreground mb-4">
-            Add documents that are required for this stage
+            Add documents that are required for this stage.
           </p>
           <div className="flex gap-2 justify-center">
-            <Button onClick={() => onAddDocument(false)} variant="outline" size="sm">
+            <Button onClick={() => onAddDocument(false)} variant="outline" size="sm" className="text-blue-600 border-blue-300 hover:bg-blue-50">
               <Plus className="h-4 w-4 mr-2" />
               Add Regular Document
             </Button>
@@ -965,6 +986,7 @@ function DocumentsSection({
               variant="outline"
               size="sm"
               disabled={!entityOptions.length && !loadingEntities}
+              className="text-amber-600 border-amber-300 hover:bg-amber-50"
             >
               <Star className="h-4 w-4 mr-2" />
               Add Special Document
@@ -976,7 +998,7 @@ function DocumentsSection({
   )
 }
 
-// Multi-select Entity Picker Component
+// Multi-select Entity Picker Component (Kept functionality, updated styling slightly)
 function MultiEntityPicker({
   entities,
   selectedEntities = [],
@@ -1047,7 +1069,7 @@ function MultiEntityPicker({
             variant="outline"
             role="combobox"
             aria-expanded={open}
-            className="w-full justify-between"
+            className="w-full justify-between bg-white"
             disabled={loading}
           >
             {selectedEntities.length === 0 ? (
@@ -1075,7 +1097,7 @@ function MultiEntityPicker({
                       >
                         <div className="flex items-center gap-2 flex-1">
                           <div className="flex h-4 w-4 items-center justify-center">
-                            {isEntitySelected(entity) && <Check className="h-3 w-3" />}
+                            {isEntitySelected(entity) && <Check className="h-3 w-3 text-blue-600" />}
                           </div>
                           <span style={{ marginLeft: `${entity.level * 12}px` }}>
                             {entity.name}
@@ -1099,21 +1121,21 @@ function MultiEntityPicker({
             <Badge
               key={index}
               variant="secondary"
-              className="flex items-center gap-1 text-xs"
+              className="flex items-center gap-1 text-xs bg-blue-100 text-blue-800 hover:bg-blue-200"
             >
               {entity.entityName}
-              <Badge variant="outline" className="text-xs ml-1">
+              <Badge variant="outline" className="text-xs ml-1 bg-white">
                 {entity.entityType}
               </Badge>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-3 w-3 ml-1 hover:bg-destructive hover:text-destructive-foreground"
+                className="h-4 w-4 ml-1 p-0 hover:bg-destructive hover:text-destructive-foreground rounded-full"
                 onClick={() => {
                   onSelectionChange(selectedEntities.filter((_, i) => i !== index))
                 }}
               >
-                <X className="h-2 w-2" />
+                <X className="h-3 w-3" />
               </Button>
             </Badge>
           ))}
@@ -1123,7 +1145,7 @@ function MultiEntityPicker({
   )
 }
 
-// Enhanced Document Card Component with KYC Linking
+// Enhanced Document Card Component with KYC Linking (Styling heavily updated)
 function DocumentCard({
   doc,
   docIndex,
@@ -1178,14 +1200,15 @@ function DocumentCard({
     }
   }
 
+  // Updated Card styling to be cleaner and match the overall theme
   return (
-    <Card className={doc.isSpecial ? 'border-amber-200 bg-amber-50/20' : ''}>
-      <CardHeader>
-        <div className="flex justify-between items-start">
-          <div className="flex items-center gap-2">
-            <h5 className="font-medium">
-              {doc.isSpecial && <Star className="h-4 w-4 text-amber-500 inline mr-1" />}
-              Document {docIndex + 1}
+    <Card className={`shadow-sm border-slate-200 ${doc.isSpecial ? 'border-amber-300 bg-amber-50/30' : 'bg-white'}`}>
+      <CardHeader className="p-4 bg-slate-50 border-b">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <h5 className="font-semibold text-sm text-gray-800">
+              {doc.isSpecial && <Star className="h-4 w-4 text-amber-500 inline mr-2" />}
+              Document {docIndex + 1}: {doc.name || 'Untitled'}
             </h5>
             {doc.isRequired && (
               <Badge variant="destructive" className="text-xs">Required</Badge>
@@ -1194,7 +1217,7 @@ function DocumentCard({
               {doc.documentType}
             </Badge>
             {documentMode === 'existing' && (
-              <Badge variant="secondary" className="text-xs">Linked</Badge>
+              <Badge className="text-xs bg-blue-100 text-blue-800 hover:bg-blue-100">Linked</Badge>
             )}
             {doc.isSpecial && doc.targetEntities && doc.targetEntities.length > 0 && (
               <Badge variant="secondary" className="text-xs">
@@ -1206,22 +1229,22 @@ function DocumentCard({
             variant="ghost"
             size="icon"
             onClick={() => onRemoveDocument(doc.id)}
-            className="text-muted-foreground hover:text-destructive"
+            className="text-muted-foreground hover:text-destructive h-7 w-7"
           >
             <Trash2 className="h-4 w-4" />
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-6 p-4">
         {/* Document Mode Selection */}
-        <div className="space-y-3 p-4 bg-muted/30 border rounded-lg">
-          <Label className="font-medium">Document Source</Label>
-          <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-3 p-4 bg-slate-100/70 border border-slate-200 rounded-lg">
+          <Label className="font-medium text-gray-700">Document Source</Label>
+          <div className="grid grid-cols-2 gap-3">
             <Button
               variant={documentMode === 'new' ? 'default' : 'outline'}
               size="sm"
               onClick={() => handleModeChange('new')}
-              className="justify-start"
+              className={`justify-start ${documentMode === 'new' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}`}
             >
               <Plus className="h-4 w-4 mr-2" />
               Create New
@@ -1230,7 +1253,7 @@ function DocumentCard({
               variant={documentMode === 'existing' ? 'default' : 'outline'}
               size="sm"
               onClick={() => handleModeChange('existing')}
-              className="justify-start"
+              className={`justify-start ${documentMode === 'existing' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}`}
               disabled={loadingKycDocs}
             >
               <FileText className="h-4 w-4 mr-2" />
@@ -1239,8 +1262,9 @@ function DocumentCard({
           </div>
           
           {documentMode === 'existing' && (
-            <div className="space-y-2">
-              <Label className="text-sm">Select Existing Document</Label>
+            <div className="space-y-2 pt-2">
+              <Label className="text-sm text-gray-600">Select Existing Document</Label>
+              {/* Assuming ComboBox is a custom component, ensure its styling matches */}
               <ComboBox
                 options={kycDocuments.map(doc => ({
                   value: doc.id,
@@ -1253,11 +1277,11 @@ function DocumentCard({
                 emptyText="No documents found"
                 disabled={loadingKycDocs}
                 loading={loadingKycDocs}
-                className="w-full"
+                className="w-full bg-white"
               />
               {doc.linkedKycDocument && (
-                <p className="text-xs text-muted-foreground">
-                  ✓ Document linked successfully. Extraction fields have been populated automatically.
+                <p className="text-xs text-green-600 flex items-center gap-1">
+                  <Check className="h-3 w-3"/> Document linked successfully.
                 </p>
               )}
             </div>
@@ -1266,8 +1290,8 @@ function DocumentCard({
 
         {/* Special Document Entity Selection */}
         {doc.isSpecial && (
-          <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-            <Label className="font-medium flex items-center gap-2">
+          <div className="space-y-2 p-4 bg-amber-50 border border-amber-300 rounded-lg">
+            <Label className="font-medium flex items-center gap-2 text-amber-800">
               <Star className="h-4 w-4 text-amber-500" />
               Target Entities
             </Label>
@@ -1280,8 +1304,8 @@ function DocumentCard({
               loading={loadingEntities}
               placeholder="Select which entities need this document..."
             />
-            <p className="text-xs text-muted-foreground">
-              This document will only be required for the selected entities
+            <p className="text-xs text-amber-700">
+              This document will only be required for the selected entities.
             </p>
           </div>
         )}
@@ -1289,7 +1313,7 @@ function DocumentCard({
         {/* Document Configuration */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="space-y-2">
-            <Label>Document Name *</Label>
+            <Label className="text-xs font-medium text-gray-700">Document Name *</Label>
             <Input
               value={doc.name || ''}
               onChange={(e) => onUpdateDocument(doc.id, { name: e.target.value })}
@@ -1298,12 +1322,12 @@ function DocumentCard({
             />
             {documentMode === 'existing' && doc.linkedKycDocument && (
               <p className="text-xs text-muted-foreground">
-                Name is automatically set from the linked document
+                Name is set from the linked document.
               </p>
             )}
           </div>
           <div className="space-y-2">
-            <Label>Document Type</Label>
+            <Label className="text-xs font-medium text-gray-700">Document Type</Label>
             <Select
               value={doc.documentType}
               onValueChange={(value: 'upload' | 'extraction' | 'both') =>
@@ -1337,7 +1361,7 @@ function DocumentCard({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Input Type</Label>
+            <Label className="text-xs font-medium text-gray-700">Input Type</Label>
             <Select
               value={doc.inputType || 'file'}
               onValueChange={(value: 'file' | 'message' | 'both') =>
@@ -1373,7 +1397,7 @@ function DocumentCard({
         </div>
 
         <div className="space-y-2">
-          <Label>Description</Label>
+          <Label className="text-xs font-medium text-gray-700">Description</Label>
           <Textarea
             value={doc.description || ''}
             onChange={(e) => onUpdateDocument(doc.id, { description: e.target.value })}
@@ -1386,20 +1410,21 @@ function DocumentCard({
           <Checkbox
             checked={doc.isRequired}
             onCheckedChange={(checked) => onUpdateDocument(doc.id, { isRequired: checked as boolean })}
+            className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
           />
-          <Label className="text-sm">This document is required for stage completion</Label>
+          <Label className="text-sm font-normal text-gray-700">This document is required for stage completion</Label>
         </div>
 
         {/* Data Extraction Fields */}
         {(doc.documentType === 'extraction' || doc.documentType === 'both') && (
-          <div className="space-y-4 border-t pt-4">
+          <div className="space-y-4 border-t pt-4 mt-4">
             <div className="flex justify-between items-center">
               <div>
-                <Label className="text-sm font-medium">Data Extraction Fields</Label>
+                <Label className="text-sm font-semibold text-gray-800">Data Extraction Fields</Label>
                 <p className="text-xs text-muted-foreground">
                   {documentMode === 'existing' && doc.linkedKycDocument
-                    ? "Fields from the linked document (read-only)"
-                    : "Define what data should be extracted from this document"
+                    ? "Fields from the linked document (read-only)."
+                    : "Define what data should be extracted from this document."
                   }
                 </p>
               </div>
@@ -1408,6 +1433,7 @@ function DocumentCard({
                   variant="outline"
                   size="sm"
                   onClick={() => onAddExtraction(doc.id)}
+                  className="text-white bg-blue-600 border-blue-300 hover:bg-blue-50"
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   Add Field
@@ -1421,10 +1447,10 @@ function DocumentCard({
                   // NEW: Conditional rendering for array types
                   if (extraction.isArray && extraction.arrayConfig) {
                     return (
-                      <div key={extraction.id} className={`p-3 rounded-lg border space-y-3 ${
+                      <div key={extraction.id} className={`p-4 rounded-lg border space-y-3 ${
                         documentMode === 'existing' && doc.linkedKycDocument
                           ? 'bg-blue-50 border-blue-200'
-                          : 'bg-muted/30'
+                          : 'bg-slate-100 border-slate-200'
                       }`}>
                         <div className="flex justify-between items-start">
                           <div className="space-y-1">
@@ -1450,7 +1476,7 @@ function DocumentCard({
                         <div className="pl-4 border-l-2 ml-1 space-y-2">
                           <h4 className="text-xs font-semibold text-muted-foreground uppercase">Fields in this array</h4>
                           {extraction.arrayConfig.fields.map(subField => (
-                            <div key={subField.id} className="flex items-center justify-between text-sm p-2 bg-background rounded border">
+                            <div key={subField.id} className="flex items-center justify-between text-sm p-2 bg-white rounded border">
                               <div className="flex items-center gap-2">
                                 <span className="font-medium text-xs">{subField.fieldName}</span>
                                 {subField.isRequired && <span className="text-destructive font-bold ml-1">*</span>}
@@ -1469,25 +1495,25 @@ function DocumentCard({
                     );
                   }
                   
-                  // Render regular field editor
+                  // Render regular field editor (Styling updated)
                   return (
-                    <div key={extraction.id} className={`grid grid-cols-1 md:grid-cols-6 gap-3 items-end p-3 rounded-lg ${
+                    <div key={extraction.id} className={`grid grid-cols-1 md:grid-cols-6 gap-3 items-end p-3 rounded-lg border ${
                       documentMode === 'existing' && doc.linkedKycDocument
-                        ? 'bg-blue-50 border border-blue-200'
-                        : 'bg-muted/20'
+                        ? 'bg-blue-50 border-blue-200'
+                        : 'bg-slate-100 border-slate-200'
                     }`}>
                       <div className="space-y-1 col-span-2">
-                        <Label className="text-xs">Field Name</Label>
+                        <Label className="text-xs text-gray-600">Field Name</Label>
                         <Input
                           value={extraction.fieldName || ''}
                           onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { fieldName: e.target.value })}
                           placeholder="e.g., Application Date"
-                          className="h-8"
+                          className="h-9 bg-white"
                           disabled={documentMode === 'existing' && doc.linkedKycDocument}
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">Field Type</Label>
+                        <Label className="text-xs text-gray-600">Field Type</Label>
                         <Select
                           value={extraction.fieldType}
                           onValueChange={(value: 'text' | 'date' | 'number' | 'boolean' | 'file') =>
@@ -1495,7 +1521,7 @@ function DocumentCard({
                           }
                           disabled={documentMode === 'existing' && doc.linkedKycDocument}
                         >
-                          <SelectTrigger className="h-8">
+                          <SelectTrigger className="h-9 bg-white">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -1508,23 +1534,24 @@ function DocumentCard({
                         </Select>
                       </div>
                       <div className="space-y-1 col-span-2">
-                        <Label className="text-xs">Description</Label>
+                        <Label className="text-xs text-gray-600">Description</Label>
                         <Input
                           value={extraction.description || ''}
                           onChange={(e) => onUpdateExtraction(doc.id, extraction.id, { description: e.target.value })}
                           placeholder="Optional description"
-                          className="h-8"
+                          className="h-9 bg-white"
                           disabled={documentMode === 'existing' && doc.linkedKycDocument}
                         />
                       </div>
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between h-9">
                         <div className="flex items-center space-x-2">
                           <Checkbox
                             checked={extraction.isRequired}
                             onCheckedChange={(checked) => onUpdateExtraction(doc.id, extraction.id, { isRequired: checked as boolean })}
                             disabled={documentMode === 'existing' && doc.linkedKycDocument}
+                            className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
                           />
-                          <Label className="text-xs">Required</Label>
+                          <Label className="text-xs font-normal">Required</Label>
                         </div>
                         {documentMode === 'new' && (
                           <Button
@@ -1533,7 +1560,7 @@ function DocumentCard({
                             className="h-6 w-6 text-muted-foreground hover:text-destructive"
                             onClick={() => onRemoveExtraction(doc.id, extraction.id)}
                           >
-                            <X className="h-3 w-3" />
+                            <X className="h-4 w-4" />
                           </Button>
                         )}
                       </div>
@@ -1541,29 +1568,22 @@ function DocumentCard({
                   )
                 })}
                 {documentMode === 'existing' && doc.linkedKycDocument && (
-                  <div className="text-center p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="text-center p-4 bg-blue-50 border border-blue-300 rounded-lg">
                     <Info className="h-5 w-5 mx-auto mb-2 text-blue-600" />
                     <p className="text-sm text-blue-800 font-medium">Linked Document Fields</p>
                     <p className="text-xs text-blue-600">
                       These fields are imported from the linked KYC document and cannot be edited here.
-                      To modify them, edit the original document in the KYC system.
                     </p>
                   </div>
                 )}
               </div>
             ) : (
-              <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg">
-                <Info className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg bg-white">
+                <Info className="h-8 w-8 mx-auto mb-2 text-gray-400" />
                 <p className="text-sm">
                   {documentMode === 'existing'
                     ? "Select a linked document to view its extraction fields"
                     : "No extraction fields defined"
-                  }
-                </p>
-                <p className="text-xs">
-                  {documentMode === 'existing'
-                    ? "Choose an existing document from the dropdown above"
-                    : "Add fields to specify what data should be extracted"
                   }
                 </p>
               </div>
