@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
+import React, { useState, useMemo, useCallback, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { TruncatedText } from "@/app/(dashboard)/dashboard/departments/documents+fields/types"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -233,8 +233,8 @@ export default function DepartmentTasksManager({
   // Dependant expansion state
   const [expandedDependants, setExpandedDependants] = useState<Set<string>>(new Set())
 
-  // KYC documents cache (using ref instead of state)
-  const kycDocumentsRef = useRef<Map<string, any>>(new Map())
+  // KYC documents cache
+  const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map())
 
   // State for document preview
   const [previewDocument, setPreviewDocument] = useState<any>(null);
@@ -246,9 +246,8 @@ export default function DepartmentTasksManager({
 
   // Fetch KYC document by kycId (with caching)
   const fetchKycDocument = useCallback(async (kycId: string) => {
-    const cache = kycDocumentsRef.current
-    if (cache.has(kycId)) {
-      return cache.get(kycId)
+    if (kycDocuments.has(kycId)) {
+      return kycDocuments.get(kycId)
     }
 
     try {
@@ -265,13 +264,13 @@ export default function DepartmentTasksManager({
         fields: transformKycFields(data.fields || [])
       }
 
-      cache.set(kycId, transformedDoc)
+      setKycDocuments(prev => new Map(prev.set(kycId, transformedDoc)))
       return transformedDoc
     } catch (error) {
       console.error('Error fetching KYC document:', error)
       return null
     }
-  }, [])
+  }, [kycDocuments])
 
   // Get KYC fields for a document using the cache-aware fetcher
   const getKycFields = useCallback(async (doc: any) => {
@@ -303,47 +302,10 @@ export default function DepartmentTasksManager({
     }
   }, [])
 
-  // State to track if KYC fields are being prefetched
-  const [isPrefetchingKyc, setIsPrefetchingKyc] = useState(false);
-
-  // Fetch documents and prefetch KYC fields when component mounts
+  // Fetch documents when component mounts
   useEffect(() => {
-    const prefetchKycFields = async () => {
-      try {
-        // Only prefetch if we have tasks and stages loaded
-        if (!tasks.length || !stages.length) return;
-
-        // Prevent multiple prefetches
-        if (isPrefetchingKyc) return;
-        setIsPrefetchingKyc(true);
-
-        // Get all unique kycIds from all stages in all tasks
-        const allKycIds = Array.from(new Set(
-          tasks.flatMap(task => 
-            stages.flatMap(stage => 
-              stage.documents?.map(doc => doc.kycId) || []
-            )
-          )
-        ));
-
-        // Fetch and cache KYC fields for all kycIds
-        for (const kycId of allKycIds) {
-          if (kycId) {
-            await fetchKycDocument(kycId);
-          }
-        }
-      } catch (error) {
-        console.error('Error prefetching KYC fields:', error);
-      } finally {
-        setIsPrefetchingKyc(false);
-      }
-    };
-
-    // Only prefetch when we have both tasks and stages
-    if (tasks.length > 0 && stages.length > 0) {
-      prefetchKycFields();
-    }
-  }, [fetchAllDocuments, tasks, stages, fetchKycDocument, isPrefetchingKyc])
+    fetchAllDocuments()
+  }, [fetchAllDocuments])
 
   // Helper function to check if a document applies to the current task (similar to StageUploadDialog)
   const isDocumentApplicableToTask = useCallback((doc: any, task: any) => {
@@ -823,7 +785,7 @@ export default function DepartmentTasksManager({
     stages.forEach(stage => {
       if (expandedStages.has(stage.id)) {
         stage.documents?.forEach(doc => {
-          if (expandedDocuments.has(doc.id) && doc.kycId && !kycDocumentsRef.has(doc.kycId)) {
+          if (expandedDocuments.has(doc.id) && doc.kycId && !kycDocuments.has(doc.kycId)) {
             idsToFetch.add(doc.kycId);
           }
         });
@@ -833,7 +795,7 @@ export default function DepartmentTasksManager({
     if (idsToFetch.size > 0) {
       idsToFetch.forEach(id => fetchKycDocument(id));
     }
-  }, [isTransposedView, stages, expandedStages, expandedDocuments, kycDocumentsRef, fetchKycDocument]);
+  }, [isTransposedView, stages, expandedStages, expandedDocuments, kycDocuments, fetchKycDocument]);
 
   // Handle task actions
   const handleTaskAction = useCallback((action: { type: string; taskId?: string | number;[key: string]: any }) => {
@@ -1310,7 +1272,7 @@ export default function DepartmentTasksManager({
     }
 
     const kycFieldsMap = new Map(
-      Array.from(kycDocumentsRef.entries()).map(([kycId, kycDoc]) => [kycId, kycDoc.fields || []])
+      Array.from(kycDocuments.entries()).map(([kycId, kycDoc]) => [kycId, kycDoc.fields || []])
     );
 
     const visibleStages = stages.filter(stage => stage).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
@@ -1500,7 +1462,7 @@ export default function DepartmentTasksManager({
         </Table>
       </div>
     )
-  }, [stages, tasksLoading, departmentsLoading, companiesLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, getDocumentForTaskStage, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocumentsRef, isDocumentApplicableToTask])
+  }, [stages, tasksLoading, departmentsLoading, companiesLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, getDocumentForTaskStage, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, isDocumentApplicableToTask])
 
   // Enhanced render function for transposed table with better dependants positioning
   const renderEnhancedTransposedTable = useCallback((tasks: any[], tableType: string) => {
