@@ -22,7 +22,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -130,18 +130,18 @@ function RequirementComponent({
           />
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
-              <Checkbox 
-                checked={requirement.isVisible} 
-                onCheckedChange={(checked) => onUpdate([...path, 'isVisible'], Boolean(checked))} 
-                id={`visible-${path.join('-')}`} 
+              <Checkbox
+                checked={requirement.isVisible}
+                onCheckedChange={(checked) => onUpdate([...path, 'isVisible'], Boolean(checked))}
+                id={`visible-${path.join('-')}`}
               />
               <Label htmlFor={`visible-${path.join('-')}`} className="text-sm text-gray-700">Visible</Label>
             </div>
             <div className="flex items-center space-x-2">
-              <Checkbox 
-                checked={requirement.isRequired} 
-                onCheckedChange={(checked) => onUpdate([...path, 'isRequired'], Boolean(checked))} 
-                id={`required-${path.join('-')}`} 
+              <Checkbox
+                checked={requirement.isRequired}
+                onCheckedChange={(checked) => onUpdate([...path, 'isRequired'], Boolean(checked))}
+                id={`required-${path.join('-')}`}
               />
               <Label htmlFor={`required-${path.join('-')}`} className="text-sm text-gray-700">Required</Label>
             </div>
@@ -180,10 +180,10 @@ function SubClassComponent({
             <Badge variant="secondary" className="font-mono bg-gray-200 text-gray-700">{index}</Badge>
             <Input placeholder="Sub-class name" value={subClass.name} onChange={(e) => onUpdate([...path, 'name'], e.target.value)} className="font-semibold" />
             <div className="flex items-center space-x-2">
-              <Checkbox 
-                checked={subClass.default_display} 
-                onCheckedChange={(checked) => onUpdate([...path, 'default_display'], Boolean(checked))} 
-                id={`default-display-${path.join('-')}`} 
+              <Checkbox
+                checked={subClass.default_display}
+                onCheckedChange={(checked) => onUpdate([...path, 'default_display'], Boolean(checked))}
+                id={`default-display-${path.join('-')}`}
               />
               <Label htmlFor={`default-display-${path.join('-')}`} className="text-sm text-gray-700">Default Display</Label>
             </div>
@@ -208,13 +208,13 @@ function SubClassComponent({
             </div>
             <div className="space-y-3">
               {subClass.requirements.map((req, reqIndex) => (
-                <RequirementComponent 
-                  key={req.id} 
-                  requirement={req} 
-                  onUpdate={onUpdate} 
-                  onRemove={() => removeRequirement(reqIndex)} 
-                  path={[...path, 'requirements', reqIndex.toString()]} 
-                  index={`${index}.${reqIndex + 1}`} 
+                <RequirementComponent
+                  key={req.id}
+                  requirement={req}
+                  onUpdate={onUpdate}
+                  onRemove={() => removeRequirement(reqIndex)}
+                  path={[...path, 'requirements', reqIndex.toString()]}
+                  index={`${index}.${reqIndex + 1}`}
                 />
               ))}
             </div>
@@ -232,20 +232,20 @@ function ClassComponent({
   classItem: ClassForm, onUpdate: (path: string[], value: any) => void, onRemove: () => void, path: string[], index: string
 }) {
   const addSubClass = () => {
-    onUpdate([...path, 'subClasses'], [...classItem.subClasses, { 
-      id: Date.now(), 
-      name: '', 
-      description: '', 
-      order: classItem.subClasses.length + 1, 
-      isVisible: true, 
+    onUpdate([...path, 'subClasses'], [...classItem.subClasses, {
+      id: Date.now(),
+      name: '',
+      description: '',
+      order: classItem.subClasses.length + 1,
+      isVisible: true,
       default_display: true,
-      requirements: [] 
+      requirements: []
     }]);
   };
   const removeSubClass = (subClassIndex: number) => {
     onUpdate([...path, 'subClasses'], classItem.subClasses.filter((_, i) => i !== subClassIndex));
   };
-  
+
   return (
     <Card className="border-l-4 border-blue-500 bg-white">
       <CardHeader>
@@ -255,10 +255,10 @@ function ClassComponent({
             <Layers className="h-5 w-5 text-blue-600" />
             <Input placeholder="Class name" value={classItem.name} onChange={(e) => onUpdate([...path, 'name'], e.target.value)} className="flex-1 font-bold text-lg" />
             <div className="flex items-center space-x-2">
-              <Checkbox 
-                checked={classItem.default_display} 
-                onCheckedChange={(checked) => onUpdate([...path, 'default_display'], Boolean(checked))} 
-                id={`class-default-display-${path.join('-')}`} 
+              <Checkbox
+                checked={classItem.default_display}
+                onCheckedChange={(checked) => onUpdate([...path, 'default_display'], Boolean(checked))}
+                id={`class-default-display-${path.join('-')}`}
               />
               <Label htmlFor={`class-default-display-${path.join('-')}`} className="text-sm text-gray-700">Default Display</Label>
             </div>
@@ -278,13 +278,13 @@ function ClassComponent({
         </div>
         <div className="space-y-4">
           {classItem.subClasses.map((subClass, subClassIndex) => (
-            <SubClassComponent 
-              key={subClass.id} 
-              subClass={subClass} 
-              onUpdate={onUpdate} 
-              onRemove={() => removeSubClass(subClassIndex)} 
-              path={[...path, 'subClasses', subClassIndex.toString()]} 
-              index={`${index}.${subClassIndex + 1}`} 
+            <SubClassComponent
+              key={subClass.id}
+              subClass={subClass}
+              onUpdate={onUpdate}
+              onRemove={() => removeSubClass(subClassIndex)}
+              path={[...path, 'subClasses', subClassIndex.toString()]}
+              index={`${index}.${subClassIndex + 1}`}
             />
           ))}
           {classItem.subClasses.length === 0 && (
@@ -307,7 +307,7 @@ export default function Departments() {
   const [searchTerm, setSearchTerm] = useState("")
   const [users, setUsers] = useState<User[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
-  
+
   // State for managing expanded/collapsed state
   const [expanded, setExpanded] = useState<{ [key: string]: boolean }>({});
   const [expandedClasses, setExpandedClasses] = useState<{ [key: string]: boolean }>({});
@@ -315,11 +315,11 @@ export default function Departments() {
 
   const [isOrderChanged, setIsOrderChanged] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
-  const [departmentForm, setDepartmentForm] = useState({ 
-    name: '', 
-    description: '', 
+  const [departmentForm, setDepartmentForm] = useState({
+    name: '',
+    description: '',
     default_display: true,
-    subdepartments: [] as SubdepartmentForm[] 
+    subdepartments: [] as SubdepartmentForm[]
   })
 
   // Expand/collapse all departments and their children
@@ -369,8 +369,8 @@ export default function Departments() {
       try {
         const usersData = await fetchUsers();
         setUsers(usersData);
-      } catch (error) { 
-        toast.error('Failed to load users'); 
+      } catch (error) {
+        toast.error('Failed to load users');
       }
     }
     loadInitialData();
@@ -389,7 +389,7 @@ export default function Departments() {
     return newList;
   };
 
-  const handleDepartmentReorder = (index: number, direction: 'up' | 'down') => 
+  const handleDepartmentReorder = (index: number, direction: 'up' | 'down') =>
     setDepartments(prev => handleReorder(prev, index, direction));
 
   const handleSubdepartmentReorder = (deptIndex: number, subdeptIndex: number, direction: 'up' | 'down') => {
@@ -473,16 +473,16 @@ export default function Departments() {
   const handleAddDepartment = () => {
     setCurrentDepartmentId(null);
     setDepartmentForm({
-      name: '', 
+      name: '',
       description: '',
       default_display: true,
-      subdepartments: [{ 
-        name: '', 
-        description: '', 
-        classes: [], 
-        taskManagerId: '', 
+      subdepartments: [{
+        name: '',
+        description: '',
+        classes: [],
+        taskManagerId: '',
         taskAssistantIds: [],
-        default_display: true 
+        default_display: true
       }]
     });
     setIsAddDepartmentOpen(true);
@@ -491,16 +491,16 @@ export default function Departments() {
   const handleAddSubdepartment = (deptId: string, deptName: string) => {
     setCurrentDepartmentId(deptId);
     setDepartmentForm({
-      name: deptName, 
+      name: deptName,
       description: '',
       default_display: true,
-      subdepartments: [{ 
-        name: '', 
-        description: '', 
-        classes: [], 
-        taskManagerId: '', 
+      subdepartments: [{
+        name: '',
+        description: '',
+        classes: [],
+        taskManagerId: '',
         taskAssistantIds: [],
-        default_display: true 
+        default_display: true
       }]
     });
     setIsAddDepartmentOpen(true);
@@ -510,19 +510,49 @@ export default function Departments() {
     setSaving(true);
     try {
       if (currentDepartmentId) {
-        const subdept = departmentForm.subdepartments[0];
-        await saveSubdepartmentRequirements(currentDepartmentId, subdept);
+        // If we're editing a department
+        if (departmentForm.subdepartments.length > 0) {
+          // Editing a subdepartment - get the requirements from the form state
+          const requirements = departmentForm.subdepartments[0].requirements || [];
+          await saveSubdepartmentRequirements(currentDepartmentId, requirements);
+        } else {
+          // Editing a department
+          const { error } = await supabase
+            .from('tm_departments')
+            .update({
+              name: departmentForm.name,
+              description: departmentForm.description,
+              default_display: departmentForm.default_display,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', currentDepartmentId);
+
+          if (error) throw error;
+        }
       } else {
+        // Creating a new department
         await createDepartmentDb(departmentForm);
       }
       toast.success('Saved successfully!');
       setIsAddDepartmentOpen(false);
       await fetchData();
     } catch (error) {
-      toast.error('Failed to save.');
+      console.error('Save error:', error);
+      toast.error('Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleEditDepartment = (dept: Department) => {
+    setCurrentDepartmentId(dept.id);
+    setDepartmentForm({
+      name: dept.name,
+      description: dept.description || '',
+      default_display: dept.default_display || true,
+      subdepartments: [] // Empty array ensures department fields are enabled
+    });
+    setIsAddDepartmentOpen(true);
   };
 
   const handleEditSubdepartment = (deptId: string, subdept: Subdepartment) => {
@@ -577,20 +607,20 @@ export default function Departments() {
 
   const handleRemoveClass = (subdeptIndex: number, classIndex: number) => {
     updateFormState(
-      ['subdepartments', subdeptIndex, 'classes'], 
+      ['subdepartments', subdeptIndex, 'classes'],
       departmentForm.subdepartments[subdeptIndex].classes.filter((_, i) => i !== classIndex)
     );
   };
 
-  const handleSubdepartmentChange = (subdeptIndex: number, field: string, value: any) => 
+  const handleSubdepartmentChange = (subdeptIndex: number, field: string, value: any) =>
     updateFormState(['subdepartments', subdeptIndex, field], value);
 
-  const handleAddTaskAssistant = (subdeptIndex: number) => 
-    updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'], 
+  const handleAddTaskAssistant = (subdeptIndex: number) =>
+    updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'],
       [...departmentForm.subdepartments[subdeptIndex].taskAssistantIds, '']);
 
-  const handleRemoveTaskAssistant = (subdeptIndex: number, assistantIndex: number) => 
-    updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'], 
+  const handleRemoveTaskAssistant = (subdeptIndex: number, assistantIndex: number) =>
+    updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'],
       departmentForm.subdepartments[subdeptIndex].taskAssistantIds.filter((_, i) => i !== assistantIndex));
 
   const handleTaskAssistantChange = (subdeptIndex: number, assistantIndex: number, userId: string) => {
@@ -601,11 +631,11 @@ export default function Departments() {
 
   useEffect(() => {
     if (!isAddDepartmentOpen) {
-      setDepartmentForm({ 
-        name: '', 
-        description: '', 
+      setDepartmentForm({
+        name: '',
+        description: '',
         default_display: true,
-        subdepartments: [] 
+        subdepartments: []
       });
       setCurrentDepartmentId(null);
     }
@@ -636,7 +666,7 @@ export default function Departments() {
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-800 flex items-center">
-            <Building className="h-8 w-8 mr-3 text-blue-600" /> 
+            <Building className="h-8 w-8 mr-3 text-blue-600" />
             Departments & Workflows
           </h1>
           <p className="text-gray-500 mt-1">Manage all company departments and their structures.</p>
@@ -713,8 +743,8 @@ export default function Departments() {
                       {deptIndex + 1}
                     </TableCell>
                     <TableCell className="text-base text-gray-800 flex justify-between gap-3 border-r">
-                      <div className="flex gap-3">
-                        {dept.name}
+                      <div className="flex items-center gap-2">
+                        <span>{dept.name}</span>
                       </div>
                       <Button
                         variant="ghost"
@@ -737,13 +767,24 @@ export default function Departments() {
                     <TableCell className="text-center border-r">
                       <Checkbox
                         checked={dept.default_display || false}
-                        onCheckedChange={(checked) => 
+                        onCheckedChange={(checked) =>
                           handleDepartmentDefaultDisplayToggle(deptIndex, Boolean(checked))
                         }
                       />
                     </TableCell>
                     <TableCell className="text-right border-r">
                       <div className="flex items-center justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditDepartment(dept);
+                          }}
+                          className="h-6 w-6 text-gray-500 hover:text-blue-600"
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </Button>
                         <OrderButtons onReorder={handleDepartmentReorder} index={deptIndex} listLength={filteredDepartments.length} disabled={savingOrder} />
                         <Button
                           size="sm"
@@ -820,7 +861,7 @@ export default function Departments() {
                           <TableCell className="text-center border-r">
                             <Checkbox
                               checked={subdept.default_display || false}
-                              onCheckedChange={(checked) => 
+                              onCheckedChange={(checked) =>
                                 handleSubdepartmentDefaultDisplayToggle(deptIndex, subdeptIndex, Boolean(checked))
                               }
                             />
@@ -907,7 +948,7 @@ export default function Departments() {
                                 <TableCell className="text-center border-r">
                                   <Checkbox
                                     checked={cls.default_display || false}
-                                    onCheckedChange={(checked) => 
+                                    onCheckedChange={(checked) =>
                                       handleClassDefaultDisplayToggle(deptIndex, subdeptIndex, clsIndex, Boolean(checked))
                                     }
                                   />
@@ -942,7 +983,7 @@ export default function Departments() {
                                   <TableCell className="text-center border-r">
                                     <Checkbox
                                       checked={subClass.default_display || false}
-                                      onCheckedChange={(checked) => 
+                                      onCheckedChange={(checked) =>
                                         handleSubclassDefaultDisplayToggle(deptIndex, subdeptIndex, clsIndex, subClassIndex, Boolean(checked))
                                       }
                                     />
@@ -967,38 +1008,41 @@ export default function Departments() {
         <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="text-2xl text-gray-800">
-              {currentDepartmentId ? 'Edit Subdepartment' : 'Add New Department'}
+              {currentDepartmentId ? 'Edit Department Details' : 'Add New Department'}
             </DialogTitle>
+            <DialogDescription className="text-gray-600">
+              {currentDepartmentId ? 'Edit the details of the selected department' : 'Add a new department'}
+            </DialogDescription>
           </DialogHeader>
           <div className="flex-grow overflow-y-auto -mx-6 px-6 py-4 space-y-6">
             <div className="space-y-4 p-4 border rounded-lg bg-gray-50">
-              <h3 className="font-semibold text-lg text-gray-800">Department Info</h3>
+              <h3 className="font-semibold text-lg text-gray-800">Department Details</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label htmlFor="deptName">Name</Label>
-                  <Input 
-                    id="deptName" 
-                    value={departmentForm.name} 
-                    onChange={(e) => updateFormState(['name'], e.target.value)} 
-                    disabled={!!currentDepartmentId} 
+                  <Input
+                    id="deptName"
+                    value={departmentForm.name}
+                    onChange={(e) => updateFormState(['name'], e.target.value)}
+                    disabled={!!currentDepartmentId && departmentForm.subdepartments.length > 0}
                   />
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="deptDesc">Description</Label>
-                  <Textarea 
-                    id="deptDesc" 
-                    value={departmentForm.description} 
-                    onChange={(e) => updateFormState(['description'], e.target.value)} 
-                    disabled={!!currentDepartmentId} 
+                  <Textarea
+                    id="deptDesc"
+                    value={departmentForm.description}
+                    onChange={(e) => updateFormState(['description'], e.target.value)}
+                    disabled={!!currentDepartmentId && departmentForm.subdepartments.length > 0}
                   />
                 </div>
               </div>
               {!currentDepartmentId && (
                 <div className="flex items-center space-x-2">
-                  <Checkbox 
-                    checked={departmentForm.default_display} 
-                    onCheckedChange={(checked) => updateFormState(['default_display'], Boolean(checked))} 
-                    id="dept-default-display" 
+                  <Checkbox
+                    checked={departmentForm.default_display}
+                    onCheckedChange={(checked) => updateFormState(['default_display'], Boolean(checked))}
+                    id="dept-default-display"
                   />
                   <Label htmlFor="dept-default-display" className="text-sm text-gray-700">
                     Set as Default Display
@@ -1029,24 +1073,24 @@ export default function Departments() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-1">
                           <Label>Subdepartment Name</Label>
-                          <Input 
-                            value={subdept.name} 
-                            onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)} 
+                          <Input
+                            value={subdept.name}
+                            onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)}
                           />
                         </div>
                         <div className="space-y-1">
                           <Label>Description</Label>
-                          <Textarea 
-                            value={subdept.description} 
-                            onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)} 
+                          <Textarea
+                            value={subdept.description}
+                            onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)}
                           />
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
-                        <Checkbox 
-                          checked={subdept.default_display} 
-                          onCheckedChange={(checked) => handleSubdepartmentChange(subdeptIndex, 'default_display', Boolean(checked))} 
-                          id={`subdept-default-display-${subdeptIndex}`} 
+                        <Checkbox
+                          checked={subdept.default_display}
+                          onCheckedChange={(checked) => handleSubdepartmentChange(subdeptIndex, 'default_display', Boolean(checked))}
+                          id={`subdept-default-display-${subdeptIndex}`}
                         />
                         <Label htmlFor={`subdept-default-display-${subdeptIndex}`} className="text-sm text-gray-700">
                           Set as Default Display
@@ -1055,15 +1099,15 @@ export default function Departments() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-1">
                           <Label>Task Manager</Label>
-                          <Select 
-                            value={subdept.taskManagerId || 'none'} 
+                          <Select
+                            value={subdept.taskManagerId || 'none'}
                             onValueChange={(v) => handleSubdepartmentChange(subdeptIndex, 'taskManagerId', v === 'none' ? '' : v)}
                           >
                             <SelectTrigger>
                               <SelectValue placeholder="Select manager" />
                             </SelectTrigger>
                             <SelectContent>
-                              {[<SelectItem value="none">None</SelectItem>, ...users.map(u => 
+                              {[<SelectItem value="none">None</SelectItem>, ...users.map(u =>
                                 <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
                               )]}
                             </SelectContent>
@@ -1079,23 +1123,23 @@ export default function Departments() {
                           <div className="space-y-2">
                             {subdept.taskAssistantIds.map((id, assistantIndex) => (
                               <div key={assistantIndex} className="flex items-center gap-2">
-                                <Select 
-                                  value={id || 'none'} 
+                                <Select
+                                  value={id || 'none'}
                                   onValueChange={(v) => handleTaskAssistantChange(subdeptIndex, assistantIndex, v === 'none' ? '' : v)}
                                 >
                                   <SelectTrigger>
                                     <SelectValue placeholder="Select assistant" />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    {[<SelectItem value="none">None</SelectItem>, ...users.map(u => 
+                                    {[<SelectItem value="none">None</SelectItem>, ...users.map(u =>
                                       <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
                                     )]}
                                   </SelectContent>
                                 </Select>
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  className="h-8 w-8 shrink-0" 
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 shrink-0"
                                   onClick={() => handleRemoveTaskAssistant(subdeptIndex, assistantIndex)}
                                 >
                                   <X className="h-4 w-4" />
@@ -1286,7 +1330,7 @@ export default function Departments() {
               Cancel
             </Button>
             <Button onClick={handleSaveDepartment} disabled={saving || !departmentForm.name.trim()}>
-              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />} 
+              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
               Save
             </Button>
           </div>

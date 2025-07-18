@@ -7,11 +7,11 @@ import { TruncatedText } from "@/app/(dashboard)/dashboard/departments/documents
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Eye, ChevronDown, Plus, Minus, Loader2, Settings, Search, Users, X, TableProperties, RotateCcw, Pencil } from "lucide-react"
+import { Eye, ChevronDown, Plus, Minus, Loader2, Settings, Search, Users, X, TableProperties, RotateCcw, Pencil, AlertTriangle } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AlertTriangle, FileText, Edit, Trash2, Download, Building, Upload, Briefcase } from "lucide-react"
+import { FileText, Edit, Trash2, Download, Building, Upload, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
-import { format, parseISO } from "date-fns"
+import { format, parseISO, isAfter } from "date-fns"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { EditTaskDialog } from "./components/EditTaskDialog"
@@ -54,8 +54,20 @@ const transformKycFields = (fields: any[]): any[] => {
   })
 }
 
+// Helper function to check if document is older than task creation
+const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolean => {
+  try {
+    const docDate = new Date(documentDate)
+    const tskDate = new Date(taskDate)
+    return docDate < tskDate
+  } catch (error) {
+    console.error('Error comparing dates:', error)
+    return false
+  }
+}
+
 // Document field cell component
-function DocumentFieldCell({ document, field }) {
+function DocumentFieldCell({ document, field, isOldDocument = false }) {
   if (!document || !document.extracted_details) {
     return <span className="text-xs text-gray-400">-</span>
   }
@@ -67,8 +79,79 @@ function DocumentFieldCell({ document, field }) {
   }
 
   return (
-    <div className="text-xs text-gray-700 p-1 max-w-[120px] truncate" title={value}>
-      {value}
+    <div className="flex items-center gap-1">
+      <div className="text-xs text-gray-700 p-1 max-w-[120px] truncate" title={value}>
+        {value}
+      </div>
+      {isOldDocument && (
+        <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />
+      )}
+    </div>
+  )
+}
+
+// Enhanced Document Stage Cell
+function DocumentStageCell({ stage, task, onDocumentUpload, onShowDocuments, getKycFields, allDocuments, isStageApplicableToTask, isDocumentApplicableToTask }) {
+  if (!stage.documents || stage.documents.length === 0) {
+    return <span className="text-xs text-gray-400 italic">N/A</span>
+  }
+
+  // Check if stage is applicable to task
+  const stageApplicable = isStageApplicableToTask(stage, task)
+  
+  if (!stageApplicable) {
+    return <span className="text-xs text-gray-400 italic">N/A</span>
+  }
+
+  // Check if any document in this stage is applicable to the task
+  const hasApplicableDocuments = stage.documents.some(doc => isDocumentApplicableToTask(doc, task))
+  
+  if (!hasApplicableDocuments) {
+    return <span className="text-xs text-gray-400 italic">N/A</span>
+  }
+
+  // Find first applicable document for this task
+  const applicableDoc = stage.documents.find(doc => isDocumentApplicableToTask(doc, task))
+  if (!applicableDoc) {
+    return <span className="text-xs text-gray-400 italic">N/A</span>
+  }
+
+  const document = allDocuments.find(doc =>
+    doc.director_id === task.individual_id &&
+    doc.document_id === applicableDoc.kycId
+  )
+
+  const hasDocument = !!document
+  const isOldDocument = document && task.created_at && 
+    isDocumentOlderThanTask(document.created_at, task.created_at)
+
+  return (
+    <div className="flex items-center justify-center gap-1">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 text-blue-600 hover:bg-blue-100"
+        onClick={() => onDocumentUpload(task, stage)}
+        title="Upload document"
+      >
+        <Upload className="h-4 w-4" />
+      </Button>
+      {hasDocument && (
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-green-600 hover:bg-green-100"
+            onClick={() => onShowDocuments(task, stage)}
+            title="View document"
+          >
+            <Eye className="h-4 w-4" />
+          </Button>
+          {isOldDocument && (
+            <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -109,6 +192,7 @@ export default function DepartmentTasksManager({
   const [companiesLoading, setCompaniesLoading] = useState(true)
   const [activeDepartmentTab, setActiveDepartmentTab] = useState<string>("")
   const [activeSubTab, setActiveSubTab] = useState<string>("wip-stages")
+  const [activeSubdepartmentTab, setActiveSubdepartmentTab] = useState<string>("")
   const [activeFollowUpFilter, setActiveFollowUpFilter] = useState<string>("all")
   const [isTransposedView, setIsTransposedView] = useState<boolean>(true)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
@@ -186,7 +270,7 @@ export default function DepartmentTasksManager({
     return kycDoc?.fields || []
   }, [fetchKycDocument])
   
-  // Fetch all documents once and store them locally
+  // Optimized fetch all documents function - single fetch for all documents
   const fetchAllDocuments = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -206,20 +290,125 @@ export default function DepartmentTasksManager({
     }
   }, [])
 
-  // Get latest document for a specific task and stage from the pre-fetched list
-  const getDocumentForTaskStage = useCallback((task: any, stage: any) => {
+  // Helper function to check if a document applies to the current task (similar to StageUploadDialog)
+  const isDocumentApplicableToTask = useCallback((doc: any, task: any) => {
+    // If it's not a special document, it applies to all tasks
+    if (!doc.isSpecial) {
+      return true;
+    }
+
+    // Check if document has targetEntities
+    if (doc.targetEntities && Array.isArray(doc.targetEntities) && doc.targetEntities.length > 0) {
+      const matchesTarget = doc.targetEntities.some((entity: any) => {
+        const classMatch = entity.class_id ?
+          entity.class_id.toString() === task.class_id?.toString() :
+          true;
+        const subdeptMatch = entity.subdept_id ?
+          entity.subdept_id.toString() === task.subdepartment?.id?.toString() :
+          true;
+        return classMatch && subdeptMatch;
+      });
+
+      return matchesTarget;
+    }
+
+    // For special documents, check if they're applicable to the current task's hierarchy
+    const taskClassId = task.class_id?.toString();
+    const taskSubdeptId = task.subdepartment?.id?.toString();
+
+    // Check entity type targeting
+    if (doc.entityType === 'class' && doc.class_id) {
+      const classMatch = taskClassId === doc.class_id.toString();
+      if (doc.subdept_id) {
+        const subdeptMatch = taskSubdeptId === doc.subdept_id.toString();
+        return classMatch && subdeptMatch;
+      }
+      return classMatch;
+    }
+
+    if (doc.entityType === 'subdept' && doc.subdept_id) {
+      return taskSubdeptId === doc.subdept_id?.toString()
+    }
+
+    if (doc.entityType === 'subclass' && doc.subclass_id && doc.class_id && doc.subdept_id) {
+      return (
+        taskSubdeptId === doc.subdept_id?.toString() &&
+        taskClassId === doc.class_id?.toString() &&
+        task.subclass_id?.toString() === doc.subclass_id?.toString()
+      )
+    }
+
+    // Fallback: if document has targeting properties but no entityType
+    if (doc.class_id && doc.subdept_id) {
+      return (
+        taskSubdeptId === doc.subdept_id?.toString() &&
+        taskClassId === doc.class_id?.toString()
+      )
+    }
+
+    if (doc.subdept_id && !doc.class_id) {
+      return taskSubdeptId === doc.subdept_id?.toString()
+    }
+
+    // For special documents without clear targeting, don't show them
+    return false
+  }, [])
+
+  // Optimized function to get document for task and stage
+  const getDocumentForTaskStage = useCallback((task: any, stage: any, documents = allDocuments) => {
     if (!task.individual_id || !stage.documents?.[0]?.kycId) return null
 
-    const relevantDocs = allDocuments.filter(doc =>
+    const relevantDocs = documents.filter(doc =>
       doc.director_id === task.individual_id &&
       doc.document_id === stage.documents[0].kycId
     );
 
     if (relevantDocs.length === 0) return null;
 
-    // The list is already sorted descending by created_at, but we can re-sort just in case
-    return relevantDocs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+    return relevantDocs[0]; // Already sorted by created_at desc
   }, [allDocuments])
+
+  // Check if a stage document is applicable to a task
+  const isStageDocumentApplicable = useCallback((stage: any, task: any) => {
+    if (!stage.documents || stage.documents.length === 0) return false;
+    
+    // Check if any document in this stage is applicable to the task
+    return stage.documents.some(doc => isDocumentApplicableToTask(doc, task));
+  }, [isDocumentApplicableToTask])
+
+  // Check if stage is applicable to task
+  const isStageApplicableToTask = useCallback((stage: any, task: any) => {
+    if (!task || !departments.length) return false
+
+    const dept = departments.find(d => d.id === task.department?.id)
+    if (!dept) return false
+
+    const subdept = dept.tm_subdepartments?.find(s => s.id === task.subdepartment?.id)
+    if (!subdept) return false
+
+    const subdeptStage = subdept.stages?.find(s => s.stage_id === stage.id)
+    if (subdeptStage && !subdeptStage.applicable) return false
+
+    if (task.class_id) {
+      const cls = subdept.classes?.find(c => c.id.toString() === task.class_id.toString())
+      if (cls) {
+        const classStage = cls.stages?.find(s => s.stage_id === stage.id)
+        if (classStage && !classStage.applicable) return false
+      }
+    }
+
+    return true
+  }, [departments])
+
+  // Get default subdepartments for current department
+  const getDefaultSubdepartments = useCallback(() => {
+    if (!activeDepartmentTab || !departments.length) return []
+    
+    const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
+    if (!currentDept) return []
+    
+    return currentDept.tm_subdepartments?.filter(sub => sub.default_display) || []
+  }, [activeDepartmentTab, departments])
 
   // Section toggle functions
   const toggleSectionExpansion = (sectionId: string) => {
@@ -447,7 +636,7 @@ export default function DepartmentTasksManager({
   }
 
   // Fetch tasks with related data
-  const fetchTasks = useCallback(async (departmentId?: string) => {
+  const fetchTasks = useCallback(async (departmentId?: string, subdepartmentId?: string) => {
     try {
       setTasksLoading(true)
       let query = supabase
@@ -463,11 +652,15 @@ export default function DepartmentTasksManager({
         query = query.eq('department_id', departmentId)
       }
 
+      if (subdepartmentId) {
+        query = query.eq('subdepartment_id', subdepartmentId)
+      }
+
       const { data, error } = await query
 
       if (error) throw error;
-      // NOTE: This is a temporary mock to demonstrate dependant functionality
-      // In a real application, this data should be joined in the backend query.
+      
+      // Mock dependants for demonstration
       const tasksWithMockedDependants = (data || []).map(task => {
         if (task.id === 2 && task.dependant_member?.length > 0) {
           return {
@@ -495,7 +688,7 @@ export default function DepartmentTasksManager({
   const handleEnquiryCreated = useCallback(async (newEnquiry: any) => {
     try {
       setTasks(prevTasks => [newEnquiry, ...prevTasks])
-      await fetchTasks();
+      await fetchTasks(activeDepartmentTab, activeSubdepartmentTab);
 
       toast({
         title: "Success",
@@ -510,7 +703,7 @@ export default function DepartmentTasksManager({
         variant: "destructive"
       });
     }
-  }, [fetchTasks])
+  }, [fetchTasks, activeDepartmentTab, activeSubdepartmentTab])
 
   // Fetch and process stages for a department
   const fetchStages = async (departmentId: string) => {
@@ -545,6 +738,12 @@ export default function DepartmentTasksManager({
         setDepartments(departmentsData)
         if (departmentsData.length > 0) {
           setActiveDepartmentTab(departmentsData[0].id.toString())
+          // Set first default subdepartment as active
+          const firstDept = departmentsData[0]
+          const defaultSubs = firstDept.tm_subdepartments?.filter(sub => sub.default_display) || []
+          if (defaultSubs.length > 0) {
+            setActiveSubdepartmentTab(defaultSubs[0].id.toString())
+          }
         }
       } catch (error) {
         console.error('Error loading initial data:', error)
@@ -558,7 +757,7 @@ export default function DepartmentTasksManager({
   
   // Effect to fetch KYC data for expanded documents in standard view
   useEffect(() => {
-    if (isTransposedView) return; // Transposed view handles this during row generation
+    if (isTransposedView) return;
 
     const idsToFetch = new Set<string>();
     stages.forEach(stage => {
@@ -576,14 +775,13 @@ export default function DepartmentTasksManager({
     }
   }, [isTransposedView, stages, expandedStages, expandedDocuments, kycDocuments, fetchKycDocument]);
 
-
   // Handle task actions
   const handleTaskAction = useCallback((action: { type: string; taskId?: string | number;[key: string]: any }) => {
     switch (action.type) {
       case 'refresh':
       case 'refresh-data':
         if (activeDepartmentTab) {
-          fetchTasks(activeDepartmentTab)
+          fetchTasks(activeDepartmentTab, activeSubdepartmentTab)
           fetchStages(activeDepartmentTab)
           fetchAllDocuments()
         }
@@ -591,15 +789,30 @@ export default function DepartmentTasksManager({
       default:
         onTaskAction?.(action)
     }
-  }, [activeDepartmentTab, onTaskAction, fetchAllDocuments, fetchTasks])
+  }, [activeDepartmentTab, activeSubdepartmentTab, onTaskAction, fetchAllDocuments, fetchTasks])
 
-  // Fetch tasks and stages when department changes
+  // Fetch tasks and stages when department or subdepartment changes
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {
-      fetchTasks(activeDepartmentTab)
+      fetchTasks(activeDepartmentTab, activeSubdepartmentTab)
       fetchStages(activeDepartmentTab)
     }
-  }, [activeDepartmentTab, departments, fetchTasks])
+  }, [activeDepartmentTab, activeSubdepartmentTab, departments, fetchTasks])
+
+  // Update activeSubdepartmentTab when department changes
+  useEffect(() => {
+    if (activeDepartmentTab && departments.length > 0) {
+      const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
+      if (currentDept) {
+        const defaultSubs = currentDept.tm_subdepartments?.filter(sub => sub.default_display) || []
+        if (defaultSubs.length > 0) {
+          setActiveSubdepartmentTab(defaultSubs[0].id.toString())
+        } else {
+          setActiveSubdepartmentTab("")
+        }
+      }
+    }
+  }, [activeDepartmentTab, departments])
 
   // Get task hierarchy info
   const getTaskHierarchy = useCallback((task: any) => {
@@ -612,41 +825,27 @@ export default function DepartmentTasksManager({
     return { department: dept, subdepartment: subdept, class: cls, subclass: subCls }
   }, [departments])
 
-  // Check if stage is applicable to a task
-  const isStageApplicableToTask = useCallback((stage: any, task: any, departments: any[]) => {
-    if (!task || !departments.length) return false
-
-    const dept = departments.find(d => d.id === task.department?.id)
-    if (!dept) return false
-
-    const subdept = dept.tm_subdepartments?.find(s => s.id === task.subdepartment?.id)
-    if (!subdept) return false
-
-    const subdeptStage = subdept.stages?.find(s => s.stage_id === stage.id)
-    if (subdeptStage && !subdeptStage.applicable) return false
-
-    if (task.class_id) {
-      const cls = subdept.classes?.find(c => c.id.toString() === task.class_id.toString())
-      if (cls) {
-        const classStage = cls.stages?.find(s => s.stage_id === stage.id)
-        if (classStage && !classStage.applicable) return false
-      }
-    }
-
-    return true
-  }, [])
-
   // Filter tasks by department and status
   const getFilteredTasks = useCallback((status?: string) => {
     if (!departments.length || !activeDepartmentTab || !tasks.length) return []
     const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
     if (!currentDept) return []
-    return tasks.filter(task =>
+    
+    let filteredTasks = tasks.filter(task =>
       task &&
       task.department?.id?.toString() === currentDept.id.toString() &&
       (!status || task.status === status)
     )
-  }, [tasks, departments, activeDepartmentTab])
+
+    // Filter by subdepartment if one is selected
+    if (activeSubdepartmentTab) {
+      filteredTasks = filteredTasks.filter(task => 
+        task.subdepartment?.id?.toString() === activeSubdepartmentTab
+      )
+    }
+
+    return filteredTasks
+  }, [tasks, departments, activeDepartmentTab, activeSubdepartmentTab])
 
   // Filter WIP tasks by follow-up
   const getWIPTasksByFollowUp = useCallback((followUpFilter: string) => {
@@ -747,7 +946,7 @@ export default function DepartmentTasksManager({
           label: 'Completed Stages',
           type: 'stat',
           getValue: (task: any) => {
-            const applicableStages = allStages.filter(stage => isStageApplicableToTask(stage, task, departments))
+            const applicableStages = allStages.filter(stage => isStageApplicableToTask(stage, task))
             const completedStages = applicableStages.filter(stage => task.stages?.[stage.id]?.status === 'completed')
             return `${completedStages.length}/${applicableStages.length}`
           }
@@ -759,7 +958,7 @@ export default function DepartmentTasksManager({
           label: 'Pending Stages',
           type: 'stat',
           getValue: (task: any) => {
-            const applicableStages = allStages.filter(stage => isStageApplicableToTask(stage, task, departments))
+            const applicableStages = allStages.filter(stage => isStageApplicableToTask(stage, task))
             const pendingStages = applicableStages.filter(stage => !task.stages?.[stage.id] || task.stages?.[stage.id]?.status === 'pending')
             return `${pendingStages.length}/${applicableStages.length}`
           }
@@ -772,7 +971,7 @@ export default function DepartmentTasksManager({
           type: 'stat',
           getValue: (task: any) => {
             const totalStages = allStages.length
-            const applicableStages = allStages.filter(stage => isStageApplicableToTask(stage, task, departments))
+            const applicableStages = allStages.filter(stage => isStageApplicableToTask(stage, task))
             const naStages = totalStages - applicableStages.length
             return `${naStages}/${totalStages}`
           }
@@ -810,6 +1009,7 @@ export default function DepartmentTasksManager({
         rows.push({ key: 'age', label: 'Age', type: 'basic', getValue: (task: any) => task.age?.toString() || 'N/A' })
       }
     }
+    
     // Stages Section
     rows.push({ key: 'section_header_stages', type: 'section_header', label: 'Stages', id: 'stages', icon: Briefcase });
 
@@ -822,7 +1022,7 @@ export default function DepartmentTasksManager({
           stage,
           stageId: stage.id,
           stageOrder: stage.order_num || 0,
-          getValue: (task: Task) => isStageApplicableToTask(stage, task, departments) ? task.stages?.[stage.id] : 'N/A'
+          getValue: (task: Task) => isStageApplicableToTask(stage, task) ? task.stages?.[stage.id] : 'N/A'
         })
 
         if (expandedStages.has(stage.id) && stage.documents && stage.documents.length > 0) {
@@ -834,7 +1034,17 @@ export default function DepartmentTasksManager({
               stage,
               document: doc,
               isSubRow: true,
-              getValue: (task: Task) => getDocumentForTaskStage(task, { ...stage, documents: [doc] }) ? 'Uploaded' : 'Not Uploaded'
+              getValue: (task: Task) => {
+                if (!isStageApplicableToTask(stage, task)) return 'N/A'
+                const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
+                const isOldDoc = document && task.created_at && 
+                  isDocumentOlderThanTask(document.created_at, task.created_at)
+                return {
+                  hasDocument: !!document,
+                  isOldDocument: isOldDoc,
+                  status: document ? 'Uploaded' : 'Not Uploaded'
+                }
+              }
             })
 
             if (expandedDocuments.has(doc.id) && doc.kycId) {
@@ -851,9 +1061,13 @@ export default function DepartmentTasksManager({
                     isSubRow: true,
                     isSubSubRow: true,
                     getValue: (task: Task) => {
+                      if (!isStageApplicableToTask(stage, task)) return 'N/A'
                       const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
                       if (!document || !document.extracted_details) return 'N/A'
-                      return document.extracted_details[field.fieldName] || document.extracted_details[field.id] || 'N/A'
+                      const value = document.extracted_details[field.fieldName] || document.extracted_details[field.id] || 'N/A'
+                      const isOldDoc = document && task.created_at && 
+                        isDocumentOlderThanTask(document.created_at, task.created_at)
+                      return { value, isOldDocument: isOldDoc }
                     }
                   })
                 })
@@ -899,11 +1113,11 @@ export default function DepartmentTasksManager({
     }
   };
 
-  // Render cell content for transposed view
+  // Enhanced render cell content for transposed view
   const renderCellContent = useCallback((row: any, task: any) => {
     const value = row.getValue ? row.getValue(task) : '';
 
-    if (value === 'N/A') {
+    if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
       return <span className="text-sm text-gray-400 italic">N/A</span>;
     }
 
@@ -922,9 +1136,25 @@ export default function DepartmentTasksManager({
     }
 
     // Handle document field dates
-    if (row.type === 'field' && row.field?.fieldType?.toLowerCase() === 'date') {
-      const formattedDate = formatDateValue(value);
-      return <span className="text-xs text-slate-700" title={formattedDate}>{formattedDate}</span>;
+    if (row.type === 'field') {
+      const fieldValue = typeof value === 'object' ? value.value : value;
+      const isOldDoc = typeof value === 'object' ? value.isOldDocument : false;
+      
+      if (row.field?.fieldType?.toLowerCase() === 'date') {
+        const formattedDate = formatDateValue(fieldValue);
+        return (
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-slate-700" title={formattedDate}>{formattedDate}</span>
+            {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
+          </div>
+        );
+      }
+      return (
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-gray-700">{fieldValue}</span>
+          {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
+        </div>
+      );
     }
 
     switch (row.type) {
@@ -946,12 +1176,13 @@ export default function DepartmentTasksManager({
           />
         )
       case 'document':
+        const docValue = typeof value === 'object' ? value : { hasDocument: false, status: value };
         return (
           <div className="flex items-center gap-2 justify-center">
-            <Badge variant={value === 'Uploaded' ? 'default' : 'outline'} className="text-xs">
-              {value}
+            <Badge variant={docValue.hasDocument ? 'default' : 'outline'} className="text-xs">
+              {docValue.status}
             </Badge>
-            {value === 'Uploaded' && (
+            {docValue.hasDocument && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -961,10 +1192,11 @@ export default function DepartmentTasksManager({
                 <Eye className="h-3 w-3" />
               </Button>
             )}
+            {docValue.isOldDocument && (
+              <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />
+            )}
           </div>
         )
-      case 'field':
-        return <span className="text-xs text-gray-700">{value}</span>
       case 'actions': return (
         <div className="flex items-center justify-center gap-1">
           <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100"><Edit className="h-4 w-4" /></Button>
@@ -1005,7 +1237,6 @@ export default function DepartmentTasksManager({
       )
     }
 
-    // FIX: Define kycFieldsMap from the kycDocuments cache state.
     const kycFieldsMap = new Map(
       Array.from(kycDocuments.entries()).map(([kycId, kycDoc]) => [kycId, kycDoc.fields || []])
     );
@@ -1132,7 +1363,7 @@ export default function DepartmentTasksManager({
                   <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle"><Badge variant={task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{task.status || 'pending'}</Badge></TableCell>
 
                   {visibleStages.map(stage => {
-                    if (!isStageApplicableToTask(stage, task, departments)) {
+                    if (!isStageApplicableToTask(stage, task)) {
                       let stageCols = 1;
                       if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
                         stageCols = stage.documents.reduce((acc, doc) => {
@@ -1152,12 +1383,30 @@ export default function DepartmentTasksManager({
 
                     return stage.documents.map(doc => {
                       const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
+                      const isOldDoc = document && task.created_at && 
+                        isDocumentOlderThanTask(document.created_at, task.created_at)
+                      
                       if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0) {
-                        return <TableCell key={`${doc.id}`} className="border border-gray-100 p-1 align-middle"><EditableStageCell stage={{ ...stage, documents: [doc] }} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={handleViewDocument} getKycFields={getKycFields} /></TableCell>
+                        return (
+                          <TableCell key={`${doc.id}`} className="border border-gray-100 p-1 align-middle">
+                            <DocumentStageCell 
+                              stage={{ ...stage, documents: [doc] }} 
+                              task={task} 
+                              onDocumentUpload={handleStageDocumentUpload} 
+                              onShowDocuments={handleViewDocument} 
+                              getKycFields={getKycFields}
+                              allDocuments={allDocuments}
+                              isStageApplicableToTask={isStageApplicableToTask}
+                              isDocumentApplicableToTask={isDocumentApplicableToTask}
+                            />
+                          </TableCell>
+                        )
                       } else {
                         const kycFields = kycFieldsMap.get(doc.kycId) || [];
                         return kycFields.map(field => (
-                          <TableCell key={`${field.id || field.fieldName}`} className="border border-gray-100 p-1 align-middle"><DocumentFieldCell document={document} field={field} /></TableCell>
+                          <TableCell key={`${field.id || field.fieldName}`} className="border border-gray-100 p-1 align-middle">
+                            <DocumentFieldCell document={document} field={field} isOldDocument={isOldDoc} />
+                          </TableCell>
                         ))
                       }
                     }).flat()
@@ -1176,9 +1425,9 @@ export default function DepartmentTasksManager({
         </Table>
       </div>
     )
-  }, [stages, tasksLoading, departmentsLoading, companiesLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, getDocumentForTaskStage, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments])
+  }, [stages, tasksLoading, departmentsLoading, companiesLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, getDocumentForTaskStage, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, isDocumentApplicableToTask])
 
-  // Render function for enhanced table
+  // Enhanced render function for transposed table with better dependants positioning
   const renderEnhancedTransposedTable = useCallback((tasks: any[], tableType: string) => {
     if (!tasks.length) {
       return (
@@ -1190,18 +1439,25 @@ export default function DepartmentTasksManager({
       )
     }
     
-    const allDependantsCount = tasks.reduce((acc, task) => {
-        if (expandedDependants.has(task.id.toString())) {
-            return acc + (task.dependnats_members?.length || 0);
-        }
-        return acc;
-    }, 0);
+    // Calculate header structure with dependants positioned next to principal
+    const headerStructure = []
+    tasks.forEach(task => {
+      headerStructure.push({ type: 'principal', task })
+      if (expandedDependants.has(task.id.toString()) && task.dependnats_members?.length > 0) {
+        task.dependnats_members.forEach((dep, index) => {
+          headerStructure.push({ type: 'dependant', task, dependant: dep, index })
+        })
+      }
+    })
+
+    const totalColumns = headerStructure.length
 
     return (
       <div className="space-y-4">
         <div className="border-2 border-slate-300 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 300px)' }}>
           <Table className="min-w-full border-separate border-spacing-0">
             <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
+              {/* Row 1: Task IDs */}
               <TableRow className="border-b-2 border-slate-400">
                 <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-20" rowSpan={4}>
                   Order
@@ -1209,74 +1465,72 @@ export default function DepartmentTasksManager({
                 <TableHead className="sticky left-20 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-[300px]" rowSpan={4}>
                   Fields
                 </TableHead>
-                {tasks.map((task) => (
-                  <TableHead key={`header-task-${task.id}`} className="font-semibold bg-blue-500 text-white min-w-[200px] text-center text-sm py-2 border-r border-slate-400 border-b">
-                     <div className="font-bold">{`Task ${task.id}`}</div>
+                {headerStructure.map((item, index) => (
+                  <TableHead key={`header-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm py-2 border-r border-slate-400 border-b ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
+                    {item.type === 'principal' ? (
+                      <div className="font-bold">{`Task ${item.task.id}`}</div>
+                    ) : (
+                      <div className="font-bold text-xs">{`Dep ${item.index + 1}`}</div>
+                    )}
                   </TableHead>
                 ))}
-                {tasks.map(task => {
-                  if (!expandedDependants.has(task.id.toString()) || !task.dependnats_members?.length) return null;
-                  return task.dependnats_members.map((dep, depIndex) => <TableHead key={`dep-h1-${task.id}-${depIndex}`} className="bg-orange-500 border-r border-slate-400"></TableHead>)
-                })}
               </TableRow>
+              
+              {/* Row 2: Names */}
               <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
-                {tasks.map((task) => (
-                  <TableHead key={`header-name-${task.id}`} className="font-semibold bg-blue-500 text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2">
-                    <div className="flex items-center justify-center gap-1">
-                      <span className="font-bold">{task.applicant_name || 'N/A'}</span>
-                      {task.dependnats_members && Array.isArray(task.dependnats_members) && task.dependnats_members.length > 0 && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-5 w-5 p-0 text-white hover:bg-blue-600"
-                          onClick={() => toggleDependantsExpansion(task.id.toString())}
-                        >
-                          {expandedDependants.has(task.id.toString()) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-                        </Button>
-                      )}
-                    </div>
-                  </TableHead>
-                ))}
-                {tasks.map((task) => {
-                  if (!expandedDependants.has(task.id.toString()) || !task.dependnats_members?.length) return null;
-                  return task.dependnats_members.map((dep, depIndex) => (
-                    <TableHead key={`dep-h2-${task.id}-${depIndex}`} className="font-semibold bg-orange-500 text-white min-w-[180px] text-center text-sm border-r border-slate-400 py-2">
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="font-bold text-xs">{dep.name || `Dependant ${depIndex + 1}`}</span>
-                        <span className="text-xs opacity-80">{dep.relationship || 'Dependant'}</span>
+                {headerStructure.map((item, index) => (
+                  <TableHead key={`name-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
+                    {item.type === 'principal' ? (
+                      <div className="flex items-center justify-center gap-1">
+                        <span className="font-bold">{item.task.applicant_name || 'N/A'}</span>
+                        {item.task.dependnats_members && Array.isArray(item.task.dependnats_members) && item.task.dependnats_members.length > 0 && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-5 w-5 p-0 text-white hover:bg-blue-600"
+                            onClick={() => toggleDependantsExpansion(item.task.id.toString())}
+                          >
+                            {expandedDependants.has(item.task.id.toString()) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                          </Button>
+                        )}
                       </div>
-                    </TableHead>
-                  ));
-                })}
-              </TableRow>
-              <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
-                {tasks.map((task) => (
-                  <TableHead key={`header-company-${task.id}`} className="font-semibold bg-blue-500 text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2">
-                    {companies.get(task.company_id) || 'No Company'}
+                    ) : (
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="font-bold text-xs">{item.dependant.name || `Dependant ${item.index + 1}`}</span>
+                        <span className="text-xs opacity-80">{item.dependant.relationship || 'Dependant'}</span>
+                      </div>
+                    )}
                   </TableHead>
                 ))}
-                 {tasks.map(task => {
-                  if (!expandedDependants.has(task.id.toString()) || !task.dependnats_members?.length) return null;
-                  return task.dependnats_members.map((dep, depIndex) => <TableHead key={`dep-h3-${task.id}-${depIndex}`} className="bg-orange-500 border-r border-slate-400"></TableHead>)
-                })}
               </TableRow>
+              
+              {/* Row 3: Companies */}
               <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
-                {tasks.map((task) => (
-                  <TableHead key={`header-job-${task.id}`} className="font-semibold bg-blue-500 text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2">
-                    {getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || getTaskHierarchy(task)?.subdepartment?.name || 'N/A'}
+                {headerStructure.map((item, index) => (
+                  <TableHead key={`company-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
+                    {item.type === 'principal' ? (
+                      companies.get(item.task.company_id) || 'No Company'
+                    ) : ''}
                   </TableHead>
                 ))}
-                 {tasks.map(task => {
-                  if (!expandedDependants.has(task.id.toString()) || !task.dependnats_members?.length) return null;
-                  return task.dependnats_members.map((dep, depIndex) => <TableHead key={`dep-h4-${task.id}-${depIndex}`} className="bg-orange-500 border-r border-slate-400"></TableHead>)
-                })}
+              </TableRow>
+              
+              {/* Row 4: Job Level */}
+              <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
+                {headerStructure.map((item, index) => (
+                  <TableHead key={`job-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
+                    {item.type === 'principal' ? (
+                      getTaskHierarchy(item.task)?.subclass?.name || getTaskHierarchy(item.task)?.class?.name || getTaskHierarchy(item.task)?.subdepartment?.name || 'N/A'
+                    ) : ''}
+                  </TableHead>
+                ))}
               </TableRow>
             </TableHeader>
 
             <TableBody className="divide-y divide-slate-200">
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={tasks.length + 2 + allDependantsCount} className="h-32 text-center">
+                  <TableCell colSpan={totalColumns + 2} className="h-32 text-center">
                     <div className="flex justify-center items-center gap-2 text-slate-600">
                       <Loader2 className="h-5 w-5 animate-spin" />
                       Loading table data...
@@ -1285,7 +1539,7 @@ export default function DepartmentTasksManager({
                 </TableRow>
               ) : error ? (
                 <TableRow>
-                  <TableCell colSpan={tasks.length + 2 + allDependantsCount} className="h-32 text-center text-red-600 border border-gray-100">
+                  <TableCell colSpan={totalColumns + 2} className="h-32 text-center text-red-600 border border-gray-100">
                     <div className="flex justify-center items-center gap-2"><AlertTriangle className="h-5 w-5" />{error}</div>
                   </TableCell>
                 </TableRow>
@@ -1311,7 +1565,7 @@ export default function DepartmentTasksManager({
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell colSpan={tasks.length + allDependantsCount} className="py-0 px-0"></TableCell>
+                        <TableCell colSpan={totalColumns} className="py-0 px-0"></TableCell>
                       </TableRow>
                     )
                   }
@@ -1338,27 +1592,20 @@ export default function DepartmentTasksManager({
                           )}
                         </div>
                       </TableCell>
-                      {tasks.map(task => (
-                        <TableCell key={`${row.key}-${task.id}`} className="text-center text-sm py-1 px-2 align-middle border border-gray-100 w-[200px]">
-                          {renderCellContent(row, task)}
+                      {headerStructure.map((item, colIndex) => (
+                        <TableCell key={`${row.key}-${colIndex}`} className={`text-center text-sm py-1 px-2 align-middle border border-gray-100 w-[200px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}>
+                          {item.type === 'principal' ? (
+                            renderCellContent(row, item.task)
+                          ) : (
+                            // Render dependant data
+                            row.key === 'applicant_name' && item.dependant.name ? item.dependant.name :
+                            row.key === 'nationality' && item.dependant.nationality ? item.dependant.nationality :
+                            row.key === 'age' && item.dependant.age ? item.dependant.age.toString() :
+                            row.key === 'case_status' ? <Badge variant="outline">{item.dependant.relationship || 'Dependant'}</Badge> :
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
                         </TableCell>
                       ))}
-                      {/* Render dependants data cells */}
-                      {tasks.map((task) => {
-                        if (!expandedDependants.has(task.id.toString()) || !task.dependnats_members?.length) return null;
-
-                        return task.dependnats_members.map((dep, depIndex) => (
-                          <TableCell key={`dep-data-${task.id}-${depIndex}-${row.key}`} className="text-center text-sm py-1 px-2 align-middle border border-gray-100 w-[180px] bg-orange-50/50">
-                            {
-                              row.key === 'applicant_name' && dep.name ? dep.name :
-                              row.key === 'nationality' && dep.nationality ? dep.nationality :
-                              row.key === 'age' && dep.age ? dep.age.toString() :
-                              row.key === 'case_status' ? <Badge variant="outline">{dep.relationship || 'Dependant'}</Badge> :
-                              <span className="text-xs text-gray-400">-</span>
-                            }
-                          </TableCell>
-                        ));
-                      })}
                     </TableRow>
                   )
                 })
@@ -1370,7 +1617,6 @@ export default function DepartmentTasksManager({
     )
   }, [loading, error, tableRows, renderCellContent, expandedSections, expandedStages, expandedDocuments, expandedDependants, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies, toggleDependantsExpansion, getTaskHierarchy])
   
-  // ... (rest of the component is unchanged and contains the main layout, dialogs etc.)
   if (departmentsLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-slate-50/30">
@@ -1400,6 +1646,8 @@ export default function DepartmentTasksManager({
     )
   }
 
+  const defaultSubdepartments = getDefaultSubdepartments()
+
   return (
     <div className="flex-1 space-y-2 p-2 bg-slate-50/30 min-h-screen">
       <Tabs value={activeDepartmentTab} onValueChange={setActiveDepartmentTab} className="space-y-2">
@@ -1413,6 +1661,22 @@ export default function DepartmentTasksManager({
 
         {departments.map(dept => (
           <TabsContent key={dept.id} value={dept.id.toString()} className="space-y-4">
+            {/* Subdepartment Tabs */}
+            {defaultSubdepartments.length > 0 && (
+              <Tabs value={activeSubdepartmentTab} onValueChange={setActiveSubdepartmentTab}>
+                <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
+                  <TabsTrigger value="" className="text-sm font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">
+                    All Subdepartments
+                  </TabsTrigger>
+                  {defaultSubdepartments.map(subdept => (
+                    <TabsTrigger key={subdept.id} value={subdept.id.toString()} className="text-sm font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">
+                      {subdept.name}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+            )}
+
             <Tabs value={activeSubTab} onValueChange={setActiveSubTab}>
               <TabsList className="rounded-lg p-1 shadow-sm">
                 <TabsTrigger value="enquiries" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
@@ -1440,7 +1704,12 @@ export default function DepartmentTasksManager({
                       <CardHeader className="border-b border-slate-100 bg-white">
                         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
                           <div>
-                            <CardTitle className="text-lg text-slate-800">{title} - {dept.name}</CardTitle>
+                            <CardTitle className="text-lg text-slate-800">
+                              {title} - {dept.name}
+                              {activeSubdepartmentTab && defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab) && 
+                                ` - ${defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab)?.name}`
+                              }
+                            </CardTitle>
                             <CardDescription className="text-slate-600">
                               Showing {tasksToRender.length} {globalSearchTerm ? 'filtered ' : ''}tasks {isTransposedView ? '(Transposed View)' : '(Standard View)'}
                             </CardDescription>
