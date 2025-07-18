@@ -25,7 +25,6 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import EditableStageCell from "./components/EditableStageCell"
 import ExtractionPreview from "@/components/ExtractionPreview"
-
 // Recursive helper to transform KYC fields, handling nested arrays
 const transformKycFields = (fields: any[]): any[] => {
   if (!Array.isArray(fields)) return []
@@ -66,9 +65,9 @@ const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolea
   }
 }
 
-// Document field cell component
+// Document field cell component - Updated to check for indicator
 function DocumentFieldCell({ document, field, isOldDocument = false }) {
-  // Failsafe: Don't render if there's no document, no details, or an indicator is present
+  // Don't render if there's no document, no details, or an indicator is present
   if (!document || !document.extracted_details || document.indicator === true) {
     return <span className="text-xs text-gray-400">-</span>
   }
@@ -91,8 +90,18 @@ function DocumentFieldCell({ document, field, isOldDocument = false }) {
   )
 }
 
-// Enhanced Document Stage Cell
-function DocumentStageCell({ stage, task, onDocumentUpload, onShowDocuments, getKycFields, allDocuments, isStageApplicableToTask, isDocumentApplicableToTask }) {
+// Enhanced Document Stage Cell with KYC document names and indicator handling
+function DocumentStageCell({ 
+  stage, 
+  task, 
+  onDocumentUpload, 
+  onShowDocuments, 
+  getKycFields, 
+  allDocuments, 
+  isStageApplicableToTask, 
+  isDocumentApplicableToTask,
+  kycDocuments 
+}) {
   if (!stage.documents || stage.documents.length === 0) {
     return <span className="text-xs text-gray-400 italic">N/A</span>
   }
@@ -117,8 +126,9 @@ function DocumentStageCell({ stage, task, onDocumentUpload, onShowDocuments, get
     return <span className="text-xs text-gray-400 italic">N/A</span>
   }
   
-  // Get display name from KYC document if available, falling back to name
-  const documentDisplayName = applicableDoc.display_name || applicableDoc.name || 'Document'
+  // Get document name from KYC data, not from stage config
+  const kycData = kycDocuments.get(applicableDoc.kycId)
+  const documentDisplayName = kycData?.name || applicableDoc.display_name || applicableDoc.name || 'Document'
 
   const document = allDocuments.find(doc =>
     doc.director_id === task.individual_id &&
@@ -292,16 +302,19 @@ export default function DepartmentTasksManager({
       if (error) throw error;
       
       const fieldsMap: Record<string, any[]> = {};
+      const kycDocsMap = new Map();
       
-      // Transform and store fields by kycId
+      // Transform and store fields by kycId and cache KYC documents
       data?.forEach(doc => {
         if (doc.id && doc.fields) {
           fieldsMap[doc.id] = transformKycFields(doc.fields);
+          kycDocsMap.set(doc.id, doc);
         }
       });
       
       console.log(`Fetched KYC fields for ${Object.keys(fieldsMap).length} document types`);
       setAllKycFields(fieldsMap);
+      setKycDocuments(kycDocsMap);
     } catch (error) {
       console.error('Error fetching KYC fields:', error);
       toast({
@@ -592,79 +605,143 @@ export default function DepartmentTasksManager({
     setIsStageUploadDialogOpen(true)
   }, [departments])
 
-  // Handle document view using KYC fields
-  const handleViewDocument = useCallback(async (task: any, stage: any) => {
-    try {
-      const document = getDocumentForTaskStage(task, stage);
+// Handle document view using KYC fields with proper KYC document name fetching
+const handleViewDocument = useCallback(async (task: any, stage: any) => {
+  try {
+    const document = getDocumentForTaskStage(task, stage);
 
-      if (!document) {
-        toast({
-          title: 'No documents found',
-          description: `No documents uploaded for this stage yet.`,
-          variant: 'default',
-        });
-        return;
-      }
-
-      // Check if document has indicator and prevent preview
-      if (document.indicator) {
-        toast({
-          title: 'Preview not available',
-          description: 'Document preview is not available for this document.',
-          variant: 'default',
-        });
-        return;
-      }
-
-      // Get the document name from KYC, using display_name if available, otherwise fall back to name
-      const kycDoc = stage.documents?.[0];
-      const documentName = kycDoc?.display_name || kycDoc?.name || 'Document';
-      
-      // Get KYC fields for the document
-      const kycFields = await getKycFields(kycDoc || {});
-      const fields = kycFields.map(field => ({
-        id: field.id || field.fieldName,
-        name: field.fieldName,
-        type: field.fieldType,
-        required: field.isRequired,
-        description: field.description,
-        isArray: field.isArray,
-        arrayConfig: field.arrayConfig
-      }));
-      // Prepare extracted data, ensuring all fields are present
-      const extractedData = { ...(document.extracted_details || {}) };
-      fields.forEach(field => {
-        if (extractedData[field.id] === undefined) {
-          extractedData[field.id] = '';
-        }
+    if (!document) {
+      toast({
+        title: 'No documents found',
+        description: `No documents uploaded for this stage yet.`,
+        variant: 'default',
       });
+      return;
+    }
 
-      // Prepare preview data
-      const previewData = {
-        documentId: document.id,
-        documentName,
-        fileUrl: signedUrlData.signedUrl,
-        fileName,
-        extractedData,
-        fields,
-        type: kycDoc?.documentType || 'document',
-        file: {
-          name: fileName,
-          type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
-          url: signedUrlData.signedUrl
-        }
-      };
+    // Check if document has indicator and prevent preview
+    if (document.indicator === true) {
+      toast({
+        title: 'Preview not available',
+        description: 'Document preview is not available for this document.',
+        variant: 'default',
+      });
+      return;
+    }
 
-      setPreviewDocument(previewData);
-    } catch (error) {
-      console.error('Error preparing document for view:', error);
+    // Get KYC document data using document_id
+    const kycId = document.document_id;
+    if (!kycId) {
       toast({
         title: 'Error',
-        description: `Failed to load document: ${error.message}`,
+        description: 'No KYC document ID found.',
         variant: 'destructive',
       });
+      return;
     }
-  }, [getDocumentForTaskStage, getKycFields]);
+
+    // Fetch KYC document data from database
+    const { data: kycData, error: kycError } = await supabase
+      .from('acc_portal_kyc')
+      .select('*')
+      .eq('id', kycId)
+      .single();
+
+    if (kycError || !kycData) {
+      console.error('Error fetching KYC document:', kycError);
+      toast({
+        title: 'Error',
+        description: 'Failed to load document configuration.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Use KYC document name, not stage document name
+    const documentName = kycData.name || 'Document';
+    
+    // Transform KYC fields
+    const transformKycFields = (fields: any[]): any[] => {
+      if (!Array.isArray(fields)) return []
+
+      return fields.map((field: any) => {
+        const isArray = field.type === 'array' || field.isArray === true
+
+        const transformedField: any = {
+          id: field.id || field.fieldName || '',
+          fieldName: field.name || field.fieldName || '',
+          description: field.description || '',
+          isRequired: field.isRequired !== false,
+          fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
+          parentField: field.parentField,
+          isArray: isArray,
+        }
+
+        if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
+          transformedField.arrayConfig = {
+            maxItems: field.arrayConfig.maxItems,
+            fields: transformKycFields(field.arrayConfig.fields)
+          }
+        }
+
+        return transformedField
+      })
+    };
+
+    // Get KYC fields from the KYC document data
+    const kycFields = transformKycFields(kycData.fields || []);
+    const fields = kycFields.map(field => ({
+      id: field.id || field.fieldName,
+      name: field.fieldName,
+      type: field.fieldType,
+      required: field.isRequired,
+      description: field.description,
+      isArray: field.isArray,
+      arrayConfig: field.arrayConfig
+    }));
+
+    // Prepare extracted data, ensuring all fields are present
+    const extractedData = { ...(document.extracted_details || {}) };
+    fields.forEach(field => {
+      if (extractedData[field.id] === undefined) {
+        extractedData[field.id] = '';
+      }
+    });
+
+    // Format file URL
+    const bucketName = 'kyc-documents';
+    const filePath = document.file_path?.startsWith(bucketName) 
+      ? document.file_path 
+      : `${bucketName}/${document.file_path}`;
+    const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+    const fileName = document.file_path?.split('/').pop() || documentName;
+
+    // Prepare preview data
+    const previewData = {
+      documentId: document.id,
+      documentName,
+      fileUrl,
+      fileName,
+      extractedData,
+      fields,
+      type: kycData.documentType || 'document',
+      file: {
+        name: fileName,
+        type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
+        url: fileUrl
+      }
+    };
+
+    setPreviewDocument(previewData);
+  } catch (error) {
+    console.error('Error preparing document for view:', error);
+    toast({
+      title: 'Error',
+      description: `Failed to load document: ${error.message}`,
+      variant: 'destructive',
+    });
+  }
+}, [getDocumentForTaskStage]);
 
   // Fetch companies
   const fetchCompanies = async () => {
@@ -1473,16 +1550,17 @@ export default function DepartmentTasksManager({
                       if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0 || hasIndicator) {
                         return (
                           <TableCell key={`${doc.id}`} className="border border-gray-100 p-1 align-middle">
-                            <DocumentStageCell 
-                              stage={{ ...stage, documents: [doc] }} 
-                              task={task} 
-                              onDocumentUpload={handleStageDocumentUpload} 
-                              onShowDocuments={handleViewDocument} 
-                              getKycFields={getKycFields}
-                              allDocuments={allDocuments}
-                              isStageApplicableToTask={isStageApplicableToTask}
-                              isDocumentApplicableToTask={isDocumentApplicableToTask}
-                            />
+                             <DocumentStageCell 
+        stage={stage} 
+        task={task} 
+        onDocumentUpload={handleStageDocumentUpload} 
+        onShowDocuments={handleViewDocument} 
+        getKycFields={getKycFields}
+        allDocuments={allDocuments}
+        isStageApplicableToTask={isStageApplicableToTask}
+        isDocumentApplicableToTask={isDocumentApplicableToTask}
+        kycDocuments={kycDocuments}
+      />
                           </TableCell>
                         )
                       } else {
