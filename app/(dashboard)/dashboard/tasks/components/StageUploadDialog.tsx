@@ -85,18 +85,9 @@ export function StageUploadDialog({
 }: StageUploadDialogProps) {
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File>>({})
   const [messageTexts, setMessageTexts] = useState<Record<string, string>>({})
-  const [extractedData, setExtractedData] = useState<Record<string, any>>({})
   const [uploading, setUploading] = useState(false)
   const [activeDocumentTab, setActiveDocumentTab] = useState<string>('')
   const [uploadedDocs, setUploadedDocs] = useState<Record<string, any[]>>({})
-  const [previewData, setPreviewData] = useState<Record<string, {
-    fileUrl?: string;
-    fileName?: string;
-    fileType?: string;
-    messageContent?: string;
-    extractedData?: any;
-    documentName?: string;
-  }>>({})
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({})
   const [existingDocuments, setExistingDocuments] = useState<Record<string, any[]>>({}) // New state for existing documents
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map()) // Cache for KYC document data
@@ -441,16 +432,16 @@ export function StageUploadDialog({
     )
   }
 
-  // Clean up object URLs when component unmounts or when dialog closes
+  // FIX: Clean up object URLs from uploadedDocs state to prevent memory leaks
   useEffect(() => {
     return () => {
-      Object.values(previewData).forEach(data => {
-        if (data.fileUrl) {
-          URL.revokeObjectURL(data.fileUrl)
+      Object.values(uploadedDocs).flat().forEach(doc => {
+        if (doc.fileUrl) {
+          URL.revokeObjectURL(doc.fileUrl);
         }
-      })
-    }
-  }, [previewData])
+      });
+    };
+  }, [uploadedDocs]);
 
   // Helper function to check if a document applies to the current task
   const isDocumentApplicableToTask = useCallback((doc: any, task: any) => {
@@ -591,9 +582,7 @@ export function StageUploadDialog({
     if (!open) {
       setActiveDocumentTab('')
       setUploadedDocs({})
-      setPreviewData({})
       setMessageTexts({})
-      setExtractedData({})
       setExistingDocuments({}) // Reset existing documents
       setConfirmationDialogOpen(false)
       setFuzzyMatchResults([])
@@ -860,7 +849,7 @@ export function StageUploadDialog({
 
         // Insert document record
         const { data: insertedDoc, error: insertError } = await supabase
-          .from.from('acc_portal_directors_documents')
+          .from('acc_portal_directors_documents')
           .insert(documentRecord)
           .select()
           .single()
@@ -890,52 +879,16 @@ export function StageUploadDialog({
   // Get fields for extraction based on document configuration
   const getFieldsForDocument = async (docId: string) => {
     if (!selectedStageTask?.stage?.documents) return []
- 
+
     const document = selectedStageTask.stage.documents.find(d => d.id === docId)
     if (!document) return []
- 
+
     // If document has a kycId, fetch fields from KYC document
     if (document.kycId) {
       try {
-        const { data, error } = await supabase
-          .from('acc_portal_kyc')
-          .select('id, fields, name, display_name')
-          .eq('id', document.kycId)
-          .single()
- 
-        if (error) throw error
- 
-        if (data?.fields?.length > 0) {
-          // Transform KYC fields to the expected format
-          const transformKycFields = (fields: any[]): any[] => {
-            if (!Array.isArray(fields)) return []
- 
-            return fields.map((field: any) => {
-              const isArray = field.type === 'array' || field.isArray === true
- 
-              const transformedField: any = {
-                id: field.id || field.fieldName || '',
-                fieldName: field.name || field.fieldName || '',
-                description: field.description || '',
-                isRequired: field.isRequired !== false,
-                fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
-                parentField: field.parentField,
-                isArray: isArray,
-              }
- 
-              if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
-                transformedField.arrayConfig = {
-                  maxItems: field.arrayConfig.maxItems,
-                  fields: transformKycFields(field.arrayConfig.fields)
-                }
-              }
- 
-              return transformedField
-            })
-          }
- 
-          const transformedFields = transformKycFields(data.fields)
-          return transformedFields.map((field: any) => ({
+        const kycDoc = await fetchKycDocument(document.kycId);
+        if (kycDoc?.fields?.length > 0) {
+          return kycDoc.fields.map((field: any) => ({
             id: field.id || field.fieldName,
             name: field.fieldName,
             type: field.fieldType,
@@ -946,13 +899,13 @@ export function StageUploadDialog({
           }))
         }
       } catch (error) {
-        console.error('Error fetching KYC fields:', error)
+        console.error('Error getting fields from KYC document:', error)
       }
     }
- 
+
     // Fallback to extractionSpecs if no KYC fields found
     if (!document.extractionSpecs) return []
- 
+
     return document.extractionSpecs.map(spec => ({
       id: spec.id || spec.fieldName || `field-${Date.now()}`,
       name: spec.fieldName || spec.name || 'Unknown Field',
@@ -1107,31 +1060,25 @@ export function StageUploadDialog({
             }
           }
  
-          let mappedData = parsedData.rawData || parsedData || {}
+          const mappedData = parsedData.rawData || parsedData || {}
  
-          if (documentFields.length > 0) {
-            const fieldMappedData = {}
-            documentFields.forEach(field => {
-              const fieldName = field.name
-              const fieldKeys = [
-                fieldName,
-                fieldName.toLowerCase(),
-                fieldName.replace(/[_\s]/g, ''),
-                fieldName.replace(/[_\s]/g, '.'),
-              ]
- 
-              const value = fieldKeys.reduce((val, key) => val || mappedData[key], undefined)
-              if (value !== undefined) {
-                fieldMappedData[fieldName] = value
-              }
-            })
- 
-            if (Object.keys(fieldMappedData).length > 0) {
-              mappedData = fieldMappedData
+          // FIX: Pad extractedData to ensure all fields have a default value.
+          // This prevents the "uncontrolled to controlled input" error.
+          const finalExtractedData = {};
+          documentFields.forEach(field => {
+            const fieldName = field.name;
+            // Find the value from the extracted data using various key formats
+            const extractedValue = mappedData[fieldName];
+            
+            if (field.isArray) {
+              finalExtractedData[fieldName] = Array.isArray(extractedValue) ? extractedValue : [];
+            } else {
+              // Use ?? to default null/undefined to ''
+              finalExtractedData[fieldName] = extractedValue ?? '';
             }
-          }
- 
-          newDoc.extractedData = mappedData
+          });
+
+          newDoc.extractedData = finalExtractedData;
           newDoc.status = success ? 'valid' : 'pending'
  
           if (success) {
@@ -1181,19 +1128,6 @@ export function StageUploadDialog({
         [docId]: [...(prev[docId] || []), ...newDocs]
       }))
  
-      if (newDocs.length > 0) {
-        const firstDoc = newDocs[0]
-        setPreviewData(prev => ({
-          ...prev,
-          [docId]: {
-            fileUrl: firstDoc.fileUrl,
-            fileName: firstDoc.fileName,
-            fileType: firstDoc.fileType,
-            documentName: firstDoc.documentName,
-            extractedData: firstDoc.extractedData
-          }
-        }))
-      }
     } catch (error) {
       console.error('Error uploading files:', error)
       toast({
@@ -1249,45 +1183,35 @@ export function StageUploadDialog({
     }
   }
  
-  // Handle data changes from ExtractionPreview
-  const handleDataChange = (docId: string, fieldName: string, value: any) => {
+  // FIX: Handle data changes from ExtractionPreview efficiently and correctly.
+  const handleDataChange = (docId: string, docIndex: number, fieldName: string, value: any) => {
     if (fieldName === 'save') {
       handleSaveDocument(docId, value)
     } else {
-      setExtractedData(prev => ({
-        ...prev,
-        [docId]: {
-          ...(prev[docId] || {}),
-          [fieldName]: value
-        }
-      }))
- 
-      setPreviewData(prev => ({
-        ...prev,
-        [docId]: {
-          ...prev[docId],
-          extractedData: {
-            ...(prev[docId]?.extractedData || {}),
-            [fieldName]: value
-          }
-        }
-      }))
- 
       setUploadedDocs(prev => {
-        if (prev[docId]) {
+        // Create a copy of the document array for the specific docId
+        const updatedDocsForId = [...(prev[docId] || [])];
+        
+        // Check if the document at the given index exists
+        if (updatedDocsForId[docIndex]) {
+          // Update only the specific document's extractedData
+          updatedDocsForId[docIndex] = {
+            ...updatedDocsForId[docIndex],
+            extractedData: {
+              ...(updatedDocsForId[docIndex].extractedData || {}),
+              // Ensure the value is not null to prevent console errors.
+              [fieldName]: value === null ? '' : value,
+            },
+          };
+          // Return the updated state
           return {
             ...prev,
-            [docId]: prev[docId].map(doc => ({
-              ...doc,
-              extractedData: {
-                ...doc.extractedData,
-                [fieldName]: value
-              }
-            }))
-          }
+            [docId]: updatedDocsForId,
+          };
         }
-        return prev
-      })
+        // If something is wrong, return the previous state
+        return prev;
+      });
     }
   }
  
@@ -1430,9 +1354,7 @@ export function StageUploadDialog({
       onOpenChange(false)
  
       setUploadedDocs({})
-      setPreviewData({})
       setMessageTexts({})
-      setExtractedData({})
       setExistingDocuments({}) // Reset existing documents
     } catch (error) {
       console.error('Error saving all documents:', error)
@@ -1495,92 +1417,29 @@ export function StageUploadDialog({
         }
       }
  
-      let mappedData = parsedData.rawData || {}
- 
-      if (!parsedData.rawData) {
-        const documentFields = await getFieldsForDocument(docId)
-        documentFields.forEach(field => {
-          if (field.type === 'array' && field.isArray && field.arrayConfig?.fields) {
-            const arrayFieldName = field.name
-            const arrayData = parsedData[arrayFieldName] || []
- 
-            if (Array.isArray(arrayData)) {
-              mappedData[arrayFieldName] = arrayData
-            } else {
-              const constructedArray = []
-              const maxItems = field.arrayConfig.maxItems || 10
- 
-              for (let i = 0; i < maxItems; i++) {
-                const itemData = {}
-                let hasData = false
- 
-                field.arrayConfig.fields.forEach(subField => {
-                  const possibleKeys = [
-                    `${arrayFieldName}_${i + 1}_${subField.name}`,
-                    `${arrayFieldName}[${i}].${subField.name}`,
-                    `${arrayFieldName}.${i}.${subField.name}`,
-                    `${arrayFieldName}[${i}][${subField.name}]`,
-                    `${subField.name}`,
-                    subField.name.toLowerCase(),
-                    subField.name.replace(/[_\s]/g, '')
-                  ]
- 
-                  const value = possibleKeys.reduce((val, key) =>
-                    val || parsedData[key] ||
-                    (typeof parsedData[arrayFieldName] === 'object' && parsedData[arrayFieldName][key]),
-                    undefined
-                  )
- 
-                  if (value !== undefined) {
-                    itemData[subField.name] = value
-                    hasData = true
-                  }
-                })
- 
-                if (hasData) {
-                  constructedArray.push(itemData)
-                }
-              }
- 
-              if (constructedArray.length > 0) {
-                mappedData[arrayFieldName] = constructedArray
-              }
-            }
-          } else {
-            const fieldKeys = [
-              field.name,
-              field.name.toLowerCase(),
-              field.name.replace(/[_\s]/g, ''),
-              field.name.replace(/[_\s]/g, '.'),
-            ]
- 
-            const value = fieldKeys.reduce((val, key) => val || parsedData[key], undefined)
-            if (value !== undefined) {
-              mappedData[field.name] = value
-            }
-          }
-        })
-      }
+      // FIX: Re-apply the same data padding logic on re-extraction
+      const mappedData = parsedData.rawData || parsedData || {};
+      const finalExtractedData = {};
+      documentFields.forEach(field => {
+        const value = mappedData[field.name];
+        if (field.isArray) {
+          finalExtractedData[field.name] = Array.isArray(value) ? value : [];
+        } else {
+          finalExtractedData[field.name] = value ?? '';
+        }
+      });
  
       setUploadedDocs(prev => {
         const updatedDocs = { ...prev }
         if (updatedDocs[docId] && updatedDocs[docId][docIndex]) {
           updatedDocs[docId][docIndex] = {
             ...updatedDocs[docId][docIndex],
-            extractedData: mappedData,
+            extractedData: finalExtractedData, // Use padded data
             status: success ? 'valid' : 'pending'
           }
         }
         return updatedDocs
       })
- 
-      setPreviewData(prev => ({
-        ...prev,
-        [docId]: {
-          ...prev[docId],
-          extractedData: mappedData
-        }
-      }))
  
       toast({
         title: 'Success',
@@ -1812,6 +1671,7 @@ export function StageUploadDialog({
 
                  {/* Right Panel - Preview and Extracted Data */}
                  <div className="">
+                   {/* FIX: Simplified rendering logic to only use uploadedDocs */}
                    {uploadedDocs[doc.id]?.length > 0 ? (
                      <div className="space-y-6">
                        {uploadedDocs[doc.id].map((uploadedDoc, index) => (
@@ -1845,10 +1705,11 @@ export function StageUploadDialog({
                              </div>
                            </div>
                            <ExtractionPreview
-                             documentName={doc.name}
+                             documentName={getDocumentDisplayName(doc)}
                              extractedData={uploadedDoc.extractedData || {}}
                              fieldsPromise={getFieldsForDocument(doc.id)}
-                             onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
+                             // FIX: Pass index to correctly handle data changes for a specific document
+                             onDataChange={(fieldName, value) => handleDataChange(doc.id, index, fieldName, value)}
                              fileUrl={uploadedDoc.fileUrl}
                              fileName={uploadedDoc.fileName}
                              expanded={true}
@@ -1859,18 +1720,6 @@ export function StageUploadDialog({
                          </div>
                        ))}
                      </div>
-                   ) : previewData[doc.id] ? (
-                     <ExtractionPreview
-                       documentName={doc.name}
-                       extractedData={previewData[doc.id].extractedData || {}}
-                       fieldsPromise={getFieldsForDocument(doc.id)}
-                       onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
-                       fileUrl={previewData[doc.id].fileUrl}
-                       fileName={previewData[doc.id].fileName}
-                       expanded={true}
-                       showSaveButton={false}
-                       type={doc.documentType || 'document'}
-                     />
                    ) : (
                      <div className="border rounded-lg p-8 text-center bg-gray-50">
                        <div className="flex flex-col items-center">
@@ -1907,7 +1756,7 @@ export function StageUploadDialog({
          <div className="flex justify-end pt-4 border-t mt-4">
            <Button 
              onClick={handleSaveAllDocuments}
-             disabled={Object.keys(uploadedDocs).length === 0 || uploading}
+             disabled={Object.values(uploadedDocs).every(docs => docs.length === 0) || uploading}
              className="w-full sm:w-auto"
            >
              {uploading ? (
