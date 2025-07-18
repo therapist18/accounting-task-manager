@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import ExtractionPreview from "@/components/ExtractionPreview"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Upload, Calendar, Check, X, Clock, CheckCircle, FileText, Eye } from "lucide-react"
+import { Upload, Calendar, Check, X, Clock, CheckCircle, FileText, Eye, AlertTriangle } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
@@ -22,6 +22,18 @@ interface EditableStageCellProps {
   onShowDocuments?: (doc: any) => void
   getKycFields?: (documentConfig: any) => Promise<any[]>
   allDocuments?: any[]
+}
+
+// Helper function to check if document is older than task creation
+const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolean => {
+  try {
+    const docDate = new Date(documentDate)
+    const tskDate = new Date(taskDate)
+    return docDate < tskDate
+  } catch (error) {
+    console.error('Error comparing dates:', error)
+    return false
+  }
 }
 
 // Helper function to filter documents for a specific stage and director
@@ -58,15 +70,16 @@ export default function EditableStageCell({
   const [stageDate, setStageDate] = useState('');
   const [cachedDocuments, setCachedDocuments] = useState<any[]>([]);
   const [kycDocumentData, setKycDocumentData] = useState<any>(null);
+  const [isOldDocument, setIsOldDocument] = useState(false); // New state for old document detection
   const inputRef = useRef<HTMLInputElement>(null);
   const requiresUpload = stage.documents && stage.documents.length > 0;
   
-  // Fetch KYC document data
+  // Fetch KYC document data - Updated to include display_name
   const fetchKycDocumentData = useCallback(async (kycId: string) => {
     try {
       const { data, error } = await supabase
         .from('acc_portal_kyc')
-        .select('*')
+        .select('id, fields, name, display_name, documentType')
         .eq('id', kycId)
         .single();
 
@@ -120,6 +133,21 @@ export default function EditableStageCell({
         return null;
       }
 
+      // Check if document is older than task creation - if so, don't show preview
+      const isOldDoc = task.created_at && 
+        isDocumentOlderThanTask(doc.created_at, task.created_at);
+      
+      if (isOldDoc) {
+        console.log('Document is older than task creation, skipping preview');
+        toast({
+          title: 'Preview not available',
+          description: 'Document is older than task creation - preview disabled.',
+          variant: 'default',
+        });
+        setIsPreviewOpen(false);
+        return null;
+      }
+
       // Get the KYC document data using the document_id (which should match kycId)
       const kycId = doc.document_id;
       if (!kycId) {
@@ -137,8 +165,8 @@ export default function EditableStageCell({
       console.log('KYC Data:', kycData);
       console.log('Raw document data:', doc);
 
-      // Use KYC document name, not stage document name
-      const documentName = kycData.name || 'Document';
+      // Use KYC document display_name or name, not stage document name
+      const documentName = kycData.display_name || kycData.name || 'Document';
       
       // Format the file path and URL
       const bucketName = 'kyc-documents';
@@ -206,6 +234,7 @@ export default function EditableStageCell({
       });
       
       const previewData = {
+        documentId: doc.id,
         documentName: documentName, // Use KYC document name
         fileUrl,
         fileName,
@@ -241,7 +270,7 @@ export default function EditableStageCell({
     );
   };
 
-  // Initialize documents using passed allDocuments
+  // Initialize documents using passed allDocuments - Updated to handle old documents
   useEffect(() => {
     console.log('Initializing documents for stage:', {
       taskId: task.id,
@@ -266,25 +295,35 @@ export default function EditableStageCell({
           document_id: doc.document_id,
           kyc_document_id: doc.kyc_document_id,
           file_path: doc.file_path,
-          indicator: doc.indicator
+          indicator: doc.indicator,
+          created_at: doc.created_at
         }))
       });
 
       if (stageDocuments.length > 0) {
         const mostRecentDoc = stageDocuments[0];
         
-        // Only set hasDocuments to true if document doesn't have indicator
-        setHasDocuments(!mostRecentDoc.indicator);
+        // Check if document is older than task creation
+        const isOldDoc = task.created_at && 
+          isDocumentOlderThanTask(mostRecentDoc.created_at, task.created_at);
+        
+        setIsOldDocument(isOldDoc);
+        
+        // Only set hasDocuments to true if document doesn't have indicator AND is not old
+        setHasDocuments(!mostRecentDoc.indicator && !isOldDoc);
 
         console.log('Found most recent document:', {
           id: mostRecentDoc.id,
           file_path: mostRecentDoc.file_path,
           extracted_details: mostRecentDoc.extracted_details,
-          indicator: mostRecentDoc.indicator
+          indicator: mostRecentDoc.indicator,
+          isOldDocument: isOldDoc,
+          created_at: mostRecentDoc.created_at,
+          task_created_at: task.created_at
         });
 
-        // Extract date from most recent document only if no indicator
-        if (!mostRecentDoc.indicator) {
+        // Extract date from most recent document only if no indicator AND not old
+        if (!mostRecentDoc.indicator && !isOldDoc) {
           const dateFields = ['application_date', 'date', 'upload_date', 'created_date', 'date_generated', 'invoice_date_and_time'];
           for (const field of dateFields) {
             if (mostRecentDoc.extracted_details && mostRecentDoc.extracted_details[field]) {
@@ -292,18 +331,22 @@ export default function EditableStageCell({
               break;
             }
           }
+        } else {
+          // Clear stage date if document has indicator or is old
+          setStageDate('');
         }
       } else {
         console.log('No documents found for this stage');
         setHasDocuments(false);
+        setIsOldDocument(false);
         setStageDate('');
       }
     };
 
     processStageDocuments();
-  }, [allDocuments, task.individual_id, stage.documents, requiresUpload]);
+  }, [allDocuments, task.individual_id, task.created_at, stage.documents, requiresUpload]);
 
-  // Get extracted date from passed documents
+  // Get extracted date from passed documents - Updated to handle old documents
   const getExtractedDate = (): string => {
     console.log('Getting extracted date for stage:', {
       stageId: stage.id,
@@ -323,7 +366,8 @@ export default function EditableStageCell({
         director_id: doc.director_id,
         document_id: doc.document_id,
         kyc_document_id: doc.kyc_document_id,
-        indicator: doc.indicator
+        indicator: doc.indicator,
+        created_at: doc.created_at
       }))
     });
 
@@ -337,6 +381,15 @@ export default function EditableStageCell({
     // Don't extract date if document has indicator
     if (mostRecentDoc.indicator) {
       console.log('Document has indicator, skipping date extraction');
+      return '';
+    }
+    
+    // Check if document is older than task creation
+    const isOldDoc = task.created_at && 
+      isDocumentOlderThanTask(mostRecentDoc.created_at, task.created_at);
+    
+    if (isOldDoc) {
+      console.log('Document is older than task creation, skipping date extraction');
       return '';
     }
     
@@ -525,6 +578,7 @@ export default function EditableStageCell({
     }
   };
 
+  // Updated handleViewDocument to prevent viewing old documents
   const handleViewDocument = useCallback((e?: React.MouseEvent) => {
     console.log('--- handleViewDocument called ---');
     e?.stopPropagation();
@@ -569,10 +623,24 @@ export default function EditableStageCell({
       return;
     }
 
+    // Check if document is older than task creation
+    const isOldDoc = task.created_at && 
+      isDocumentOlderThanTask(doc.created_at, task.created_at);
+    
+    if (isOldDoc) {
+      console.log('Document is older than task creation, cannot preview');
+      toast({
+        title: 'Preview not available',
+        description: 'Document is older than task creation - preview disabled.',
+        variant: 'default',
+      });
+      return;
+    }
+
     console.log('Opening preview dialog');
     setIsPreviewOpen(true);
 
-    // Update stage date with extracted date if available
+    // Update stage date with extracted date if available (only if not old)
     console.log('Document details:', doc);
     
     const dateFields = ['application_date', 'date', 'upload_date', 'created_date'];
@@ -665,7 +733,8 @@ export default function EditableStageCell({
             >
               <Upload className="h-4 w-4" />
             </Button>
-            {hasDocuments && (
+            {/* Only show Eye button if document exists, has no indicator, and is not old */}
+            {hasDocuments && !isOldDocument && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -679,10 +748,26 @@ export default function EditableStageCell({
                 <Eye className="h-4 w-4" />
               </Button>
             )}
+            {/* Show warning icon for old documents */}
+            {isOldDocument && (
+              <div className="h-8 w-8 flex items-center justify-center">
+                <AlertTriangle 
+                  className="h-4 w-4 text-orange-500" 
+                  title="Document is older than task creation - preview disabled" 
+                />
+              </div>
+            )}
           </div>
-          {hasDocuments && (
+          {/* Show date only if document is not old and has no indicator */}
+          {hasDocuments && !isOldDocument && stageDate && (
             <div className="text-xs text-gray-600 text-center mt-1">
               {formatDateDisplay(stageDate)}
+            </div>
+          )}
+          {/* Show "Old Document" message for old documents */}
+          {isOldDocument && (
+            <div className="text-xs text-orange-600 text-center mt-1">
+              Old Document
             </div>
           )}
         </div>
@@ -722,36 +807,37 @@ export default function EditableStageCell({
             </DialogHeader>
             <div className="flex-1 overflow-y-auto p-6 pt-2">
               <ExtractionPreview
+                documentId={previewDocument.documentId}
                 documentName={previewDocument.documentName}
                 fileUrl={previewDocument.fileUrl}
                 fileName={previewDocument.fileName}
                 extractedData={previewDocument.extractedData}
                 fields={previewDocument.fields}
-                onDataChange={() => {}}
-                onVerify={() => {}}
-                onRemoveFile={() => {}}
-                isVerified={false}
-                expanded={true}
-                showSaveButton={false}
-                type={previewDocument.type}
+                onClose={() => setIsPreviewOpen(false)}
+                onSave={(updatedData) => {
+                  console.log("Saving updated data:", updatedData);
+                  setIsPreviewOpen(false);
+                  toast({ title: "Success", description: "Document details saved." });
+                }}
                 file={previewDocument.file}
+                type={previewDocument.type}
                 viewMode={true}
                 getStylesByType={(type) => ({
                   getBgColor: () => 'bg-primary',
-                  getTextColor: () => 'text-primary-foreground',
-                  getBorderColor: () => 'border-primary',
-                  getButtonStyle: () => 'bg-primary hover:bg-primary/90 text-primary-foreground'
-                })}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center">
-            <p className="text-muted-foreground">No document data available</p>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  </>
-  );
+                 getTextColor: () => 'text-primary-foreground',
+                 getBorderColor: () => 'border-primary',
+                 getButtonStyle: () => 'bg-primary hover:bg-primary/90 text-primary-foreground'
+               })}
+             />
+           </div>
+         </div>
+       ) : (
+         <div className="flex-1 flex items-center justify-center">
+           <p className="text-muted-foreground">No document data available</p>
+         </div>
+       )}
+     </DialogContent>
+   </Dialog>
+ </>
+ );
 }

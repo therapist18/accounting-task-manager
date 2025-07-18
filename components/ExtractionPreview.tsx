@@ -399,8 +399,10 @@ const ExtractionPreview = ({
     }
   };
 
-  const toTitleCase = (str: string) => 
-    str.replace(/_/g, ' ').replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+  const toTitleCase = (str: string | undefined | null) => {
+    if (!str) return '';
+    return str.replace(/_/g, ' ').replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+  };
 
   const renderField = (field: Field, docIndex: number) => {
     const isArrayField = field.type === 'array' || field.isArray;

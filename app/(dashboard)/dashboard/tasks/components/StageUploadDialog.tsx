@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Send, FileText, RotateCw, Trash2, MessageSquare, Upload, Star } from "lucide-react"
+import { Loader2, Send, FileText, RotateCw, Trash2, MessageSquare, Upload, Star, AlertTriangle } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -35,6 +35,46 @@ interface StageUploadDialogProps {
   onTaskAction?: (action: { type: string; taskId: string | number; [key: string]: any }) => void
 }
 
+// Recursive helper to transform KYC fields, handling nested arrays
+const transformKycFields = (fields: any[]): any[] => {
+  if (!Array.isArray(fields)) return []
+
+  return fields.map((field: any) => {
+    const isArray = field.type === 'array' || field.isArray === true
+
+    const transformedField: any = {
+      id: field.id || field.fieldName || '',
+      fieldName: field.name || field.fieldName || '',
+      description: field.description || '',
+      isRequired: field.isRequired !== false,
+      fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
+      parentField: field.parentField,
+      isArray: isArray,
+    }
+
+    if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
+      transformedField.arrayConfig = {
+        maxItems: field.arrayConfig.maxItems,
+        fields: transformKycFields(field.arrayConfig.fields)
+      }
+    }
+
+    return transformedField
+  })
+}
+
+// Helper function to check if document is older than task creation
+const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolean => {
+  try {
+    const docDate = new Date(documentDate)
+    const tskDate = new Date(taskDate)
+    return docDate < tskDate
+  } catch (error) {
+    console.error('Error comparing dates:', error)
+    return false
+  }
+}
+
 export function StageUploadDialog({
   open,
   onOpenChange,
@@ -58,6 +98,8 @@ export function StageUploadDialog({
     documentName?: string;
   }>>({})
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({})
+  const [existingDocuments, setExistingDocuments] = useState<Record<string, any[]>>({}) // New state for existing documents
+  const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map()) // Cache for KYC document data
 
   // New state for database submission
   const [confirmationDialogOpen, setConfirmationDialogOpen] = useState(false)
@@ -67,6 +109,94 @@ export function StageUploadDialog({
   // Storage keys
   const STAGE_DOCUMENTS_STORAGE_KEY = 'stageDocuments'
   const TASK_STAGE_STATUS_KEY = 'taskStageStatuses'
+
+  // Fetch KYC document by kycId
+  const fetchKycDocument = useCallback(async (kycId: string) => {
+    if (kycDocuments.has(kycId)) {
+      return kycDocuments.get(kycId)
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('acc_portal_kyc')
+        .select('id, fields, name, display_name')
+        .eq('id', kycId)
+        .single()
+
+      if (error) throw error
+
+      const transformedDoc = {
+        ...data,
+        fields: transformKycFields(data.fields || [])
+      }
+
+      setKycDocuments(prev => new Map(prev.set(kycId, transformedDoc)))
+      return transformedDoc
+    } catch (error) {
+      console.error('Error fetching KYC document:', error)
+      return null
+    }
+  }, [kycDocuments])
+
+  // Fetch existing documents for the current task and stage
+  const fetchExistingDocuments = useCallback(async () => {
+    if (!selectedStageTask?.task?.individual_id || !selectedStageTask?.stage?.documents) {
+      setExistingDocuments({})
+      return
+    }
+
+    try {
+      const { data: documents, error } = await supabase
+        .from('acc_portal_directors_documents')
+        .select('*')
+        .eq('director_id', selectedStageTask.task.individual_id)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Error fetching existing documents:', error)
+        return
+      }
+
+      // Group documents by document_id (kycId) and filter for stage documents
+      const groupedDocs: Record<string, any[]> = {}
+      
+      // Fetch KYC document data for each stage document
+      const kycDocPromises = selectedStageTask.stage.documents.map(async (stageDoc) => {
+        if (stageDoc.kycId) {
+          const kycDoc = await fetchKycDocument(stageDoc.kycId)
+          return { 
+            ...stageDoc,
+            kycData: kycDoc
+          }
+        }
+        return stageDoc
+      })
+
+      const stageDocsWithKyc = await Promise.all(kycDocPromises)
+
+      stageDocsWithKyc.forEach(stageDoc => {
+        if (stageDoc.kycId) {
+          const docsForType = documents?.filter(doc => doc.document_id === stageDoc.kycId) || []
+          if (docsForType.length > 0) {
+            groupedDocs[stageDoc.id] = docsForType
+          }
+        }
+      })
+      
+      console.log('Existing documents fetched:', groupedDocs)
+      setExistingDocuments(groupedDocs)
+    } catch (error) {
+      console.error('Error fetching existing documents:', error)
+      setExistingDocuments({})
+    }
+  }, [selectedStageTask?.task?.individual_id, selectedStageTask?.stage?.documents])
+
+  // Fetch existing documents when dialog opens
+  useEffect(() => {
+    if (open && selectedStageTask) {
+      fetchExistingDocuments()
+    }
+  }, [open, selectedStageTask, fetchExistingDocuments])
 
   // Helper function to get input type for a document
   const getDocumentInputType = (doc: any): 'file' | 'message' | 'both' => {
@@ -81,14 +211,112 @@ export function StageUploadDialog({
     return 'both';
   }
 
+  // Helper function to get document display name
+  const getDocumentDisplayName = (doc: any): string => {
+    if (!doc.kycId) return doc.name || 'Document'
+    
+    const kycData = kycDocuments.get(doc.kycId)
+    return kycData?.display_name || kycData?.name || doc.name || 'Document'
+  }
+
+  // Helper function to render existing document status
+  const renderExistingDocumentStatus = (doc: any) => {
+    const existingDocs = existingDocuments[doc.id] || []
+    
+    if (existingDocs.length === 0) {
+      return null
+    }
+
+    const mostRecentDoc = existingDocs[0]
+    const isOldDocument = selectedStageTask?.task?.created_at && 
+      isDocumentOlderThanTask(mostRecentDoc.created_at, selectedStageTask.task.created_at)
+    const hasIndicator = mostRecentDoc.indicator === true
+
+    return (
+      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="flex items-start gap-2">
+          <div className="flex-1">
+            <h4 className="text-sm font-medium text-blue-900 mb-1">
+              Existing Documents ({existingDocs.length})
+            </h4>
+            <div className="space-y-1">
+              {existingDocs.slice(0, 3).map((existingDoc, index) => {
+                const docIsOld = selectedStageTask?.task?.created_at && 
+                  isDocumentOlderThanTask(existingDoc.created_at, selectedStageTask.task.created_at)
+                const docHasIndicator = existingDoc.indicator === true
+                
+                return (
+                  <div key={existingDoc.id} className="flex items-center gap-2 text-xs">
+                    <span className="text-blue-700">
+                      {existingDoc.file_path?.split('/').pop() || getDocumentDisplayName(doc)}
+                    </span>
+                    {docIsOld && (
+                      <div className="flex items-center gap-1 text-orange-600">
+                        <AlertTriangle className="h-3 w-3" />
+                        <span>Old</span>
+                      </div>
+                    )}
+                    {docHasIndicator && (
+                      <Badge variant="outline" className="text-xs px-1">
+                        No Preview
+                      </Badge>
+                    )}
+                    {!docIsOld && !docHasIndicator && (
+                      <Badge variant="default" className="text-xs px-1 bg-green-100 text-green-800">
+                        Active
+                      </Badge>
+                    )}
+                  </div>
+                )
+              })}
+              {existingDocs.length > 3 && (
+                <p className="text-xs text-blue-600">
+                  +{existingDocs.length - 3} more documents
+                </p>
+              )}
+            </div>
+          </div>
+          {isOldDocument && (
+            <div className="flex items-center gap-1 text-orange-600">
+              <AlertTriangle className="h-4 w-4" />
+              <span className="text-xs">Latest document is old</span>
+            </div>
+          )}
+        </div>
+        
+        {/* Show warning if most recent document is old or has indicator */}
+        {(isOldDocument || hasIndicator) && (
+          <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-xs">
+            {isOldDocument && (
+              <p className="text-orange-700 mb-1">
+                ⚠️ Most recent document is older than task creation - uploading new document recommended
+              </p>
+            )}
+            {hasIndicator && (
+              <p className="text-orange-700">
+                ⚠️ Most recent document has restricted preview access
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   // Helper function to render input section based on input type and document configuration
   const renderInputSection = (doc: any) => {
+    const documentName = getDocumentDisplayName(doc)
     const inputType = getDocumentInputType(doc);
     const isSpecialDocument = doc.isSpecial;
     const documentType = doc.documentType || 'both';
+    const existingDocs = existingDocuments[doc.id] || []
+    const hasExistingDocs = existingDocs.length > 0
 
     return (
       <div className="space-y-4 p-4 rounded-lg border">
+        {/* Existing Documents Status */}
+        {renderExistingDocumentStatus(doc)}
+
         {isSpecialDocument && (
           <div className="bg-amber-50 border-l-4 border-amber-400 p-4 mb-4">
             <div className="flex">
@@ -111,7 +339,12 @@ export function StageUploadDialog({
           <div className="space-y-2">
             <Label htmlFor={`file-${doc.id}`} className="font-medium flex items-center gap-2">
               <Upload className="h-4 w-4" />
-              {inputType === 'both' ? 'Upload File' : doc.description || `Upload ${doc.name}`}
+              {inputType === 'both' ? 'Upload File' : doc.description || `Upload ${documentName}`}
+              {hasExistingDocs && (
+                <Badge variant="secondary" className="text-xs">
+                  Will replace existing
+                </Badge>
+              )}
             </Label>
             <Input
               id={`file-${doc.id}`}
@@ -129,6 +362,7 @@ export function StageUploadDialog({
                 documentType === 'upload' ? "Upload document only (PDF/Images)" :
                   documentType === 'extraction' ? "PDF only (data extraction required)" :
                     "Accepts PDF and image files"}
+              {hasExistingDocs && " • New upload will replace existing documents"}
             </p>
 
             {/* Upload Progress */}
@@ -160,7 +394,12 @@ export function StageUploadDialog({
           <div className="space-y-2">
             <Label className="font-medium flex items-center gap-2">
               <MessageSquare className="h-4 w-4" />
-              {inputType === 'both' ? 'Submit Message/Text' : doc.description || `Enter ${doc.name}`}
+              {inputType === 'both' ? 'Submit Message/Text' : doc.description || `Enter ${documentName}`}
+              {hasExistingDocs && (
+                <Badge variant="secondary" className="text-xs">
+                  Will replace existing
+                </Badge>
+              )}
             </Label>
             <div className="relative">
               <Textarea
@@ -194,6 +433,7 @@ export function StageUploadDialog({
             </Button>
             <p className="text-sm text-muted-foreground">
               {doc.isRequired ? "Required" : "Optional"} • Message will be converted to PDF
+              {hasExistingDocs && " • New submission will replace existing documents"}
             </p>
           </div>
         )}
@@ -211,7 +451,6 @@ export function StageUploadDialog({
       })
     }
   }, [previewData])
-
 
   // Helper function to check if a document applies to the current task
   const isDocumentApplicableToTask = useCallback((doc: any, task: any) => {
@@ -324,7 +563,6 @@ export function StageUploadDialog({
     return false
   }, [])
 
-
   // Filter the documents based on applicability to the current task
   const applicableDocuments = useMemo(() => {
     if (!selectedStageTask?.stage?.documents || !selectedStageTask?.task) {
@@ -342,7 +580,6 @@ export function StageUploadDialog({
     return filtered
   }, [selectedStageTask, isDocumentApplicableToTask])
 
-
   useEffect(() => {
     if (applicableDocuments.length > 0 && !activeDocumentTab) {
       setActiveDocumentTab(applicableDocuments[0].id)
@@ -357,6 +594,7 @@ export function StageUploadDialog({
       setPreviewData({})
       setMessageTexts({})
       setExtractedData({})
+      setExistingDocuments({}) // Reset existing documents
       setConfirmationDialogOpen(false)
       setFuzzyMatchResults([])
       setPendingSubmission(null)
@@ -535,6 +773,7 @@ export function StageUploadDialog({
       throw error
     }
   }
+
   // Function to fetch document details by ID
   const fetchDocumentDetails = async (documentId: string) => {
     try {
@@ -552,6 +791,7 @@ export function StageUploadDialog({
     }
   }
 
+  // Updated submitDocumentsToDatabase to handle existing documents
   const submitDocumentsToDatabase = async (documents: any[], registryIndividual: any, docId: string) => {
     try {
       console.log('=== Starting document submission ===')
@@ -582,6 +822,27 @@ export function StageUploadDialog({
         throw new Error(`Failed to fetch individual details: ${individualError.message}`)
       }
 
+      // Check if there are existing documents for this document type
+      const existingDocs = existingDocuments[docId] || []
+      
+      // If there are existing documents, mark them as replaced/inactive
+      if (existingDocs.length > 0) {
+        console.log(`Found ${existingDocs.length} existing documents to replace`)
+        
+        const updatePromises = existingDocs.map(existingDoc => 
+          supabase
+            .from('acc_portal_directors_documents')
+            .update({ 
+              status: 'replaced',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', existingDoc.id)
+        )
+        
+        await Promise.all(updatePromises)
+        console.log('Marked existing documents as replaced')
+      }
+
       for (const [index, doc] of documents.entries()) {
         // Upload file to storage
         const filePath = await uploadFileToStorage(doc.file, selectedStageTask.task.individual_id, documentName)
@@ -599,62 +860,99 @@ export function StageUploadDialog({
 
         // Insert document record
         const { data: insertedDoc, error: insertError } = await supabase
-          .from('acc_portal_directors_documents')
+          .from.from('acc_portal_directors_documents')
           .insert(documentRecord)
           .select()
           .single()
-
+ 
         if (insertError) {
           throw new Error(`Failed to save document record: ${insertError.message}`)
         }
-
+ 
         submittedDocIds.push(insertedDoc.id)
       }
-
+ 
+      // Refresh existing documents after successful submission
+      await fetchExistingDocuments()
+ 
       toast({
         title: 'Success',
         description: `${documents.length} document(s) submitted successfully to database`
       })
-
+ 
       return submittedDocIds
     } catch (error) {
       console.error('=== Document submission failed ===', error)
       throw error
     }
   }
-
+ 
   // Get fields for extraction based on document configuration
   const getFieldsForDocument = async (docId: string) => {
     if (!selectedStageTask?.stage?.documents) return []
-
+ 
     const document = selectedStageTask.stage.documents.find(d => d.id === docId)
     if (!document) return []
-
+ 
     // If document has a kycId, fetch fields from KYC document
     if (document.kycId) {
       try {
-        const response = await fetch(`/api/kyc-fields/${document.kycId}`)
-        if (response.ok) {
-          const data = await response.json()
-          if (data.fields?.length > 0) {
-            return data.fields.map((field: any) => ({
-              id: field.id || `field-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              name: field.name || field.fieldName || 'Unknown Field',
-              type: field.type || 'text',
-              required: field.isRequired || field.required || false,
-              isArray: field.isArray || false,
-              arrayConfig: field.arrayConfig
-            }))
+        const { data, error } = await supabase
+          .from('acc_portal_kyc')
+          .select('id, fields, name, display_name')
+          .eq('id', document.kycId)
+          .single()
+ 
+        if (error) throw error
+ 
+        if (data?.fields?.length > 0) {
+          // Transform KYC fields to the expected format
+          const transformKycFields = (fields: any[]): any[] => {
+            if (!Array.isArray(fields)) return []
+ 
+            return fields.map((field: any) => {
+              const isArray = field.type === 'array' || field.isArray === true
+ 
+              const transformedField: any = {
+                id: field.id || field.fieldName || '',
+                fieldName: field.name || field.fieldName || '',
+                description: field.description || '',
+                isRequired: field.isRequired !== false,
+                fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
+                parentField: field.parentField,
+                isArray: isArray,
+              }
+ 
+              if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
+                transformedField.arrayConfig = {
+                  maxItems: field.arrayConfig.maxItems,
+                  fields: transformKycFields(field.arrayConfig.fields)
+                }
+              }
+ 
+              return transformedField
+            })
           }
+ 
+          const transformedFields = transformKycFields(data.fields)
+          return transformedFields.map((field: any) => ({
+            id: field.id || field.fieldName,
+            name: field.fieldName,
+            type: field.fieldType,
+            required: field.isRequired,
+            description: field.description,
+            isArray: field.isArray,
+            arrayConfig: field.arrayConfig
+          }))
         }
       } catch (error) {
         console.error('Error fetching KYC fields:', error)
       }
     }
-
+ 
     // Fallback to extractionSpecs if no KYC fields found
     if (!document.extractionSpecs) return []
-
+ 
     return document.extractionSpecs.map(spec => ({
       id: spec.id || spec.fieldName || `field-${Date.now()}`,
       name: spec.fieldName || spec.name || 'Unknown Field',
@@ -664,7 +962,7 @@ export function StageUploadDialog({
       arrayConfig: spec.arrayConfig
     }))
   }
-
+ 
   // Function to convert message to PDF
   const convertMessageToPDF = async (message: string, documentName: string): Promise<Blob> => {
     try {
@@ -677,23 +975,23 @@ export function StageUploadDialog({
           documentName
         })
       })
-
+ 
       if (!response.ok) {
         const errorText = await response.text()
         throw new Error(`Failed to convert message to PDF: ${response.status} ${errorText}`)
       }
-
+ 
       return response.blob()
     } catch (error) {
       console.error('Error in convertMessageToPDF:', error)
       throw error
     }
   }
-
+ 
   // Handle file upload and extraction
   const handleFileUpload = async (files: File[] | File, docId: string) => {
     if (!selectedStageTask) return
-
+ 
     try {
       const fileArray = Array.isArray(files) ? files : [files]
       if (!fileArray.length) {
@@ -704,15 +1002,15 @@ export function StageUploadDialog({
         })
         return
       }
-
+ 
       const existingDocs = JSON.parse(localStorage.getItem(STAGE_DOCUMENTS_STORAGE_KEY) || '[]')
       const existingDocsMap = new Map(
         existingDocs.map(doc => [`${doc.taskId}-${doc.stageId}-${doc.documentId}`, doc])
       )
-
+ 
       const newDocs = []
       const duplicates = []
-
+ 
       const document = selectedStageTask.stage.documents?.find(d => d.id === docId)
       if (!document) {
         toast({
@@ -722,7 +1020,7 @@ export function StageUploadDialog({
         })
         return
       }
-
+ 
       for (const file of fileArray) {
         if (!(file instanceof File)) {
           toast({
@@ -732,7 +1030,7 @@ export function StageUploadDialog({
           })
           continue
         }
-
+ 
         let fileUrl = null
         try {
           fileUrl = URL.createObjectURL(file)
@@ -744,7 +1042,7 @@ export function StageUploadDialog({
           })
           continue
         }
-
+ 
         const newDoc = {
           id: generateDocumentId(),
           taskId: selectedStageTask.task.id,
@@ -763,7 +1061,7 @@ export function StageUploadDialog({
           status: 'pending',
           fields: document.extractionSpecs || []
         }
-
+ 
         // Create a unique key using task ID, stage ID, document ID, file name, and timestamp
         const fileKey = `${selectedStageTask.task.id}-${selectedStageTask.stage.id}-${docId}-${file.name}-${Date.now()}`
         
@@ -778,15 +1076,15 @@ export function StageUploadDialog({
           duplicates.push(file.name)
           continue
         }
-
+ 
         const documentFields = await getFieldsForDocument(docId)
-
+ 
         try {
           const extractionToast = toast({
             title: 'Extraction in progress',
             description: `Starting extraction for ${file.name}...`,
           })
-
+ 
           const { extractedData, success, message } = await performExtraction(
             fileUrl,
             documentFields,
@@ -797,7 +1095,7 @@ export function StageUploadDialog({
             file.name,
             document.kycId // Pass kycId to performExtraction
           )
-
+ 
           let parsedData = extractedData
           if (typeof extractedData === 'string') {
             try {
@@ -808,9 +1106,9 @@ export function StageUploadDialog({
               parsedData = {}
             }
           }
-
+ 
           let mappedData = parsedData.rawData || parsedData || {}
-
+ 
           if (documentFields.length > 0) {
             const fieldMappedData = {}
             documentFields.forEach(field => {
@@ -821,21 +1119,21 @@ export function StageUploadDialog({
                 fieldName.replace(/[_\s]/g, ''),
                 fieldName.replace(/[_\s]/g, '.'),
               ]
-
+ 
               const value = fieldKeys.reduce((val, key) => val || mappedData[key], undefined)
               if (value !== undefined) {
                 fieldMappedData[fieldName] = value
               }
             })
-
+ 
             if (Object.keys(fieldMappedData).length > 0) {
               mappedData = fieldMappedData
             }
           }
-
+ 
           newDoc.extractedData = mappedData
           newDoc.status = success ? 'valid' : 'pending'
-
+ 
           if (success) {
             toast({
               title: 'Success',
@@ -857,10 +1155,10 @@ export function StageUploadDialog({
           })
           newDoc.status = 'pending'
         }
-
+ 
         newDocs.push(newDoc)
       }
-
+ 
       if (duplicates.length > 0) {
         toast({
           title: 'Warning',
@@ -868,7 +1166,7 @@ export function StageUploadDialog({
           variant: 'destructive',
         })
       }
-
+ 
       if (newDocs.length === 0) {
         toast({
           title: 'Error',
@@ -877,12 +1175,12 @@ export function StageUploadDialog({
         })
         return
       }
-
+ 
       setUploadedDocs(prev => ({
         ...prev,
         [docId]: [...(prev[docId] || []), ...newDocs]
       }))
-
+ 
       if (newDocs.length > 0) {
         const firstDoc = newDocs[0]
         setPreviewData(prev => ({
@@ -905,12 +1203,12 @@ export function StageUploadDialog({
       })
     }
   }
-
+ 
   // Handle file input change
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, docId: string) => {
     const file = e.target.files?.[0]
     if (!file) return
-
+ 
     setUploading(true)
     try {
       await handleFileUpload([file], docId)
@@ -918,23 +1216,23 @@ export function StageUploadDialog({
       setUploading(false)
     }
   }
-
+ 
   // Handle message submission
   const handleMessageSubmit = async (message: string, docId: string) => {
     if (!selectedStageTask) return
-
+ 
     try {
       setUploading(true)
       setMessageTexts(prev => ({ ...prev, [docId]: message }))
-
+ 
       const document = selectedStageTask.stage.documents?.find(d => d.id === docId)
       if (!document) return
-
+ 
       const pdfBlob = await convertMessageToPDF(message, document.name)
       const pdfFile = new File([pdfBlob], `${document.name}_message.pdf`, { type: 'application/pdf' })
-
+ 
       await handleFileUpload([pdfFile], docId)
-
+ 
       toast({
         title: 'Success',
         description: 'Message processed successfully',
@@ -950,7 +1248,7 @@ export function StageUploadDialog({
       setUploading(false)
     }
   }
-
+ 
   // Handle data changes from ExtractionPreview
   const handleDataChange = (docId: string, fieldName: string, value: any) => {
     if (fieldName === 'save') {
@@ -963,7 +1261,7 @@ export function StageUploadDialog({
           [fieldName]: value
         }
       }))
-
+ 
       setPreviewData(prev => ({
         ...prev,
         [docId]: {
@@ -974,7 +1272,7 @@ export function StageUploadDialog({
           }
         }
       }))
-
+ 
       setUploadedDocs(prev => {
         if (prev[docId]) {
           return {
@@ -992,19 +1290,19 @@ export function StageUploadDialog({
       })
     }
   }
-
+ 
   // Main data submission handler
   const handleDataSubmission = async (docId: string, saveData: any) => {
     if (!selectedStageTask) return
-
+ 
     try {
       setUploading(true)
-
+ 
       const docsToSave = uploadedDocs[docId] || []
       if (docsToSave.length === 0) {
         throw new Error('No documents to save')
       }
-
+ 
       const individual = {
         id: selectedStageTask.task.id,
         full_name: selectedStageTask.task.applicant_name || selectedStageTask.task.principal_member_name,
@@ -1015,9 +1313,9 @@ export function StageUploadDialog({
         individual_type: selectedStageTask.task.renewal_status === 'New' ? 'principal' : 'dependent',
         relationship: 'Principal'
       }
-
+ 
       const registryMatch = await searchRegistryIndividuals(individual)
-
+ 
       if (registryMatch.exactMatch) {
         await submitDocumentsToDatabase(docsToSave, registryMatch.exactMatch, docId)
       } else if (registryMatch.fuzzyMatches && registryMatch.fuzzyMatches.length > 0) {
@@ -1029,7 +1327,7 @@ export function StageUploadDialog({
         const newRegistryId = await createNewRegistryIndividual(individual)
         await submitDocumentsToDatabase(docsToSave, { id: newRegistryId }, docId)
       }
-
+ 
       await handleExistingSaveLogic(docId, docsToSave)
     } catch (error) {
       console.error('Error in data submission:', error)
@@ -1042,13 +1340,13 @@ export function StageUploadDialog({
       setUploading(false)
     }
   }
-
+ 
   // Handle existing save logic for backward compatibility
   const handleExistingSaveLogic = async (docId: string, docsToSave: any[]) => {
     if (!selectedStageTask) return
-
+ 
     const existingDocs = JSON.parse(localStorage.getItem(STAGE_DOCUMENTS_STORAGE_KEY) || '[]')
-
+ 
     const processedUploads = docsToSave.map(doc => ({
       ...doc,
       status: 'valid',
@@ -1056,14 +1354,14 @@ export function StageUploadDialog({
       isRecent: true,
       file: undefined
     }))
-
+ 
     const updatedDocs = [...existingDocs, ...processedUploads]
     updateLocalStorage(STAGE_DOCUMENTS_STORAGE_KEY, updatedDocs)
-
+ 
     const stageStatuses = JSON.parse(localStorage.getItem(TASK_STAGE_STATUS_KEY) || '{}')
     const taskKey = `${selectedStageTask.task.id}`
     const currentTaskStatus = stageStatuses[taskKey] || {}
-
+ 
     currentTaskStatus[selectedStageTask.stage.id] = {
       ...currentTaskStatus[selectedStageTask.stage.id],
       [docId]: {
@@ -1072,16 +1370,16 @@ export function StageUploadDialog({
         documentsCount: processedUploads.length
       }
     }
-
+ 
     stageStatuses[taskKey] = currentTaskStatus
     updateLocalStorage(TASK_STAGE_STATUS_KEY, stageStatuses)
-
+ 
     setUploadedDocs(prev => ({
       ...prev,
       [docId]: []
     }))
   }
-
+ 
   // Handle document save with database submission
   const handleSaveDocument = async (docId: string, saveData: any) => {
     try {
@@ -1104,21 +1402,21 @@ export function StageUploadDialog({
       throw error
     }
   }
-
+ 
   // Handle saving all documents
   const handleSaveAllDocuments = async () => {
     try {
       setUploading(true)
-
+ 
       const savePromises = Object.keys(uploadedDocs).map(docId => {
         if (uploadedDocs[docId].length > 0) {
           return handleDataSubmission(docId, { documents: uploadedDocs[docId] })
         }
         return Promise.resolve()
       })
-
+ 
       await Promise.all(savePromises)
-
+ 
       // Call onTaskAction to refresh the parent component's data
       if (selectedStageTask?.task?.id && onTaskAction) {
         onTaskAction({ 
@@ -1128,13 +1426,14 @@ export function StageUploadDialog({
         })
         onTaskAction({ type: 'refresh-data' })
       }
-
+ 
       onOpenChange(false)
-
+ 
       setUploadedDocs({})
       setPreviewData({})
       setMessageTexts({})
       setExtractedData({})
+      setExistingDocuments({}) // Reset existing documents
     } catch (error) {
       console.error('Error saving all documents:', error)
       toast({
@@ -1146,15 +1445,15 @@ export function StageUploadDialog({
       setUploading(false)
     }
   }
-
+ 
   // Re-extraction function
   const handleReExtraction = async (docId: string, docIndex: number) => {
     if (!selectedStageTask) return
-
+ 
     try {
       const docsForType = uploadedDocs[docId] || []
       const doc = docsForType[docIndex]
-
+ 
       if (!doc?.file) {
         toast({
           title: 'Error',
@@ -1163,17 +1462,17 @@ export function StageUploadDialog({
         })
         return
       }
-
+ 
       const document = selectedStageTask.stage.documents?.find(d => d.id === docId)
       if (!document) return
-
-      const documentFields = document.extractionSpecs || []
-
+ 
+      const documentFields = await getFieldsForDocument(docId)
+ 
       const progressToastId = toast({
         title: 'Re-extraction',
         description: "Starting re-extraction..."
       })
-
+ 
       const { extractedData, success, message } = await performExtraction(
         doc.fileUrl,
         documentFields,
@@ -1181,9 +1480,10 @@ export function StageUploadDialog({
         (progressMessage) => {
           console.log('Re-extraction progress:', progressMessage)
         },
-        doc.fileName
+        doc.fileName,
+        document.kycId
       )
-
+ 
       let parsedData = extractedData
       if (typeof extractedData === 'string') {
         try {
@@ -1194,25 +1494,26 @@ export function StageUploadDialog({
           parsedData = {}
         }
       }
-
+ 
       let mappedData = parsedData.rawData || {}
-
+ 
       if (!parsedData.rawData) {
+        const documentFields = await getFieldsForDocument(docId)
         documentFields.forEach(field => {
           if (field.type === 'array' && field.isArray && field.arrayConfig?.fields) {
             const arrayFieldName = field.name
             const arrayData = parsedData[arrayFieldName] || []
-
+ 
             if (Array.isArray(arrayData)) {
               mappedData[arrayFieldName] = arrayData
             } else {
               const constructedArray = []
               const maxItems = field.arrayConfig.maxItems || 10
-
+ 
               for (let i = 0; i < maxItems; i++) {
                 const itemData = {}
                 let hasData = false
-
+ 
                 field.arrayConfig.fields.forEach(subField => {
                   const possibleKeys = [
                     `${arrayFieldName}_${i + 1}_${subField.name}`,
@@ -1223,24 +1524,24 @@ export function StageUploadDialog({
                     subField.name.toLowerCase(),
                     subField.name.replace(/[_\s]/g, '')
                   ]
-
+ 
                   const value = possibleKeys.reduce((val, key) =>
                     val || parsedData[key] ||
                     (typeof parsedData[arrayFieldName] === 'object' && parsedData[arrayFieldName][key]),
                     undefined
                   )
-
+ 
                   if (value !== undefined) {
                     itemData[subField.name] = value
                     hasData = true
                   }
                 })
-
+ 
                 if (hasData) {
                   constructedArray.push(itemData)
                 }
               }
-
+ 
               if (constructedArray.length > 0) {
                 mappedData[arrayFieldName] = constructedArray
               }
@@ -1252,7 +1553,7 @@ export function StageUploadDialog({
               field.name.replace(/[_\s]/g, ''),
               field.name.replace(/[_\s]/g, '.'),
             ]
-
+ 
             const value = fieldKeys.reduce((val, key) => val || parsedData[key], undefined)
             if (value !== undefined) {
               mappedData[field.name] = value
@@ -1260,7 +1561,7 @@ export function StageUploadDialog({
           }
         })
       }
-
+ 
       setUploadedDocs(prev => {
         const updatedDocs = { ...prev }
         if (updatedDocs[docId] && updatedDocs[docId][docIndex]) {
@@ -1272,7 +1573,7 @@ export function StageUploadDialog({
         }
         return updatedDocs
       })
-
+ 
       setPreviewData(prev => ({
         ...prev,
         [docId]: {
@@ -1280,7 +1581,7 @@ export function StageUploadDialog({
           extractedData: mappedData
         }
       }))
-
+ 
       toast({
         title: 'Success',
         description: `Successfully re-extracted data from ${doc.fileName}`,
@@ -1294,7 +1595,7 @@ export function StageUploadDialog({
       })
     }
   }
-
+ 
   // Fuzzy Match Confirmation Dialog Component
   const FuzzyMatchConfirmationDialog = () => {
     const handleConfirmMatch = async (selectedMatch: any) => {
@@ -1306,7 +1607,7 @@ export function StageUploadDialog({
           pendingSubmission.docId
         )
         await handleExistingSaveLogic(pendingSubmission.docId, pendingSubmission.docsToSave)
-
+ 
         setConfirmationDialogOpen(false)
         setPendingSubmission(null)
         setFuzzyMatchResults([])
@@ -1321,7 +1622,7 @@ export function StageUploadDialog({
         setUploading(false)
       }
     }
-
+ 
     const handleCreateNew = async () => {
       try {
         setUploading(true)
@@ -1332,7 +1633,7 @@ export function StageUploadDialog({
           pendingSubmission.docId
         )
         await handleExistingSaveLogic(pendingSubmission.docId, pendingSubmission.docsToSave)
-
+ 
         setConfirmationDialogOpen(false)
         setPendingSubmission(null)
         setFuzzyMatchResults([])
@@ -1347,7 +1648,7 @@ export function StageUploadDialog({
         setUploading(false)
       }
     }
-
+ 
     return (
       <Dialog open={confirmationDialogOpen} onOpenChange={setConfirmationDialogOpen}>
         <DialogContent className="max-w-4xl">
@@ -1358,7 +1659,7 @@ export function StageUploadDialog({
               <strong> {pendingSubmission?.originalIndividual?.full_name}</strong>:
             </DialogDescription>
           </DialogHeader>
-
+ 
           <div className="space-y-4 max-h-96 overflow-y-auto">
             {fuzzyMatchResults.map((match) => (
               <div key={match.id} className="border rounded-lg p-4 hover:bg-gray-50">
@@ -1384,7 +1685,7 @@ export function StageUploadDialog({
               </div>
             ))}
           </div>
-
+ 
           <div className="flex justify-between pt-4 border-t">
             <Button
               variant="outline"
@@ -1405,14 +1706,15 @@ export function StageUploadDialog({
       </Dialog>
     )
   }
+ 
   // Don't render anything if there's no selected stage task
   if (!selectedStageTask) {
     return null
   }
-
+ 
   const { task, stage } = selectedStageTask
   const activeDocument = stage?.documents?.find(d => d.id === activeDocumentTab)
-
+ 
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1448,151 +1750,179 @@ export function StageUploadDialog({
               {applicableDocuments?.map((doc) => {
                 const inputType = getDocumentInputType(doc)
                 const hasUploads = uploadedDocs[doc.id]?.length > 0
+                const hasExistingDocs = existingDocuments[doc.id]?.length > 0
+                const existingDocs = existingDocuments[doc.id] || []
+                const mostRecentDoc = existingDocs[0]
+                const isOldDocument = mostRecentDoc && selectedStageTask?.task?.created_at && 
+                  isDocumentOlderThanTask(mostRecentDoc.created_at, selectedStageTask.task.created_at)
 
-                return (
-                  <TabsTrigger
-                    key={doc.id}
-                    value={doc.id}
-                    className="whitespace-nowrap flex items-center gap-2"
-                  >
-                    {/* Input type indicator */}
-                    {inputType === 'file' && <Upload className="h-3 w-3" />}
-                    {inputType === 'message' && <MessageSquare className="h-3 w-3" />}
-                    {inputType === 'both' && <FileText className="h-3 w-3" />}
+               return (
+                 <TabsTrigger
+                   key={doc.id}
+                   value={doc.id}
+                   className="whitespace-nowrap flex items-center gap-2"
+                 >
+                   {/* Input type indicator */}
+                   {inputType === 'file' && <Upload className="h-3 w-3" />}
+                   {inputType === 'message' && <MessageSquare className="h-3 w-3" />}
+                   {inputType === 'both' && <FileText className="h-3 w-3" />}
 
-                    {doc.name}
+                   {getDocumentDisplayName(doc)}
 
-                    {/* Special document indicator */}
-                    {doc.isSpecial && <Star className="h-3 w-3 text-amber-500" />}
+                   {/* Special document indicator */}
+                   {doc.isSpecial && <Star className="h-3 w-3 text-amber-500" />}
 
-                    {/* Required indicator */}
-                    {doc.isRequired && (
-                      <Badge variant="destructive" className="text-xs px-1">
-                        Required
-                      </Badge>
-                    )}
+                   {/* Required indicator */}
+                   {doc.isRequired && (
+                     <Badge variant="destructive" className="text-xs px-1">
+                       Required
+                     </Badge>
+                   )}
 
-                    {/* Upload status indicator */}
-                    {hasUploads && (
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                    )}
-                  </TabsTrigger>
-                )
-              })}
-            </TabsList>
+                   {/* Upload status indicator */}
+                   {hasUploads && (
+                     <div className="w-2 h-2 bg-green-500 rounded-full" title="Has new uploads"></div>
+                   )}
 
-            {applicableDocuments?.map((doc) => (
-              <div
-                key={doc.id}
-                className={`mt-6 ${activeDocumentTab === doc.id ? 'block' : 'hidden'}`}
-              >
-                <div className="space-y-6 grid">
-                  {/* Left Panel - Document Upload/Message Input */}
-                  <div className="space-y-4">
-                    {renderInputSection(doc)}
-                  </div>
+                   {/* Existing documents status indicator */}
+                   {hasExistingDocs && !hasUploads && (
+                     <>
+                       {isOldDocument ? (
+                         <div className="w-2 h-2 bg-orange-500 rounded-full" title="Has old documents"></div>
+                       ) : (
+                         <div className="w-2 h-2 bg-blue-500 rounded-full" title="Has existing documents"></div>
+                       )}
+                     </>
+                   )}
+                 </TabsTrigger>
+               )
+             })}
+           </TabsList>
 
-                  {/* Right Panel - Preview and Extracted Data */}
-                  <div className="">
-                    {uploadedDocs[doc.id]?.length > 0 ? (
-                      <div className="space-y-6">
-                        {uploadedDocs[doc.id].map((uploadedDoc, index) => (
-                          <div key={uploadedDoc.id} className="relative bg-gray-50 rounded-lg p-4 border">
-                            <div className="flex justify-between items-start mb-2">
-                              <span className="inline-flex items-center justify-center bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded">
-                                Upload #{index + 1}
-                              </span>
-                              <div className="flex gap-2">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-blue-600 hover:text-blue-800 hover:bg-blue-100"
-                                  onClick={() => handleReExtraction(doc.id, index)}
-                                >
-                                  <RotateCw className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-red-600 hover:text-red-800 hover:bg-red-100"
-                                  onClick={() => {
-                                    setUploadedDocs(prev => ({
-                                      ...prev,
-                                      [doc.id]: prev[doc.id].filter((_, i) => i !== index)
-                                    }))
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                            <ExtractionPreview
-                              documentName={doc.name}
-                              extractedData={uploadedDoc.extractedData || {}}
-                              fieldsPromise={getFieldsForDocument(doc.id)}
-                              onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
-                              fileUrl={uploadedDoc.fileUrl}
-                              fileName={uploadedDoc.fileName}
-                              expanded={true}
-                              showSaveButton={false}
-                              type={doc.documentType || 'document'}
-                              file={uploadedDoc.file}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    ) : previewData[doc.id] ? (
-                      <ExtractionPreview
-                        documentName={doc.name}
-                        extractedData={previewData[doc.id].extractedData || {}}
-                        fieldsPromise={getFieldsForDocument(doc.id)}
-                        onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
-                        fileUrl={previewData[doc.id].fileUrl}
-                        fileName={previewData[doc.id].fileName}
-                        expanded={true}
-                        showSaveButton={false}
-                        type={doc.documentType || 'document'}
-                      />
-                    ) : (
-                      <div className="border rounded-lg p-8 text-center bg-gray-50">
-                        <div className="flex flex-col items-center">
-                          {getDocumentInputType(doc) === 'file' && <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
-                          {getDocumentInputType(doc) === 'message' && <MessageSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
-                          {getDocumentInputType(doc) === 'both' && <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
+           {applicableDocuments?.map((doc) => (
+             <div
+               key={doc.id}
+               className={`mt-6 ${activeDocumentTab === doc.id ? 'block' : 'hidden'}`}
+             >
+               <div className="space-y-6 grid">
+                 {/* Left Panel - Document Upload/Message Input */}
+                 <div className="space-y-4">
+                   {renderInputSection(doc)}
+                 </div>
 
-                          <p className="text-muted-foreground mb-2">No content submitted yet</p>
-                          <p className="text-sm text-muted-foreground">
-                            {getDocumentInputType(doc) === 'file' && 'Upload a file to see the preview and extracted data'}
-                            {getDocumentInputType(doc) === 'message' && 'Submit a message to see the processed content'}
-                            {getDocumentInputType(doc) === 'both' && 'Upload a file or submit a message to see the preview and extracted data'}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </Tabs>
-          <div className="flex justify-end pt-4 border-t mt-4">
-            <Button 
-              onClick={handleSaveAllDocuments}
-              disabled={Object.keys(uploadedDocs).length === 0 || uploading}
-              className="w-full sm:w-auto"
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                'Save All Documents'
-              )}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-      <FuzzyMatchConfirmationDialog />
-    </>
-  )
+                 {/* Right Panel - Preview and Extracted Data */}
+                 <div className="">
+                   {uploadedDocs[doc.id]?.length > 0 ? (
+                     <div className="space-y-6">
+                       {uploadedDocs[doc.id].map((uploadedDoc, index) => (
+                         <div key={uploadedDoc.id} className="relative bg-gray-50 rounded-lg p-4 border">
+                           <div className="flex justify-between items-start mb-2">
+                             <span className="inline-flex items-center justify-center bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded">
+                               Upload #{index + 1}
+                             </span>
+                             <div className="flex gap-2">
+                               <Button
+                                 variant="ghost"
+                                 size="sm"
+                                 className="text-blue-600 hover:text-blue-800 hover:bg-blue-100"
+                                 onClick={() => handleReExtraction(doc.id, index)}
+                               >
+                                 <RotateCw className="h-4 w-4" />
+                               </Button>
+                               <Button
+                                 variant="ghost"
+                                 size="sm"
+                                 className="text-red-600 hover:text-red-800 hover:bg-red-100"
+                                 onClick={() => {
+                                   setUploadedDocs(prev => ({
+                                     ...prev,
+                                     [doc.id]: prev[doc.id].filter((_, i) => i !== index)
+                                   }))
+                                 }}
+                               >
+                                 <Trash2 className="h-4 w-4" />
+                               </Button>
+                             </div>
+                           </div>
+                           <ExtractionPreview
+                             documentName={doc.name}
+                             extractedData={uploadedDoc.extractedData || {}}
+                             fieldsPromise={getFieldsForDocument(doc.id)}
+                             onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
+                             fileUrl={uploadedDoc.fileUrl}
+                             fileName={uploadedDoc.fileName}
+                             expanded={true}
+                             showSaveButton={false}
+                             type={doc.documentType || 'document'}
+                             file={uploadedDoc.file}
+                           />
+                         </div>
+                       ))}
+                     </div>
+                   ) : previewData[doc.id] ? (
+                     <ExtractionPreview
+                       documentName={doc.name}
+                       extractedData={previewData[doc.id].extractedData || {}}
+                       fieldsPromise={getFieldsForDocument(doc.id)}
+                       onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
+                       fileUrl={previewData[doc.id].fileUrl}
+                       fileName={previewData[doc.id].fileName}
+                       expanded={true}
+                       showSaveButton={false}
+                       type={doc.documentType || 'document'}
+                     />
+                   ) : (
+                     <div className="border rounded-lg p-8 text-center bg-gray-50">
+                       <div className="flex flex-col items-center">
+                         {getDocumentInputType(doc) === 'file' && <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
+                         {getDocumentInputType(doc) === 'message' && <MessageSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
+                         {getDocumentInputType(doc) === 'both' && <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />}
+
+                         <p className="text-muted-foreground mb-2">No content submitted yet</p>
+                         <p className="text-sm text-muted-foreground">
+                           {getDocumentInputType(doc) === 'file' && 'Upload a file to see the preview and extracted data'}
+                           {getDocumentInputType(doc) === 'message' && 'Submit a message to see the processed content'}
+                           {getDocumentInputType(doc) === 'both' && 'Upload a file or submit a message to see the preview and extracted data'}
+                         </p>
+                         
+                         {/* Show existing document information if available */}
+                         {existingDocuments[doc.id]?.length > 0 && (
+                           <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded text-sm">
+                             <p className="text-blue-700 font-medium mb-1">
+                               {existingDocuments[doc.id].length} existing document(s) found
+                             </p>
+                             <p className="text-blue-600 text-xs">
+                               Upload a new file to replace existing documents
+                             </p>
+                           </div>
+                         )}
+                       </div>
+                     </div>
+                   )}
+                 </div>
+               </div>
+             </div>
+           ))}
+         </Tabs>
+         <div className="flex justify-end pt-4 border-t mt-4">
+           <Button 
+             onClick={handleSaveAllDocuments}
+             disabled={Object.keys(uploadedDocs).length === 0 || uploading}
+             className="w-full sm:w-auto"
+           >
+             {uploading ? (
+               <>
+                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                 Saving...
+               </>
+             ) : (
+               'Save All Documents'
+             )}
+           </Button>
+         </div>
+       </DialogContent>
+     </Dialog>
+     <FuzzyMatchConfirmationDialog />
+   </>
+ )
 }

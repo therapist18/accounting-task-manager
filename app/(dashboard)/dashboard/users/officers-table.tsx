@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { UserCheck, UserX, History, Pencil } from "lucide-react"
 import { useState } from "react"
 import { User, UserRole, type StatusHistoryEntry, type DepartmentHistoryEntry } from "./database"
+import { AddOfficerDialog } from "./add-officer-dialog"
 
 export interface Officer extends User {
   department_history: DepartmentHistoryEntry[]
@@ -122,7 +123,6 @@ export function OfficersTable({
   const handleOfficerUpdated = () => {
     setIsEditDialogOpen(false)
     setEditingOfficer(null)
-    // The parent component will handle the refresh
   }
 
   return (

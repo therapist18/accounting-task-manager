@@ -1,7 +1,7 @@
 // @ts-nocheck
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { UserPlus, Eye, EyeOff, Pencil } from 'lucide-react'
 import { useForm, SubmitHandler } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -29,43 +29,48 @@ import { toast } from '@/components/ui/use-toast'
 import { createUser, updateOfficerDepartment } from './database'
 import { fetchDepartments } from '../departments/departments/database'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import supabase from '@/lib/supabase/client'
 
 const officerFormSchema = z.object({
     name: z.string().min(2, {
         message: 'Name must be at least 2 characters.',
     }),
-    email: z.string().email('Please enter a valid email'),
-    password: z.string().min(8, {
-        message: 'Password must be at least 8 characters.',
-    }),
+    email: z.string().optional(),
+    // Password is optional for edit mode, required for create mode
+    password: z.string().optional(),
     department_id: z.string().min(1, 'Please select a department'),
-    subdepartment_id: z.string().min(1, 'Please select a subdepartment'),
-    position: z.enum(['task_manager', 'task_assistant'], {
-        required_error: 'Please select a position',
-    }),
+    subdepartment_id: z.string().optional(),
     department_start_date: z.string().min(1, 'Start date is required'),
     department_end_date: z.string().optional(),
     start_date: z.string().min(1, 'Start date is required'),
     end_date: z.string().optional(),
 })
+// Create a more specific schema for creation mode
+.refine(data => !data.id && data.password && data.password.length >= 8, {
+    message: 'Password must be at least 8 characters.',
+    path: ['password'],
+})
+
 
 type OfficerFormValues = z.infer<typeof officerFormSchema>
 
+// Updated interface to match the JSON data structure from Supabase
+interface Department {
+    id: string | number
+    name: string
+    tm_subdepartments: Array<{
+        id: string | number
+        name: string
+        taskManagerId?: string
+        taskAssistantId?: string
+    }>
+}
 interface AddOfficerDialogProps {
     onOfficerAdded: () => void
     open?: boolean
     onOpenChange?: (open: boolean) => void
     officer?: Officer | null
-    departments?: Array<{
-        id: string
-        name: string
-        subdepartments: Array<{
-            id: string
-            name: string
-            taskManagerId?: string
-            taskAssistantId?: string
-        }>
-    }>
+    departments?: Department[]
 }
 
 export function AddOfficerDialog({
@@ -80,104 +85,132 @@ export function AddOfficerDialog({
     const setOpen = propOnOpenChange || setInternalOpen
     const [isLoading, setIsLoading] = useState(false)
     const [showPassword, setShowPassword] = useState(false)
-    const [departments, setDepartments] = useState<Array<{
-        id: string
-        name: string
-        subdepartments: Array<{
-            id: string
-            name: string
-            taskManagerId?: string
-            taskAssistantId?: string
-        }>
-    }>>(propDepartments || [])
+    const [departments, setDepartments] = useState<Department[]>(propDepartments)
+    const [subdepartments, setSubdepartments] = useState<Department['tm_subdepartments']>([])
 
     const isEditMode = !!propOfficer?.id
-    const [selectedDepartment, setSelectedDepartment] = useState<string>(propOfficer?.department_id || '')
-    const [subdepartments, setSubdepartments] = useState<Array<{
-        id: string
-        name: string
-        taskManagerId?: string
-        taskAssistantId?: string
-    }>>([])
 
     const form = useForm<OfficerFormValues>({
         resolver: zodResolver(officerFormSchema),
         defaultValues: {
-            name: propOfficer?.name || '',
-            email: propOfficer?.email || '',
+            name: '',
+            email: '',
             password: '',
-            department_id: propOfficer?.department_id || '',
-            subdepartment_id: propOfficer?.subdepartment_id || '',
-            position: propOfficer?.position as any || undefined,
-            department_start_date: propOfficer?.department_start_date || new Date().toISOString().split('T')[0],
-            department_end_date: propOfficer?.department_end_date || undefined,
-            start_date: propOfficer?.start_date || new Date().toISOString().split('T')[0],
-            end_date: propOfficer?.end_date || undefined,
+            department_id: '',
+            subdepartment_id: '',
+            department_start_date: new Date().toISOString().split('T')[0],
+            department_end_date: undefined,
+            start_date: new Date().toISOString().split('T')[0],
+            end_date: undefined,
         },
     })
-
+    
     useEffect(() => {
-    const loadDepartments = async () => {
-        try {
-            const depts = await fetchDepartments()
-            setDepartments(depts)
-            
-            // Reset form when dialog is opened
-            if (open) {
-                form.reset({
-                    name: '',
-                    email: '',
-                    password: '',
-                    department_id: '',
-                    subdepartment_id: '',
-                    position: undefined,
-                    department_start_date: new Date().toISOString().split('T')[0],
-                    start_date: new Date().toISOString().split('T')[0],
+        const loadDepartmentsAndSetupForm = async () => {
+            try {
+                const depts = await fetchDepartments()
+                setDepartments(depts)
+                
+                if (isEditMode && propOfficer) {
+                    // --- EDIT MODE ---
+                    // Find the officer's current department
+                    const currentDept = depts.find(d => String(d.id) === String(propOfficer.department_id))
+                    
+                    // If department is found, populate the subdepartments dropdown
+                    if (currentDept) {
+                        setSubdepartments(currentDept.tm_subdepartments || [])
+                    } else {
+                        setSubdepartments([])
+                    }
+                    
+                    // Reset the form with the officer's data
+                    form.reset({
+                        name: propOfficer.name || '',
+                        email: propOfficer.email || '',
+                        password: '', // Password is not edited
+                        department_id: propOfficer.department_id || '',
+                        subdepartment_id: propOfficer.subdepartment_id || '',
+                        department_start_date: propOfficer.department_start_date || new Date().toISOString().split('T')[0],
+                        department_end_date: propOfficer.department_end_date || undefined,
+                        start_date: propOfficer.start_date || new Date().toISOString().split('T')[0],
+                        end_date: propOfficer.end_date || undefined,
+                    });
+                } else {
+                    // --- ADD MODE ---
+                    // Reset form for a new officer
+                    form.reset({
+                        name: '', email: '', password: '',
+                        department_id: '', subdepartment_id: '',
+                        department_start_date: new Date().toISOString().split('T')[0],
+                        start_date: new Date().toISOString().split('T')[0],
+                    })
+                    setSubdepartments([])
+                }
+            } catch (error) {
+                console.error('Error loading departments:', error)
+                toast({
+                    title: 'Error',
+                    description: 'Failed to load departments.',
+                    variant: 'destructive',
                 })
-                setSelectedDepartment('')
-                setSubdepartments([])
             }
-        } catch (error) {
-            console.error('Error loading departments:', error)
-            toast({
-                title: 'Error',
-                description: 'Failed to load departments',
-                variant: 'destructive',
-            })
         }
-    }
 
-    if (open) {
-        loadDepartments()
-    }
-}, [open, form])
+        if (open) {
+            loadDepartmentsAndSetupForm()
+        }
+    }, [open, isEditMode, propOfficer, form])
 
     const onSubmit: SubmitHandler<OfficerFormValues> = async (data) => {
         try {
-            setIsLoading(true)
+            console.log('Form submission started', { data, isEditMode });
+            setIsLoading(true);
             
+            // Validate required fields
+            if (!data.name) {
+                throw new Error('Name is required');
+            }
+            if (!data.department_id) {
+                throw new Error('Department is required');
+            }
+            if (!isEditMode && (!data.email || !data.password)) {
+                throw new Error('Email and password are required for new officers');
+            }
+
+            // Format dates properly
+            const formattedData = {
+                ...data,
+                department_start_date: data.department_start_date || new Date().toISOString().split('T')[0],
+                department_end_date: data.department_end_date || null,
+                start_date: data.start_date || new Date().toISOString().split('T')[0],
+                end_date: data.end_date || null,
+                subdepartment_id: data.subdepartment_id || null
+            };
+
+            console.log('Submitting data:', formattedData);
+
             if (isEditMode && propOfficer) {
                 // Update existing officer
                 await updateOfficerDepartment(
                     propOfficer.id,
-                    data.department_id,
-                    data.subdepartment_id,
-                    data.position,
+                    formattedData.department_id,
+                    formattedData.subdepartment_id,
                     'system',
-                    data.department_start_date,
-                    data.department_end_date
+                    formattedData.department_start_date,
+                    formattedData.department_end_date
                 );
 
                 toast({
-                    title: 'Officer updated',
-                    description: 'The officer has been updated successfully.',
+                    title: 'Success',
+                    description: 'Officer updated successfully',
                 });
+                
             } else {
                 // Create new officer
                 const newOfficer = await createUser({
-                    name: data.name,
-                    email: data.email,
-                    password: data.password,
+                    name: formattedData.name,
+                    email: formattedData.email,
+                    password: formattedData.password,
                     role: 'officer',
                     clerk_id: `officer_${Date.now()}`,
                     status_history: [{
@@ -185,47 +218,50 @@ export function AddOfficerDialog({
                         changed_at: new Date().toISOString(),
                         changed_by: 'system',
                         reason: 'Officer account created',
-                        start_date: data.start_date,
-                        end_date: data.end_date || null,
+                        start_date: formattedData.start_date,
+                        end_date: formattedData.end_date
                     }]
                 });
 
-                // Assign department and position
-                if (data.department_id && data.subdepartment_id && data.position) {
+                // Assign department
+                if (formattedData.department_id) {
                     await updateOfficerDepartment(
                         newOfficer.id,
-                        data.department_id,
-                        data.subdepartment_id,
-                        data.position,
+                        formattedData.department_id,
+                        formattedData.subdepartment_id,
                         'system',
-                        data.department_start_date,
-                        data.department_end_date
+                        formattedData.department_start_date,
+                        formattedData.department_end_date
                     );
                 }
 
                 toast({
-                    title: 'Officer created',
-                    description: 'The officer has been added and assigned to the department successfully.',
+                    title: 'Success',
+                    description: 'Officer created successfully',
                 });
             }
 
+            // Refresh parent component and reset form
             if (onOfficerAdded) {
-                onOfficerAdded();
+                await onOfficerAdded();
             }
+            
             setOpen(false);
             form.reset();
+            
         } catch (error) {
-            console.error('Error creating officer:', error);
+            console.error('Form submission error:', error);
             toast({
                 title: 'Error',
-                description: error instanceof Error ? error.message : 'There was an error creating the officer. Please try again.',
+                description: error instanceof Error 
+                    ? error.message 
+                    : 'An unexpected error occurred. Please try again.',
                 variant: 'destructive',
             });
         } finally {
             setIsLoading(false);
         }
-    }
-
+    };
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -298,11 +334,7 @@ export function AddOfficerDialog({
                                                     className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                                     onClick={() => setShowPassword(!showPassword)}
                                                 >
-                                                    {showPassword ? (
-                                                        <EyeOff className="h-4 w-4" />
-                                                    ) : (
-                                                        <Eye className="h-4 w-4" />
-                                                    )}
+                                                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                                                 </button>
                                             </div>
                                         </FormControl>
@@ -357,12 +389,20 @@ export function AddOfficerDialog({
                                         <FormLabel>Department</FormLabel>
                                         <Select 
                                             onValueChange={(value) => {
-                                                field.onChange(value)
-                                                setSelectedDepartment(value)
-                                                const dept = departments.find(d => d.id === value)
-                                                setSubdepartments(dept?.subdepartments || [])
-                                                form.setValue('subdepartment_id', '')
-                                                form.setValue('position', undefined as any)
+                                                field.onChange(value);
+                                                
+                                                // Reset subdepartment
+                                                form.setValue('subdepartment_id', '');
+                                                
+                                                // Find the selected department and update subdepartments state
+                                                const selectedDept = departments.find(d => String(d.id) === value);
+                                                
+                                                // Correctly check for tm_subdepartments from the API data
+                                                if (selectedDept && selectedDept.tm_subdepartments) {
+                                                    setSubdepartments(selectedDept.tm_subdepartments);
+                                                } else {
+                                                    setSubdepartments([]);
+                                                }
                                             }} 
                                             value={field.value}
                                         >
@@ -373,7 +413,7 @@ export function AddOfficerDialog({
                                             </FormControl>
                                             <SelectContent>
                                                 {departments.map((dept) => (
-                                                    <SelectItem key={dept.id} value={dept.id}>
+                                                    <SelectItem key={dept.id} value={String(dept.id)}>
                                                         {dept.name}
                                                     </SelectItem>
                                                 ))}
@@ -392,11 +432,10 @@ export function AddOfficerDialog({
                                         <FormLabel>Subdepartment</FormLabel>
                                         <Select 
                                             onValueChange={(value) => {
-                                                field.onChange(value)
-                                                form.setValue('position', undefined as any)
+                                                field.onChange(value === 'none' ? '' : value)
                                             }} 
-                                            value={field.value}
-                                            disabled={!form.watch('department_id')}
+                                            value={field.value || 'none'}
+                                            disabled={!form.watch('department_id') || subdepartments.length === 0}
                                         >
                                             <FormControl>
                                                 <SelectTrigger>
@@ -404,37 +443,14 @@ export function AddOfficerDialog({
                                                 </SelectTrigger>
                                             </FormControl>
                                             <SelectContent>
+                                                <SelectItem value="none">
+                                                    None
+                                                </SelectItem>
                                                 {subdepartments.map((subdept) => (
-                                                    <SelectItem key={subdept.id} value={subdept.id}>
+                                                    <SelectItem key={subdept.id} value={String(subdept.id)}>
                                                         {subdept.name}
                                                     </SelectItem>
                                                 ))}
-                                            </SelectContent>
-                                        </Select>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-
-                            <FormField
-                                control={form.control}
-                                name="position"
-                                render={({ field }) => (
-                                    <FormItem className="mb-4">
-                                        <FormLabel>Position</FormLabel>
-                                        <Select 
-                                            onValueChange={field.onChange} 
-                                            value={field.value}
-                                            disabled={!form.watch('subdepartment_id')}
-                                        >
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Select a position" />
-                                                </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                <SelectItem value="task_manager">Task Manager</SelectItem>
-                                                <SelectItem value="task_assistant">Task Assistant</SelectItem>
                                             </SelectContent>
                                         </Select>
                                         <FormMessage />
