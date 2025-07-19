@@ -293,7 +293,15 @@ const ExtractionPreview = React.memo(({
   // FIXED: Add local state for immediate UI feedback while maintaining parent sync
   const [localData, setLocalData] = useState<Record<string, any>>(extractedData);
 
-
+  console.log('ExtractionPreview rendering with:', {
+    documentName,
+    fileUrl,
+    fileName,
+    extractedData,
+    localData,
+    initialFields,
+    viewMode
+  });
 
   // FIXED: Sync local data with prop changes
   useEffect(() => {
@@ -306,11 +314,11 @@ const ExtractionPreview = React.memo(({
       setLoadingFields(true);
       fieldsPromise
         .then(fetchedFields => {
-      
+          console.log('Fetched fields from promise:', fetchedFields);
           setFields(fetchedFields || []);
         })
         .catch(error => {
-      
+          console.error('Error loading fields:', error);
           setFields(initialFields);
         })
         .finally(() => {
@@ -321,53 +329,127 @@ const ExtractionPreview = React.memo(({
     }
   }, [fieldsPromise]); // Only depend on fieldsPromise
 
-  // FIXED: Use local data for immediate UI feedback, extractedData as fallback
   const getFieldValue = useCallback((field: Field): any => {
+    // Try multiple possible field identifiers to match against extracted data
+    const possibleKeys = [
+      field.id,
+      field.name,
+      field.fieldName,
+      // Convert snake_case to camelCase
+      field.name?.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()),
+      // Convert camelCase to snake_case  
+      field.name?.replace(/([A-Z])/g, '_$1').toLowerCase(),
+      // Try exact key match from extractedData
+      Object.keys(extractedData).find(key => 
+        key.toLowerCase() === field.name?.toLowerCase() ||
+        key.toLowerCase() === field.id?.toLowerCase()
+      )
+    ].filter(Boolean);
+  
     // Try to get value from local data first (for immediate UI feedback)
-    const localValueById = localData[field.id];
-    const localValueByName = localData[field.name];
+    let value = undefined;
+    let matchedKey = null;
     
-    // Fallback to prop data
-    const propValueById = extractedData[field.id];
-    const propValueByName = extractedData[field.name];
+    for (const key of possibleKeys) {
+      if (localData[key] !== undefined) {
+        value = localData[key];
+        matchedKey = key;
+        break;
+      }
+    }
+  
+    // Fallback to prop data if not found in local data
+    if (value === undefined) {
+      for (const key of possibleKeys) {
+        if (extractedData[key] !== undefined) {
+          value = extractedData[key];
+          matchedKey = key;
+          break;
+        }
+      }
+    }
+  
+    console.log(`🔍 Getting value for field:`, {
+      fieldName: field.name,
+      fieldId: field.id,
+      possibleKeys,
+      matchedKey,
+      foundValue: value,
+      localDataKeys: Object.keys(localData),
+      extractedDataKeys: Object.keys(extractedData)
+    });
     
-
-    
-    // Return the first non-undefined value, prioritizing local data
-    if (localValueById !== undefined) return localValueById;
-    if (localValueByName !== undefined) return localValueByName;
-    if (propValueById !== undefined) return propValueById;
-    if (propValueByName !== undefined) return propValueByName;
-    return '';
+    return value !== undefined ? value : '';
   }, [localData, extractedData]);
+  
 
-  // FIXED: Update both local state and parent
   const handleFieldChange = useCallback((field: Field, value: any) => {
     if (viewMode) return;
     
-    console.log(`Field changed: ${field.name} (ID: ${field.id}) = ${value}`);
+    console.log(`🔄 Field changed in ExtractionPreview:`, {
+      fieldName: field.name,
+      fieldId: field.id,
+      newValue: value,
+      timestamp: new Date().toISOString()
+    });
     
     // Update local state immediately for UI feedback
-    setLocalData(prev => ({
-      ...prev,
-      [field.id]: value,
-      [field.name]: value // Store under both keys for compatibility
-    }));
+    setLocalData(prev => {
+      const updatedData = {
+        ...prev,
+        [field.id]: value,
+        [field.name]: value // Store under both keys for compatibility
+      };
+      
+      console.log(`📊 Local data updated:`, {
+        fieldName: field.name,
+        fieldId: field.id,
+        previousValue: prev[field.id] || prev[field.name],
+        newValue: value,
+        allData: updatedData
+      });
+      
+      return updatedData;
+    });
     
     // Call parent's onDataChange for persistence
     if (onDataChange) {
+      console.log(`📤 Calling parent onDataChange:`, {
+        fieldId: field.id,
+        fieldName: field.name,
+        value: value
+      });
+      
+      // Use field.id as the key for consistency with parent component
       onDataChange(field.id, value);
+    } else {
+      console.warn('⚠️ onDataChange callback not provided');
     }
   }, [viewMode, onDataChange]);
 
   const handleArrayItemChange = useCallback((field: Field, itemIndex: number, subFieldName: string, value: any) => {
     if (viewMode) return;
     
+    console.log(`📝 Array item changed:`, {
+      fieldName: field.name,
+      fieldId: field.id,
+      itemIndex,
+      subFieldName,
+      value
+    });
+    
     const currentArray = Array.isArray(getFieldValue(field)) ? [...getFieldValue(field)] : [];
     while (currentArray.length <= itemIndex) currentArray.push({});
     currentArray[itemIndex] = { ...currentArray[itemIndex], [subFieldName]: value };
+    
+    console.log(`📊 Updated array:`, {
+      fieldName: field.name,
+      newArray: currentArray
+    });
+    
     handleFieldChange(field, currentArray);
   }, [viewMode, getFieldValue, handleFieldChange]);
+  
 
   const addArrayItem = useCallback((field: Field) => {
     if (viewMode) return;
@@ -389,14 +471,21 @@ const ExtractionPreview = React.memo(({
     if (!str) return '';
     return str.replace(/_/g, ' ').replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
   }, []);
-
-  // FIXED: Memoize the field rendering to prevent unnecessary re-renders
   const renderField = useCallback((field: Field) => {
     const isArrayField = field.type === 'array' || field.isArray;
     const displayName = toTitleCase(field.name || '');
-
+    const currentValue = getFieldValue(field);
+  
+    console.log(`🎨 Rendering field:`, {
+      fieldName: field.name,
+      fieldId: field.id,
+      isArrayField,
+      currentValue,
+      fieldType: field.type
+    });
+  
     if (isArrayField && field.arrayConfig?.fields) {
-      const arrayValue = getFieldValue(field);
+      const arrayValue = currentValue;
       const arrayData = Array.isArray(arrayValue) && arrayValue.length > 0 ? arrayValue : [{}];
       
       return (
@@ -446,7 +535,15 @@ const ExtractionPreview = React.memo(({
                           <Input 
                             id={`${field.id}-${itemIndex}-${subField.id}`} 
                             value={subFieldValue} 
-                            onChange={(e) => handleArrayItemChange(field, itemIndex, subField.name, e.target.value)} 
+                            onChange={(e) => {
+                              console.log(`📝 Array subfield changed:`, {
+                                parentField: field.name,
+                                itemIndex,
+                                subFieldName: subField.name,
+                                newValue: e.target.value
+                              });
+                              handleArrayItemChange(field, itemIndex, subField.name, e.target.value);
+                            }} 
                             placeholder={subFieldDisplayName} 
                             disabled={viewMode} 
                           />
@@ -461,8 +558,7 @@ const ExtractionPreview = React.memo(({
         </div>
       );
     }
-
-    const value = getFieldValue(field);
+  
     return (
       <div key={field.id} className="space-y-2">
         <Label htmlFor={field.id}>
@@ -471,22 +567,41 @@ const ExtractionPreview = React.memo(({
         </Label>
         <Input 
           id={field.id} 
-          value={value || ''} 
-          onChange={(e) => handleFieldChange(field, e.target.value)} 
+          value={currentValue || ''} 
+          onChange={(e) => {
+            console.log(`📝 Simple field changed:`, {
+              fieldName: field.name,
+              fieldId: field.id,
+              previousValue: currentValue,
+              newValue: e.target.value
+            });
+            handleFieldChange(field, e.target.value);
+          }} 
           placeholder={`Enter ${displayName}`} 
           disabled={viewMode} 
         />
       </div>
     );
   }, [getFieldValue, handleFieldChange, handleArrayItemChange, addArrayItem, removeArrayItem, toTitleCase, viewMode]);
-
+  
   const handleSave = useCallback(() => {
+    console.log(`💾 Save initiated:`, {
+      documentName,
+      localData,
+      hasOnSave: !!onSave,
+      hasOnVerify: !!onVerify
+    });
+  
     if (onSave) {
+      console.log(`📤 Calling onSave with data:`, localData);
       onSave(localData); // Use local data for save
     } else if (onVerify) {
+      console.log(`✅ Calling onVerify`);
       onVerify();
+    } else {
+      console.warn('⚠️ No save or verify callback available');
     }
-  }, [onSave, onVerify, localData]);
+  }, [onSave, onVerify, localData, documentName]);
 
   // FIXED: Memoize the rendered fields to prevent re-renders
   const renderedFields = useMemo(() => {

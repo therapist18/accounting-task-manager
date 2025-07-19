@@ -563,66 +563,55 @@ export function StageUploadDialog({
       throw new Error(`Registry search failed: ${error.message}`)
     }
   }, [fuzzyMatch])
-
   const uploadFileToStorage = useCallback(async (file: File, individualId: number, documentName: string, documentKycId: string): Promise<string> => {
     try {
       const bucketName = 'kyc-documents'
-
+  
       const individual = await supabase
         .from('registry_individuals')
         .select('full_name')
         .eq('id', individualId)
         .single()
-
+  
       if (individual.error) {
         throw new Error(`Failed to get individual name: ${individual.error.message}`)
       }
-
+  
       // Get the document name from KYC document
       const { data: kycDoc, error: kycError } = await supabase
         .from('acc_portal_kyc')
         .select('name')
         .eq('id', documentKycId)
         .single()
-
+  
       if (kycError) {
         throw new Error(`Failed to get document name: ${kycError.message}`)
       }
-
+  
       const normalizedName = individual.data.full_name
         .toLowerCase()
         .replace(/\s+/g, '_')
         .replace(/[^a-z0-9_]/g, '')
       
-      const normalizedDocName = kycDoc?.name?.toLowerCase() || 'document'
-        .replace(/\s+/g, '_')
-        .replace(/[^a-z0-9_]/g, '')
-
-      // Normalize file name by removing special characters and replacing spaces with underscores
-      const normalizedFileName = file.name
+      // FIXED: Properly normalize document name with spaces converted to underscores
+      const normalizedDocName = (kycDoc?.name || documentName || 'document')
         .toLowerCase()
-        .replace(/[^a-z0-9._-]/g, '') // Remove all special characters except . and -
-        .replace(/\s+/g, '_') // Replace spaces with underscores
-        .replace(/\.+/g, '.') // Remove consecutive dots
-        .replace(/_+/g, '_') // Remove consecutive underscores
-        .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
-        .replace(/\.+$/, '') // Remove trailing dots
-        .replace(/_+$/, '') // Remove trailing underscores
-        .replace(/^_+/, '') // Remove leading underscores
-
-      const filename = `individual-documents/${normalizedName}/${normalizedDocName}/${normalizedFileName}`
-
+        .replace(/\s+/g, '_')  // Replace spaces with underscores
+        .replace(/[^a-z0-9_]/g, '') // Remove special characters except underscores
+  
+      const filename = `individual-documents/${normalizedName}/${normalizedDocName}/${file.name}`
+  
       const { data, error } = await supabase.storage
         .from(bucketName)
         .upload(filename, file, {
           cacheControl: '3600',
           upsert: false
         })
-
+  
       if (error) {
         throw new Error(`Storage upload failed: ${error.message}`)
       }
-
+  
       return data.path
     } catch (error) {
       console.error('Error uploading file to storage:', error)
@@ -684,30 +673,35 @@ export function StageUploadDialog({
   const submitDocumentsToDatabase = useCallback(async (documents: any[], registryIndividual: any, docId: string) => {
     try {
       console.log('=== Starting document submission ===')
-
+      console.log('Documents to submit:', documents.map(doc => ({
+        fileName: doc.fileName,
+        extractedData: doc.extractedData,
+        hasFile: !!doc.file
+      })))
+  
       if (!selectedStageTask?.task?.individual_id) {
         throw new Error('No individual ID found in task')
       }
-
+  
       const submittedDocIds = []
       const documentConfig = selectedStageTask?.stage?.documents?.find(d => d.id === docId)
       const documentKycId = documentConfig?.kycId
       const documentName = documentConfig?.name || 'document'
-
+  
       if (!documentKycId) {
         throw new Error('Document configuration not found or missing kycId')
       }
-
+  
       const { data: individual, error: individualError } = await supabase
         .from('registry_individuals')
         .select('*')
         .eq('id', selectedStageTask.task.individual_id)
         .single()
-
+  
       if (individualError) {
         throw new Error(`Failed to fetch individual details: ${individualError.message}`)
       }
-
+  
       const existingDocs = existingDocuments[docId] || []
       
       if (existingDocs.length > 0) {
@@ -726,47 +720,59 @@ export function StageUploadDialog({
         await Promise.all(updatePromises)
         console.log('Marked existing documents as replaced')
       }
-
+  
       for (const [index, doc] of documents.entries()) {
+        // FIXED: Ensure we're using the most up-to-date extracted data
+        const extractedDetails = doc.extractedData || {}
+        
+        console.log(`Submitting document ${index + 1}:`, {
+          fileName: doc.fileName,
+          extractedData: extractedDetails,
+          extractedDataKeys: Object.keys(extractedDetails)
+        })
+  
         const filename = await uploadFileToStorage(doc.file, selectedStageTask.task.individual_id, documentName, documentKycId)
         
         const documentRecord = {
           director_id: selectedStageTask.task.individual_id,
           document_id: documentKycId,
           file_path: filename,
-          extracted_details: doc.extractedData || {},
+          extracted_details: extractedDetails, // This now includes all field changes
           status: 'pending',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         }
-
+  
+        console.log('Document record to insert:', documentRecord)
+  
         const { data: insertedDoc, error: insertError } = await supabase
           .from('acc_portal_directors_documents')
           .insert(documentRecord)
           .select()
           .single()
- 
+  
         if (insertError) {
           throw new Error(`Failed to save document record: ${insertError.message}`)
         }
- 
+  
         submittedDocIds.push(insertedDoc.id)
+        console.log(`Successfully submitted document with ID: ${insertedDoc.id}`)
       }
- 
+  
       await fetchExistingDocuments()
- 
+  
       toast({
         title: 'Success',
-        description: `${documents.length} document(s) submitted successfully to database`
+        description: `${documents.length} document(s) submitted successfully with extracted data`
       })
- 
+  
       return submittedDocIds
     } catch (error) {
       console.error('=== Document submission failed ===', error)
       throw error
     }
   }, [selectedStageTask, existingDocuments, fetchExistingDocuments, uploadFileToStorage])
-
+  
   const convertMessageToPDF = useCallback(async (message: string, documentName: string): Promise<Blob> => {
     try {
       const response = await fetch('/api/convert-message-to-pdf', {
@@ -1018,27 +1024,51 @@ export function StageUploadDialog({
     }
   }, [selectedStageTask, convertMessageToPDF, handleFileUpload])
 
-  // FIXED: Create completely stable data change handler
   const handleDataChange = useCallback((docId: string, docIndex: number, fieldName: string, value: any) => {
+    console.log(`📝 Data change event:`, {
+      docId,
+      docIndex,
+      fieldName,
+      value,
+      timestamp: new Date().toISOString()
+    })
+  
     setUploadedDocs(prev => {
       const updatedDocsForId = [...(prev[docId] || [])];
       
       if (updatedDocsForId[docIndex]) {
+        const existingExtractedData = updatedDocsForId[docIndex].extractedData || {}
+        
+        // Update both the field ID and field name for compatibility
+        const updatedExtractedData = {
+          ...existingExtractedData,
+          [fieldName]: value === null ? '' : value,
+        }
+  
         updatedDocsForId[docIndex] = {
           ...updatedDocsForId[docIndex],
-          extractedData: {
-            ...(updatedDocsForId[docIndex].extractedData || {}),
-            [fieldName]: value === null ? '' : value,
-          },
+          extractedData: updatedExtractedData,
+          lastModified: new Date().toISOString() // Track when data was last modified
         };
+  
+        console.log(`✅ Updated document data:`, {
+          docId,
+          docIndex,
+          fieldName,
+          newValue: value,
+          allExtractedData: updatedExtractedData
+        })
+  
         return {
           ...prev,
           [docId]: updatedDocsForId,
         };
       }
+      
+      console.warn(`⚠️ Document not found for update:`, { docId, docIndex })
       return prev;
     });
-  }, []) // No dependencies = completely stable
+  }, [])
 
   // FIXED: Create stable callbacks using useMemo
   const stableCallbacks = useMemo(() => {
@@ -1104,18 +1134,31 @@ export function StageUploadDialog({
       if (docsToSave.length === 0) {
         throw new Error('No documents to save')
       }
-
+  
+      console.log('🚀 Starting data submission:', {
+        docId,
+        documentsCount: docsToSave.length,
+        documentsData: docsToSave.map(doc => ({
+          fileName: doc.fileName,
+          extractedDataKeys: Object.keys(doc.extractedData || {}),
+          extractedData: doc.extractedData,
+          lastModified: doc.lastModified
+        }))
+      })
+  
       // Use the existing individual_id from the task
       const individualId = selectedStageTask.task.individual_id
       if (!individualId) {
         throw new Error('No individual ID found in task')
       }
-
-      // Submit documents directly using the existing individual's ID
+  
+      // Submit documents with all the updated extracted data
       await submitDocumentsToDatabase(docsToSave, { id: individualId }, docId)
       await handleExistingSaveLogic(docId, docsToSave)
+  
+      console.log('✅ Data submission completed successfully')
     } catch (error) {
-      console.error('Error in data submission:', error)
+      console.error('❌ Error in data submission:', error)
       toast({
         title: 'Error',
         description: `Failed to submit documents: ${error.message}`,
