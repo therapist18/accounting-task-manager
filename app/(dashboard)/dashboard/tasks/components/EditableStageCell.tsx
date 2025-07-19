@@ -272,33 +272,15 @@ export default function EditableStageCell({
 
   // Initialize documents using passed allDocuments - Updated to handle old documents
   useEffect(() => {
-    console.log('Initializing documents for stage:', {
-      taskId: task.id,
-      stageId: stage.id,
-      allDocumentsCount: allDocuments.length,
-      stageDocuments: stage.documents
-    });
-    
     const directorId = task.individual_id;
     if (!directorId) {
-      console.log('No director ID, skipping document initialization');
       return;
     }
 
     // Process KYC fields for the stage documents
     const processStageDocuments = async () => {
       const stageDocuments = filterDocumentsForStage(allDocuments, directorId, stage.documents || []);
-      console.log('Filtered documents:', {
-        matchedDocuments: stageDocuments?.map(doc => ({
-          id: doc.id,
-          director_id: doc.director_id,
-          document_id: doc.document_id,
-          kyc_document_id: doc.kyc_document_id,
-          file_path: doc.file_path,
-          indicator: doc.indicator,
-          created_at: doc.created_at
-        }))
-      });
+
 
       if (stageDocuments.length > 0) {
         const mostRecentDoc = stageDocuments[0];
@@ -311,16 +293,6 @@ export default function EditableStageCell({
         
         // Only set hasDocuments to true if document doesn't have indicator AND is not old
         setHasDocuments(!mostRecentDoc.indicator && !isOldDoc);
-
-        console.log('Found most recent document:', {
-          id: mostRecentDoc.id,
-          file_path: mostRecentDoc.file_path,
-          extracted_details: mostRecentDoc.extracted_details,
-          indicator: mostRecentDoc.indicator,
-          isOldDocument: isOldDoc,
-          created_at: mostRecentDoc.created_at,
-          task_created_at: task.created_at
-        });
 
         // Extract date from most recent document only if no indicator AND not old
         if (!mostRecentDoc.indicator && !isOldDoc) {
@@ -336,7 +308,7 @@ export default function EditableStageCell({
           setStageDate('');
         }
       } else {
-        console.log('No documents found for this stage');
+  
         setHasDocuments(false);
         setIsOldDocument(false);
         setStageDate('');
@@ -348,31 +320,18 @@ export default function EditableStageCell({
 
   // Get extracted date from passed documents - Updated to handle old documents
   const getExtractedDate = (): string => {
-    console.log('Getting extracted date for stage:', {
-      stageId: stage.id,
-      individualId: task.individual_id
-    });
+    // Get extracted date for stage
+    const stageId = stage.id;
+    const individualId = task.individual_id;
 
     if (!allDocuments.length) {
-      console.log('No documents available');
       return '';
     }
 
     const stageDocuments = filterDocumentsForStage(allDocuments, task.individual_id, stage.documents || []);
-    console.log('Found stage documents:', {
-      count: stageDocuments.length,
-      documents: stageDocuments.map(doc => ({
-        id: doc.id,
-        director_id: doc.director_id,
-        document_id: doc.document_id,
-        kyc_document_id: doc.kyc_document_id,
-        indicator: doc.indicator,
-        created_at: doc.created_at
-      }))
-    });
+
 
     if (!stageDocuments.length) {
-      console.log('No matching documents found');
       return '';
     }
     

@@ -293,15 +293,7 @@ const ExtractionPreview = React.memo(({
   // FIXED: Add local state for immediate UI feedback while maintaining parent sync
   const [localData, setLocalData] = useState<Record<string, any>>(extractedData);
 
-  console.log('ExtractionPreview rendering with:', {
-    documentName,
-    fileUrl,
-    fileName,
-    extractedData,
-    localData,
-    initialFields,
-    viewMode
-  });
+
 
   // FIXED: Sync local data with prop changes
   useEffect(() => {
@@ -314,11 +306,11 @@ const ExtractionPreview = React.memo(({
       setLoadingFields(true);
       fieldsPromise
         .then(fetchedFields => {
-          console.log('Fetched fields from promise:', fetchedFields);
+      
           setFields(fetchedFields || []);
         })
         .catch(error => {
-          console.error('Error loading fields:', error);
+      
           setFields(initialFields);
         })
         .finally(() => {
@@ -339,14 +331,7 @@ const ExtractionPreview = React.memo(({
     const propValueById = extractedData[field.id];
     const propValueByName = extractedData[field.name];
     
-    console.log(`Getting value for field ${field.name} (ID: ${field.id}):`, {
-      localValueById,
-      localValueByName,
-      propValueById,
-      propValueByName,
-      localData,
-      extractedData
-    });
+
     
     // Return the first non-undefined value, prioritizing local data
     if (localValueById !== undefined) return localValueById;

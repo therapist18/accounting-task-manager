@@ -150,14 +150,7 @@ export function StageUploadDialog({
   fuzzyMatch,
   onTaskAction
 }: StageUploadDialogProps) {
-  console.log('=== STAGE UPLOAD DIALOG RENDER ===')
-  console.log('Props received:', {
-    open,
-    selectedStageTask,
-    hasGetCurrentRequirements: !!getCurrentRequirements,
-    hasFuzzyMatch: !!fuzzyMatch,
-    hasOnTaskAction: !!onTaskAction
-  })
+
   
   // All useState hooks first
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File>>({})
@@ -182,12 +175,7 @@ export function StageUploadDialog({
   }, [selectedStageTask])
 
   useEffect(() => {
-    console.log('=== DIALOG OPEN EFFECT ===')
-    console.log('Dialog open:', open)
-    console.log('selectedStageTask:', selectedStageTask)
-    
     if (open && selectedStageTask) {
-      console.log('Fetching existing documents...')
       fetchExistingDocuments()
     }
   }, [open, selectedStageTask])
@@ -1086,40 +1074,23 @@ export function StageUploadDialog({
 
   const handleDataSubmission = useCallback(async (docId: string, saveData: any) => {
     if (!selectedStageTask) return
- 
+   
     try {
       setUploading(true)
- 
+   
       const docsToSave = uploadedDocs[docId] || []
       if (docsToSave.length === 0) {
         throw new Error('No documents to save')
       }
- 
-      const individual = {
-        id: selectedStageTask.task.id,
-        full_name: selectedStageTask.task.applicant_name || selectedStageTask.task.principal_member_name,
-        first_name: selectedStageTask.task.applicant_name?.split(' ')[0],
-        last_name: selectedStageTask.task.applicant_name?.split(' ').slice(-1)[0],
-        r_number: selectedStageTask.task.r_number,
-        passport_number: null,
-        individual_type: selectedStageTask.task.renewal_status === 'New' ? 'principal' : 'dependent',
-        relationship: 'Principal'
+
+      // Use the existing individual_id from the task
+      const individualId = selectedStageTask.task.individual_id
+      if (!individualId) {
+        throw new Error('No individual ID found in task')
       }
- 
-      const registryMatch = await searchRegistryIndividuals(individual)
- 
-      if (registryMatch.exactMatch) {
-        await submitDocumentsToDatabase(docsToSave, registryMatch.exactMatch, docId)
-      } else if (registryMatch.fuzzyMatches && registryMatch.fuzzyMatches.length > 0) {
-        setFuzzyMatchResults(registryMatch.fuzzyMatches)
-        setPendingSubmission({ docsToSave, docId, originalIndividual: individual })
-        setConfirmationDialogOpen(true)
-        return
-      } else {
-        const newRegistryId = await createNewRegistryIndividual(individual)
-        await submitDocumentsToDatabase(docsToSave, { id: newRegistryId }, docId)
-      }
- 
+
+      // Submit documents directly using the existing individual's ID
+      await submitDocumentsToDatabase(docsToSave, { id: individualId }, docId)
       await handleExistingSaveLogic(docId, docsToSave)
     } catch (error) {
       console.error('Error in data submission:', error)
@@ -1131,7 +1102,7 @@ export function StageUploadDialog({
     } finally {
       setUploading(false)
     }
-  }, [selectedStageTask, uploadedDocs, searchRegistryIndividuals, submitDocumentsToDatabase, createNewRegistryIndividual, handleExistingSaveLogic])
+  }, [selectedStageTask, uploadedDocs, submitDocumentsToDatabase, handleExistingSaveLogic])
 
   const handleSaveDocument = useCallback(async (docId: string, saveData: any) => {
     try {
