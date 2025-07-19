@@ -412,16 +412,17 @@ const ExtractionPreview = React.memo(({
       return updatedData;
     });
     
-    // Call parent's onDataChange for persistence
+    // FIXED: Call parent's onDataChange with field.name instead of field.id
     if (onDataChange) {
-      console.log(`📤 Calling parent onDataChange:`, {
+      console.log(`📤 Calling parent onDataChange with field.name:`, {
         fieldId: field.id,
         fieldName: field.name,
+        keyUsed: field.name, // This is what we're using now
         value: value
       });
       
-      // Use field.id as the key for consistency with parent component
-      onDataChange(field.id, value);
+      // Use field.name as the key for consistency with submission expectations
+      onDataChange(field.name, value);
     } else {
       console.warn('⚠️ onDataChange callback not provided');
     }
