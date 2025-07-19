@@ -564,7 +564,7 @@ export function StageUploadDialog({
     }
   }, [fuzzyMatch])
 
-  const uploadFileToStorage = useCallback(async (file: File, individualId: number, documentName: string): Promise<string> => {
+  const uploadFileToStorage = useCallback(async (file: File, individualId: number, documentName: string, documentKycId: string): Promise<string> => {
     try {
       const bucketName = 'kyc-documents'
 
@@ -578,17 +578,39 @@ export function StageUploadDialog({
         throw new Error(`Failed to get individual name: ${individual.error.message}`)
       }
 
+      // Get the document name from KYC document
+      const { data: kycDoc, error: kycError } = await supabase
+        .from('acc_portal_kyc')
+        .select('name')
+        .eq('id', documentKycId)
+        .single()
+
+      if (kycError) {
+        throw new Error(`Failed to get document name: ${kycError.message}`)
+      }
+
       const normalizedName = individual.data.full_name
         .toLowerCase()
         .replace(/\s+/g, '_')
         .replace(/[^a-z0-9_]/g, '')
       
-      const normalizedDocName = documentName
-        .toLowerCase()
+      const normalizedDocName = kycDoc?.name?.toLowerCase() || 'document'
         .replace(/\s+/g, '_')
         .replace(/[^a-z0-9_]/g, '')
 
-      const filename = `individual-documents/${normalizedName}/${normalizedDocName}/${file.name}`
+      // Normalize file name by removing special characters and replacing spaces with underscores
+      const normalizedFileName = file.name
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]/g, '') // Remove all special characters except . and -
+        .replace(/\s+/g, '_') // Replace spaces with underscores
+        .replace(/\.+/g, '.') // Remove consecutive dots
+        .replace(/_+/g, '_') // Remove consecutive underscores
+        .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
+        .replace(/\.+$/, '') // Remove trailing dots
+        .replace(/_+$/, '') // Remove trailing underscores
+        .replace(/^_+/, '') // Remove leading underscores
+
+      const filename = `individual-documents/${normalizedName}/${normalizedDocName}/${normalizedFileName}`
 
       const { data, error } = await supabase.storage
         .from(bucketName)
@@ -706,12 +728,12 @@ export function StageUploadDialog({
       }
 
       for (const [index, doc] of documents.entries()) {
-        const filePath = await uploadFileToStorage(doc.file, selectedStageTask.task.individual_id, documentName)
+        const filename = await uploadFileToStorage(doc.file, selectedStageTask.task.individual_id, documentName, documentKycId)
         
         const documentRecord = {
           director_id: selectedStageTask.task.individual_id,
           document_id: documentKycId,
-          file_path: filePath,
+          file_path: filename,
           extracted_details: doc.extractedData || {},
           status: 'pending',
           created_at: new Date().toISOString(),
