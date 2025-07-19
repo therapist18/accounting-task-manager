@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -20,7 +20,7 @@ import {
   RotateCw,
   Image as ImageIcon
 } from 'lucide-react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import Image from 'next/image'
 import { toast } from 'sonner'
 import dynamic from 'next/dynamic'
@@ -53,6 +53,8 @@ interface ExtractionPreviewProps {
   fieldsPromise?: Promise<Field[]> | null
   onDataChange?: (fieldName: string, value: any) => void
   onVerify?: () => void
+  onSave?: (data: any) => void
+  onClose?: () => void
   onRemoveFile?: () => void
   isVerified?: boolean
   fileUrl?: string
@@ -70,29 +72,20 @@ interface ExtractionPreviewProps {
   }
 }
 
-interface DocumentData {
-  documentName: string;
-  extractedData: Record<string, any>;
-  fields: Field[];
-  fileUrl?: string;
-  fileName?: string;
-  type?: string;
-}
-
 // Enhanced Image Viewer component
-const ImageViewer = ({ fileUrl, fileName, documentName }) => {
+const ImageViewer = React.memo(({ fileUrl, fileName, documentName }) => {
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [imageError, setImageError] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
 
-  const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.25, 3));
-  const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.25, 0.25));
-  const handleRotate = () => setRotation(prev => (prev + 90) % 360);
-  const handleReset = () => {
+  const handleZoomIn = useCallback(() => setZoom(prev => Math.min(prev + 0.25, 3)), []);
+  const handleZoomOut = useCallback(() => setZoom(prev => Math.max(prev - 0.25, 0.25)), []);
+  const handleRotate = useCallback(() => setRotation(prev => (prev + 90) % 360), []);
+  const handleReset = useCallback(() => {
     setZoom(1);
     setRotation(0);
-  };
+  }, []);
 
   if (imageError) {
     return (
@@ -189,20 +182,31 @@ const ImageViewer = ({ fileUrl, fileName, documentName }) => {
       </div>
     </div>
   );
-};
+});
 
 // Enhanced Document Viewer component
-const DocumentViewer = ({ fileUrl, fileName, documentName }) => {
-  const getFileType = (fileName: string) => {
+const DocumentViewer = React.memo(({ fileUrl, fileName, documentName }) => {
+  const getFileType = useCallback((fileName: string) => {
     if (!fileName) return 'unknown';
     const extension = fileName.toLowerCase().split('.').pop();
     
     if (extension === 'pdf') return 'pdf';
     if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension)) return 'image';
     return 'unknown';
-  };
+  }, []);
 
   const fileType = getFileType(fileName);
+
+  console.log('DocumentViewer rendering with:', { fileUrl, fileName, fileType });
+
+  if (!fileUrl) {
+    return (
+      <div className="p-4 text-center text-muted-foreground">
+        <p>No document available for preview</p>
+        <p className="text-sm">File URL: {fileUrl || 'Not provided'}</p>
+      </div>
+    );
+  }
 
   return (
     <Card className="w-full h-full flex flex-col min-h-[70vh]">
@@ -223,30 +227,22 @@ const DocumentViewer = ({ fileUrl, fileName, documentName }) => {
       </CardHeader>
       <CardContent className="flex-1 p-2">
         <div className="relative w-full h-[65vh]">
-          {fileUrl ? (
-            fileType === 'pdf' ? (
-              <PDFViewer url={fileUrl} />
-            ) : fileType === 'image' ? (
-              <ImageViewer 
-                fileUrl={fileUrl} 
-                fileName={fileName} 
-                documentName={documentName} 
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-secondary/30 rounded-md border">
-                <FileText className="h-16 w-16 mb-4" />
-                <p className="text-lg font-medium">Unsupported File Type</p>
-                <p className="text-sm">This file type cannot be previewed</p>
-                {fileName && (
-                  <p className="text-xs mt-2 opacity-70">{fileName}</p>
-                )}
-              </div>
-            )
+          {fileType === 'pdf' ? (
+            <PDFViewer url={fileUrl} />
+          ) : fileType === 'image' ? (
+            <ImageViewer 
+              fileUrl={fileUrl} 
+              fileName={fileName} 
+              documentName={documentName} 
+            />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-secondary/30 rounded-md border">
               <FileText className="h-16 w-16 mb-4" />
-              <p className="text-lg font-medium">No Preview Available</p>
-              <p className="text-sm">No file has been uploaded yet</p>
+              <p className="text-lg font-medium">Unsupported File Type</p>
+              <p className="text-sm">This file type cannot be previewed</p>
+              {fileName && (
+                <p className="text-xs mt-2 opacity-70">{fileName}</p>
+              )}
             </div>
           )}
         </div>
@@ -263,21 +259,24 @@ const DocumentViewer = ({ fileUrl, fileName, documentName }) => {
       )}
     </Card>
   );
-};
+});
 
-const ExtractionPreview = ({
+// FIXED: Wrap the main component in React.memo with custom comparison
+const ExtractionPreview = React.memo(({
   documentName,
   extractedData = {},
   fields: initialFields = [],
   fieldsPromise,
-  onDataChange,
+  onDataChange = () => {},
   onVerify,
+  onSave,
+  onClose,
   onRemoveFile,
   fileUrl,
   fileName,
   expanded = false,
   showSaveButton = true,
-  type,
+  type = 'document',
   file,
   viewMode = false,
   getStylesByType = (type) => ({
@@ -289,17 +288,33 @@ const ExtractionPreview = ({
 }: ExtractionPreviewProps) => {
   const [fields, setFields] = useState<Field[]>(initialFields);
   const [loadingFields, setLoadingFields] = useState(!!fieldsPromise);
-  const [isOpen, setIsOpen] = useState(expanded);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [documents, setDocuments] = useState<DocumentData[]>([]);
-  const [kycFields, setKycFields] = useState<Field[]>([]);
+  
+  // FIXED: Add local state for immediate UI feedback while maintaining parent sync
+  const [localData, setLocalData] = useState<Record<string, any>>(extractedData);
 
+  console.log('ExtractionPreview rendering with:', {
+    documentName,
+    fileUrl,
+    fileName,
+    extractedData,
+    localData,
+    initialFields,
+    viewMode
+  });
+
+  // FIXED: Sync local data with prop changes
+  useEffect(() => {
+    setLocalData(extractedData);
+  }, [extractedData]);
+
+  // FIXED: Handle fields loading more efficiently
   useEffect(() => {
     if (fieldsPromise) {
       setLoadingFields(true);
       fieldsPromise
         .then(fetchedFields => {
+          console.log('Fetched fields from promise:', fetchedFields);
           setFields(fetchedFields || []);
         })
         .catch(error => {
@@ -309,127 +324,125 @@ const ExtractionPreview = ({
         .finally(() => {
           setLoadingFields(false);
         });
-    } else {
+    } else if (initialFields?.length > 0 && fields !== initialFields) {
       setFields(initialFields);
     }
-  }, [fieldsPromise, initialFields]);
+  }, [fieldsPromise]); // Only depend on fieldsPromise
 
-  useEffect(() => {
-    const fetchKycFields = async () => {
-      if (!extractedData?.kycId) {
-        setKycFields(fields);
-        return;
-      }
-
-      setIsLoading(true);
-      try {
-        const response = await fetch(`/api/kyc-fields/${extractedData.kycId}`);
-        if (!response.ok) throw new Error('Failed to fetch KYC fields');
-        const data = await response.json();
-        setKycFields(data.fields || []);
-      } catch (error) {
-        console.error('Error fetching KYC fields:', error);
-        setKycFields(fields); // Fallback to provided fields
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    if (documentName) {
-      setDocuments([{
-        documentName,
-        extractedData,
-        fields: kycFields.length > 0 ? kycFields : fields,
-        fileUrl,
-        fileName,
-        type
-      }]);
-    }
-
-    fetchKycFields();
-  }, [documentName, extractedData, fields, fileUrl, fileName, type, extractedData?.kycId, kycFields]);
-
-  const getNestedValue = (obj: any, path: string, defaultValue: any = '') => {
-    if (!path || !obj) return defaultValue;
-    if (obj.hasOwnProperty(path)) return obj[path] !== undefined ? obj[path] : defaultValue;
-    const keys = path.split('.');
-    let result = obj;
-    for (const key of keys) {
-      if (result === null || result === undefined) return defaultValue;
-      result = result[key];
-    }
-    return result !== undefined ? result : defaultValue;
-  };
-
-  const handleFieldChange = (fieldName: string, value: any, docIndex: number) => {
-    if (viewMode) return;
-    setDocuments(prevDocs => {
-      const updatedDocs = [...prevDocs];
-      const currentDoc = { ...updatedDocs[docIndex], extractedData: { ...updatedDocs[docIndex].extractedData, [fieldName]: value }};
-      updatedDocs[docIndex] = currentDoc;
-      return updatedDocs;
+  // FIXED: Use local data for immediate UI feedback, extractedData as fallback
+  const getFieldValue = useCallback((field: Field): any => {
+    // Try to get value from local data first (for immediate UI feedback)
+    const localValueById = localData[field.id];
+    const localValueByName = localData[field.name];
+    
+    // Fallback to prop data
+    const propValueById = extractedData[field.id];
+    const propValueByName = extractedData[field.name];
+    
+    console.log(`Getting value for field ${field.name} (ID: ${field.id}):`, {
+      localValueById,
+      localValueByName,
+      propValueById,
+      propValueByName,
+      localData,
+      extractedData
     });
-    if (onDataChange) onDataChange(fieldName, value);
-  };
+    
+    // Return the first non-undefined value, prioritizing local data
+    if (localValueById !== undefined) return localValueById;
+    if (localValueByName !== undefined) return localValueByName;
+    if (propValueById !== undefined) return propValueById;
+    if (propValueByName !== undefined) return propValueByName;
+    return '';
+  }, [localData, extractedData]);
 
-  const handleArrayItemChange = (fieldName: string, itemIndex: number, subFieldName: string, value: any, docIndex: number) => {
+  // FIXED: Update both local state and parent
+  const handleFieldChange = useCallback((field: Field, value: any) => {
     if (viewMode) return;
-    const currentDoc = documents[docIndex];
-    let currentArray = Array.isArray(currentDoc?.extractedData?.[fieldName]) ? [...currentDoc.extractedData[fieldName]] : [];
+    
+    console.log(`Field changed: ${field.name} (ID: ${field.id}) = ${value}`);
+    
+    // Update local state immediately for UI feedback
+    setLocalData(prev => ({
+      ...prev,
+      [field.id]: value,
+      [field.name]: value // Store under both keys for compatibility
+    }));
+    
+    // Call parent's onDataChange for persistence
+    if (onDataChange) {
+      onDataChange(field.id, value);
+    }
+  }, [viewMode, onDataChange]);
+
+  const handleArrayItemChange = useCallback((field: Field, itemIndex: number, subFieldName: string, value: any) => {
+    if (viewMode) return;
+    
+    const currentArray = Array.isArray(getFieldValue(field)) ? [...getFieldValue(field)] : [];
     while (currentArray.length <= itemIndex) currentArray.push({});
     currentArray[itemIndex] = { ...currentArray[itemIndex], [subFieldName]: value };
-    handleFieldChange(fieldName, currentArray, docIndex);
-  };
+    handleFieldChange(field, currentArray);
+  }, [viewMode, getFieldValue, handleFieldChange]);
 
-  const addArrayItem = (fieldName: string, docIndex: number) => {
+  const addArrayItem = useCallback((field: Field) => {
     if (viewMode) return;
-    const currentDoc = documents[docIndex];
-    const currentArray = Array.isArray(currentDoc?.extractedData?.[fieldName]) ? [...currentDoc.extractedData[fieldName]] : [];
+    const currentArray = Array.isArray(getFieldValue(field)) ? [...getFieldValue(field)] : [];
     currentArray.push({});
-    handleFieldChange(fieldName, currentArray, docIndex);
-  };
+    handleFieldChange(field, currentArray);
+  }, [viewMode, getFieldValue, handleFieldChange]);
 
-  const removeArrayItem = (fieldName: string, itemIndex: number, docIndex: number) => {
+  const removeArrayItem = useCallback((field: Field, itemIndex: number) => {
     if (viewMode) return;
-    const currentDoc = documents[docIndex];
-    let currentArray = Array.isArray(currentDoc?.extractedData?.[fieldName]) ? [...currentDoc.extractedData[fieldName]] : [];
+    let currentArray = Array.isArray(getFieldValue(field)) ? [...getFieldValue(field)] : [];
     if (currentArray.length > 1) {
       currentArray.splice(itemIndex, 1);
-      handleFieldChange(fieldName, currentArray, docIndex);
+      handleFieldChange(field, currentArray);
     }
-  };
+  }, [viewMode, getFieldValue, handleFieldChange]);
 
-  const toTitleCase = (str: string | undefined | null) => {
+  const toTitleCase = useCallback((str: string | undefined | null) => {
     if (!str) return '';
     return str.replace(/_/g, ' ').replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-  };
+  }, []);
 
-  const renderField = (field: Field, docIndex: number) => {
+  // FIXED: Memoize the field rendering to prevent unnecessary re-renders
+  const renderField = useCallback((field: Field) => {
     const isArrayField = field.type === 'array' || field.isArray;
-    const fieldKey = field.name?.trim() || '';
     const displayName = toTitleCase(field.name || '');
 
     if (isArrayField && field.arrayConfig?.fields) {
-      const arrayValue = getNestedValue(documents[docIndex]?.extractedData || {}, fieldKey, []);
+      const arrayValue = getFieldValue(field);
       const arrayData = Array.isArray(arrayValue) && arrayValue.length > 0 ? arrayValue : [{}];
       
       return (
-        <div key={`${docIndex}-${fieldKey}`} className="space-y-4 rounded-lg border bg-background p-4">
+        <div key={field.id} className="space-y-4 rounded-lg border bg-background p-4">
           <div className="flex items-center justify-between">
             <h4 className="font-semibold text-base text-foreground">{displayName}</h4>
             {!viewMode && (
-              <Button type="button" size="sm" variant="outline" onClick={() => addArrayItem(fieldKey, docIndex)} className="flex items-center gap-1.5">
+              <Button 
+                type="button" 
+                size="sm" 
+                variant="outline" 
+                onClick={() => addArrayItem(field)} 
+                className="flex items-center gap-1.5"
+              >
                 <Plus className="h-4 w-4" /> Add
               </Button>
             )}
           </div>
           <div className="space-y-3">
             {arrayData.map((item, itemIndex) => (
-              <Card key={`${fieldKey}-${itemIndex}`} className="bg-muted/50">
+              <Card key={`${field.id}-${itemIndex}`} className="bg-muted/50">
                 <CardHeader className="flex flex-row items-center justify-between py-3 px-4">
                   <CardTitle className="text-sm font-medium">Item {itemIndex + 1}</CardTitle>
                   {!viewMode && arrayData.length > 1 && (
-                    <Button type="button" size="icon" variant="ghost" onClick={() => removeArrayItem(fieldKey, itemIndex, docIndex)} className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                    <Button 
+                      type="button" 
+                      size="icon" 
+                      variant="ghost" 
+                      onClick={() => removeArrayItem(field, itemIndex)} 
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    >
                       <Trash2 className="h-4 w-4" />
                       <span className="sr-only">Remove Item</span>
                     </Button>
@@ -438,13 +451,20 @@ const ExtractionPreview = ({
                 <CardContent className="p-4 pt-0">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {field.arrayConfig.fields.map((subField) => {
-                      const subFieldKey = (subField.name || '').trim();
-                      const subFieldValue = item[subFieldKey] || '';
+                      const subFieldValue = item[subField.name] || item[subField.id] || '';
                       const subFieldDisplayName = toTitleCase(subField.name);
                       return (
-                        <div key={`${fieldKey}-${itemIndex}-${subFieldKey}`} className="space-y-1.5">
-                          <Label htmlFor={`${docIndex}-${fieldKey}-${itemIndex}-${subFieldKey}`} className="text-xs font-medium">{subFieldDisplayName}</Label>
-                          <Input id={`${docIndex}-${fieldKey}-${itemIndex}-${subFieldKey}`} value={subFieldValue} onChange={(e) => handleArrayItemChange(fieldKey, itemIndex, subFieldKey, e.target.value, docIndex)} placeholder={subFieldDisplayName} disabled={viewMode} />
+                        <div key={`${field.id}-${itemIndex}-${subField.id}`} className="space-y-1.5">
+                          <Label htmlFor={`${field.id}-${itemIndex}-${subField.id}`} className="text-xs font-medium">
+                            {subFieldDisplayName}
+                          </Label>
+                          <Input 
+                            id={`${field.id}-${itemIndex}-${subField.id}`} 
+                            value={subFieldValue} 
+                            onChange={(e) => handleArrayItemChange(field, itemIndex, subField.name, e.target.value)} 
+                            placeholder={subFieldDisplayName} 
+                            disabled={viewMode} 
+                          />
                         </div>
                       );
                     })}
@@ -457,99 +477,46 @@ const ExtractionPreview = ({
       );
     }
 
-    const value = getNestedValue(documents[docIndex]?.extractedData || {}, fieldKey, '');
+    const value = getFieldValue(field);
     return (
-      <div key={`${docIndex}-${fieldKey}`} className="space-y-2">
-        <Label htmlFor={`${docIndex}-${fieldKey}`}>
+      <div key={field.id} className="space-y-2">
+        <Label htmlFor={field.id}>
           {displayName}
           {field.required && <span className="text-destructive ml-1">*</span>}
         </Label>
-        <Input id={`${docIndex}-${fieldKey}`} value={value} onChange={(e) => handleFieldChange(fieldKey, e.target.value, docIndex)} placeholder={`Enter ${displayName}`} disabled={viewMode} />
+        <Input 
+          id={field.id} 
+          value={value || ''} 
+          onChange={(e) => handleFieldChange(field, e.target.value)} 
+          placeholder={`Enter ${displayName}`} 
+          disabled={viewMode} 
+        />
       </div>
     );
-  };
+  }, [getFieldValue, handleFieldChange, handleArrayItemChange, addArrayItem, removeArrayItem, toTitleCase, viewMode]);
 
-  const renderDocument = (doc: DocumentData, index: number) => {
-    const styles = getStylesByType?.(doc.type || 'principal') || {};
-    return (
-      <div key={index} className="space-y-6 max-w-9xl">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className={`flex items-center justify-center h-10 w-10 rounded-lg ${styles.getBgColor?.() || 'bg-primary'}`}>
-              <FileText className={`h-5 w-5 ${styles.getTextColor?.() || 'text-primary-foreground'}`} />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold tracking-tight">{doc.documentName}</h2>
-              {doc.type && <Badge variant="secondary" className="mt-1">{toTitleCase(doc.type)}</Badge>}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {doc.fileUrl && (
-              <Button asChild variant="outline" size="sm">
-                <a href={doc.fileUrl} download={doc.fileName}>
-                  <Download className="mr-2 h-4 w-4" /> Download
-                </a>
-              </Button>
-            )}
-            {onRemoveFile && !viewMode && (
-              <Button variant="destructive" size="sm" onClick={onRemoveFile}>
-                <Trash2 className="mr-2 h-4 w-4" /> Delete
-              </Button>
-            )}
-          </div>
+  const handleSave = useCallback(() => {
+    if (onSave) {
+      onSave(localData); // Use local data for save
+    } else if (onVerify) {
+      onVerify();
+    }
+  }, [onSave, onVerify, localData]);
+
+  // FIXED: Memoize the rendered fields to prevent re-renders
+  const renderedFields = useMemo(() => {
+    if (!fields?.length) {
+      return (
+        <div className="flex flex-col items-center justify-center text-center py-10 text-muted-foreground">
+          <FileText className="h-12 w-12 mb-4" />
+          <p className="font-medium">No Fields Defined</p>
+          <p className="text-sm">There are no fields configured for this document type.</p>
         </div>
-        <div className="flex gap-6 items-start grid grid-cols-3">
-          <div className="xl:sticky xl:top-6 w-full col-span-2">
-            <DocumentViewer fileUrl={doc.fileUrl} fileName={doc.fileName} documentName={doc.documentName} />
-          </div>
-          <Card className="h-full w-full col-span-1">
-            <CardHeader>
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <CardTitle>Extracted Details</CardTitle>
-                  <CardDescription>Review and edit the extracted data.</CardDescription>
-                </div>
-                {!viewMode && (
-                  <Button variant="outline" size="sm" onClick={async () => {
-                    if (typeof window.refreshExtraction === 'function') {
-                      setIsRefreshing(true);
-                      try {
-                        await window.refreshExtraction();
-                        toast.success('Extraction refreshed successfully');
-                      } catch (error) {
-                        toast.error('Failed to refresh extraction');
-                      } finally {
-                        setIsRefreshing(false);
-                      }
-                    }
-                  }} disabled={isRefreshing || !doc.fileUrl} className="shrink-0">
-                    {isRefreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                    Refresh
-                  </Button>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6 max-h-[65vh] overflow-y-auto">
-              {doc.fields?.length > 0 ? doc.fields.map((field) => renderField(field, index)) : (
-                <div className="flex flex-col items-center justify-center text-center py-10 text-muted-foreground">
-                  <FileText className="h-12 w-12 mb-4" />
-                  <p className="font-medium">No Fields Defined</p>
-                  <p className="text-sm">There are no fields configured for this document type.</p>
-                </div>
-              )}
-            </CardContent>
-            {showSaveButton && !viewMode && (
-              <CardFooter className="border-t bg-muted/50">
-                <Button onClick={onVerify} className="w-full sm:w-auto">
-                  <Save className="mr-2 h-4 w-4" /> Save Changes
-                </Button>
-              </CardFooter>
-            )}
-          </Card>
-        </div>
-      </div>
-    );
-  };
+      );
+    }
+    
+    return fields.map(field => renderField(field));
+  }, [fields, renderField]);
 
   if (loadingFields) {
     return (
@@ -560,15 +527,90 @@ const ExtractionPreview = ({
     );
   }
 
+  const styles = getStylesByType?.(type || 'principal') || {};
+
   const content = (
-    <div className="space-y-12">
-      {documents.length > 0 ? documents.map(renderDocument) : (
-        <div className="flex flex-col items-center justify-center h-[50vh] text-center text-muted-foreground bg-background rounded-lg border border-dashed">
-          <FileText className="h-16 w-16 mb-4" />
-          <h3 className="text-xl font-semibold">No Documents</h3>
-          <p className="mt-2 text-sm">There are no documents to display or preview.</p>
+    <div className="space-y-6 max-w-9xl">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className={`flex items-center justify-center h-10 w-10 rounded-lg ${styles.getBgColor?.() || 'bg-primary'}`}>
+            <FileText className={`h-5 w-5 ${styles.getTextColor?.() || 'text-primary-foreground'}`} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold tracking-tight">{documentName}</h2>
+            {type && <Badge variant="secondary" className="mt-1">{toTitleCase(type)}</Badge>}
+          </div>
         </div>
-      )}
+        <div className="flex items-center gap-2">
+          {fileUrl && (
+            <Button asChild variant="outline" size="sm">
+              <a href={fileUrl} download={fileName}>
+                <Download className="mr-2 h-4 w-4" /> Download
+              </a>
+            </Button>
+          )}
+          {onRemoveFile && !viewMode && (
+            <Button variant="destructive" size="sm" onClick={onRemoveFile}>
+              <Trash2 className="mr-2 h-4 w-4" /> Delete
+            </Button>
+          )}
+        </div>
+      </div>
+      
+      <div className="grid grid-cols-3 xl:grid-cols-3 gap-6">
+        <div className="col-span-2">
+          <DocumentViewer fileUrl={fileUrl} fileName={fileName} documentName={documentName} />
+        </div>
+        
+        <div className="col-span-1">
+          <Card className="h-full">
+            <CardHeader>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <CardTitle>Extracted Details</CardTitle>
+                  <CardDescription>
+                    {viewMode ? 'Review the extracted data' : 'Review and edit the extracted data'}
+                  </CardDescription>
+                </div>
+                {!viewMode && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={async () => {
+                      if (typeof window.refreshExtraction === 'function') {
+                        setIsRefreshing(true);
+                        try {
+                          await window.refreshExtraction();
+                          toast.success('Extraction refreshed successfully');
+                        } catch (error) {
+                          toast.error('Failed to refresh extraction');
+                        } finally {
+                          setIsRefreshing(false);
+                        }
+                      }
+                    }} 
+                    disabled={isRefreshing || !fileUrl} 
+                    className="shrink-0"
+                  >
+                    {isRefreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                    Refresh
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6 max-h-[65vh] overflow-y-auto">
+              {renderedFields}
+            </CardContent>
+            {showSaveButton && !viewMode && (
+              <CardFooter className="border-t bg-muted/50">
+                <Button onClick={handleSave} className="w-full sm:w-auto">
+                  <Save className="mr-2 h-4 w-4" /> Save Changes
+                </Button>
+              </CardFooter>
+            )}
+          </Card>
+        </div>
+      </div>
     </div>
   );
 
@@ -577,22 +619,45 @@ const ExtractionPreview = ({
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className="max-w-7xl w-[95vw] h-[95vh] flex flex-col p-0">
+    <Dialog open={true} onOpenChange={(open) => !open && onClose?.()}>
+      <DialogContent 
+        className="max-w-7xl w-[95vw] h-[95vh] flex flex-col p-0"
+        aria-describedby="document-extraction-desc"
+      >
         <DialogHeader className="p-6 pb-4 border-b">
           <DialogTitle className="text-2xl">Document Details Extraction</DialogTitle>
+          <DialogDescription id="document-extraction-desc">
+            Review and verify the extracted document details
+          </DialogDescription>
         </DialogHeader>
         <div className="flex-1 overflow-y-auto p-6 bg-muted/40">
           {content}
         </div>
         <DialogFooter className="p-4 border-t bg-background">
           <DialogClose asChild>
-            <Button variant="outline">Close</Button>
+            <Button variant="outline" onClick={onClose}>Close</Button>
           </DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
-};
+}, (prevProps, nextProps) => {
+  // FIXED: Custom comparison function to prevent unnecessary re-renders
+  // Only re-render if these specific props change
+  return (
+    prevProps.documentName === nextProps.documentName &&
+    prevProps.fileUrl === nextProps.fileUrl &&
+    prevProps.fileName === nextProps.fileName &&
+    prevProps.expanded === nextProps.expanded &&
+    prevProps.showSaveButton === nextProps.showSaveButton &&
+    prevProps.type === nextProps.type &&
+    prevProps.viewMode === nextProps.viewMode &&
+    JSON.stringify(prevProps.extractedData) === JSON.stringify(nextProps.extractedData) &&
+    prevProps.fieldsPromise === nextProps.fieldsPromise &&
+    prevProps.onDataChange === nextProps.onDataChange
+  );
+});
+
+ExtractionPreview.displayName = 'ExtractionPreview';
 
 export default ExtractionPreview;

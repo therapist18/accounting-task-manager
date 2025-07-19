@@ -821,37 +821,40 @@ export default function EditableStageCell({
             </DialogHeader>
             <div className="flex-1 overflow-y-auto p-6 pt-2">
               <ExtractionPreview
-                documentId={previewDocument.documentId}
                 documentName={previewDocument.documentName}
                 fileUrl={previewDocument.fileUrl}
                 fileName={previewDocument.fileName}
-                extractedData={previewDocument.extractedData}
-                fields={previewDocument.fields}
-                onClose={() => setIsPreviewOpen(false)}
-                onSave={(updatedData) => {
-                  console.log("Saving updated data:", updatedData);
+                extractedData={previewDocument.extractedData || {}}
+                fields={previewDocument.fields || []}
+                viewMode={true}
+                file={previewDocument.file}
+                type={previewDocument.type}
+                onDataChange={(fieldName, value) => {
+                  // Handle data changes if needed
+                  console.log(`Field ${fieldName} changed to:`, value);
+                }}
+                onSave={() => {
+                  console.log("Saving document data...");
+                  // Add save logic here
                   setIsPreviewOpen(false);
                   toast({ title: "Success", description: "Document details saved." });
                 }}
-                file={previewDocument.file}
-                type={previewDocument.type}
-                viewMode={true}
                 getStylesByType={(type) => ({
                   getBgColor: () => 'bg-primary',
-                 getTextColor: () => 'text-primary-foreground',
-                 getBorderColor: () => 'border-primary',
-                 getButtonStyle: () => 'bg-primary hover:bg-primary/90 text-primary-foreground'
-               })}
-             />
-           </div>
-         </div>
-       ) : (
-         <div className="flex-1 flex items-center justify-center">
-           <p className="text-muted-foreground">No document data available</p>
-         </div>
-       )}
-     </DialogContent>
-   </Dialog>
- </>
- );
+                  getTextColor: () => 'text-primary-foreground',
+                  getBorderColor: () => 'border-primary',
+                  getButtonStyle: () => 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                })}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-muted-foreground">No document data available</p>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  </>
+         );
 }
