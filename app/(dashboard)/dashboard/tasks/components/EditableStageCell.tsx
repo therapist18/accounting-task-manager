@@ -79,7 +79,7 @@ export default function EditableStageCell({
     try {
       const { data, error } = await supabase
         .from('acc_portal_kyc')
-        .select('id, fields, name, display_name, documentType')
+        .select('id, fields, name, display_name, document_type')
         .eq('id', kycId)
         .single();
 
@@ -515,6 +515,20 @@ export default function EditableStageCell({
   
       setIsLoading(true);
       await onSave(stage.id, task.id, formattedDate);
+      
+      // After successful save, trigger a refetch of the table data
+      try {
+        const response = await fetch('/api/tasks'); // Adjust the API endpoint as needed
+        if (!response.ok) {
+          throw new Error('Failed to refresh task data');
+        }
+        const data = await response.json();
+        console.log('Task data refreshed successfully');
+      } catch (fetchError) {
+        console.error('Error refreshing task data:', fetchError);
+        // Don't show error toast to user as the main operation was successful
+      }
+      
       setIsEditing(false);
       
       toast({
