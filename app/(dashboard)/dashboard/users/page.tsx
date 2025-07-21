@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Users, Briefcase } from "lucide-react"
+import { Users, Briefcase, History, Pencil, UserX, UserCheck } from "lucide-react"
 import { TaskAssignmentDialog } from "@/components/task-assignment-dialog"
 import {
   fetchUsers,
@@ -52,8 +52,7 @@ export default function UsersPage() {
   const [userAssignments, setUserAssignments] = useState<{ [key: string]: { departments: string[], subdepartments: string[] } }>({})
   const [assignmentsDialogOpen, setAssignmentsDialogOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
-  const [activeTab, setActiveTab] = useState<'users' | 'officers'>('users')
-  const [activeStatusTab, setActiveStatusTab] = useState<'active' | 'inactive'>('active')
+  const [activeTab, setActiveTab] = useState<'active-users' | 'inactive-users' | 'active-officers' | 'inactive-officers'>('active-users')
   const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
@@ -65,11 +64,11 @@ export default function UsersPage() {
       ])
       setActiveUsers(active.filter(user => user.role !== 'officer'))
       setInactiveUsers(inactive.filter(user => user.role !== 'officer'))
-      
+
       // Cast to Officer type for TypeScript
       const activeOfficers = active.filter(user => user.role === 'officer') as Officer[]
       const inactiveOfficers = inactive.filter(user => user.role === 'officer') as Officer[]
-      
+
       setActiveOfficers(activeOfficers)
       setInactiveOfficers(inactiveOfficers)
       setRefreshKey(prev => prev + 1)
@@ -146,9 +145,9 @@ export default function UsersPage() {
       // In a real app, you would get the current user's ID from your auth context
       const currentUserId = 'system' // Replace with actual user ID from auth
       await updateUserStatus(
-        userId.toString(), 
-        makeActive, 
-        currentUserId, 
+        userId.toString(),
+        makeActive,
+        currentUserId,
         makeActive ? 'User reactivated by admin' : 'User deactivated by admin'
       )
 
@@ -179,7 +178,7 @@ export default function UsersPage() {
       status_history: Array.isArray(user.status_history)
         ? [...user.status_history]
         : [],
-      department_history: 'department_history' in user 
+      department_history: 'department_history' in user
         ? [...(user as Officer).department_history]
         : []
     })
@@ -192,147 +191,14 @@ export default function UsersPage() {
     setIsEditDialogOpen(false)
   }
 
-  const renderUserRow = (user: User, isActive: boolean, index: number) => {
-    const statusHistory = Array.isArray(user.status_history) ? user.status_history : []
-    const lastStatusChange = statusHistory[statusHistory.length - 1]
-    const assignments = userAssignments[user.id] || { departments: [], subdepartments: [] }
-    const departmentHistory = Array.isArray(user.department_history) ? user.department_history : []
-    
-    // Filter by selected department if viewing officers
-    if (activeTab === 'officers' && selectedDepartment) {
-      const userDepartments = departmentHistory.map(d => d.department_id)
-      if (!userDepartments.includes(selectedDepartment)) {
-        return null
-      }
-    }
-
-    // Get current department assignment for officers
-    const currentDepartment = departmentHistory.length > 0 
-      ? departments.find(d => d.id === departmentHistory[0].department_id)
-      : null
-
-    // Format dates for display
-    const formatDate = (dateString: string | null | undefined) => {
-      if (!dateString) return 'N/A'
-      try {
-        const date = new Date(dateString)
-        return date.toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
-        })
-      } catch (e) {
-        return 'Invalid Date'
-      }
-    }
-
-    // Get the current status dates
-    const currentStatus = statusHistory.length > 0
-      ? statusHistory[statusHistory.length - 1]
-      : null
-
-    const startDate = currentStatus?.start_date || user.start_date
-    const endDate = currentStatus?.end_date || user.end_date
-
-    const getDepartmentName = (id: string) => {
-      const dept = departments.find(d => d.id === id)
-      return dept?.name || 'Unknown Department'
-    }
-
-    const getSubdepartmentName = (id: string) => {
-      for (const dept of departments) {
-        const subdept = dept.subdepartments?.find((s: any) => s.id === id)
-        if (subdept) return subdept.name
-      }
-      return 'Unknown Subdepartment'
-    }
-
-    return (
-      <TableRow key={`${user.id}-${refreshKey}`} className="border-b">
-        <TableCell className="font-medium w-12 text-center">{index + 1}</TableCell>
-        <TableCell className="font-medium">
-          {user.name || `User ${user.id}`}
-        </TableCell>
-        <TableCell className="text-muted-foreground">
-          {user.email || 'N/A'}
-        </TableCell>
-        {activeTab === 'officers' ? (
-          <>
-            <TableCell>
-              {currentDepartment?.name || 'N/A'}
-            </TableCell>
-            <TableCell>
-              {departmentHistory[0]?.start_date ? formatDate(departmentHistory[0].start_date) : 'N/A'}
-            </TableCell>
-            <TableCell>
-              {departmentHistory[0]?.end_date ? formatDate(departmentHistory[0].end_date) : 'Present'}
-            </TableCell>
-          </>
-        ) : (
-          <>
-            <TableCell className="capitalize">
-              {user.role.replace(/_/g, ' ')}
-            </TableCell>
-            <TableCell>
-              {lastStatusChange?.start_date ? new Date(lastStatusChange.start_date).toLocaleDateString() : 'N/A'}
-            </TableCell>
-            <TableCell>
-              {lastStatusChange?.end_date ? new Date(lastStatusChange.end_date).toLocaleDateString() : 'N/A'}
-            </TableCell>
-          </>
-        )}
-        <TableCell>
-          <div className="flex items-center gap-2">
-            <span className={`h-2 w-2 rounded-full ${isActive ? 'bg-green-500' : 'bg-gray-400'}`} />
-            {isActive ? 'Active' : 'Inactive'}
-          </div>
-        </TableCell>
-        <TableCell className="space-x-1">
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleEditUser(user)}
-              title="Edit user"
-              className="h-8 w-8 p-0"
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleViewHistory(user.id)}
-              title="View history"
-              className="h-8 w-8 p-0"
-            >
-              <History className="h-4 w-4" />
-            </Button>
-            {isActive ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleStatusChange(user.id, false)}
-                title="Deactivate user"
-                className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-              >
-                <UserX className="h-4 w-4" />
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleStatusChange(user.id, true)}
-                title="Reactivate user"
-                className="h-8 w-8 p-0 text-green-600 hover:text-green-700"
-              >
-                <UserCheck className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        </TableCell>
-      </TableRow>
-    )
+  // Helper function to get the current tab context
+  const getCurrentTabInfo = () => {
+    const isOfficerTab = activeTab.includes('officers')
+    const isActiveTab = activeTab.includes('active')
+    return { isOfficerTab, isActiveTab }
   }
+
+  const { isOfficerTab, isActiveTab } = getCurrentTabInfo()
 
   if (isLoading) {
     return <div>Loading users...</div>
@@ -343,77 +209,51 @@ export default function UsersPage() {
       <div className="flex items-center justify-between space-y-2">
         <h2 className="text-3xl font-bold tracking-tight">User Management</h2>
         <div className="flex items-center space-x-2">
-          <div className="flex items-center space-x-2">
-            {activeTab === 'officers' ? (
-              <AddOfficerDialog onOfficerAdded={refreshUsers} />
-            ) : (
-              <AddUserDialog
-                defaultRole="user"
-                onUserAdded={refreshUsers}
-                isEditMode={false}
-              />
-            )}
-          </div>
+          {isOfficerTab ? (
+            <AddOfficerDialog onOfficerAdded={refreshUsers} departments={departments} />
+          ) : (
+            <AddUserDialog
+              defaultRole="user"
+              onUserAdded={refreshUsers}
+              isEditMode={false}
+            />
+          )}
         </div>
       </div>
 
       <div className="space-y-4">
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) => {
-            setActiveTab(value as 'users' | 'officers')
-            setSelectedDepartment(null)
-          }}
-          className="space-y-4"
-        >
+        <Tabs defaultValue="users">
           <TabsList>
             <TabsTrigger value="users">Users</TabsTrigger>
             <TabsTrigger value="officers">Officers</TabsTrigger>
           </TabsList>
-          
-          {activeTab === 'officers' && departments.length > 0 && (
-            <div className="mt-4">
-              <h3 className="text-sm font-medium mb-2">Departments</h3>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant={!selectedDepartment ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setSelectedDepartment(null)}
-                >
-                  All Departments
-                </Button>
-                {departments.map((dept) => (
-                  <Button
-                    key={dept.id}
-                    variant={selectedDepartment === dept.id ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setSelectedDepartment(dept.id)}
-                  >
-                    {dept.name}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
 
-          <Tabs
-            value={activeStatusTab}
-            onValueChange={(value) => setActiveStatusTab(value as 'active' | 'inactive')}
-            className="space-y-4"
-          >
-            <TabsList>
-              <TabsTrigger value="active">Active {activeTab === 'users' ? 'Users' : 'Officers'}</TabsTrigger>
-              <TabsTrigger value="inactive">Inactive {activeTab === 'users' ? 'Users' : 'Officers'}</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="active" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Active {activeTab === 'users' ? 'Users' : 'Officers'}</CardTitle>
-                  <CardDescription>Manage your active {activeTab} accounts.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {activeTab === 'users' ? (
+          <TabsContent value="users">
+            <Tabs defaultValue='active-users' className="space-y-4">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="active-users" className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Active Users
+                </TabsTrigger>
+                <TabsTrigger value="inactive-users" className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Inactive Users
+                </TabsTrigger>
+              </TabsList>
+              {/* Active Users Tab */}
+              <TabsContent value="active-users" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      Active Users
+                      <span className="text-sm font-normal text-muted-foreground">
+                        ({activeUsers.length})
+                      </span>
+                    </CardTitle>
+                    <CardDescription>Manage your active user accounts.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
                     <UsersTable
                       users={activeUsers}
                       isActive={true}
@@ -422,7 +262,98 @@ export default function UsersPage() {
                       onEditUser={handleEditUser}
                       refreshKey={refreshKey}
                     />
-                  ) : (
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Inactive Users Tab */}
+              <TabsContent value="inactive-users" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      Inactive Users
+                      <span className="text-sm font-normal text-muted-foreground">
+                        ({inactiveUsers.length})
+                      </span>
+                    </CardTitle>
+                    <CardDescription>View and manage inactive user accounts.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <UsersTable
+                      users={inactiveUsers}
+                      isActive={false}
+                      onStatusChange={handleStatusChange}
+                      onViewHistory={handleViewHistory}
+                      onEditUser={handleEditUser}
+                      refreshKey={refreshKey}
+                    />
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          </TabsContent>
+
+          <TabsContent value="officers">
+            <Tabs defaultValue="active-officers"
+              value={activeTab}
+              onValueChange={(value) => {
+                setActiveTab(value as typeof activeTab)
+                setSelectedDepartment(null)
+              }}
+              className="space-y-4"
+            >
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="active-officers" className="flex items-center gap-2">
+                  <Briefcase className="h-4 w-4" />
+                  Active Officers
+                </TabsTrigger>
+                <TabsTrigger value="inactive-officers" className="flex items-center gap-2">
+                  <Briefcase className="h-4 w-4" />
+                  Inactive Officers
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Department Filter for Officer Tabs */}
+              {isOfficerTab && departments.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="text-sm font-medium mb-2">Filter by Department</h3>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant={!selectedDepartment ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setSelectedDepartment(null)}
+                    >
+                      All Departments
+                    </Button>
+                    {departments.map((dept) => (
+                      <Button
+                        key={dept.id}
+                        variant={selectedDepartment === dept.id ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setSelectedDepartment(dept.id)}
+                      >
+                        {dept.name}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Active Officers Tab */}
+              <TabsContent value="active-officers" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Briefcase className="h-5 w-5" />
+                      Active Officers
+                      <span className="text-sm font-normal text-muted-foreground">
+                        ({activeOfficers.length})
+                      </span>
+                    </CardTitle>
+                    <CardDescription>Manage your active officer accounts.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
                     <OfficersTable
                       officers={activeOfficers}
                       isActive={true}
@@ -433,28 +364,24 @@ export default function UsersPage() {
                       selectedDepartment={selectedDepartment}
                       refreshKey={refreshKey}
                     />
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
-            <TabsContent value="inactive" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Inactive {activeTab === 'users' ? 'Users' : 'Officers'}</CardTitle>
-                  <CardDescription>View and manage inactive {activeTab} accounts.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {activeTab === 'users' ? (
-                    <UsersTable
-                      users={inactiveUsers}
-                      isActive={false}
-                      onStatusChange={handleStatusChange}
-                      onViewHistory={handleViewHistory}
-                      onEditUser={handleEditUser}
-                      refreshKey={refreshKey}
-                    />
-                  ) : (
+              {/* Inactive Officers Tab */}
+              <TabsContent value="inactive-officers" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Briefcase className="h-5 w-5" />
+                      Inactive Officers
+                      <span className="text-sm font-normal text-muted-foreground">
+                        ({inactiveOfficers.length})
+                      </span>
+                    </CardTitle>
+                    <CardDescription>View and manage inactive officer accounts.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
                     <OfficersTable
                       officers={inactiveOfficers}
                       isActive={false}
@@ -465,22 +392,12 @@ export default function UsersPage() {
                       selectedDepartment={selectedDepartment}
                       refreshKey={refreshKey}
                     />
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          </TabsContent>
         </Tabs>
-
-        {/* Edit User Dialog */}
-        {editingUser && (
-          <AddUserDialog
-            user={editingUser}
-            isEditMode={true}
-            onUserAdded={handleUserUpdated}
-            defaultRole={editingUser.role as UserRole}
-          />
-        )}
       </div>
 
       {/* Edit User Dialog */}
@@ -490,11 +407,7 @@ export default function UsersPage() {
           onOpenChange={setIsEditDialogOpen}
           user={editingUser}
           isEditMode={true}
-          onUserAdded={() => {
-            refreshUsers()
-            setEditingUser(null)
-            setIsEditDialogOpen(false)
-          }}
+          onUserAdded={handleUserUpdated}
         />
       )}
 

@@ -563,6 +563,7 @@ export function StageUploadDialog({
       throw new Error(`Registry search failed: ${error.message}`)
     }
   }, [fuzzyMatch])
+  
   const uploadFileToStorage = useCallback(async (file: File, individualId: number, documentName: string, documentKycId: string): Promise<string> => {
     try {
       const bucketName = 'kyc-documents'
@@ -676,6 +677,7 @@ export function StageUploadDialog({
       console.log('Documents to submit:', documents.map(doc => ({
         fileName: doc.fileName,
         extractedData: doc.extractedData,
+        extractedDataKeys: Object.keys(doc.extractedData || {}),
         hasFile: !!doc.file
       })))
   
@@ -722,7 +724,7 @@ export function StageUploadDialog({
       }
   
       for (const [index, doc] of documents.entries()) {
-        // FIXED: Ensure we're using the most up-to-date extracted data
+        // FIXED: Use the document's extractedData directly (no additional processing needed)
         const extractedDetails = doc.extractedData || {}
         
         console.log(`Submitting document ${index + 1}:`, {
@@ -737,7 +739,7 @@ export function StageUploadDialog({
           director_id: selectedStageTask.task.individual_id,
           document_id: documentKycId,
           file_path: filename,
-          extracted_details: extractedDetails, // This now includes all field changes
+          extracted_details: extractedDetails, // This should now contain the correct data
           status: 'pending',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
@@ -1023,12 +1025,15 @@ export function StageUploadDialog({
       setUploading(false)
     }
   }, [selectedStageTask, convertMessageToPDF, handleFileUpload])
+
+  // FIXED: Simplified data change handler that directly updates the uploadedDocs state
   const handleDataChange = useCallback((docId: string, docIndex: number, fieldName: string, value: any) => {
-    console.log(`📝 Data change event:`, {
+    console.log(`📝 Data change event in StageUploadDialog:`, {
       docId,
       docIndex,
       fieldName,
       value,
+      valueType: typeof value,
       timestamp: new Date().toISOString()
     })
   
@@ -1038,10 +1043,12 @@ export function StageUploadDialog({
       if (updatedDocsForId[docIndex]) {
         const existingExtractedData = updatedDocsForId[docIndex].extractedData || {}
         
-        // FIXED: Update the extracted data with the correct field name
+        // FIXED: Process the value to ensure it's stored correctly
+        const processedValue = value === null || value === undefined ? '' : String(value);
+        
         const updatedExtractedData = {
           ...existingExtractedData,
-          [fieldName]: value === null ? '' : value,
+          [fieldName]: processedValue,
         }
   
         updatedDocsForId[docIndex] = {
@@ -1050,11 +1057,12 @@ export function StageUploadDialog({
           lastModified: new Date().toISOString()
         };
   
-        console.log(`✅ Updated document data:`, {
+        console.log(`✅ Updated document data in StageUploadDialog:`, {
           docId,
           docIndex,
           fieldName,
-          newValue: value,
+          previousValue: existingExtractedData[fieldName],
+          newValue: processedValue,
           allExtractedData: updatedExtractedData,
           extractedDataKeys: Object.keys(updatedExtractedData)
         })
@@ -1070,6 +1078,7 @@ export function StageUploadDialog({
     });
   }, [])
 
+  // FIXED: Create stable callbacks that are properly memoized
   const stableCallbacks = useMemo(() => {
     const callbacks: Record<string, (fieldName: string, value: any) => void> = {};
     
@@ -1077,12 +1086,12 @@ export function StageUploadDialog({
       uploadedDocs[docId].forEach((_, index) => {
         const key = `${docId}-${index}`;
         callbacks[key] = (fieldIdentifier: string, value: any) => {
-          // FIXED: Ensure we use the correct field identifier
-          console.log(`📝 StableCallback called:`, {
+          console.log(`📝 StableCallback triggered:`, {
             docId,
             index,
             fieldIdentifier,
-            value
+            value,
+            valueType: typeof value
           });
           
           handleDataChange(docId, index, fieldIdentifier, value);
@@ -1091,7 +1100,7 @@ export function StageUploadDialog({
     });
     
     return callbacks;
-  }, [uploadedDocs.length ? Object.keys(uploadedDocs).map(k => `${k}:${uploadedDocs[k].length}`).join(',') : '', handleDataChange]);
+  }, [Object.keys(uploadedDocs).map(k => `${k}:${uploadedDocs[k].length}`).join(','), handleDataChange]);
   
   const handleExistingSaveLogic = useCallback(async (docId: string, docsToSave: any[]) => {
     if (!selectedStageTask) return
@@ -1131,18 +1140,20 @@ export function StageUploadDialog({
     }))
   }, [selectedStageTask, updateLocalStorage])
 
+  // FIXED: Simplified data submission without DOM manipulation
   const handleDataSubmission = useCallback(async (docId: string, saveData: any) => {
     if (!selectedStageTask) return
    
     try {
       setUploading(true)
    
+      // FIXED: Get current documents from state directly
       const docsToSave = uploadedDocs[docId] || []
       if (docsToSave.length === 0) {
         throw new Error('No documents to save')
       }
   
-      console.log('🚀 Starting data submission:', {
+      console.log('🚀 Starting data submission (FIXED VERSION):', {
         docId,
         documentsCount: docsToSave.length,
         documentsData: docsToSave.map(doc => ({
@@ -1159,7 +1170,7 @@ export function StageUploadDialog({
         throw new Error('No individual ID found in task')
       }
   
-      // Submit documents with all the updated extracted data
+      // FIXED: Submit documents directly with their current extractedData
       await submitDocumentsToDatabase(docsToSave, { id: individualId }, docId)
       await handleExistingSaveLogic(docId, docsToSave)
   
@@ -1175,33 +1186,7 @@ export function StageUploadDialog({
       setUploading(false)
     }
   }, [selectedStageTask, uploadedDocs, submitDocumentsToDatabase, handleExistingSaveLogic])
-  const debugDocumentData = useCallback((documents: any[], docId: string) => {
-    console.log(`🔍 DEBUG: Document data before submission:`, {
-      docId,
-      documentsCount: documents.length,
-      documents: documents.map((doc, index) => ({
-        index,
-        fileName: doc.fileName,
-        extractedData: doc.extractedData,
-        extractedDataKeys: Object.keys(doc.extractedData || {}),
-        extractedDataValues: doc.extractedData
-      }))
-    });
-  
-    // Also check the current uploadedDocs state
-    const currentDocsForId = uploadedDocs[docId] || [];
-    console.log(`🔍 DEBUG: Current uploadedDocs for ${docId}:`, {
-      count: currentDocsForId.length,
-      documents: currentDocsForId.map((doc, index) => ({
-        index,
-        fileName: doc.fileName,
-        extractedData: doc.extractedData,
-        extractedDataKeys: Object.keys(doc.extractedData || {}),
-        lastModified: doc.lastModified
-      }))
-    });
-  }, [uploadedDocs]);
-  
+
   const handleSaveDocument = useCallback(async (docId: string, saveData: any) => {
     try {
       await handleDataSubmission(docId, saveData)
@@ -1713,7 +1698,7 @@ export function StageUploadDialog({
               </div>
               
               <ExtractionPreview
-                key={uploadedDoc.id} // Use document ID, not a changing key
+                key={uploadedDoc.id}
                 documentName={getDocumentDisplayName(doc)}
                 extractedData={uploadedDoc.extractedData || {}}
                 fieldsPromise={getStableFieldPromise(doc.id)}
@@ -1724,6 +1709,8 @@ export function StageUploadDialog({
                 showSaveButton={false}
                 type={doc.documentType || 'document'}
                 file={uploadedDoc.file}
+                documentId={doc.id}
+                documentIndex={index}
               />
             </div>
           )

@@ -64,6 +64,8 @@ interface ExtractionPreviewProps {
   type?: string
   file?: any
   viewMode?: boolean
+  documentId?: string
+  documentIndex?: number
   getStylesByType?: (type: string) => {
     getBgColor: () => string
     getTextColor: () => string
@@ -279,6 +281,8 @@ function ExtractionPreview({
   type = 'document',
   file,
   viewMode = false,
+  documentId,
+  documentIndex,
   getStylesByType = (type) => ({
     getBgColor: () => 'bg-primary',
     getTextColor: () => 'text-primary-foreground',
@@ -290,37 +294,26 @@ function ExtractionPreview({
   const [loadingFields, setLoadingFields] = useState(!!fieldsPromise);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // FIXED: Add local state for immediate UI feedback while maintaining parent sync
-  const [localData, setLocalData] = useState<Record<string, any>>(extractedData);
+  // FIXED: Use a single source of truth for form data
+  const [localFormData, setLocalFormData] = useState<Record<string, any>>({});
 
   console.log('ExtractionPreview rendering with:', {
     documentName,
     fileUrl,
     fileName,
     extractedData,
-    localData,
+    localFormData,
     initialFields,
-    viewMode
+    viewMode,
+    documentId,
+    documentIndex
   });
 
-  // FIXED: Sync local data with prop changes
+  // FIXED: Initialize form data only from extractedData prop
   useEffect(() => {
-    // Initialize local data with extracted data, but preserve any existing values
-    const newLocalData = {};
-    Object.entries(extractedData).forEach(([key, value]) => {
-      newLocalData[key] = value;
-      // Also store under field ID if it exists
-      const field = fields.find(f => f.name === key);
-      if (field) {
-        newLocalData[field.id] = value;
-      }
-    });
-    setLocalData(newLocalData);
-    console.log('🔄 Initialized local data with extracted data:', {
-      extractedDataKeys: Object.keys(extractedData),
-      localDataKeys: Object.keys(newLocalData)
-    });
-  }, [extractedData, fields]);
+    console.log('🔄 Initializing form data from extractedData:', extractedData);
+    setLocalFormData(extractedData || {});
+  }, [JSON.stringify(extractedData)]);
 
   // FIXED: Handle fields loading more efficiently
   useEffect(() => {
@@ -344,154 +337,21 @@ function ExtractionPreview({
   }, [fieldsPromise]); // Only depend on fieldsPromise
 
   const getFieldValue = useCallback((field: Field): any => {
+    // FIXED: Only use localFormData as the source of truth
+    const value = localFormData[field.name] ?? localFormData[field.id] ?? '';
+    
     console.log('🔍 Getting value for field:', {
       fieldName: field.name,
       fieldId: field.id,
-      fieldPath: field.parentField ? `${field.parentField}.${field.name}` : field.name,
-      localDataKeys: Object.keys(localData),
-      extractedDataKeys: Object.keys(extractedData)
+      value: value,
+      localFormData: localFormData
     });
 
-    // Try to get value from local data first
-    let value = localData[field.name];
-    if (value !== undefined) {
-      console.log('✅ Found value in localData by name:', {
-        field: field.name,
-        value
-      });
-      return value;
-    }
+    return value;
+  }, [localFormData]);
 
-    // Try field ID if name wasn't found
-    value = localData[field.id];
-    if (value !== undefined) {
-      console.log('✅ Found value in localData by ID:', {
-        field: field.id,
-        value
-      });
-      return value;
-    }
-
-    // Try to get value from extractedData
-    value = extractedData[field.name];
-    if (value !== undefined) {
-      console.log('✅ Found value in extractedData by name:', {
-        field: field.name,
-        value
-      });
-      return value;
-    }
-
-    // Try field ID in extractedData
-    value = extractedData[field.id];
-    if (value !== undefined) {
-      console.log('✅ Found value in extractedData by ID:', {
-        field: field.id,
-        value
-      });
-      return value;
-    }
-
-    // If still not found, check for case-insensitive matches
-    const lowerCaseName = field.name?.toLowerCase();
-    const lowerCaseId = field.id?.toLowerCase();
-
-    // Check localData case-insensitive
-    const localMatch = Object.entries(localData).find(([key, val]) =>
-      key.toLowerCase() === lowerCaseName || key.toLowerCase() === lowerCaseId
-    );
-
-    if (localMatch) {
-      console.log('✅ Found value in localData by case-insensitive match:', {
-        field: field.name,
-        key: localMatch[0],
-        value: localMatch[1]
-      });
-      return localMatch[1];
-    }
-
-    // Check extractedData case-insensitive
-    const extractedMatch = Object.entries(extractedData).find(([key, val]) =>
-      key.toLowerCase() === lowerCaseName || key.toLowerCase() === lowerCaseId
-    );
-
-    if (extractedMatch) {
-      console.log('✅ Found value in extractedData by case-insensitive match:', {
-        field: field.name,
-        key: extractedMatch[0],
-        value: extractedMatch[1]
-      });
-      return extractedMatch[1];
-    }
-
-    // If still not found, log error
-    console.error('❌ Failed to find value for field:', {
-      field: field.name,
-      fieldId: field.id,
-      localDataKeys: Object.keys(localData),
-      extractedDataKeys: Object.keys(extractedData)
-    });
-
-    return '';
-  }, [localData, extractedData]);
-
-
+  // FIXED: Simplified field change handler that immediately syncs with parent
   const handleFieldChange = useCallback((field: Field, value: any) => {
-    if (viewMode) return;
-
-    console.log(`🔄 Field changed in ExtractionPreview:`, {
-      fieldName: field.name,
-      fieldId: field.id,
-      newValue: value,
-      timestamp: new Date().toISOString(),
-      parentField: field.parentField,
-      fieldPath: field.parentField ? `${field.parentField}.${field.name}` : field.name
-    });
-
-    // Update local state immediately for UI feedback
-    setLocalData(prev => {
-      const updatedData = {
-        ...prev,
-        // Store under both field ID and name for compatibility
-        [field.id]: value,
-        [field.name]: value,
-        // If this is a nested field, update the parent array
-        ...(field.parentField && {
-          [field.parentField]: {
-            ...prev[field.parentField],
-            [field.name]: value
-          }
-        })
-      };
-
-      console.log(`📊 Local data updated:`, {
-        fieldName: field.name,
-        fieldId: field.id,
-        previousValue: prev[field.id] || prev[field.name],
-        newValue: value,
-        allData: updatedData,
-        fieldPath: field.parentField ? `${field.parentField}.${field.name}` : field.name
-      });
-
-      return updatedData;
-    });
-
-    // Call parent's onDataChange with field.name
-    if (onDataChange) {
-      console.log(`📤 Calling parent onDataChange with field.name:`, {
-        fieldId: field.id,
-        fieldName: field.name,
-        keyUsed: field.name,
-        value: value,
-        parentField: field.parentField,
-        fieldPath: field.parentField ? `${field.parentField}.${field.name}` : field.name
-      });
-
-      // Use field.name as the key for consistency with submission expectations
-      onDataChange(field.name, value);
-    } else {
-      console.warn('⚠️ onDataChange callback not provided');
-    }
     if (viewMode) return;
 
     console.log(`🔄 Field changed in ExtractionPreview:`, {
@@ -501,18 +361,18 @@ function ExtractionPreview({
       timestamp: new Date().toISOString()
     });
 
-    // Update local state immediately for UI feedback
-    setLocalData(prev => {
+    // FIXED: Update local form data immediately
+    setLocalFormData(prev => {
       const updatedData = {
         ...prev,
-        [field.id]: value,
-        [field.name]: value // Store under both keys for compatibility
+        [field.name]: value,
+        [field.id]: value // Store under both keys for compatibility
       };
 
-      console.log(`📊 Local data updated:`, {
+      console.log(`📊 Local form data updated:`, {
         fieldName: field.name,
         fieldId: field.id,
-        previousValue: prev[field.id] || prev[field.name],
+        previousValue: prev[field.name],
         newValue: value,
         allData: updatedData
       });
@@ -520,16 +380,16 @@ function ExtractionPreview({
       return updatedData;
     });
 
-    // FIXED: Call parent's onDataChange with field.name instead of field.id
+    // FIXED: Immediately call parent's onDataChange
     if (onDataChange) {
-      console.log(`📤 Calling parent onDataChange with field.name:`, {
+      console.log(`📤 Calling parent onDataChange IMMEDIATELY:`, {
         fieldId: field.id,
         fieldName: field.name,
-        keyUsed: field.name, // This is what we're using now
+        keyUsed: field.name,
         value: value
       });
 
-      // Use field.name as the key for consistency with submission expectations
+      // Call onDataChange immediately, not in a setTimeout or async operation
       onDataChange(field.name, value);
     } else {
       console.warn('⚠️ onDataChange callback not provided');
@@ -559,7 +419,6 @@ function ExtractionPreview({
     handleFieldChange(field, currentArray);
   }, [viewMode, getFieldValue, handleFieldChange]);
 
-
   const addArrayItem = useCallback((field: Field) => {
     if (viewMode) return;
     const currentArray = Array.isArray(getFieldValue(field)) ? [...getFieldValue(field)] : [];
@@ -580,6 +439,7 @@ function ExtractionPreview({
     if (!str) return '';
     return str.replace(/_/g, ' ').replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
   }, []);
+
   const renderField = useCallback((field: Field) => {
     const isArrayField = field.type === 'array' || field.isArray;
     const displayName = toTitleCase(field.name || '');
@@ -676,6 +536,8 @@ function ExtractionPreview({
         </Label>
         <Input
           id={field.id}
+          data-field-name={field.name}
+          data-field-id={field.id}
           value={currentValue || ''}
           onChange={(e) => {
             console.log(`📝 Simple field changed:`, {
@@ -696,21 +558,21 @@ function ExtractionPreview({
   const handleSave = useCallback(() => {
     console.log(`💾 Save initiated:`, {
       documentName,
-      localData,
+      localFormData,
       hasOnSave: !!onSave,
       hasOnVerify: !!onVerify
     });
 
     if (onSave) {
-      console.log(`📤 Calling onSave with data:`, localData);
-      onSave(localData); // Use local data for save
+      console.log(`📤 Calling onSave with data:`, localFormData);
+      onSave(localFormData);
     } else if (onVerify) {
       console.log(`✅ Calling onVerify`);
       onVerify();
     } else {
       console.warn('⚠️ No save or verify callback available');
     }
-  }, [onSave, onVerify, localData, documentName]);
+  }, [onSave, onVerify, localFormData, documentName]);
 
   // FIXED: Memoize the rendered fields to prevent re-renders
   const renderedFields = useMemo(() => {
@@ -739,33 +601,11 @@ function ExtractionPreview({
   const styles = getStylesByType?.(type || 'principal') || {};
 
   const content = (
-    <div className="space-y-6 max-w-9xl">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        {/* <div className="flex items-center gap-3">
-          <div className={`flex items-center justify-center h-10 w-10 rounded-lg ${styles.getBgColor?.() || 'bg-primary'}`}>
-            <FileText className={`h-5 w-5 ${styles.getTextColor?.() || 'text-primary-foreground'}`} />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold tracking-tight">{documentName}</h2>
-            {type && <Badge variant="secondary" className="mt-1">{toTitleCase(type)}</Badge>}
-          </div>
-        </div> */}
-        {/* <div className="flex items-center gap-2 justify-end">
-          {fileUrl && (
-            <Button asChild variant="outline" size="sm">
-              <a href={fileUrl} download={fileName}>  
-                <Download className="mr-2 h-4 w-4" /> Download
-              </a>
-            </Button>
-          )}
-          {onRemoveFile && !viewMode && (
-            <Button variant="destructive" size="sm" onClick={onRemoveFile}>
-              <Trash2 className="mr-2 h-4 w-4" /> Delete
-            </Button>
-          )}
-        </div> */}
-      </div>
-
+    <div 
+      className="space-y-6 max-w-9xl"
+      data-doc-id={documentId}
+      data-doc-index={documentIndex}
+    >
       <div className="grid grid-cols-3 xl:grid-cols-3 gap-6">
         <div className="col-span-2">
           <DocumentViewer fileUrl={fileUrl} fileName={fileName} documentName={documentName} />
