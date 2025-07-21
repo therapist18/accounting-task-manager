@@ -296,7 +296,7 @@ export default function EditableStageCell({
 
         // Extract date from most recent document only if no indicator AND not old
         if (!mostRecentDoc.indicator && !isOldDoc) {
-          const dateFields = ['application_date', 'date', 'upload_date', 'created_date', 'date_generated', 'invoice_date_and_time'];
+          const dateFields = ['application_date', 'date', 'upload_date', 'created_date', 'date_and_time_generated', 'invoice_date_and_time'];
           for (const field of dateFields) {
             if (mostRecentDoc.extracted_details && mostRecentDoc.extracted_details[field]) {
               setStageDate(mostRecentDoc.extracted_details[field]);

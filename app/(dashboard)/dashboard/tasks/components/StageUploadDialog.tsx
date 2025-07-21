@@ -1469,7 +1469,7 @@ export function StageUploadDialog({
                 documentType === 'upload' ? "Upload document only (PDF/Images)" :
                   documentType === 'extraction' ? "PDF only (data extraction required)" :
                     "Accepts PDF and image files"}
-              {hasExistingDocs && " • New upload will replace existing documents"}
+              {/* {hasExistingDocs && " • New upload will replace existing documents"} */}
             </p>
 
             {uploadProgress[doc.id] > 0 && uploadProgress[doc.id] < 100 && (
