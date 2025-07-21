@@ -89,16 +89,16 @@ function DocumentFieldCell({ document, field, isOldDocument = false }) {
 }
 
 // Enhanced Document Stage Cell with KYC document names and indicator handling
-function DocumentStageCell({ 
-  stage, 
-  task, 
-  onDocumentUpload, 
-  onShowDocuments, 
-  getKycFields, 
-  allDocuments, 
-  isStageApplicableToTask, 
+function DocumentStageCell({
+  stage,
+  task,
+  onDocumentUpload,
+  onShowDocuments,
+  getKycFields,
+  allDocuments,
+  isStageApplicableToTask,
   isDocumentApplicableToTask,
-  kycDocuments 
+  kycDocuments
 }) {
   if (!stage.documents || stage.documents.length === 0) {
     return <span className="text-xs text-gray-400 italic">N/A</span>
@@ -106,14 +106,14 @@ function DocumentStageCell({
 
   // Check if stage is applicable to task
   const stageApplicable = isStageApplicableToTask(stage, task)
-  
+
   if (!stageApplicable) {
     return <span className="text-xs text-gray-400 italic">N/A</span>
   }
 
   // Check if any document in this stage is applicable to the task
   const hasApplicableDocuments = stage.documents.some(doc => isDocumentApplicableToTask(doc, task))
-  
+
   if (!hasApplicableDocuments) {
     return <span className="text-xs text-gray-400 italic">N/A</span>
   }
@@ -123,7 +123,7 @@ function DocumentStageCell({
   if (!applicableDoc) {
     return <span className="text-xs text-gray-400 italic">N/A</span>
   }
-  
+
   // Get document name from KYC data, not from stage config
   const kycData = kycDocuments.get(applicableDoc.kycId)
   const documentDisplayName = kycData?.display_name || kycData?.name || applicableDoc.display_name || applicableDoc.name || 'Document'
@@ -134,9 +134,9 @@ function DocumentStageCell({
   )
 
   const hasDocument = !!document
-  const isOldDocument = document && task.created_at && 
+  const isOldDocument = document && task.created_at &&
     isDocumentOlderThanTask(document.created_at, task.created_at)
-  
+
   // Check if document has indicator (hide preview if true)
   const hasIndicator = document?.indicator === true
 
@@ -287,7 +287,7 @@ export default function DepartmentTasksManager({
     }
     return Promise.resolve(allKycFields[doc.kycId] || []);
   }, [allKycFields])
-  
+
   // Fetch all KYC fields for all document types - Updated to include display_name
   const fetchAllKycFields = useCallback(async () => {
     try {
@@ -295,12 +295,12 @@ export default function DepartmentTasksManager({
       const { data, error } = await supabase
         .from('acc_portal_kyc')
         .select('id, fields, name, display_name')
-      
+
       if (error) throw error;
-      
+
       const fieldsMap: Record<string, any[]> = {};
       const kycDocsMap = new Map();
-      
+
       // Transform and store fields by kycId and cache KYC documents
       data?.forEach(doc => {
         if (doc.id && doc.fields) {
@@ -308,7 +308,7 @@ export default function DepartmentTasksManager({
           kycDocsMap.set(doc.id, doc);
         }
       });
-      
+
       console.log(`Fetched KYC fields for ${Object.keys(fieldsMap).length} document types`);
       setAllKycFields(fieldsMap);
       setKycDocuments(kycDocsMap);
@@ -433,7 +433,7 @@ export default function DepartmentTasksManager({
   // Check if a stage document is applicable to a task
   const isStageDocumentApplicable = useCallback((stage: any, task: any) => {
     if (!stage.documents || stage.documents.length === 0) return false;
-    
+
     // Check if any document in this stage is applicable to the task
     return stage.documents.some(doc => isDocumentApplicableToTask(doc, task));
   }, [isDocumentApplicableToTask])
@@ -465,10 +465,10 @@ export default function DepartmentTasksManager({
   // Get default subdepartments for current department
   const getDefaultSubdepartments = useCallback(() => {
     if (!activeDepartmentTab || !departments.length) return []
-    
+
     const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
     if (!currentDept) return []
-    
+
     return currentDept.tm_subdepartments?.filter(sub => sub.default_display) || []
   }, [activeDepartmentTab, departments])
 
@@ -522,7 +522,7 @@ export default function DepartmentTasksManager({
       return newSet
     })
   }
-  
+
   // Expand/Collapse all functions
   const expandAll = () => {
     setExpandedSections(new Set(['case_details', 'stages', 'stats']))
@@ -602,158 +602,158 @@ export default function DepartmentTasksManager({
     setIsStageUploadDialogOpen(true)
   }, [departments])
 
-// Handle document view using KYC fields with proper KYC document name fetching
-// Updated to prevent preview for old documents
-const handleViewDocument = useCallback(async (task: any, stage: any) => {
-  try {
-    const document = getDocumentForTaskStage(task, stage);
+  // Handle document view using KYC fields with proper KYC document name fetching
+  // Updated to prevent preview for old documents
+  const handleViewDocument = useCallback(async (task: any, stage: any) => {
+    try {
+      const document = getDocumentForTaskStage(task, stage);
 
-    if (!document) {
-      toast({
-        title: 'No documents found',
-        description: `No documents uploaded for this stage yet.`,
-        variant: 'default',
-      });
-      return;
-    }
+      if (!document) {
+        toast({
+          title: 'No documents found',
+          description: `No documents uploaded for this stage yet.`,
+          variant: 'default',
+        });
+        return;
+      }
 
-    // Check if document has indicator and prevent preview
-    if (document.indicator === true) {
-      toast({
-        title: 'Preview not available',
-        description: 'Document preview is not available for this document.',
-        variant: 'default',
-      });
-      return;
-    }
+      // Check if document has indicator and prevent preview
+      if (document.indicator === true) {
+        toast({
+          title: 'Preview not available',
+          description: 'Document preview is not available for this document.',
+          variant: 'default',
+        });
+        return;
+      }
 
-    // Check if document is older than task creation and prevent preview
-    const isOldDocument = task.created_at && 
-      isDocumentOlderThanTask(document.created_at, task.created_at);
-    
-    if (isOldDocument) {
-      toast({
-        title: 'Preview not available',
-        description: 'Document is older than task creation - preview disabled.',
-        variant: 'default',
-      });
-      return;
-    }
+      // Check if document is older than task creation and prevent preview
+      const isOldDocument = task.created_at &&
+        isDocumentOlderThanTask(document.created_at, task.created_at);
 
-    // Get KYC document data using document_id
-    const kycId = document.document_id;
-    if (!kycId) {
-      toast({
-        title: 'Error',
-        description: 'No KYC document ID found.',
-        variant: 'destructive',
-      });
-      return;
-    }
+      if (isOldDocument) {
+        toast({
+          title: 'Preview not available',
+          description: 'Document is older than task creation - preview disabled.',
+          variant: 'default',
+        });
+        return;
+      }
 
-    // Fetch KYC document data from database
-    const { data: kycData, error: kycError } = await supabase
-      .from('acc_portal_kyc')
-      .select('id, fields, name, display_name')
-      .eq('id', kycId)
-      .single();
+      // Get KYC document data using document_id
+      const kycId = document.document_id;
+      if (!kycId) {
+        toast({
+          title: 'Error',
+          description: 'No KYC document ID found.',
+          variant: 'destructive',
+        });
+        return;
+      }
 
-    if (kycError || !kycData) {
-      console.error('Error fetching KYC document:', kycError);
-      toast({
-        title: 'Error',
-        description: 'Failed to load document configuration.',
-        variant: 'destructive',
-      });
-      return;
-    }
+      // Fetch KYC document data from database
+      const { data: kycData, error: kycError } = await supabase
+        .from('acc_portal_kyc')
+        .select('id, fields, name, display_name')
+        .eq('id', kycId)
+        .single();
 
-    // Use KYC document display_name or name, not stage document name
-    const documentName = kycData.display_name || kycData.name || 'Document';
-    
-    // Transform KYC fields
-    const transformKycFields = (fields: any[]): any[] => {
-      if (!Array.isArray(fields)) return []
+      if (kycError || !kycData) {
+        console.error('Error fetching KYC document:', kycError);
+        toast({
+          title: 'Error',
+          description: 'Failed to load document configuration.',
+          variant: 'destructive',
+        });
+        return;
+      }
 
-      return fields.map((field: any) => {
-        const isArray = field.type === 'array' || field.isArray === true
+      // Use KYC document display_name or name, not stage document name
+      const documentName = kycData.display_name || kycData.name || 'Document';
 
-        const transformedField: any = {
-          id: field.id || field.fieldName || '',
-          fieldName: field.name || field.fieldName || '',
-          description: field.description || '',
-          isRequired: field.isRequired !== false,
-          fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
-          parentField: field.parentField,
-          isArray: isArray,
-        }
+      // Transform KYC fields
+      const transformKycFields = (fields: any[]): any[] => {
+        if (!Array.isArray(fields)) return []
 
-        if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
-          transformedField.arrayConfig = {
-            maxItems: field.arrayConfig.maxItems,
-            fields: transformKycFields(field.arrayConfig.fields)
+        return fields.map((field: any) => {
+          const isArray = field.type === 'array' || field.isArray === true
+
+          const transformedField: any = {
+            id: field.id || field.fieldName || '',
+            fieldName: field.name || field.fieldName || '',
+            description: field.description || '',
+            isRequired: field.isRequired !== false,
+            fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
+            parentField: field.parentField,
+            isArray: isArray,
           }
+
+          if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
+            transformedField.arrayConfig = {
+              maxItems: field.arrayConfig.maxItems,
+              fields: transformKycFields(field.arrayConfig.fields)
+            }
+          }
+
+          return transformedField
+        })
+      };
+
+      // Get KYC fields from the KYC document data
+      const kycFields = transformKycFields(kycData.fields || []);
+      const fields = kycFields.map(field => ({
+        id: field.id || field.fieldName,
+        name: field.fieldName,
+        type: field.fieldType,
+        required: field.isRequired,
+        description: field.description,
+        isArray: field.isArray,
+        arrayConfig: field.arrayConfig
+      }));
+
+      // Prepare extracted data, ensuring all fields are present
+      const extractedData = { ...(document.extracted_details || {}) };
+      fields.forEach(field => {
+        if (extractedData[field.id] === undefined) {
+          extractedData[field.id] = '';
         }
+      });
 
-        return transformedField
-      })
-    };
+      // Format file URL
+      const bucketName = 'kyc-documents';
+      const filePath = document.file_path?.startsWith(bucketName)
+        ? document.file_path
+        : `${bucketName}/${document.file_path}`;
+      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+      const fileName = document.file_path?.split('/').pop() || documentName;
 
-    // Get KYC fields from the KYC document data
-    const kycFields = transformKycFields(kycData.fields || []);
-    const fields = kycFields.map(field => ({
-      id: field.id || field.fieldName,
-      name: field.fieldName,
-      type: field.fieldType,
-      required: field.isRequired,
-      description: field.description,
-      isArray: field.isArray,
-      arrayConfig: field.arrayConfig
-    }));
+      // Prepare preview data
+      const previewData = {
+        documentId: document.id,
+        documentName,
+        fileUrl,
+        fileName,
+        extractedData,
+        fields,
+        type: kycData.documentType || 'document',
+        file: {
+          name: fileName,
+          type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
+          url: fileUrl
+        }
+      };
 
-    // Prepare extracted data, ensuring all fields are present
-    const extractedData = { ...(document.extracted_details || {}) };
-    fields.forEach(field => {
-      if (extractedData[field.id] === undefined) {
-        extractedData[field.id] = '';
-      }
-    });
+      setPreviewDocument(previewData);
+    } catch (error) {
+      console.error('Error preparing document for view:', error);
+      toast({
+        title: 'Error',
+        description: `Failed to load document: ${error.message}`,
+        variant: 'destructive',
+      });
+    }
+  }, [getDocumentForTaskStage]);
 
-    // Format file URL
-    const bucketName = 'kyc-documents';
-    const filePath = document.file_path?.startsWith(bucketName) 
-      ? document.file_path 
-      : `${bucketName}/${document.file_path}`;
-    const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
-    const fileName = document.file_path?.split('/').pop() || documentName;
-
-    // Prepare preview data
-    const previewData = {
-      documentId: document.id,
-      documentName,
-      fileUrl,
-      fileName,
-      extractedData,
-      fields,
-      type: kycData.documentType || 'document',
-      file: {
-        name: fileName,
-        type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
-        url: fileUrl
-      }
-    };
- 
-    setPreviewDocument(previewData);
-  } catch (error) {
-    console.error('Error preparing document for view:', error);
-    toast({
-      title: 'Error',
-      description: `Failed to load document: ${error.message}`,
-      variant: 'destructive',
-    });
-  }
- }, [getDocumentForTaskStage]);
- 
   // Fetch companies
   const fetchCompanies = async () => {
     try {
@@ -761,9 +761,9 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       const { data, error } = await supabase
         .from('acc_portal_company_duplicate')
         .select('id, company_name')
- 
+
       if (error) throw error
- 
+
       if (data) {
         const companyMap = new Map(data.map(c => [c.id, c.company_name]))
         setCompanies(companyMap)
@@ -779,7 +779,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       setCompaniesLoading(false)
     }
   }
- 
+
   // Fetch tasks with related data
   const fetchTasks = useCallback(async (departmentId?: string, subdepartmentId?: string) => {
     try {
@@ -792,19 +792,19 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
           current_stage:current_stage_id (id, name, order_num)
         `)
         .order('created_at', { ascending: false })
- 
+
       if (departmentId) {
         query = query.eq('department_id', departmentId)
       }
- 
+
       if (subdepartmentId) {
         query = query.eq('subdepartment_id', subdepartmentId)
       }
- 
+
       const { data, error } = await query
- 
+
       if (error) throw error;
-      
+
       // Mock dependants for demonstration
       const tasksWithMockedDependants = (data || []).map(task => {
         if (task.id === 2 && task.dependant_member?.length > 0) {
@@ -818,9 +818,9 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         }
         return task;
       });
- 
+
       setTasks(tasksWithMockedDependants)
- 
+
     } catch (error) {
       console.error('Error fetching tasks:', error)
       toast({ title: "Error", description: "Failed to load tasks.", variant: "destructive" })
@@ -828,13 +828,13 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       setTasksLoading(false)
     }
   }, [])
- 
+
   // Handle new enquiry creation
   const handleEnquiryCreated = useCallback(async (newEnquiry: any) => {
     try {
       setTasks(prevTasks => [newEnquiry, ...prevTasks])
       await fetchTasks(activeDepartmentTab, activeSubdepartmentTab);
- 
+
       toast({
         title: "Success",
         description: "New enquiry created successfully",
@@ -849,13 +849,13 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       });
     }
   }, [fetchTasks, activeDepartmentTab, activeSubdepartmentTab])
- 
+
   // Fetch and process stages for a department
   const fetchStages = async (departmentId: string) => {
     try {
       const department = departments.find(d => d.id.toString() === departmentId.toString())
       if (!department) return
- 
+
       const uniqueStages = new Map()
       department.stages.forEach(stage => {
         if (!uniqueStages.has(stage.id)) {
@@ -869,7 +869,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       toast({ title: "Error", description: "Failed to load stages.", variant: "destructive" })
     }
   }
- 
+
   // Initial data loading
   useEffect(() => {
     const initializeData = async () => {
@@ -879,10 +879,10 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         fetchAllKycFields(),
       ]);
     };
- 
+
     initializeData();
   }, [fetchAllDocuments, fetchAllKycFields])
- 
+
   useEffect(() => {
     const loadInitialData = async () => {
       setDepartmentsLoading(true)
@@ -911,11 +911,11 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
     }
     loadInitialData()
   }, [fetchAllDocuments])
-  
+
   // Effect to fetch KYC data for expanded documents in standard view
   useEffect(() => {
     if (isTransposedView) return;
- 
+
     const idsToFetch = new Set<string>();
     stages.forEach(stage => {
       if (expandedStages.has(stage.id)) {
@@ -926,12 +926,12 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         });
       }
     });
- 
+
     if (idsToFetch.size > 0) {
       idsToFetch.forEach(id => fetchKycDocument(id));
     }
   }, [isTransposedView, stages, expandedStages, expandedDocuments, kycDocuments, fetchKycDocument]);
- 
+
   // Handle task actions
   const handleTaskAction = useCallback((action: { type: string; taskId?: string | number;[key: string]: any }) => {
     switch (action.type) {
@@ -947,7 +947,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         onTaskAction?.(action)
     }
   }, [activeDepartmentTab, activeSubdepartmentTab, onTaskAction, fetchAllDocuments, fetchTasks])
- 
+
   // Fetch tasks and stages when department or subdepartment changes
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {
@@ -955,7 +955,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       fetchStages(activeDepartmentTab)
     }
   }, [activeDepartmentTab, activeSubdepartmentTab, departments, fetchTasks])
- 
+
   // Update activeSubdepartmentTab when department changes
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {
@@ -970,7 +970,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       }
     }
   }, [activeDepartmentTab, departments])
- 
+
   // Get task hierarchy info
   const getTaskHierarchy = useCallback((task: any) => {
     if (!task || !departments.length) return null
@@ -981,41 +981,41 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
     const subCls = cls?.subClasses?.find(sc => sc.id.toString() === task.subclass_id?.toString())
     return { department: dept, subdepartment: subdept, class: cls, subclass: subCls }
   }, [departments])
- 
+
   // Filter tasks by department and status
   const getFilteredTasks = useCallback((status?: string) => {
     if (!departments.length || !activeDepartmentTab || !tasks.length) return []
     const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
     if (!currentDept) return []
-    
+
     let filteredTasks = tasks.filter(task =>
       task &&
       task.department?.id?.toString() === currentDept.id.toString() &&
       (!status || task.status === status)
     )
- 
+
     // Filter by subdepartment if one is selected
     if (activeSubdepartmentTab) {
-      filteredTasks = filteredTasks.filter(task => 
+      filteredTasks = filteredTasks.filter(task =>
         task.subdepartment?.id?.toString() === activeSubdepartmentTab
       )
     }
- 
+
     return filteredTasks
   }, [tasks, departments, activeDepartmentTab, activeSubdepartmentTab])
- 
+
   // Filter WIP tasks by follow-up
   const getWIPTasksByFollowUp = useCallback((followUpFilter: string) => {
     const wipTasks = getFilteredTasks('in_progress')
     if (followUpFilter === 'all') return wipTasks
- 
+
     return wipTasks.filter(task => {
       if (!task.current_stage) return false
       const currentStage = stages.find(s => s.id === task.current_stage.id)
       if (!currentStage) return false
- 
+
       const stageFollowUp = currentStage.follow_up?.toLowerCase() || null
- 
+
       switch (followUpFilter) {
         case 'bcl':
           return stageFollowUp === 'bcl'
@@ -1028,13 +1028,13 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       }
     })
   }, [getFilteredTasks, stages])
- 
+
   // Global search functionality
   const filterTasksBySearch = useCallback((tasks: any[]) => {
     if (!globalSearchTerm.trim()) return tasks
- 
+
     const searchTerm = globalSearchTerm.toLowerCase()
- 
+
     return tasks.filter(task => {
       // Search in basic task fields
       const basicFields = [
@@ -1051,31 +1051,31 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         getTaskHierarchy(task)?.class?.name,
         getTaskHierarchy(task)?.subclass?.name
       ].filter(Boolean).join(' ').toLowerCase()
- 
+
       if (basicFields.includes(searchTerm)) return true
- 
+
       // Search in dependants
       if (task.dependnats_members && Array.isArray(task.dependnats_members)) {
         const dependantsText = task.dependnats_members.map(dep =>
           [dep.name, dep.nationality, dep.age?.toString(), dep.relationship].filter(Boolean).join(' ')
         ).join(' ').toLowerCase()
- 
+
         if (dependantsText.includes(searchTerm)) return true
       }
- 
+
       return false
     })
   }, [globalSearchTerm, companies, getTaskHierarchy])
- 
+
   // Memoized task lists with search filtering
   const enquiryTasks = useMemo(() => filterTasksBySearch(getFilteredTasks('enquiry')), [getFilteredTasks, filterTasksBySearch])
   const wipTasks = useMemo(() => filterTasksBySearch(getWIPTasksByFollowUp(activeFollowUpFilter)), [getWIPTasksByFollowUp, activeFollowUpFilter, filterTasksBySearch])
   const completedTasks = useMemo(() => filterTasksBySearch(getFilteredTasks('completed')), [getFilteredTasks, filterTasksBySearch])
- 
+
   // Task actions handlers
   const handleTaskEdit = (task: any) => { setEditingTask(task); setEditDialogOpen(true) }
   const handleTaskUpdate = (updatedTask: any) => { onTaskUpdate?.(updatedTask); setEditDialogOpen(false); setEditingTask(null) }
- 
+
   // Export to CSV
   const handleExport = useCallback((tasks: any[], tableType: string) => {
     if (!tasks.length) {
@@ -1084,17 +1084,17 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
     }
     toast({ title: "Export Successful", description: `${tableType} data exported.` })
   }, [])
- 
+
   // Generate enhanced table rows for transposed view using KYC fields
   const generateEnhancedTableRows = useCallback(async (tasks: Task[]) => {
     if (!tasks.length) return []
- 
+
     const allStages = stages.filter(stage => stage).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
     const rows = []
- 
+
     // Stats Section
     rows.push({ key: 'section_header_stats', type: 'section_header', label: 'Statistics', id: 'stats', icon: Briefcase });
- 
+
     if (expandedSections.has('stats')) {
       // Calculate stats for each task with visibility toggle
       if (visibleStats.has('stats_completed')) {
@@ -1135,10 +1135,10 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         })
       }
     }
- 
+
     // Case Details Section
     rows.push({ key: 'section_header_case_details', type: 'section_header', label: 'Case Details', id: 'case_details', icon: Users });
- 
+
     if (expandedSections.has('case_details')) {
       // Add header fields based on visibility
       if (visibleHeaders.has('id')) {
@@ -1166,10 +1166,10 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         rows.push({ key: 'age', label: 'Age', type: 'basic', getValue: (task: any) => task.age?.toString() || 'N/A' })
       }
     }
-    
+
     // Stages Section
     rows.push({ key: 'section_header_stages', type: 'section_header', label: 'Stages', id: 'stages', icon: Briefcase });
- 
+
     if (expandedSections.has('stages')) {
       for (const stage of allStages) {
         rows.push({
@@ -1181,13 +1181,13 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
           stageOrder: stage.order_num || 0,
           getValue: (task: Task) => isStageApplicableToTask(stage, task) ? task.stages?.[stage.id] : 'N/A'
         })
- 
+
         if (expandedStages.has(stage.id) && stage.documents && stage.documents.length > 0) {
           for (const doc of stage.documents) {
             // Get document name from KYC data with proper fallback
             const kycData = kycDocuments.get(doc.kycId);
             const docDisplayName = kycData?.display_name || kycData?.name || doc.display_name || doc.name || 'Document';
-            
+
             rows.push({
               key: `doc_${stage.id}_${doc.id}`,
               label: docDisplayName,
@@ -1197,23 +1197,23 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
               isSubRow: true,
               getValue: (task: Task) => {
                 if (!isStageApplicableToTask(stage, task)) return 'N/A';
-                
+
                 const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
-                const isOldDoc = document && task.created_at && 
+                const isOldDoc = document && task.created_at &&
                   isDocumentOlderThanTask(document.created_at, task.created_at);
                 const hasIndicator = document?.indicator === true;
-                
+
                 return {
                   hasDocument: !!document,
                   isOldDocument: isOldDoc,
                   hasIndicator,
-                  status: hasIndicator ? 'Preview Not Available' : 
-                           isOldDoc ? 'Old Document - No Preview' : 
-                           (document ? 'Uploaded' : 'Not Uploaded')
+                  status: hasIndicator ? 'Preview Not Available' :
+                    isOldDoc ? 'Old Document - No Preview' :
+                      (document ? 'Uploaded' : 'Not Uploaded')
                 };
               }
             })
- 
+
             // Only show fields if document is expanded AND it does not have an indicator AND is not old
             if (expandedDocuments.has(doc.id) && doc.kycId) {
               const kycFields = await getKycFields(doc);
@@ -1231,14 +1231,14 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
                     getValue: (task: Task) => {
                       if (!isStageApplicableToTask(stage, task)) return 'N/A'
                       const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
-                      
+
                       // Check if document is old
-                      const isOldDoc = document && task.created_at && 
+                      const isOldDoc = document && task.created_at &&
                         isDocumentOlderThanTask(document.created_at, task.created_at)
-                      
+
                       // Return N/A if no document, no details, has an indicator, OR is old
                       if (!document || !document.extracted_details || document.indicator === true || isOldDoc) return 'N/A'
-                      
+
                       const value = document.extracted_details[field.fieldName] || document.extracted_details[field.id] || 'N/A'
                       return { value, isOldDocument: false } // Since we already filtered out old docs above
                     }
@@ -1250,22 +1250,22 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         }
       }
     }
- 
+
     rows.push({ key: 'section_header_actions', type: 'section_header', label: 'Actions', id: 'actions', icon: Pencil })
- 
+
     if (expandedSections.has('actions')) {
       rows.push({ key: 'actions_row', type: 'actions', label: 'Actions', id: 'actions' })
     }
- 
+
     return rows
   }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getDocumentForTaskStage, getKycFields, visibleHeaders, visibleStats, kycDocuments])
- 
+
   // Format date to dd/MM/yyyy format
   const formatDateValue = (dateString: string | Date | null | undefined) => {
     if (!dateString) return 'N/A';
     try {
       let date: Date;
- 
+
       if (typeof dateString === 'string') {
         if (dateString.includes('/')) {
           return dateString;
@@ -1274,26 +1274,26 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       } else {
         date = dateString;
       }
- 
+
       const day = String(date.getDate()).padStart(2, '0');
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const year = date.getFullYear();
- 
+
       return `${day}/${month}/${year}`;
     } catch (e) {
       console.error('Error formatting date:', dateString, e);
       return 'Invalid Date';
     }
   };
- 
+
   // Enhanced render cell content for transposed view
   const renderCellContent = useCallback((row: any, task: any) => {
     const value = row.getValue ? row.getValue(task) : '';
- 
+
     if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
       return <span className="text-sm text-gray-400 italic">N/A</span>;
     }
- 
+
     // Handle stage dates if this is a stage cell
     if (row.type === 'stage' && row.stage && task.stages?.[row.stage.id]) {
       const stageData = task.stages[row.stage.id];
@@ -1307,12 +1307,12 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         </div>
       );
     }
- 
+
     // Handle document field dates
     if (row.type === 'field') {
       const fieldValue = typeof value === 'object' ? value.value : value;
       const isOldDoc = typeof value === 'object' ? value.isOldDocument : false;
-      
+
       if (row.field?.fieldType?.toLowerCase() === 'date') {
         const formattedDate = formatDateValue(fieldValue);
         return (
@@ -1329,7 +1329,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         </div>
       );
     }
- 
+
     switch (row.type) {
       case 'basic': return <span className="text-sm font-medium text-slate-800">{value}</span>;
       case 'badge': return <Badge variant={value === 'completed' ? 'default' : value === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{value}</Badge>;
@@ -1353,8 +1353,8 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         const docValue = typeof value === 'object' ? value : { hasDocument: false, status: value };
         return (
           <div className="flex items-center gap-2 justify-center">
-            <Badge 
-              variant={docValue.hasDocument ? 'default' : 'outline'} 
+            <Badge
+              variant={docValue.hasDocument ? 'default' : 'outline'}
               className={`text-xs ${docValue.isOldDocument ? 'border-orange-500 text-orange-700' : ''}`}
             >
               {docValue.status}
@@ -1384,11 +1384,11 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       default: return <span className="text-sm text-slate-800">{value}</span>
     }
   }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, handleStageStatusSave])
- 
+
   // State for enhanced table rendering
   const [tableRows, setTableRows] = useState([]);
   const [loading, setLoading] = useState(false);
- 
+
   // Function to load rows for enhanced table
   const loadRows = useCallback(async (tasks: any[]) => {
     setLoading(true);
@@ -1396,14 +1396,14 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
     setTableRows(rows);
     setLoading(false);
   }, [generateEnhancedTableRows]);
- 
+
   // Effect to load rows when tasks or view settings change
   useEffect(() => {
     if (isTransposedView) {
       loadRows(tasks);
     }
   }, [tasks, isTransposedView, loadRows, expandedSections, expandedStages, expandedDocuments, visibleHeaders, visibleStats]);
- 
+
   const renderStandardTable = useCallback((tasks: any[], tableType: string) => {
     if (!tasks.length) {
       return (
@@ -1414,13 +1414,13 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         </div>
       )
     }
- 
+
     const kycFieldsMap = new Map(
       Array.from(kycDocuments.entries()).map(([kycId, kycDoc]) => [kycId, kycDoc.fields || []])
     );
- 
+
     const visibleStages = stages.filter(stage => stage).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
- 
+
     const totalStageColumns = visibleStages.reduce((total, stage) => {
       let stageCols = 0;
       if (expandedStages.has(stage.id) && stage.documents && stage.documents.length > 0) {
@@ -1437,7 +1437,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       }
       return total + Math.max(1, stageCols);
     }, 0);
- 
+
     return (
       <div className="border border-slate-200 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 400px)' }}>
         <Table className="min-w-full border-separate border-spacing-0">
@@ -1459,13 +1459,13 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
               {visibleStages.map((stage) => {
                 let stageCols = 0;
                 let subHeaders = [];
- 
+
                 if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
                   stage.documents.forEach(doc => {
                     // Get document name from KYC data with proper fallback
                     const kycData = kycDocuments.get(doc.kycId);
                     const docDisplayName = kycData?.display_name || kycData?.name || doc.display_name || doc.name || 'Document';
-                    
+
                     if (expandedDocuments.has(doc.id) && doc.kycId) {
                       const kycFields = kycFieldsMap.get(doc.kycId) || [];
                       if (kycFields.length > 0) {
@@ -1485,7 +1485,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
                   stageCols = 1;
                 }
                 stageCols = Math.max(1, stageCols);
- 
+
                 if (!expandedStages.has(stage.id) || stage.documents?.length === 0) {
                   return (
                     <TableHead key={stage.id} className="bg-blue-500 border-r border-slate-500 text-white text-center font-semibold min-w-[150px] px-2 py-2 align-middle">
@@ -1528,7 +1528,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
               })}
             </TableRow>
           </TableHeader>
- 
+
           <TableBody className="divide-y divide-slate-200">
             {(tasksLoading || departmentsLoading || companiesLoading) ? (
               <TableRow><TableCell colSpan={20} className="h-32 text-center text-slate-500">Loading...</TableCell></TableRow>
@@ -1543,7 +1543,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
                   </TableCell>
                   <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle"><div className="max-w-[160px] mx-auto truncate" title={companies.get(task.company_id)}>{companies.get(task.company_id) || 'N/A'}</div></TableCell>
                   <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle"><Badge variant={task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{task.status || 'pending'}</Badge></TableCell>
- 
+
                   {visibleStages.map(stage => {
                     if (!isStageApplicableToTask(stage, task)) {
                       let stageCols = 1;
@@ -1558,26 +1558,26 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
                       }
                       return <TableCell key={`${stage.id}-na`} colSpan={Math.max(1, stageCols)} className="border border-gray-100 text-center text-slate-400 italic text-xs align-middle">N/A</TableCell>
                     }
- 
+
                     if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
                       return <TableCell key={stage.id} className="border border-gray-100 p-1 align-middle"><EditableStageCell stage={stage} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={handleViewDocument} getKycFields={getKycFields} /></TableCell>
                     }
- 
+
                     return stage.documents.map(doc => {
                       const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
-                      const isOldDoc = document && task.created_at && 
+                      const isOldDoc = document && task.created_at &&
                         isDocumentOlderThanTask(document.created_at, task.created_at)
                       const hasIndicator = document?.indicator === true;
-                      
+
                       // Don't render fields if doc isn't expanded, has no fields, has an indicator, or is old
                       if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0 || hasIndicator || isOldDoc) {
                         return (
                           <TableCell key={`${doc.id}`} className="border border-gray-100 p-1 align-middle">
-                            <DocumentStageCell 
-                              stage={{ ...stage, documents: [doc] }} 
-                              task={task} 
-                              onDocumentUpload={handleStageDocumentUpload} 
-                              onShowDocuments={handleViewDocument} 
+                            <DocumentStageCell
+                              stage={{ ...stage, documents: [doc] }}
+                              task={task}
+                              onDocumentUpload={handleStageDocumentUpload}
+                              onShowDocuments={handleViewDocument}
                               getKycFields={getKycFields}
                               allDocuments={allDocuments}
                               isStageApplicableToTask={isStageApplicableToTask}
@@ -1596,7 +1596,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
                       }
                     }).flat()
                   })}
- 
+
                   <TableCell className="text-center text-sm p-2 align-middle">
                     <div className="flex items-center justify-center gap-1">
                       <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100"><Edit className="h-4 w-4" /></Button>
@@ -1611,7 +1611,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       </div>
     )
   }, [stages, tasksLoading, departmentsLoading, companiesLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, getDocumentForTaskStage, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, isDocumentApplicableToTask])
- 
+
   // Enhanced render function for transposed table with better dependants positioning
   const renderEnhancedTransposedTable = useCallback((tasks: any[], tableType: string) => {
     if (!tasks.length) {
@@ -1623,7 +1623,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         </div>
       )
     }
-    
+
     // Calculate header structure with dependants positioned next to principal
     const headerStructure = []
     tasks.forEach(task => {
@@ -1634,9 +1634,9 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
         })
       }
     })
- 
+
     const totalColumns = headerStructure.length
- 
+
     return (
       <div className="space-y-4">
         <div className="border-2 border-slate-300 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 300px)' }}>
@@ -1660,7 +1660,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
                   </TableHead>
                 ))}
               </TableRow>
-              
+
               {/* Row 2: Names */}
               <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
                 {headerStructure.map((item, index) => (
@@ -1688,7 +1688,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
                   </TableHead>
                 ))}
               </TableRow>
-              
+
               {/* Row 3: Companies */}
               <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
                 {headerStructure.map((item, index) => (
@@ -1699,7 +1699,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
                   </TableHead>
                 ))}
               </TableRow>
-              
+
               {/* Row 4: Job Level */}
               <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
                 {headerStructure.map((item, index) => (
@@ -1711,7 +1711,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
                 ))}
               </TableRow>
             </TableHeader>
- 
+
             <TableBody className="divide-y divide-slate-200">
               {loading ? (
                 <TableRow>
@@ -1732,7 +1732,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
                 tableRows.map((row, index) => {
                   const rowBg = row.isSubSubRow ? 'bg-slate-100/50' : row.isSubRow ? 'bg-slate-50/60' : 'bg-white';
                   const hoverBg = 'hover:bg-blue-50/50';
- 
+
                   if (row.type === 'section_header') {
                     const Icon = row.icon;
                     return (
@@ -1754,7 +1754,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
                       </TableRow>
                     )
                   }
- 
+
                   return (
                     <TableRow key={row.key} className={`${rowBg} ${hoverBg} group border-b border-slate-200`}>
                       <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center w-20`}>
@@ -1784,10 +1784,10 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
                           ) : (
                             // Render dependant data
                             row.key === 'applicant_name' && item.dependant.name ? item.dependant.name :
-                            row.key === 'nationality' && item.dependant.nationality ? item.dependant.nationality :
-                            row.key === 'age' && item.dependant.age ? item.dependant.age.toString() :
-                            row.key === 'case_status' ? <Badge variant="outline">{item.dependant.relationship || 'Dependant'}</Badge> :
-                            <span className="text-xs text-gray-400">-</span>
+                              row.key === 'nationality' && item.dependant.nationality ? item.dependant.nationality :
+                                row.key === 'age' && item.dependant.age ? item.dependant.age.toString() :
+                                  row.key === 'case_status' ? <Badge variant="outline">{item.dependant.relationship || 'Dependant'}</Badge> :
+                                    <span className="text-xs text-gray-400">-</span>
                           )}
                         </TableCell>
                       ))}
@@ -1801,7 +1801,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       </div>
     )
   }, [loading, error, tableRows, renderCellContent, expandedSections, expandedStages, expandedDocuments, expandedDependants, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies, toggleDependantsExpansion, getTaskHierarchy])
-  
+
   if (departmentsLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-slate-50/30">
@@ -1813,7 +1813,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       </div>
     )
   }
- 
+
   if (!departments.length) {
     return (
       <div className="flex-1 p-8 bg-slate-50/30">
@@ -1830,9 +1830,9 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
       </div>
     )
   }
- 
+
   const defaultSubdepartments = getDefaultSubdepartments()
- 
+
   return (
     <div className="flex-1 space-y-2 p-2 bg-slate-50/30 min-h-screen">
       <Tabs value={activeDepartmentTab} onValueChange={setActiveDepartmentTab} className="space-y-2">
@@ -1843,7 +1843,7 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
             </TabsTrigger>
           ))}
         </TabsList>
- 
+
         {departments.map(dept => (
           <TabsContent key={dept.id} value={dept.id.toString()} className="space-y-4">
             {/* Subdepartment Tabs */}
@@ -1861,247 +1861,247 @@ const handleViewDocument = useCallback(async (task: any, stage: any) => {
                 </TabsList>
               </Tabs>
             )}
- 
+
             <Tabs value={activeSubTab} onValueChange={setActiveSubTab}>
               <TabsList className="rounded-lg p-1 shadow-sm">
                 <TabsTrigger value="enquiries" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
                   Enquiries <Badge variant="secondary">{enquiryTasks.length}</Badge>
                 </TabsTrigger>
                 <TabsTrigger value="wip-stages" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                 WIP Stages <Badge variant="secondary">{wipTasks.length}</Badge>
-               </TabsTrigger>
-               <TabsTrigger value="completed" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                 Completed <Badge variant="secondary">{completedTasks.length}</Badge>
-               </TabsTrigger>
-             </TabsList>
+                  WIP Stages <Badge variant="secondary">{wipTasks.length}</Badge>
+                </TabsTrigger>
+                <TabsTrigger value="completed" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                  Completed <Badge variant="secondary">{completedTasks.length}</Badge>
+                </TabsTrigger>
+              </TabsList>
 
-             {/* All Tabs Content */}
-             {['enquiries', 'wip-stages', 'completed'].map(tabValue => {
-               const isWipTab = tabValue === 'wip-stages';
-               let tasksToRender, title;
-               if (tabValue === 'enquiries') { tasksToRender = enquiryTasks; title = 'Enquiries'; }
-               else if (tabValue === 'wip-stages') { tasksToRender = wipTasks; title = 'WIP Stages'; }
-               else { tasksToRender = completedTasks; title = 'Completed Tasks'; }
+              {/* All Tabs Content */}
+              {['enquiries', 'wip-stages', 'completed'].map(tabValue => {
+                const isWipTab = tabValue === 'wip-stages';
+                let tasksToRender, title;
+                if (tabValue === 'enquiries') { tasksToRender = enquiryTasks; title = 'Enquiries'; }
+                else if (tabValue === 'wip-stages') { tasksToRender = wipTasks; title = 'WIP Stages'; }
+                else { tasksToRender = completedTasks; title = 'Completed Tasks'; }
 
-               return (
-                 <TabsContent key={tabValue} value={tabValue} className="mt-4">
-                   <Card className="bg-white/80 backdrop-blur-sm shadow-lg border-slate-100">
-                     <CardHeader className="border-b border-slate-100 bg-white">
-                       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
-                         <div>
-                           <CardTitle className="text-lg text-slate-800">
-                             {title} - {dept.name}
-                             {activeSubdepartmentTab && defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab) && 
-                               ` - ${defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab)?.name}`
-                             }
-                           </CardTitle>
-                           <CardDescription className="text-slate-600">
-                             Showing {tasksToRender.length} {globalSearchTerm ? 'filtered ' : ''}tasks {isTransposedView ? '(Transposed View)' : '(Standard View)'}
-                           </CardDescription>
-                         </div>
-                         <div className="flex items-center gap-2">
-                           {tabValue === 'enquiries' && <Button className="flex items-center gap-2" onClick={() => setIsEnquiryDialogOpen(true)}><Plus className="h-4 w-4" />New Enquiry</Button>}
-                           <div className="relative">
-                             <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
-                             <Input
-                               placeholder="Search tasks, applicants, companies..."
-                               value={globalSearchTerm}
-                               onChange={(e) => setGlobalSearchTerm(e.target.value)}
-                               className="pl-8 w-64"
-                             />
-                             {globalSearchTerm && (
-                               <Button
-                                 variant="ghost"
-                                 size="icon"
-                                 className="absolute right-1 top-1 h-6 w-6"
-                                 onClick={() => setGlobalSearchTerm('')}
-                               >
-                                 <X className="h-4 w-4" />
-                               </Button>
-                             )}
-                           </div>
+                return (
+                  <TabsContent key={tabValue} value={tabValue} className="mt-4">
+                    <Card className="bg-white/80 backdrop-blur-sm shadow-lg border-slate-100">
+                      <CardHeader className="border-b border-slate-100 bg-white">
+                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
+                          <div>
+                            <CardTitle className="text-lg text-slate-800">
+                              {title} - {dept.name}
+                              {activeSubdepartmentTab && defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab) &&
+                                ` - ${defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab)?.name}`
+                              }
+                            </CardTitle>
+                            <CardDescription className="text-slate-600">
+                              Showing {tasksToRender.length} {globalSearchTerm ? 'filtered ' : ''}tasks {isTransposedView ? '(Transposed View)' : '(Standard View)'}
+                            </CardDescription>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {tabValue === 'enquiries' && <Button className="flex items-center gap-2" onClick={() => setIsEnquiryDialogOpen(true)}><Plus className="h-4 w-4" />New Enquiry</Button>}
+                            <div className="relative">
+                              <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
+                              <Input
+                                placeholder="Search tasks, applicants, companies..."
+                                value={globalSearchTerm}
+                                onChange={(e) => setGlobalSearchTerm(e.target.value)}
+                                className="pl-8 w-64"
+                              />
+                              {globalSearchTerm && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="absolute right-1 top-1 h-6 w-6"
+                                  onClick={() => setGlobalSearchTerm('')}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
 
-                           {isTransposedView && (
-                             <>
-                               <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={expandAll}><Plus className="h-4 w-4" />Expand All</Button>
-                               <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={collapseAll}><Minus className="h-4 w-4" />Collapse All</Button>
-                             </>
-                           )}
+                            {isTransposedView && (
+                              <>
+                                <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={expandAll}><Plus className="h-4 w-4" />Expand All</Button>
+                                <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={collapseAll}><Minus className="h-4 w-4" />Collapse All</Button>
+                              </>
+                            )}
 
-                           <Button
-                             variant="outline"
-                             size="sm"
-                             className="flex items-center gap-2"
-                             onClick={() => setIsTransposedView(!isTransposedView)}
-                           >
-                             {isTransposedView ? <TableProperties className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
-                             {isTransposedView ? 'Standard View' : 'Transposed View'}
-                           </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-2"
+                              onClick={() => setIsTransposedView(!isTransposedView)}
+                            >
+                              {isTransposedView ? <TableProperties className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
+                              {isTransposedView ? 'Standard View' : 'Transposed View'}
+                            </Button>
 
-                           <Popover>
-                             <PopoverTrigger asChild>
-                               <Button variant="outline" size="sm" className="flex items-center gap-2">
-                                 <Settings className="h-4 w-4" />
-                                 {isTransposedView ? `Fields (${visibleHeaders.size + visibleStats.size})` : `Columns (${visibleHeaders.size})`}
-                               </Button>
-                             </PopoverTrigger>
-                             <PopoverContent className="w-80">
-                               <div className="space-y-4">
-                                 <div className="space-y-2">
-                                   <h4 className="font-medium">
-                                     {isTransposedView ? 'Visible Fields' : 'Visible Columns'}
-                                   </h4>
-                                   <p className="text-sm text-muted-foreground">
-                                     {isTransposedView ? 'Select which fields to display as rows' : 'Select which columns to display in the table'}
-                                   </p>
-                                 </div>
-                                 {/* Stats Fields (only in transposed view) */}
-                                 {isTransposedView && (
-                                   <div className="space-y-2 border-t pt-2">
-                                     <h5 className="text-sm font-medium text-slate-700">Statistics</h5>
-                                     {STATS_HEADERS.map((stat) => (
-                                       <div key={stat.id} className="flex items-center space-x-2">
-                                         <Checkbox
-                                           id={stat.id}
-                                           checked={visibleStats.has(stat.id)}
-                                           onCheckedChange={() => toggleStatsVisibility(stat.id)}
-                                         />
-                                         <Label
-                                           htmlFor={stat.id}
-                                           className="text-sm font-normal cursor-pointer"
-                                         >
-                                           {stat.label}
-                                         </Label>
-                                       </div>
-                                     ))}
-                                   </div>
-                                 )}
-                                 {/* Case Details Fields */}
-                                 <div className="space-y-2">
-                                   <h5 className="text-sm font-medium text-slate-700">Case Details</h5>
-                                   {TABLE_HEADERS.map((header) => (
-                                     <div key={header.id} className="flex items-center space-x-2">
-                                       <Checkbox
-                                         id={header.id}
-                                         checked={visibleHeaders.has(header.id)}
-                                         onCheckedChange={() => toggleHeaderVisibility(header.id)}
-                                       />
-                                       <Label
-                                         htmlFor={header.id}
-                                         className="text-sm font-normal cursor-pointer"
-                                       >
-                                         {header.label}
-                                       </Label>
-                                     </div>
-                                   ))}
-                                 </div>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                                  <Settings className="h-4 w-4" />
+                                  {isTransposedView ? `Fields (${visibleHeaders.size + visibleStats.size})` : `Columns (${visibleHeaders.size})`}
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-80">
+                                <div className="space-y-4">
+                                  <div className="space-y-2">
+                                    <h4 className="font-medium">
+                                      {isTransposedView ? 'Visible Fields' : 'Visible Columns'}
+                                    </h4>
+                                    <p className="text-sm text-muted-foreground">
+                                      {isTransposedView ? 'Select which fields to display as rows' : 'Select which columns to display in the table'}
+                                    </p>
+                                  </div>
+                                  {/* Stats Fields (only in transposed view) */}
+                                  {isTransposedView && (
+                                    <div className="space-y-2 border-t pt-2">
+                                      <h5 className="text-sm font-medium text-slate-700">Statistics</h5>
+                                      {STATS_HEADERS.map((stat) => (
+                                        <div key={stat.id} className="flex items-center space-x-2">
+                                          <Checkbox
+                                            id={stat.id}
+                                            checked={visibleStats.has(stat.id)}
+                                            onCheckedChange={() => toggleStatsVisibility(stat.id)}
+                                          />
+                                          <Label
+                                            htmlFor={stat.id}
+                                            className="text-sm font-normal cursor-pointer"
+                                          >
+                                            {stat.label}
+                                          </Label>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {/* Case Details Fields */}
+                                  <div className="space-y-2">
+                                    <h5 className="text-sm font-medium text-slate-700">Case Details</h5>
+                                    {TABLE_HEADERS.map((header) => (
+                                      <div key={header.id} className="flex items-center space-x-2">
+                                        <Checkbox
+                                          id={header.id}
+                                          checked={visibleHeaders.has(header.id)}
+                                          onCheckedChange={() => toggleHeaderVisibility(header.id)}
+                                        />
+                                        <Label
+                                          htmlFor={header.id}
+                                          className="text-sm font-normal cursor-pointer"
+                                        >
+                                          {header.label}
+                                        </Label>
+                                      </div>
+                                    ))}
+                                  </div>
 
-                                 <div className="flex gap-2 pt-2 border-t">
-                                   <Button
-                                     variant="outline"
-                                     size="sm"
-                                     onClick={() => {
-                                       setVisibleHeaders(new Set(TABLE_HEADERS.map(h => h.id)))
-                                       if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.map(s => s.id)))
-                                     }}
-                                   >
-                                     Show All
-                                   </Button>
-                                   <Button
-                                     variant="outline"
-                                     size="sm"
-                                     onClick={() => {
-                                       setVisibleHeaders(new Set(TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
-                                       if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.filter(s => s.default).map(s => s.id)))
-                                     }}
-                                   >
-                                     Reset
-                                   </Button>
-                                 </div>
-                               </div>
-                             </PopoverContent>
-                           </Popover>
+                                  <div className="flex gap-2 pt-2 border-t">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        setVisibleHeaders(new Set(TABLE_HEADERS.map(h => h.id)))
+                                        if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.map(s => s.id)))
+                                      }}
+                                    >
+                                      Show All
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        setVisibleHeaders(new Set(TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
+                                        if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.filter(s => s.default).map(s => s.id)))
+                                      }}
+                                    >
+                                      Reset
+                                    </Button>
+                                  </div>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
 
-                           <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(tasksToRender, title)}>
-                             <Download className="h-4 w-4" />Export to Excel
-                           </Button>
-                         </div>
-                       </div>
+                            <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(tasksToRender, title)}>
+                              <Download className="h-4 w-4" />Export to Excel
+                            </Button>
+                          </div>
+                        </div>
 
-                       {isWipTab && (
-                         <div className="mt-4">
-                           <Tabs value={activeFollowUpFilter} onValueChange={setActiveFollowUpFilter}>
-                             <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
-                               <TabsTrigger value="all" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">All <Badge variant="outline">{wipTasks.length}</Badge></TabsTrigger>
-                               <TabsTrigger value="bcl" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">BCL <Badge variant="outline">{getWIPTasksByFollowUp('bcl').length}</Badge></TabsTrigger>
-                               <TabsTrigger value="officer" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Officer <Badge variant="outline">{getWIPTasksByFollowUp('officer').length}</Badge></TabsTrigger>
-                               <TabsTrigger value="client" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Client <Badge variant="outline">{getWIPTasksByFollowUp('client').length}</Badge></TabsTrigger>
-                             </TabsList>
-                           </Tabs>
-                         </div>
-                       )}
-                     </CardHeader>
-                     <CardContent className="p-2 sm:p-4">
-                       {isTransposedView ? renderEnhancedTransposedTable(tasksToRender, title) : renderStandardTable(tasksToRender, title)}
-                     </CardContent>
-                   </Card>
-                 </TabsContent>
-               );
-             })}
-           </Tabs>
-         </TabsContent>
-       ))}
-     </Tabs>
+                        {isWipTab && (
+                          <div className="mt-4">
+                            <Tabs value={activeFollowUpFilter} onValueChange={setActiveFollowUpFilter}>
+                              <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
+                                <TabsTrigger value="all" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">All <Badge variant="outline">{wipTasks.length}</Badge></TabsTrigger>
+                                <TabsTrigger value="bcl" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">BCL <Badge variant="outline">{getWIPTasksByFollowUp('bcl').length}</Badge></TabsTrigger>
+                                <TabsTrigger value="officer" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Officer <Badge variant="outline">{getWIPTasksByFollowUp('officer').length}</Badge></TabsTrigger>
+                                <TabsTrigger value="client" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Client <Badge variant="outline">{getWIPTasksByFollowUp('client').length}</Badge></TabsTrigger>
+                              </TabsList>
+                            </Tabs>
+                          </div>
+                        )}
+                      </CardHeader>
+                      <CardContent className="p-2 sm:p-4">
+                        {isTransposedView ? renderEnhancedTransposedTable(tasksToRender, title) : renderStandardTable(tasksToRender, title)}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+                );
+              })}
+            </Tabs>
+          </TabsContent>
+        ))}
+      </Tabs>
 
-     <EditTaskDialog
-       open={editDialogOpen}
-       onOpenChange={setEditDialogOpen}
-       task={editingTask}
-       departments={departments}
-       onTaskUpdate={handleTaskUpdate}
-     />
+      <EditTaskDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        task={editingTask}
+        departments={departments}
+        onTaskUpdate={handleTaskUpdate}
+      />
 
-     <EnquiryDialog
-       open={isEnquiryDialogOpen}
-       onOpenChange={setIsEnquiryDialogOpen}
-       onEnquiryCreated={handleEnquiryCreated}
-     />
+      <EnquiryDialog
+        open={isEnquiryDialogOpen}
+        onOpenChange={setIsEnquiryDialogOpen}
+        onEnquiryCreated={handleEnquiryCreated}
+      />
 
-     <StageUploadDialog
-       open={isStageUploadDialogOpen}
-       onOpenChange={setIsStageUploadDialogOpen}
-       selectedStageTask={selectedStageTask}
-       getCurrentRequirements={getCurrentRequirements}
-       fuzzyMatch={() => false}
-       onTaskAction={handleTaskAction}
-     />
+      <StageUploadDialog
+        open={isStageUploadDialogOpen}
+        onOpenChange={setIsStageUploadDialogOpen}
+        selectedStageTask={selectedStageTask}
+        getCurrentRequirements={getCurrentRequirements}
+        fuzzyMatch={() => false}
+        onTaskAction={handleTaskAction}
+      />
 
-     {/* Extraction Preview Dialog */}
-     <Dialog open={!!previewDocument} onOpenChange={(isOpen) => !isOpen && setPreviewDocument(null)}>
-       <DialogContent className="max-w-none w-full h-full p-0 m-0">
-         <DialogHeader className="sr-only">
-           <DialogTitle>Document Preview</DialogTitle>
-           <DialogDescription>Preview of the extracted document data</DialogDescription>
-         </DialogHeader>
-         {previewDocument && (
-           <ExtractionPreview
-             documentId={previewDocument.documentId}
-             documentName={previewDocument.documentName}
-             fileUrl={previewDocument.fileUrl}
-             extractedData={previewDocument.extractedData}
-             fields={previewDocument.fields}
-             onClose={() => setPreviewDocument(null)}
-             onSave={(updatedData) => {
-               console.log("Saving updated data:", updatedData);
-               setPreviewDocument(null);
-               toast({ title: "Success", description: "Document details saved." });
-             }}
-             file={previewDocument.file}
-             type={previewDocument.type}
-           />
-         )}
-       </DialogContent>
-     </Dialog>
-   </div>
- )
+      {/* Extraction Preview Dialog */}
+      <Dialog open={!!previewDocument} onOpenChange={(isOpen) => !isOpen && setPreviewDocument(null)}>
+        <DialogContent className="max-w-none w-full h-full p-0 m-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Document Preview</DialogTitle>
+            <DialogDescription>Preview of the extracted document data</DialogDescription>
+          </DialogHeader>
+          {previewDocument && (
+            <ExtractionPreview
+              documentId={previewDocument.documentId}
+              documentName={previewDocument.documentName}
+              fileUrl={previewDocument.fileUrl}
+              extractedData={previewDocument.extractedData}
+              fields={previewDocument.fields}
+              onClose={() => setPreviewDocument(null)}
+              onSave={(updatedData) => {
+                console.log("Saving updated data:", updatedData);
+                setPreviewDocument(null);
+                toast({ title: "Success", description: "Document details saved." });
+              }}
+              file={previewDocument.file}
+              type={previewDocument.type}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
 }

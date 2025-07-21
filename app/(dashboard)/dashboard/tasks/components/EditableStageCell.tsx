@@ -73,7 +73,7 @@ export default function EditableStageCell({
   const [isOldDocument, setIsOldDocument] = useState(false); // New state for old document detection
   const inputRef = useRef<HTMLInputElement>(null);
   const requiresUpload = stage.documents && stage.documents.length > 0;
-  
+
   // Fetch KYC document data - Updated to include display_name
   const fetchKycDocumentData = useCallback(async (kycId: string) => {
     try {
@@ -84,7 +84,7 @@ export default function EditableStageCell({
         .single();
 
       if (error) throw error;
-      
+
       console.log('Fetched KYC document data:', data);
       setKycDocumentData(data);
       return data;
@@ -93,16 +93,16 @@ export default function EditableStageCell({
       return null;
     }
   }, []);
-  
+
   // Update preview document when dialog opens or document data changes
   useEffect(() => {
     if (!isPreviewOpen) return;
-    
+
     const buildPreviewDocument = async () => {
       console.log('--- Building preview document ---');
       console.log('Task:', { id: task.id, name: task.name });
       console.log('Stage:', { id: stage.id, name: stage.name });
-      
+
       // Get the director_id from the task
       const directorId = task.individual_id;
       if (!directorId) {
@@ -113,14 +113,14 @@ export default function EditableStageCell({
       // Get the most recent document from allDocuments
       const stageDocuments = filterDocumentsForStage(allDocuments, directorId, stage.documents || []);
       console.log('Found stage documents:', stageDocuments);
-      
+
       if (!stageDocuments.length) {
         console.log('No documents found for stage');
         return null;
       }
 
       const doc = stageDocuments[0];
-      
+
       // Check if document has indicator - if so, don't show preview
       if (doc.indicator === true) {
         console.log('Document has indicator, skipping preview');
@@ -134,9 +134,9 @@ export default function EditableStageCell({
       }
 
       // Check if document is older than task creation - if so, don't show preview
-      const isOldDoc = task.created_at && 
+      const isOldDoc = task.created_at &&
         isDocumentOlderThanTask(doc.created_at, task.created_at);
-      
+
       if (isOldDoc) {
         console.log('Document is older than task creation, skipping preview');
         toast({
@@ -167,22 +167,22 @@ export default function EditableStageCell({
 
       // Use KYC document display_name or name, not stage document name
       const documentName = kycData.display_name || kycData.name || 'Document';
-      
+
       // Format the file path and URL
       const bucketName = 'kyc-documents';
-      const filePath = doc.file_path?.startsWith(bucketName) 
-        ? doc.file_path 
+      const filePath = doc.file_path?.startsWith(bucketName)
+        ? doc.file_path
         : `${bucketName}/${doc.file_path}`;
-        
+
       const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
       const fileName = doc.file_path?.split('/').pop() || documentName;
       const fileType = fileName.split('.').pop()?.toLowerCase() || 'pdf';
-      
+
       // Get KYC fields from the KYC document data (not from stage documents)
       const kycFields = kycData.fields || [];
-      
+
       console.log('KYC Fields from KYC document:', kycFields);
-      
+
       // Transform KYC fields to the expected format
       const transformKycFields = (fields: any[]): any[] => {
         if (!Array.isArray(fields)) return []
@@ -225,14 +225,14 @@ export default function EditableStageCell({
       // Prepare extracted data, ensuring all fields have values
       const extractedData = { ...(doc.extracted_details || {}) };
       console.log('Extracted data from document:', extractedData);
-      
+
       // Ensure all fields have values, using empty strings for missing ones
       fields.forEach((field: any) => {
         if (extractedData[field.id] === undefined) {
           extractedData[field.id] = '';
         }
       });
-      
+
       const previewData = {
         documentId: doc.id,
         documentName: documentName, // Use KYC document name
@@ -254,7 +254,7 @@ export default function EditableStageCell({
 
     buildPreviewDocument();
   }, [isPreviewOpen, task, stage, allDocuments, fetchKycDocumentData]);
-  
+
   // Reset preview document when dialog closes
   useEffect(() => {
     if (!isPreviewOpen) {
@@ -264,8 +264,8 @@ export default function EditableStageCell({
 
   // Helper function to find matching document in cache
   const findMatchingDocument = (documentId: string, directorId: string): any => {
-    return cachedDocuments.find(doc => 
-      doc.document_id === documentId && 
+    return cachedDocuments.find(doc =>
+      doc.document_id === documentId &&
       doc.director_id === directorId
     );
   };
@@ -284,13 +284,13 @@ export default function EditableStageCell({
 
       if (stageDocuments.length > 0) {
         const mostRecentDoc = stageDocuments[0];
-        
+
         // Check if document is older than task creation
-        const isOldDoc = task.created_at && 
+        const isOldDoc = task.created_at &&
           isDocumentOlderThanTask(mostRecentDoc.created_at, task.created_at);
-        
+
         setIsOldDocument(isOldDoc);
-        
+
         // Only set hasDocuments to true if document doesn't have indicator AND is not old
         setHasDocuments(!mostRecentDoc.indicator && !isOldDoc);
 
@@ -308,7 +308,7 @@ export default function EditableStageCell({
           setStageDate('');
         }
       } else {
-  
+
         setHasDocuments(false);
         setIsOldDocument(false);
         setStageDate('');
@@ -334,26 +334,26 @@ export default function EditableStageCell({
     if (!stageDocuments.length) {
       return '';
     }
-    
+
     const mostRecentDoc = stageDocuments[0];
-    
+
     // Don't extract date if document has indicator
     if (mostRecentDoc.indicator) {
       console.log('Document has indicator, skipping date extraction');
       return '';
     }
-    
+
     // Check if document is older than task creation
-    const isOldDoc = task.created_at && 
+    const isOldDoc = task.created_at &&
       isDocumentOlderThanTask(mostRecentDoc.created_at, task.created_at);
-    
+
     if (isOldDoc) {
       console.log('Document is older than task creation, skipping date extraction');
       return '';
     }
-    
+
     const dateFields = ['application_date', 'date', 'upload_date', 'created_date', 'date_generated', 'invoice_date_and_time'];
-    
+
     if (mostRecentDoc.extracted_details) {
       console.log('Document details:', mostRecentDoc.extracted_details);
       for (const field of dateFields) {
@@ -400,7 +400,7 @@ export default function EditableStageCell({
     }
 
     const [year, month, day] = dateString.split('-').map(Number);
-    
+
     // Validate date components
     if (year < 1000 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) {
       return null;
@@ -408,7 +408,7 @@ export default function EditableStageCell({
 
     // Create date in local timezone to avoid UTC conversion issues
     const date = new Date(year, month - 1, day);
-    
+
     // Verify the date is valid and matches what we expected
     if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
       return null;
@@ -419,19 +419,19 @@ export default function EditableStageCell({
 
   const formatDateDisplay = (dateStr: string): string => {
     if (!dateStr) return '';
-    
+
     // Try to parse various date formats
     const date = parse(dateStr, 'dd/MM/yyyy', new Date());
     if (isValid(date)) {
       return format(date, 'dd/MM/yyyy');
     }
-    
+
     // Try ISO format
     const isoDate = parse(dateStr, 'yyyy-MM-dd', new Date());
     if (isValid(isoDate)) {
       return format(isoDate, 'dd/MM/yyyy');
     }
-    
+
     return dateStr;
   };
 
@@ -457,13 +457,13 @@ export default function EditableStageCell({
 
     try {
       const dateObj = createDateFromInput(editValue);
-      
+
       if (!dateObj || !isValid(dateObj)) {
         throw new Error('Invalid date format');
       }
-  
+
       const formattedDate = format(dateObj, 'dd/MM/yyyy');
-  
+
       console.log('About to save stage:', {
         stageId: stage.id,
         stageName: stage.name,
@@ -471,10 +471,10 @@ export default function EditableStageCell({
         formattedDate,
         editValue
       });
-  
+
       setIsLoading(true);
       await onSave(stage.id, task.id, formattedDate);
-      
+
       // After successful save, trigger a refetch of the table data
       try {
         const response = await fetch('/api/tasks'); // Adjust the API endpoint as needed
@@ -487,12 +487,12 @@ export default function EditableStageCell({
         console.error('Error refreshing task data:', fetchError);
         // Don't show error toast to user as the main operation was successful
       }
-      
+
       setIsEditing(false);
-      
+
       toast({
         title: "Success",
-        description: isConfirmationStage 
+        description: isConfirmationStage
           ? "Confirmation completed. Task moved to Work in Progress."
           : "Date saved successfully"
       });
@@ -555,11 +555,11 @@ export default function EditableStageCell({
   const handleViewDocument = useCallback((e?: React.MouseEvent) => {
     console.log('--- handleViewDocument called ---');
     e?.stopPropagation();
-    
+
     // Get the director_id from the task
     const directorId = task.individual_id;
     console.log('Director ID:', directorId);
-    
+
     if (!directorId) {
       console.error('No director ID found in task');
       toast({
@@ -573,7 +573,7 @@ export default function EditableStageCell({
     // Check if we have documents for this stage
     const stageDocuments = filterDocumentsForStage(allDocuments, directorId, stage.documents || []);
     console.log('Stage documents found:', stageDocuments);
-    
+
     if (!stageDocuments.length) {
       console.log('No documents found for stage');
       toast({
@@ -597,9 +597,9 @@ export default function EditableStageCell({
     }
 
     // Check if document is older than task creation
-    const isOldDoc = task.created_at && 
+    const isOldDoc = task.created_at &&
       isDocumentOlderThanTask(doc.created_at, task.created_at);
-    
+
     if (isOldDoc) {
       console.log('Document is older than task creation, cannot preview');
       toast({
@@ -615,7 +615,7 @@ export default function EditableStageCell({
 
     // Update stage date with extracted date if available (only if not old)
     console.log('Document details:', doc);
-    
+
     const dateFields = ['application_date', 'date', 'upload_date', 'created_date'];
     for (const field of dateFields) {
       if (doc.extracted_details && doc.extracted_details[field]) {
@@ -625,7 +625,7 @@ export default function EditableStageCell({
       }
     }
   }, [task, stage, allDocuments]);
-       
+
 
   const handleClick = () => {
     if (requiresUpload) {
@@ -637,7 +637,7 @@ export default function EditableStageCell({
 
   if (isEditing && !requiresUpload) {
     return (
-      <div 
+      <div
         className="flex items-center gap-2 min-w-[200px]"
         onBlur={handleBlur}
         tabIndex={-1}
@@ -688,132 +688,131 @@ export default function EditableStageCell({
 
   return (
     <>
-      <div 
-        className={`flex items-center justify-center min-h-[32px] cursor-pointer hover:bg-gray-50 rounded p-1 ${
-          requiresUpload ? 'hover:bg-blue-50' : 'hover:bg-gray-50'
-        }`}
+      <div
+        className={`flex items-center justify-center min-h-[32px] cursor-pointer hover:bg-gray-50 rounded p-1 ${requiresUpload ? 'hover:bg-blue-50' : 'hover:bg-gray-50'
+          }`}
         onClick={handleClick}
       >
-      {requiresUpload ? (
-        <div className="flex flex-col items-center gap-1 p-1">
-          <div className="flex gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-blue-600 hover:bg-blue-100"
-              onClick={handleDocumentUpload}
-              title="Upload document"
-            >
-              <Upload className="h-4 w-4" />
-            </Button>
-            {/* Only show Eye button if document exists, has no indicator, and is not old */}
-            {hasDocuments && !isOldDocument && (
+        {requiresUpload ? (
+          <div className="flex flex-col items-center gap-1 p-1">
+            <div className="flex gap-1">
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 text-green-600 hover:bg-green-100"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleViewDocument(e);
-                }}
-                title="View document"
+                className="h-8 w-8 text-blue-600 hover:bg-blue-100"
+                onClick={handleDocumentUpload}
+                title="Upload document"
               >
-                <Eye className="h-4 w-4" />
+                <Upload className="h-4 w-4" />
               </Button>
+              {/* Only show Eye button if document exists, has no indicator, and is not old */}
+              {hasDocuments && !isOldDocument && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-green-600 hover:bg-green-100"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleViewDocument(e);
+                  }}
+                  title="View document"
+                >
+                  <Eye className="h-4 w-4" />
+                </Button>
+              )}
+              {/* Show warning icon for old documents */}
+              {isOldDocument && (
+                <div className="h-8 w-8 flex items-center justify-center">
+                  <AlertTriangle
+                    className="h-4 w-4 text-orange-500"
+                    title="Document is older than task creation - preview disabled"
+                  />
+                </div>
+              )}
+            </div>
+            {/* Show date only if document is not old and has no indicator */}
+            {hasDocuments && !isOldDocument && stageDate && (
+              <div className="text-xs text-gray-600 text-center mt-1">
+                {formatDateDisplay(stageDate)}
+              </div>
             )}
-            {/* Show warning icon for old documents */}
+            {/* Show "Old Document" message for old documents */}
             {isOldDocument && (
-              <div className="h-8 w-8 flex items-center justify-center">
-                <AlertTriangle 
-                  className="h-4 w-4 text-orange-500" 
-                  title="Document is older than task creation - preview disabled" 
-                />
+              <div className="text-xs text-orange-600 text-center mt-1">
+                Old Document
               </div>
             )}
           </div>
-          {/* Show date only if document is not old and has no indicator */}
-          {hasDocuments && !isOldDocument && stageDate && (
-            <div className="text-xs text-gray-600 text-center mt-1">
-              {formatDateDisplay(stageDate)}
-            </div>
-          )}
-          {/* Show "Old Document" message for old documents */}
-          {isOldDocument && (
-            <div className="text-xs text-orange-600 text-center mt-1">
-              Old Document
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="flex items-center gap-2">
-          {stageDate && stageDate !== 'NaN/NaN/NaN' ? (
-            <Badge variant="default" className="bg-green-100 text-green-800 hover:bg-green-100">
-              <Check className="h-3 w-3 mr-1" />
-              {formatDateDisplay(stageDate)}
-            </Badge>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-3 text-gray-600 hover:text-gray-800 hover:bg-gray-100 border border-dashed border-gray-300"
-            >
-              <Calendar className="h-3 w-3 mr-1" />
-              {isEnquiryStage ? 'Add Enquiry Date' : 
-               isConfirmationStage ? 'Add Confirmation Date' : 
-               'Add Date'}
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
-
-    {/* Document Preview Dialog */}
-    <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-      <DialogContent className="max-w-7xl w-[95vw] h-[95vh] p-0 flex flex-col">
-        {previewDocument ? (
-          <div className="flex flex-col h-full">
-            <DialogHeader className="p-6 pb-2">
-              <DialogTitle className="text-xl">{previewDocument.documentName}</DialogTitle>
-              <DialogDescription>
-                Review extracted details for {task.applicant_name || 'this document'}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex-1 overflow-y-auto p-6 pt-2">
-              <ExtractionPreview
-                documentName={previewDocument.documentName}
-                fileUrl={previewDocument.fileUrl}
-                fileName={previewDocument.fileName}
-                extractedData={previewDocument.extractedData || {}}
-                fields={previewDocument.fields || []}
-                viewMode={true}
-                file={previewDocument.file}
-                type={previewDocument.type}
-                onDataChange={(fieldName, value) => {
-                  // Handle data changes if needed
-                  console.log(`Field ${fieldName} changed to:`, value);
-                }}
-                onSave={() => {
-                  console.log("Saving document data...");
-                  // Add save logic here
-                  setIsPreviewOpen(false);
-                  toast({ title: "Success", description: "Document details saved." });
-                }}
-                getStylesByType={(type) => ({
-                  getBgColor: () => 'bg-primary',
-                  getTextColor: () => 'text-primary-foreground',
-                  getBorderColor: () => 'border-primary',
-                  getButtonStyle: () => 'bg-primary hover:bg-primary/90 text-primary-foreground'
-                })}
-              />
-            </div>
-          </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center">
-            <p className="text-muted-foreground">No document data available</p>
+          <div className="flex items-center gap-2">
+            {stageDate && stageDate !== 'NaN/NaN/NaN' ? (
+              <Badge variant="default" className="bg-green-100 text-green-800 hover:bg-green-100">
+                <Check className="h-3 w-3 mr-1" />
+                {formatDateDisplay(stageDate)}
+              </Badge>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-3 text-gray-600 hover:text-gray-800 hover:bg-gray-100 border border-dashed border-gray-300"
+              >
+                <Calendar className="h-3 w-3 mr-1" />
+                {isEnquiryStage ? 'Add Enquiry Date' :
+                  isConfirmationStage ? 'Add Confirmation Date' :
+                    'Add Date'}
+              </Button>
+            )}
           </div>
         )}
-      </DialogContent>
-    </Dialog>
-  </>
-         );
+      </div>
+
+      {/* Document Preview Dialog */}
+      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+        <DialogContent className="max-w-7xl w-[95vw] h-[95vh] p-0 flex flex-col">
+          {previewDocument ? (
+            <div className="flex flex-col h-full">
+              <DialogHeader className="p-6 pb-2">
+                <DialogTitle className="text-xl">{previewDocument.documentName}</DialogTitle>
+                <DialogDescription>
+                  Review extracted details for {task.applicant_name || 'this document'}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex-1 overflow-y-auto p-6 pt-2">
+                <ExtractionPreview
+                  documentName={previewDocument.documentName}
+                  fileUrl={previewDocument.fileUrl}
+                  fileName={previewDocument.fileName}
+                  extractedData={previewDocument.extractedData || {}}
+                  fields={previewDocument.fields || []}
+                  viewMode={true}
+                  file={previewDocument.file}
+                  type={previewDocument.type}
+                  onDataChange={(fieldName, value) => {
+                    // Handle data changes if needed
+                    console.log(`Field ${fieldName} changed to:`, value);
+                  }}
+                  onSave={() => {
+                    console.log("Saving document data...");
+                    // Add save logic here
+                    setIsPreviewOpen(false);
+                    toast({ title: "Success", description: "Document details saved." });
+                  }}
+                  getStylesByType={(type) => ({
+                    getBgColor: () => 'bg-primary',
+                    getTextColor: () => 'text-primary-foreground',
+                    getBorderColor: () => 'border-primary',
+                    getButtonStyle: () => 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                  })}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-muted-foreground">No document data available</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }

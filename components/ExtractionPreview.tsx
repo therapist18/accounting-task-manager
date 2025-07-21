@@ -6,13 +6,13 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { 
-  Save, 
-  Trash2, 
-  FileText, 
-  RefreshCw, 
-  Loader2, 
-  Plus, 
+import {
+  Save,
+  Trash2,
+  FileText,
+  RefreshCw,
+  Loader2,
+  Plus,
   Minus,
   Download,
   ZoomIn,
@@ -100,7 +100,7 @@ const ImageViewer = React.memo(({ fileUrl, fileName, documentName }) => {
   return (
     <div className="relative w-full h-full">
       {/* Image Controls */}
-      <div className="absolute top-2 right-2 z-10 flex gap-1 bg-background/80 backdrop-blur-sm rounded-md p-1 border">
+      <div className="absolute top-2 right-2 z-10 flex gap-1 backdrop-blur-sm rounded-md p-1 border">
         <Button
           variant="ghost"
           size="icon"
@@ -147,7 +147,7 @@ const ImageViewer = React.memo(({ fileUrl, fileName, documentName }) => {
 
       {/* Image Container */}
       <div className="w-full h-full overflow-auto bg-secondary/30 rounded-md border flex items-center justify-center">
-        <div 
+        <div
           className="transition-transform duration-200 ease-in-out"
           style={{
             transform: `scale(${zoom}) rotate(${rotation}deg)`,
@@ -189,7 +189,7 @@ const DocumentViewer = React.memo(({ fileUrl, fileName, documentName }) => {
   const getFileType = useCallback((fileName: string) => {
     if (!fileName) return 'unknown';
     const extension = fileName.toLowerCase().split('.').pop();
-    
+
     if (extension === 'pdf') return 'pdf';
     if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension)) return 'image';
     return 'unknown';
@@ -230,10 +230,10 @@ const DocumentViewer = React.memo(({ fileUrl, fileName, documentName }) => {
           {fileType === 'pdf' ? (
             <PDFViewer url={fileUrl} />
           ) : fileType === 'image' ? (
-            <ImageViewer 
-              fileUrl={fileUrl} 
-              fileName={fileName} 
-              documentName={documentName} 
+            <ImageViewer
+              fileUrl={fileUrl}
+              fileName={fileName}
+              documentName={documentName}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-secondary/30 rounded-md border">
@@ -262,12 +262,12 @@ const DocumentViewer = React.memo(({ fileUrl, fileName, documentName }) => {
 });
 
 // FIXED: Wrap the main component in React.memo with custom comparison
-const ExtractionPreview = React.memo(({
+function ExtractionPreview({
   documentName,
   extractedData = {},
   fields: initialFields = [],
-  fieldsPromise,
-  onDataChange = () => {},
+  fieldsPromise = null,
+  onDataChange = () => { },
   onVerify,
   onSave,
   onClose,
@@ -285,11 +285,11 @@ const ExtractionPreview = React.memo(({
     getBorderColor: () => 'border-primary',
     getButtonStyle: () => 'bg-primary hover:bg-primary/90 text-primary-foreground'
   })
-}: ExtractionPreviewProps) => {
+}: ExtractionPreviewProps) {
   const [fields, setFields] = useState<Field[]>(initialFields);
   const [loadingFields, setLoadingFields] = useState(!!fieldsPromise);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  
+
   // FIXED: Add local state for immediate UI feedback while maintaining parent sync
   const [localData, setLocalData] = useState<Record<string, any>>(extractedData);
 
@@ -305,8 +305,22 @@ const ExtractionPreview = React.memo(({
 
   // FIXED: Sync local data with prop changes
   useEffect(() => {
-    setLocalData(extractedData);
-  }, [extractedData]);
+    // Initialize local data with extracted data, but preserve any existing values
+    const newLocalData = {};
+    Object.entries(extractedData).forEach(([key, value]) => {
+      newLocalData[key] = value;
+      // Also store under field ID if it exists
+      const field = fields.find(f => f.name === key);
+      if (field) {
+        newLocalData[field.id] = value;
+      }
+    });
+    setLocalData(newLocalData);
+    console.log('🔄 Initialized local data with extracted data:', {
+      extractedDataKeys: Object.keys(extractedData),
+      localDataKeys: Object.keys(newLocalData)
+    });
+  }, [extractedData, fields]);
 
   // FIXED: Handle fields loading more efficiently
   useEffect(() => {
@@ -330,69 +344,163 @@ const ExtractionPreview = React.memo(({
   }, [fieldsPromise]); // Only depend on fieldsPromise
 
   const getFieldValue = useCallback((field: Field): any => {
-    // Try multiple possible field identifiers to match against extracted data
-    const possibleKeys = [
-      field.id,
-      field.name,
-      field.fieldName,
-      // Convert snake_case to camelCase
-      field.name?.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()),
-      // Convert camelCase to snake_case  
-      field.name?.replace(/([A-Z])/g, '_$1').toLowerCase(),
-      // Try exact key match from extractedData
-      Object.keys(extractedData).find(key => 
-        key.toLowerCase() === field.name?.toLowerCase() ||
-        key.toLowerCase() === field.id?.toLowerCase()
-      )
-    ].filter(Boolean);
-  
-    // Try to get value from local data first (for immediate UI feedback)
-    let value = undefined;
-    let matchedKey = null;
-    
-    for (const key of possibleKeys) {
-      if (localData[key] !== undefined) {
-        value = localData[key];
-        matchedKey = key;
-        break;
-      }
-    }
-  
-    // Fallback to prop data if not found in local data
-    if (value === undefined) {
-      for (const key of possibleKeys) {
-        if (extractedData[key] !== undefined) {
-          value = extractedData[key];
-          matchedKey = key;
-          break;
-        }
-      }
-    }
-  
-    console.log(`🔍 Getting value for field:`, {
+    console.log('🔍 Getting value for field:', {
       fieldName: field.name,
       fieldId: field.id,
-      possibleKeys,
-      matchedKey,
-      foundValue: value,
+      fieldPath: field.parentField ? `${field.parentField}.${field.name}` : field.name,
       localDataKeys: Object.keys(localData),
       extractedDataKeys: Object.keys(extractedData)
     });
-    
-    return value !== undefined ? value : '';
+
+    // Try to get value from local data first
+    let value = localData[field.name];
+    if (value !== undefined) {
+      console.log('✅ Found value in localData by name:', {
+        field: field.name,
+        value
+      });
+      return value;
+    }
+
+    // Try field ID if name wasn't found
+    value = localData[field.id];
+    if (value !== undefined) {
+      console.log('✅ Found value in localData by ID:', {
+        field: field.id,
+        value
+      });
+      return value;
+    }
+
+    // Try to get value from extractedData
+    value = extractedData[field.name];
+    if (value !== undefined) {
+      console.log('✅ Found value in extractedData by name:', {
+        field: field.name,
+        value
+      });
+      return value;
+    }
+
+    // Try field ID in extractedData
+    value = extractedData[field.id];
+    if (value !== undefined) {
+      console.log('✅ Found value in extractedData by ID:', {
+        field: field.id,
+        value
+      });
+      return value;
+    }
+
+    // If still not found, check for case-insensitive matches
+    const lowerCaseName = field.name?.toLowerCase();
+    const lowerCaseId = field.id?.toLowerCase();
+
+    // Check localData case-insensitive
+    const localMatch = Object.entries(localData).find(([key, val]) =>
+      key.toLowerCase() === lowerCaseName || key.toLowerCase() === lowerCaseId
+    );
+
+    if (localMatch) {
+      console.log('✅ Found value in localData by case-insensitive match:', {
+        field: field.name,
+        key: localMatch[0],
+        value: localMatch[1]
+      });
+      return localMatch[1];
+    }
+
+    // Check extractedData case-insensitive
+    const extractedMatch = Object.entries(extractedData).find(([key, val]) =>
+      key.toLowerCase() === lowerCaseName || key.toLowerCase() === lowerCaseId
+    );
+
+    if (extractedMatch) {
+      console.log('✅ Found value in extractedData by case-insensitive match:', {
+        field: field.name,
+        key: extractedMatch[0],
+        value: extractedMatch[1]
+      });
+      return extractedMatch[1];
+    }
+
+    // If still not found, log error
+    console.error('❌ Failed to find value for field:', {
+      field: field.name,
+      fieldId: field.id,
+      localDataKeys: Object.keys(localData),
+      extractedDataKeys: Object.keys(extractedData)
+    });
+
+    return '';
   }, [localData, extractedData]);
-  
+
 
   const handleFieldChange = useCallback((field: Field, value: any) => {
     if (viewMode) return;
-    
+
+    console.log(`🔄 Field changed in ExtractionPreview:`, {
+      fieldName: field.name,
+      fieldId: field.id,
+      newValue: value,
+      timestamp: new Date().toISOString(),
+      parentField: field.parentField,
+      fieldPath: field.parentField ? `${field.parentField}.${field.name}` : field.name
+    });
+
+    // Update local state immediately for UI feedback
+    setLocalData(prev => {
+      const updatedData = {
+        ...prev,
+        // Store under both field ID and name for compatibility
+        [field.id]: value,
+        [field.name]: value,
+        // If this is a nested field, update the parent array
+        ...(field.parentField && {
+          [field.parentField]: {
+            ...prev[field.parentField],
+            [field.name]: value
+          }
+        })
+      };
+
+      console.log(`📊 Local data updated:`, {
+        fieldName: field.name,
+        fieldId: field.id,
+        previousValue: prev[field.id] || prev[field.name],
+        newValue: value,
+        allData: updatedData,
+        fieldPath: field.parentField ? `${field.parentField}.${field.name}` : field.name
+      });
+
+      return updatedData;
+    });
+
+    // Call parent's onDataChange with field.name
+    if (onDataChange) {
+      console.log(`📤 Calling parent onDataChange with field.name:`, {
+        fieldId: field.id,
+        fieldName: field.name,
+        keyUsed: field.name,
+        value: value,
+        parentField: field.parentField,
+        fieldPath: field.parentField ? `${field.parentField}.${field.name}` : field.name
+      });
+
+      // Use field.name as the key for consistency with submission expectations
+      onDataChange(field.name, value);
+    } else {
+      console.warn('⚠️ onDataChange callback not provided');
+    }
+    if (viewMode) return;
+
     console.log(`🔄 Field changed in ExtractionPreview:`, {
       fieldName: field.name,
       fieldId: field.id,
       newValue: value,
       timestamp: new Date().toISOString()
     });
-    
+
     // Update local state immediately for UI feedback
     setLocalData(prev => {
       const updatedData = {
@@ -400,7 +508,7 @@ const ExtractionPreview = React.memo(({
         [field.id]: value,
         [field.name]: value // Store under both keys for compatibility
       };
-      
+
       console.log(`📊 Local data updated:`, {
         fieldName: field.name,
         fieldId: field.id,
@@ -408,10 +516,10 @@ const ExtractionPreview = React.memo(({
         newValue: value,
         allData: updatedData
       });
-      
+
       return updatedData;
     });
-    
+
     // FIXED: Call parent's onDataChange with field.name instead of field.id
     if (onDataChange) {
       console.log(`📤 Calling parent onDataChange with field.name:`, {
@@ -420,7 +528,7 @@ const ExtractionPreview = React.memo(({
         keyUsed: field.name, // This is what we're using now
         value: value
       });
-      
+
       // Use field.name as the key for consistency with submission expectations
       onDataChange(field.name, value);
     } else {
@@ -430,7 +538,7 @@ const ExtractionPreview = React.memo(({
 
   const handleArrayItemChange = useCallback((field: Field, itemIndex: number, subFieldName: string, value: any) => {
     if (viewMode) return;
-    
+
     console.log(`📝 Array item changed:`, {
       fieldName: field.name,
       fieldId: field.id,
@@ -438,19 +546,19 @@ const ExtractionPreview = React.memo(({
       subFieldName,
       value
     });
-    
+
     const currentArray = Array.isArray(getFieldValue(field)) ? [...getFieldValue(field)] : [];
     while (currentArray.length <= itemIndex) currentArray.push({});
     currentArray[itemIndex] = { ...currentArray[itemIndex], [subFieldName]: value };
-    
+
     console.log(`📊 Updated array:`, {
       fieldName: field.name,
       newArray: currentArray
     });
-    
+
     handleFieldChange(field, currentArray);
   }, [viewMode, getFieldValue, handleFieldChange]);
-  
+
 
   const addArrayItem = useCallback((field: Field) => {
     if (viewMode) return;
@@ -476,7 +584,7 @@ const ExtractionPreview = React.memo(({
     const isArrayField = field.type === 'array' || field.isArray;
     const displayName = toTitleCase(field.name || '');
     const currentValue = getFieldValue(field);
-  
+
     console.log(`🎨 Rendering field:`, {
       fieldName: field.name,
       fieldId: field.id,
@@ -484,21 +592,21 @@ const ExtractionPreview = React.memo(({
       currentValue,
       fieldType: field.type
     });
-  
+
     if (isArrayField && field.arrayConfig?.fields) {
       const arrayValue = currentValue;
       const arrayData = Array.isArray(arrayValue) && arrayValue.length > 0 ? arrayValue : [{}];
-      
+
       return (
         <div key={field.id} className="space-y-4 rounded-lg border bg-background p-4">
           <div className="flex items-center justify-between">
             <h4 className="font-semibold text-base text-foreground">{displayName}</h4>
             {!viewMode && (
-              <Button 
-                type="button" 
-                size="sm" 
-                variant="outline" 
-                onClick={() => addArrayItem(field)} 
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => addArrayItem(field)}
                 className="flex items-center gap-1.5"
               >
                 <Plus className="h-4 w-4" /> Add
@@ -511,11 +619,11 @@ const ExtractionPreview = React.memo(({
                 <CardHeader className="flex flex-row items-center justify-between py-3 px-4">
                   <CardTitle className="text-sm font-medium">Item {itemIndex + 1}</CardTitle>
                   {!viewMode && arrayData.length > 1 && (
-                    <Button 
-                      type="button" 
-                      size="icon" 
-                      variant="ghost" 
-                      onClick={() => removeArrayItem(field, itemIndex)} 
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => removeArrayItem(field, itemIndex)}
                       className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -533,9 +641,9 @@ const ExtractionPreview = React.memo(({
                           <Label htmlFor={`${field.id}-${itemIndex}-${subField.id}`} className="text-xs font-medium">
                             {subFieldDisplayName}
                           </Label>
-                          <Input 
-                            id={`${field.id}-${itemIndex}-${subField.id}`} 
-                            value={subFieldValue} 
+                          <Input
+                            id={`${field.id}-${itemIndex}-${subField.id}`}
+                            value={subFieldValue}
                             onChange={(e) => {
                               console.log(`📝 Array subfield changed:`, {
                                 parentField: field.name,
@@ -544,9 +652,9 @@ const ExtractionPreview = React.memo(({
                                 newValue: e.target.value
                               });
                               handleArrayItemChange(field, itemIndex, subField.name, e.target.value);
-                            }} 
-                            placeholder={subFieldDisplayName} 
-                            disabled={viewMode} 
+                            }}
+                            placeholder={subFieldDisplayName}
+                            disabled={viewMode}
                           />
                         </div>
                       );
@@ -559,16 +667,16 @@ const ExtractionPreview = React.memo(({
         </div>
       );
     }
-  
+
     return (
       <div key={field.id} className="space-y-2">
         <Label htmlFor={field.id}>
           {displayName}
           {field.required && <span className="text-destructive ml-1">*</span>}
         </Label>
-        <Input 
-          id={field.id} 
-          value={currentValue || ''} 
+        <Input
+          id={field.id}
+          value={currentValue || ''}
           onChange={(e) => {
             console.log(`📝 Simple field changed:`, {
               fieldName: field.name,
@@ -577,14 +685,14 @@ const ExtractionPreview = React.memo(({
               newValue: e.target.value
             });
             handleFieldChange(field, e.target.value);
-          }} 
-          placeholder={`Enter ${displayName}`} 
-          disabled={viewMode} 
+          }}
+          placeholder={`Enter ${displayName}`}
+          disabled={viewMode}
         />
       </div>
     );
   }, [getFieldValue, handleFieldChange, handleArrayItemChange, addArrayItem, removeArrayItem, toTitleCase, viewMode]);
-  
+
   const handleSave = useCallback(() => {
     console.log(`💾 Save initiated:`, {
       documentName,
@@ -592,7 +700,7 @@ const ExtractionPreview = React.memo(({
       hasOnSave: !!onSave,
       hasOnVerify: !!onVerify
     });
-  
+
     if (onSave) {
       console.log(`📤 Calling onSave with data:`, localData);
       onSave(localData); // Use local data for save
@@ -615,7 +723,7 @@ const ExtractionPreview = React.memo(({
         </div>
       );
     }
-    
+
     return fields.map(field => renderField(field));
   }, [fields, renderField]);
 
@@ -633,7 +741,7 @@ const ExtractionPreview = React.memo(({
   const content = (
     <div className="space-y-6 max-w-9xl">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-3">
+        {/* <div className="flex items-center gap-3">
           <div className={`flex items-center justify-center h-10 w-10 rounded-lg ${styles.getBgColor?.() || 'bg-primary'}`}>
             <FileText className={`h-5 w-5 ${styles.getTextColor?.() || 'text-primary-foreground'}`} />
           </div>
@@ -641,11 +749,11 @@ const ExtractionPreview = React.memo(({
             <h2 className="text-xl font-bold tracking-tight">{documentName}</h2>
             {type && <Badge variant="secondary" className="mt-1">{toTitleCase(type)}</Badge>}
           </div>
-        </div>
-        <div className="flex items-center gap-2">
+        </div> */}
+        {/* <div className="flex items-center gap-2 justify-end">
           {fileUrl && (
             <Button asChild variant="outline" size="sm">
-              <a href={fileUrl} download={fileName}>
+              <a href={fileUrl} download={fileName}>  
                 <Download className="mr-2 h-4 w-4" /> Download
               </a>
             </Button>
@@ -655,14 +763,14 @@ const ExtractionPreview = React.memo(({
               <Trash2 className="mr-2 h-4 w-4" /> Delete
             </Button>
           )}
-        </div>
+        </div> */}
       </div>
-      
+
       <div className="grid grid-cols-3 xl:grid-cols-3 gap-6">
         <div className="col-span-2">
           <DocumentViewer fileUrl={fileUrl} fileName={fileName} documentName={documentName} />
         </div>
-        
+
         <div className="col-span-1">
           <Card className="h-full">
             <CardHeader>
@@ -674,9 +782,9 @@ const ExtractionPreview = React.memo(({
                   </CardDescription>
                 </div>
                 {!viewMode && (
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={async () => {
                       if (typeof window.refreshExtraction === 'function') {
                         setIsRefreshing(true);
@@ -689,8 +797,8 @@ const ExtractionPreview = React.memo(({
                           setIsRefreshing(false);
                         }
                       }
-                    }} 
-                    disabled={isRefreshing || !fileUrl} 
+                    }}
+                    disabled={isRefreshing || !fileUrl}
                     className="shrink-0"
                   >
                     {isRefreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
@@ -720,29 +828,19 @@ const ExtractionPreview = React.memo(({
   }
 
   return (
-    <Dialog open={true} onOpenChange={(open) => !open && onClose?.()}>
-      <DialogContent 
-        className="max-w-7xl w-[95vw] h-[95vh] flex flex-col p-0"
-        aria-describedby="document-extraction-desc"
-      >
-        <DialogHeader className="p-6 pb-4 border-b">
-          <DialogTitle className="text-2xl">Document Details Extraction</DialogTitle>
-          <DialogDescription id="document-extraction-desc">
-            Review and verify the extracted document details
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex-1 overflow-y-auto p-6 bg-muted/40">
-          {content}
+    <div className="space-y-6 max-w-9xl">
+        <div className="flex flex-col h-full bg-muted/40">
+          <div className="flex-1 overflow-y-auto p-6">
+            {content}
+          </div>
         </div>
-        <DialogFooter className="p-4 border-t bg-background">
-          <DialogClose asChild>
-            <Button variant="outline" onClick={onClose}>Close</Button>
-          </DialogClose>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    </div>
   );
-}, (prevProps, nextProps) => {
+}
+
+ExtractionPreview.displayName = 'ExtractionPreview';
+
+export default React.memo(ExtractionPreview, (prevProps, nextProps) => {
   // FIXED: Custom comparison function to prevent unnecessary re-renders
   // Only re-render if these specific props change
   return (
@@ -758,7 +856,3 @@ const ExtractionPreview = React.memo(({
     prevProps.onDataChange === nextProps.onDataChange
   );
 });
-
-ExtractionPreview.displayName = 'ExtractionPreview';
-
-export default ExtractionPreview;
