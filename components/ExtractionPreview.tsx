@@ -565,29 +565,47 @@ function ExtractionPreview({
                   )}
                 </CardHeader>
                 <CardContent className="p-4 pt-0">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-4 pl-4 border-l-2 border-muted">
                     {field.arrayConfig.fields.map((subField) => {
-                      const subFieldValue = item[subField.name] || item[subField.id] || '';
-                      const subFieldDisplayName = toTitleCase(subField.name);
+                      const subFieldId = `${fieldId}[${itemIndex}].${subField.id}`;
+                      const subFieldValue = item && typeof item === 'object' ? item[subField.id] || '' : '';
+                      const subFieldDisplayName = subField.name || subField.id;
+                      
+                      if (subField.isArray && Array.isArray(subFieldValue)) {
+                        return renderArrayItems(subField, subFieldValue, `${fieldId}[${itemIndex}]`);
+                      }
+                      
                       return (
-                        <div key={`${field.id}-${itemIndex}-${subField.id}`} className="space-y-1.5">
-                          <Label htmlFor={`${field.id}-${itemIndex}-${subField.id}`} className="text-xs font-medium">
+                        <div key={`${field.id}-${itemIndex}-${subField.id}`} className="grid grid-cols-4 gap-4 items-center">
+                          <Label htmlFor={subFieldId} className="text-sm font-medium">
                             {subFieldDisplayName}
+                            {subField.required && <span className="text-destructive ml-1">*</span>}
                           </Label>
                           <Input
-                            id={`${field.id}-${itemIndex}-${subField.id}`}
+                            id={subFieldId}
+                            type={subField.type === 'date' ? 'date' : 'text'}
                             value={subFieldValue}
                             onChange={(e) => {
                               console.log(`📝 Array subfield changed:`, {
                                 parentField: field.name,
                                 itemIndex,
-                                subFieldName: subField.name,
+                                subFieldId: subField.id,
                                 newValue: e.target.value
                               });
-                              handleArrayItemChange(field, itemIndex, subField.name, e.target.value);
+                              
+                              // Create a new array with the updated value
+                              const newArray = [...arrayData];
+                              if (!newArray[itemIndex]) newArray[itemIndex] = {};
+                              newArray[itemIndex] = {
+                                ...newArray[itemIndex],
+                                [subField.id]: e.target.value
+                              };
+                              
+                              onDataChange(fieldId, newArray);
                             }}
-                            placeholder={subFieldDisplayName}
+                            className="col-span-3"
                             disabled={viewMode}
+                            placeholder={subFieldDisplayName}
                           />
                         </div>
                       );

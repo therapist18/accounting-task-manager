@@ -186,10 +186,30 @@ export default function OfficersPage() {
     endDate?: string | null;
     children: React.ReactNode;
   }) => {
-    const deptName = department?.name || 'Unknown Department';
-    const deptId = department?.id || 'N/A';
-    const subDeptName = subdepartment?.name || 'No Subdepartment';
-    const subDeptId = subdepartment?.id || 'N/A';
+    // Get department info from the department object or try to look it up by ID
+    let deptName = 'Unknown Department';
+    let deptId = 'N/A';
+    
+    if (department) {
+      deptName = department.name || 'Unknown Department';
+      deptId = department.id || 'N/A';
+    } else if (department?.id && departments[department.id]) {
+      deptName = departments[department.id].name;
+      deptId = department.id;
+    }
+    
+    // Get subdepartment info
+    let subDeptName = 'No Subdepartment';
+    let subDeptId = 'N/A';
+    
+    if (subdepartment) {
+      subDeptName = subdepartment.name || 'No Subdepartment';
+      subDeptId = subdepartment.id || 'N/A';
+    } else if (department?.id && subdepartment?.id && departments[department.id]?.subdepartments[subdepartment.id]) {
+      subDeptName = departments[department.id].subdepartments[subdepartment.id];
+      subDeptId = subdepartment.id;
+    }
+    
     const isActive = !endDate || new Date(endDate) > new Date();
     
     return (
@@ -295,33 +315,50 @@ export default function OfficersPage() {
   // Helper function to get current department info
   const getCurrentDepartment = (officer: Officer) => {
     const currentDept = officer.department_history?.[0];
-    if (!currentDept) return { name: '-', subName: '-' };
+    if (!currentDept) return { 
+      name: '-', 
+      subName: '-',
+      department: null,
+      subdepartment: null,
+      startDate: null,
+      endDate: null
+    };
     
-    // Try to get names from the department object first
+    // Get department info using the most reliable method available
+    let deptName = 'Unknown Department';
+    let subDeptName = 'No Subdepartment';
+    
+    // Try to get from department object first
     if (currentDept.department?.name) {
-      return {
-        name: currentDept.department.name,
-        subName: currentDept.subdepartment?.name || 'No Subdepartment',
-        startDate: currentDept.start_date,
-        endDate: currentDept.end_date,
-        department: currentDept.department,
-        subdepartment: currentDept.subdepartment
-      };
+      deptName = currentDept.department.name;
+      if (currentDept.subdepartment?.name) {
+        subDeptName = currentDept.subdepartment.name;
+      }
+    } 
+    // Fall back to ID-based lookup
+    else if (currentDept.department_id) {
+      const deptInfo = getDepartmentInfo(
+        currentDept.department_id,
+        currentDept.subdepartment_id
+      );
+      deptName = deptInfo.name;
+      subDeptName = deptInfo.subName;
     }
     
-    // Fall back to ID-based lookup if department object is not available
-    const deptInfo = getDepartmentInfo(
-      currentDept.department_id || currentDept.department?.id,
-      currentDept.subdepartment_id || currentDept.subdepartment?.id
-    );
-    
     return {
-      ...deptInfo,
+      name: deptName,
+      subName: subDeptName,
       startDate: currentDept.start_date,
       endDate: currentDept.end_date,
-      department: currentDept.department || { id: currentDept.department_id, name: deptInfo.name },
+      department: currentDept.department || {
+        id: currentDept.department_id,
+        name: deptName
+      },
       subdepartment: currentDept.subdepartment || 
-        (currentDept.subdepartment_id ? { id: currentDept.subdepartment_id, name: deptInfo.subName } : null)
+        (currentDept.subdepartment_id ? { 
+          id: currentDept.subdepartment_id, 
+          name: subDeptName 
+        } : null)
     };
   };
 

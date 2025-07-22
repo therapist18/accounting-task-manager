@@ -11,7 +11,7 @@ import { Eye, ChevronDown, Plus, Minus, Loader2, Settings, Search, Users, X, Tab
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { FileText, Edit, Trash2, Download, Building, Upload, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
-import { format, parseISO, isAfter, isEqual } from "date-fns"
+import { format, parseISO, isAfter, isEqual, isValid, parse, startOfToday } from 'date-fns';
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { EditTaskDialog } from "./components/EditTaskDialog"
@@ -898,7 +898,7 @@ export default function DepartmentTasksManager({
 
     try {
       const { data: newTask, error } = await supabase
-        .from('tasks')
+        .from('tm_tasks')
         .insert([{
           applicant_name: task.applicant_name,
           individual_id: task.individual_id,
@@ -974,62 +974,121 @@ export default function DepartmentTasksManager({
     }
   }, [allDocuments])
 
+  // Helper function to parse date from various formats
+  const parseDate = (dateStr: string): Date | null => {
+    if (!dateStr) return null;
+    
+    // Try different date formats
+    const formats = [
+      'dd/MM/yyyy HH:mm:ss',  // 07/10/2024 14:25:23
+      'dd/MM/yyyy',          // 13/06/2025
+      'yyyy-MM-dd',          // 2021-08-27
+      'dd-MM-yyyy',
+      'MM/dd/yyyy',
+      'yyyy/MM/dd'
+    ];
+    
+    for (const fmt of formats) {
+      const parsed = parse(dateStr, fmt, new Date());
+      if (isValid(parsed)) {
+        return parsed;
+      }
+    }
+    
+    // Try default Date parsing as fallback
+    const parsed = new Date(dateStr);
+    return isValid(parsed) ? parsed : null;
+  };
+
+  // Recursive function to find dates in an object (including arrays)
+  const findDatesInObject = (obj: any, dateFields: string[]): Date[] => {
+    if (!obj) return [];
+    
+    const dates: Date[] = [];
+    
+    // Handle arrays
+    if (Array.isArray(obj)) {
+      return obj.flatMap(item => findDatesInObject(item, dateFields));
+    }
+    
+    // Handle objects
+    if (typeof obj === 'object') {
+      for (const key in obj) {
+        const value = obj[key];
+        
+        // Check if this key is a date field we're interested in
+        const isDateField = dateFields.some(field => 
+          key.toLowerCase().includes(field.toLowerCase())
+        );
+        
+        if (isDateField && value) {
+          const parsedDate = typeof value === 'string' ? parseDate(value) : null;
+          if (parsedDate) {
+            dates.push(parsedDate);
+          }
+        }
+        
+        // Recursively check nested objects and arrays
+        if (value && typeof value === 'object') {
+          dates.push(...findDatesInObject(value, dateFields));
+        }
+      }
+    }
+    
+    return dates;
+  };
+
   // Handler to calculate current immigration status
   const getImmigrationStatus = useCallback((task: UtilTask) => {
     const statusStageId = "072b9710-45df-4a05-ba65-01b4ef29d61d";
     const statusStage = stages.find(s => s.id === statusStageId);
 
-    if (!statusStage || !statusStage.documents || statusStage.documents.length === 0) {
-        return { status: "N/A", date: null, type: 'na' };
+    if (!statusStage?.documents?.length) {
+      return { status: "N/A", date: null, type: 'na' };
     }
 
     const stageDocKycIds = new Set(statusStage.documents.map(d => d.kycId));
     
     const relevantDocs = allDocuments.filter(doc => 
-        doc.director_id === task.individual_id &&
-        stageDocKycIds.has(doc.document_id)
+      doc.director_id === task.individual_id &&
+      stageDocKycIds.has(doc.document_id)
     );
 
-    if (relevantDocs.length === 0) {
-        return { status: "No Status Doc", date: null, type: 'na' };
+    if (!relevantDocs.length) {
+      return { status: "No Status Doc", date: null, type: 'na' };
     }
 
-    const dateFields = ['expiry date', 'valid_to', 'up_to', 'untill', 'effective_to'];
-    let latestDate: Date | null = null;
+    // Expanded list of possible date field names
+    const dateFields = [
+      'expiry', 'valid', 'date', 'until', 'effective',
+      'expiration', 'expiry_date', 'valid_to', 'valid_until', 'up_to',
+      'effective_date', 'effective_from', 'effective_to', 'with_effect_from'
+    ];
 
-    relevantDocs.forEach(doc => {
-        if (doc.extracted_details) {
-            for (const key in doc.extracted_details) {
-                if (dateFields.includes(key.toLowerCase())) {
-                    const dateValue = doc.extracted_details[key];
-                    if (dateValue) {
-                        try {
-                            const parsedDate = parseISO(dateValue);
-                            if (!isNaN(parsedDate.getTime())) {
-                                if (!latestDate || isAfter(parsedDate, latestDate)) {
-                                    latestDate = parsedDate;
-                                }
-                            }
-                        } catch (e) {
-                            // ignore parsing errors
-                        }
-                    }
-                }
-            }
-        }
+    // Find all dates in the relevant documents
+    const allDates = relevantDocs.flatMap(doc => {
+      if (!doc.extracted_details) return [];
+      return findDatesInObject(doc.extracted_details, dateFields);
     });
 
-    if (latestDate) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0); // Compare dates only
-        const checkDate = new Date(latestDate);
-        checkDate.setHours(0, 0, 0, 0);
+    // Find the latest date
+    const latestDate = allDates.length > 0 
+      ? allDates.reduce((latest, current) => 
+          isAfter(current, latest) ? current : latest, allDates[0])
+      : null;
 
-        if (isAfter(checkDate, today) || isEqual(checkDate, today)) {
-             return { status: `Active until ${format(latestDate, 'dd MMM yyyy')}`, date: latestDate, type: 'active' };
-        } else {
-             return { status: `Expired on ${format(latestDate, 'dd MMM yyyy')}`, date: latestDate, type: 'expired' };
-        }
+    // Format the status
+    if (latestDate) {
+      const today = startOfToday();
+      const isFuture = isAfter(latestDate, today) || isEqual(latestDate, today);
+      
+      return {
+        status: isFuture 
+          ? `Active until ${format(latestDate, 'dd MMM yyyy')}`
+          : `Expired on ${format(latestDate, 'dd MMM yyyy')}`,
+        date: latestDate,
+        type: isFuture ? 'active' : 'expired'
+      };
     }
 
     return { status: "No Date Found", date: null, type: 'na' };
