@@ -25,46 +25,21 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import EditableStageCell from "./components/EditableStageCell"
 import ExtractionPreview from "@/components/ExtractionPreview"
-
-// Recursive helper to transform KYC fields, handling nested arrays
-const transformKycFields = (fields: any[]): any[] => {
-  if (!Array.isArray(fields)) return []
-
-  return fields.map((field: any) => {
-    const isArray = field.type === 'array' || field.isArray === true
-
-    const transformedField: any = {
-      id: field.id || field.fieldName || '',
-      fieldName: field.name || field.fieldName || '',
-      description: field.description || '',
-      isRequired: field.isRequired !== false,
-      fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
-      parentField: field.parentField,
-      isArray: isArray,
-    }
-
-    if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
-      transformedField.arrayConfig = {
-        maxItems: field.arrayConfig.maxItems,
-        fields: transformKycFields(field.arrayConfig.fields)
-      }
-    }
-
-    return transformedField
-  })
-}
-
-// Helper function to check if document is older than task creation
-const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolean => {
-  try {
-    const docDate = new Date(documentDate)
-    const tskDate = new Date(taskDate)
-    return docDate < tskDate
-  } catch (error) {
-    console.error('Error comparing dates:', error)
-    return false
-  }
-}
+import {
+  fetchTasks,
+  fetchStages,
+  fetchCompanies,
+  fetchAllDocuments,
+  fetchAllKycFields,
+  fetchKycDocument,
+  isDocumentOlderThanTask,
+  formatDateValue,
+  getDocumentForTaskStage,
+  type Task as UtilTask,
+  type Department,
+  type KycDocument,
+  type Document
+} from "./utils/taskManagerData"
 
 // Document field cell component - Updated to hide data for old documents or those with indicators
 function DocumentFieldCell({ document, field, isOldDocument = false }) {
@@ -205,7 +180,8 @@ export default function DepartmentTasksManager({
   onTaskUpdate,
   getCurrentRequirements
 }: DepartmentTasksManagerProps) {
-  const [departments, setDepartments] = useState<any[]>([])
+  // State management
+  const [departments, setDepartments] = useState<Department[]>([])
   const [departmentsLoading, setDepartmentsLoading] = useState(true)
   const [companies, setCompanies] = useState<Map<number, string>>(new Map())
   const [companiesLoading, setCompaniesLoading] = useState(true)
@@ -216,9 +192,9 @@ export default function DepartmentTasksManager({
   const [isTransposedView, setIsTransposedView] = useState<boolean>(true)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<any>(null)
-  const [tasks, setTasks] = useState<any[]>([])
+  const [tasks, setTasks] = useState<UtilTask[]>([])
   const [stages, setStages] = useState<any[]>([])
-  const [allDocuments, setAllDocuments] = useState<any[]>([])
+  const [allDocuments, setAllDocuments] = useState<Document[]>([])
   const [tasksLoading, setTasksLoading] = useState(true)
   const [isEnquiryDialogOpen, setIsEnquiryDialogOpen] = useState(false)
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null)
@@ -237,11 +213,14 @@ export default function DepartmentTasksManager({
     new Set(STATS_HEADERS.filter(h => h.default).map(h => h.id))
   )
 
+  // Stage visibility state
+  const [visibleStageIds, setVisibleStageIds] = useState<Set<string>>(new Set())
+
   // Dependant expansion state
   const [expandedDependants, setExpandedDependants] = useState<Set<string>>(new Set())
 
   // KYC documents cache - Updated to include display_name
-  const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map())
+  const [kycDocuments, setKycDocuments] = useState<Map<string, KycDocument>>(new Map())
   const [allKycFields, setAllKycFields] = useState<Record<string, any[]>>({})
 
   // State for document preview
@@ -252,33 +231,130 @@ export default function DepartmentTasksManager({
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
 
-  // Fetch KYC document by kycId (with caching) - Updated to include display_name
-  const fetchKycDocument = useCallback(async (kycId: string) => {
-    if (kycDocuments.has(kycId)) {
-      return kycDocuments.get(kycId)
-    }
+  // Data loading states
+  const [dataLoading, setDataLoading] = useState({
+    departments: true,
+    companies: true,
+    documents: true,
+    kycFields: true,
+    tasks: true,
+    stages: false
+  })
 
+  // Load all initial data
+  const loadInitialData = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('acc_portal_kyc')
-        .select('id, fields, name, display_name')
-        .eq('id', kycId)
-        .single()
+      setDataLoading(prev => ({ ...prev, departments: true, companies: true, documents: true, kycFields: true }))
 
-      if (error) throw error
+      // Load departments first
+      const departmentsData = await fetchDepartments()
+      setDepartments(departmentsData)
+      setDataLoading(prev => ({ ...prev, departments: false }))
 
-      const transformedDoc = {
-        ...data,
-        fields: transformKycFields(data.fields || [])
+      // Set initial active department
+      if (departmentsData.length > 0) {
+        setActiveDepartmentTab(departmentsData[0].id.toString())
+        // Set first default subdepartment as active
+        const firstDept = departmentsData[0]
+        const defaultSubs = firstDept.tm_subdepartments?.filter(sub => sub.default_display) || []
+        if (defaultSubs.length > 0) {
+          setActiveSubdepartmentTab(defaultSubs[0].id.toString())
+        }
       }
 
-      setKycDocuments(prev => new Map(prev.set(kycId, transformedDoc)))
-      return transformedDoc
+      // Load other data in parallel
+      const [companiesData, documentsData, kycFieldsData] = await Promise.all([
+        fetchCompanies(),
+        fetchAllDocuments(),
+        fetchAllKycFields()
+      ])
+
+      setCompanies(companiesData)
+      setDataLoading(prev => ({ ...prev, companies: false }))
+
+      setAllDocuments(documentsData)
+      setDataLoading(prev => ({ ...prev, documents: false }))
+
+      setAllKycFields(kycFieldsData.fieldsMap)
+      setKycDocuments(kycFieldsData.kycDocsMap)
+      setDataLoading(prev => ({ ...prev, kycFields: false }))
+
     } catch (error) {
-      console.error('Error fetching KYC document:', error)
-      return null
+      console.error('Error loading initial data:', error)
+      toast({ 
+        title: "Error", 
+        description: "Failed to load initial data.", 
+        variant: "destructive" 
+      })
+      setDataLoading({
+        departments: false,
+        companies: false,
+        documents: false,
+        kycFields: false,
+        tasks: false,
+        stages: false
+      })
     }
-  }, [kycDocuments])
+  }, [])
+
+  // Load tasks data
+  const loadTasksData = useCallback(async (departmentId?: string, subdepartmentId?: string) => {
+    try {
+      setDataLoading(prev => ({ ...prev, tasks: true, stages: true }))
+
+      const [tasksData, stagesData] = await Promise.all([
+        fetchTasks(departmentId, subdepartmentId),
+        departmentId ? fetchStages(departmentId, departments) : Promise.resolve([])
+      ])
+
+      setTasks(tasksData)
+      setDataLoading(prev => ({ ...prev, tasks: false }))
+
+      setStages(stagesData)
+      setDataLoading(prev => ({ ...prev, stages: false }))
+
+    } catch (error) {
+      console.error('Error loading tasks data:', error)
+      toast({ 
+        title: "Error", 
+        description: "Failed to load tasks data.", 
+        variant: "destructive" 
+      })
+      setDataLoading(prev => ({ ...prev, tasks: false, stages: false }))
+    }
+  }, [departments])
+
+  // Refresh all data
+  const refreshAllData = useCallback(async () => {
+    try {
+      const [documentsData, kycFieldsData] = await Promise.all([
+        fetchAllDocuments(),
+        fetchAllKycFields()
+      ])
+
+      setAllDocuments(documentsData)
+      setAllKycFields(kycFieldsData.fieldsMap)
+      setKycDocuments(kycFieldsData.kycDocsMap)
+
+      // Refresh tasks and stages
+      if (activeDepartmentTab) {
+        await loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
+      }
+
+      toast({
+        title: "Success",
+        description: "Data refreshed successfully.",
+        variant: "default"
+      })
+    } catch (error) {
+      console.error('Error refreshing data:', error)
+      toast({
+        title: "Error",
+        description: "Failed to refresh data.",
+        variant: "destructive"
+      })
+    }
+  }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData])
 
   // Get KYC fields for a document from the pre-fetched fields
   const getKycFields = useCallback((doc: any) => {
@@ -287,70 +363,6 @@ export default function DepartmentTasksManager({
     }
     return Promise.resolve(allKycFields[doc.kycId] || []);
   }, [allKycFields])
-
-  // Fetch all KYC fields for all document types - Updated to include display_name
-  const fetchAllKycFields = useCallback(async () => {
-    try {
-      console.log('Fetching all KYC fields...');
-      const { data, error } = await supabase
-        .from('acc_portal_kyc')
-        .select('id, fields, name, display_name')
-
-      if (error) throw error;
-
-      const fieldsMap: Record<string, any[]> = {};
-      const kycDocsMap = new Map();
-
-      // Transform and store fields by kycId and cache KYC documents
-      data?.forEach(doc => {
-        if (doc.id && doc.fields) {
-          fieldsMap[doc.id] = transformKycFields(doc.fields);
-          kycDocsMap.set(doc.id, doc);
-        }
-      });
-
-      console.log(`Fetched KYC fields for ${Object.keys(fieldsMap).length} document types`);
-      setAllKycFields(fieldsMap);
-      setKycDocuments(kycDocsMap);
-    } catch (error) {
-      console.error('Error fetching KYC fields:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load KYC fields',
-        variant: 'destructive',
-      });
-    }
-  }, []);
-
-  // Fetch all required data when component mounts
-  useEffect(() => {
-    fetchAllKycFields();
-  }, [fetchAllKycFields]);
-
-  // Optimized fetch all documents function - single fetch for all documents
-  const fetchAllDocuments = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('acc_portal_directors_documents')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      setAllDocuments(data || [])
-    } catch (error) {
-      console.error('Error fetching documents:', error)
-      toast({
-        title: "Error",
-        description: "Failed to load documents data.",
-        variant: "destructive"
-      })
-    }
-  }, [])
-
-  // Fetch documents when component mounts
-  useEffect(() => {
-    fetchAllDocuments()
-  }, [fetchAllDocuments])
 
   // Helper function to check if a document applies to the current task (similar to StageUploadDialog)
   const isDocumentApplicableToTask = useCallback((doc: any, task: any) => {
@@ -415,20 +427,6 @@ export default function DepartmentTasksManager({
     // For special documents without clear targeting, don't show them
     return false
   }, [])
-
-  // Optimized function to get document for task and stage
-  const getDocumentForTaskStage = useCallback((task: any, stage: any, documents = allDocuments) => {
-    if (!task.individual_id || !stage.documents?.[0]?.kycId) return null
-
-    const relevantDocs = documents.filter(doc =>
-      doc.director_id === task.individual_id &&
-      doc.document_id === stage.documents[0].kycId
-    );
-
-    if (relevantDocs.length === 0) return null;
-
-    return relevantDocs[0]; // Already sorted by created_at desc
-  }, [allDocuments])
 
   // Check if a stage document is applicable to a task
   const isStageDocumentApplicable = useCallback((stage: any, task: any) => {
@@ -567,6 +565,19 @@ export default function DepartmentTasksManager({
     })
   }
 
+  // Handle stage visibility toggle
+  const toggleStageVisibility = (stageId: string) => {
+    setVisibleStageIds(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(stageId)) {
+        newSet.delete(stageId)
+      } else {
+        newSet.add(stageId)
+      }
+      return newSet
+    })
+  }
+
   // Handle document upload
   const handleStageDocumentUpload = useCallback((task: any, stage: any) => {
     const enrichedTask = {
@@ -606,7 +617,7 @@ export default function DepartmentTasksManager({
   // Updated to prevent preview for old documents
   const handleViewDocument = useCallback(async (task: any, stage: any) => {
     try {
-      const document = getDocumentForTaskStage(task, stage);
+      const document = getDocumentForTaskStage(task, stage, allDocuments);
 
       if (!document) {
         toast({
@@ -651,15 +662,16 @@ export default function DepartmentTasksManager({
         return;
       }
 
-      // Fetch KYC document data from database
-      const { data: kycData, error: kycError } = await supabase
-        .from('acc_portal_kyc')
-        .select('id, fields, name, display_name')
-        .eq('id', kycId)
-        .single();
+      // Get KYC document from cache or fetch it
+      let kycData = kycDocuments.get(kycId);
+      if (!kycData) {
+        kycData = await fetchKycDocument(kycId);
+        if (kycData) {
+          setKycDocuments(prev => new Map(prev.set(kycId, kycData)));
+        }
+      }
 
-      if (kycError || !kycData) {
-        console.error('Error fetching KYC document:', kycError);
+      if (!kycData) {
         toast({
           title: 'Error',
           description: 'Failed to load document configuration.',
@@ -671,36 +683,8 @@ export default function DepartmentTasksManager({
       // Use KYC document display_name or name, not stage document name
       const documentName = kycData.display_name || kycData.name || 'Document';
 
-      // Transform KYC fields
-      const transformKycFields = (fields: any[]): any[] => {
-        if (!Array.isArray(fields)) return []
-
-        return fields.map((field: any) => {
-          const isArray = field.type === 'array' || field.isArray === true
-
-          const transformedField: any = {
-            id: field.id || field.fieldName || '',
-            fieldName: field.name || field.fieldName || '',
-            description: field.description || '',
-            isRequired: field.isRequired !== false,
-            fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
-            parentField: field.parentField,
-            isArray: isArray,
-          }
-
-          if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
-            transformedField.arrayConfig = {
-              maxItems: field.arrayConfig.maxItems,
-              fields: transformKycFields(field.arrayConfig.fields)
-            }
-          }
-
-          return transformedField
-        })
-      };
-
       // Get KYC fields from the KYC document data
-      const kycFields = transformKycFields(kycData.fields || []);
+      const kycFields = kycData.fields || [];
       const fields = kycFields.map(field => ({
         id: field.id || field.fieldName,
         name: field.fieldName,
@@ -752,88 +736,13 @@ export default function DepartmentTasksManager({
         variant: 'destructive',
       });
     }
-  }, [getDocumentForTaskStage]);
-
-  // Fetch companies
-  const fetchCompanies = async () => {
-    try {
-      setCompaniesLoading(true)
-      const { data, error } = await supabase
-        .from('acc_portal_company_duplicate')
-        .select('id, company_name')
-
-      if (error) throw error
-
-      if (data) {
-        const companyMap = new Map(data.map(c => [c.id, c.company_name]))
-        setCompanies(companyMap)
-      }
-    } catch (error) {
-      console.error('Error fetching companies:', error)
-      toast({
-        title: "Error",
-        description: "Failed to load company data.",
-        variant: "destructive"
-      })
-    } finally {
-      setCompaniesLoading(false)
-    }
-  }
-
-  // Fetch tasks with related data
-  const fetchTasks = useCallback(async (departmentId?: string, subdepartmentId?: string) => {
-    try {
-      setTasksLoading(true)
-      let query = supabase
-        .from('tm_tasks')
-        .select(`*, 
-          department:department_id (id, name), 
-          subdepartment:subdepartment_id (id, name), 
-          current_stage:current_stage_id (id, name, order_num)
-        `)
-        .order('created_at', { ascending: false })
-
-      if (departmentId) {
-        query = query.eq('department_id', departmentId)
-      }
-
-      if (subdepartmentId) {
-        query = query.eq('subdepartment_id', subdepartmentId)
-      }
-
-      const { data, error } = await query
-
-      if (error) throw error;
-
-      // Mock dependants for demonstration
-      const tasksWithMockedDependants = (data || []).map(task => {
-        if (task.id === 2 && task.dependant_member?.length > 0) {
-          return {
-            ...task,
-            dependnats_members: [
-              { id: 766, name: 'Pooja J Suthar', relationship: 'wife', nationality: 'Indian', age: 40 },
-              { id: 765, name: 'Tisha J Suthar', relationship: 'daughter', nationality: 'Indian', age: 15 }
-            ]
-          }
-        }
-        return task;
-      });
-
-      setTasks(tasksWithMockedDependants)
-
-    } catch (error) {
-      console.error('Error fetching tasks:', error)
-      toast({ title: "Error", description: "Failed to load tasks.", variant: "destructive" })
-    } finally {
-      setTasksLoading(false)
-    }
-  }, [])
+  }, [allDocuments, kycDocuments]);
 
   // Handle new enquiry creation
   const handleEnquiryCreated = useCallback(async (newEnquiry: any) => {
     try {
       setTasks(prevTasks => [newEnquiry, ...prevTasks])
-      await fetchTasks(activeDepartmentTab, activeSubdepartmentTab);
+      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
 
       toast({
         title: "Success",
@@ -848,128 +757,19 @@ export default function DepartmentTasksManager({
         variant: "destructive"
       });
     }
-  }, [fetchTasks, activeDepartmentTab, activeSubdepartmentTab])
-
-  // Fetch and process stages for a department
-  const fetchStages = async (departmentId: string) => {
-    try {
-      const department = departments.find(d => d.id.toString() === departmentId.toString())
-      if (!department) return
-
-      const uniqueStages = new Map()
-      department.stages.forEach(stage => {
-        if (!uniqueStages.has(stage.id)) {
-          uniqueStages.set(stage.id, { ...stage, departmentId: department.id, departmentName: department.name })
-        }
-      })
-      const allStages = Array.from(uniqueStages.values()).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
-      setStages(allStages)
-    } catch (error) {
-      console.error('Error fetching stages:', error)
-      toast({ title: "Error", description: "Failed to load stages.", variant: "destructive" })
-    }
-  }
-
-  // Initial data loading
-  useEffect(() => {
-    const initializeData = async () => {
-      await Promise.all([
-        fetchDepartments(),
-        fetchAllDocuments(),
-        fetchAllKycFields(),
-      ]);
-    };
-
-    initializeData();
-  }, [fetchAllDocuments, fetchAllKycFields])
-
-  useEffect(() => {
-    const loadInitialData = async () => {
-      setDepartmentsLoading(true)
-      try {
-        const [departmentsData] = await Promise.all([
-          fetchDepartments(),
-          fetchCompanies(),
-          fetchAllDocuments()
-        ])
-        setDepartments(departmentsData)
-        if (departmentsData.length > 0) {
-          setActiveDepartmentTab(departmentsData[0].id.toString())
-          // Set first default subdepartment as active
-          const firstDept = departmentsData[0]
-          const defaultSubs = firstDept.tm_subdepartments?.filter(sub => sub.default_display) || []
-          if (defaultSubs.length > 0) {
-            setActiveSubdepartmentTab(defaultSubs[0].id.toString())
-          }
-        }
-      } catch (error) {
-        console.error('Error loading initial data:', error)
-        toast({ title: "Error", description: "Failed to load initial data.", variant: "destructive" })
-      } finally {
-        setDepartmentsLoading(false)
-      }
-    }
-    loadInitialData()
-  }, [fetchAllDocuments])
-
-  // Effect to fetch KYC data for expanded documents in standard view
-  useEffect(() => {
-    if (isTransposedView) return;
-
-    const idsToFetch = new Set<string>();
-    stages.forEach(stage => {
-      if (expandedStages.has(stage.id)) {
-        stage.documents?.forEach(doc => {
-          if (expandedDocuments.has(doc.id) && doc.kycId && !kycDocuments.has(doc.kycId)) {
-            idsToFetch.add(doc.kycId);
-          }
-        });
-      }
-    });
-
-    if (idsToFetch.size > 0) {
-      idsToFetch.forEach(id => fetchKycDocument(id));
-    }
-  }, [isTransposedView, stages, expandedStages, expandedDocuments, kycDocuments, fetchKycDocument]);
+  }, [loadTasksData, activeDepartmentTab, activeSubdepartmentTab])
 
   // Handle task actions
   const handleTaskAction = useCallback((action: { type: string; taskId?: string | number;[key: string]: any }) => {
     switch (action.type) {
       case 'refresh':
       case 'refresh-data':
-        if (activeDepartmentTab) {
-          fetchTasks(activeDepartmentTab, activeSubdepartmentTab)
-          fetchStages(activeDepartmentTab)
-          fetchAllDocuments()
-        }
+        refreshAllData()
         break
       default:
         onTaskAction?.(action)
     }
-  }, [activeDepartmentTab, activeSubdepartmentTab, onTaskAction, fetchAllDocuments, fetchTasks])
-
-  // Fetch tasks and stages when department or subdepartment changes
-  useEffect(() => {
-    if (activeDepartmentTab && departments.length > 0) {
-      fetchTasks(activeDepartmentTab, activeSubdepartmentTab)
-      fetchStages(activeDepartmentTab)
-    }
-  }, [activeDepartmentTab, activeSubdepartmentTab, departments, fetchTasks])
-
-  // Update activeSubdepartmentTab when department changes
-  useEffect(() => {
-    if (activeDepartmentTab && departments.length > 0) {
-      const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
-      if (currentDept) {
-        const defaultSubs = currentDept.tm_subdepartments?.filter(sub => sub.default_display) || []
-        if (defaultSubs.length > 0) {
-          setActiveSubdepartmentTab(defaultSubs[0].id.toString())
-        } else {
-          setActiveSubdepartmentTab("")
-        }
-      }
-    }
-  }, [activeDepartmentTab, departments])
+  }, [onTaskAction, refreshAllData])
 
   // Get task hierarchy info
   const getTaskHierarchy = useCallback((task: any) => {
@@ -1086,10 +886,12 @@ export default function DepartmentTasksManager({
   }, [])
 
   // Generate enhanced table rows for transposed view using KYC fields
-  const generateEnhancedTableRows = useCallback(async (tasks: Task[]) => {
+  const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
     if (!tasks.length) return []
 
-    const allStages = stages.filter(stage => stage).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
+    const allStages = stages
+      .filter(stage => stage && visibleStageIds.has(stage.id.toString()))
+      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
     const rows = []
 
     // Stats Section
@@ -1179,7 +981,7 @@ export default function DepartmentTasksManager({
           stage,
           stageId: stage.id,
           stageOrder: stage.order_num || 0,
-          getValue: (task: Task) => isStageApplicableToTask(stage, task) ? task.stages?.[stage.id] : 'N/A'
+          getValue: (task: UtilTask) => isStageApplicableToTask(stage, task) ? task.stages?.[stage.id] : 'N/A'
         })
 
         if (expandedStages.has(stage.id) && stage.documents && stage.documents.length > 0) {
@@ -1195,10 +997,10 @@ export default function DepartmentTasksManager({
               stage,
               document: doc,
               isSubRow: true,
-              getValue: (task: Task) => {
+              getValue: (task: UtilTask) => {
                 if (!isStageApplicableToTask(stage, task)) return 'N/A';
 
-                const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
+                const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] }, allDocuments);
                 const isOldDoc = document && task.created_at &&
                   isDocumentOlderThanTask(document.created_at, task.created_at);
                 const hasIndicator = document?.indicator === true;
@@ -1228,9 +1030,9 @@ export default function DepartmentTasksManager({
                     field,
                     isSubRow: true,
                     isSubSubRow: true,
-                    getValue: (task: Task) => {
+                    getValue: (task: UtilTask) => {
                       if (!isStageApplicableToTask(stage, task)) return 'N/A'
-                      const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
+                      const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] }, allDocuments)
 
                       // Check if document is old
                       const isOldDoc = document && task.created_at &&
@@ -1258,33 +1060,7 @@ export default function DepartmentTasksManager({
     }
 
     return rows
-  }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getDocumentForTaskStage, getKycFields, visibleHeaders, visibleStats, kycDocuments])
-
-  // Format date to dd/MM/yyyy format
-  const formatDateValue = (dateString: string | Date | null | undefined) => {
-    if (!dateString) return 'N/A';
-    try {
-      let date: Date;
-
-      if (typeof dateString === 'string') {
-        if (dateString.includes('/')) {
-          return dateString;
-        }
-        date = new Date(dateString);
-      } else {
-        date = dateString;
-      }
-
-      const day = String(date.getDate()).padStart(2, '0');
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const year = date.getFullYear();
-
-      return `${day}/${month}/${year}`;
-    } catch (e) {
-      console.error('Error formatting date:', dateString, e);
-      return 'Invalid Date';
-    }
-  };
+  }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleHeaders, visibleStats, kycDocuments, allDocuments, visibleStageIds])
 
   // Enhanced render cell content for transposed view
   const renderCellContent = useCallback((row: any, task: any) => {
@@ -1383,7 +1159,7 @@ export default function DepartmentTasksManager({
       )
       default: return <span className="text-sm text-slate-800">{value}</span>
     }
-  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, handleStageStatusSave])
+  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, handleStageStatusSave, allDocuments])
 
   // State for enhanced table rendering
   const [tableRows, setTableRows] = useState([]);
@@ -1402,7 +1178,71 @@ export default function DepartmentTasksManager({
     if (isTransposedView) {
       loadRows(tasks);
     }
-  }, [tasks, isTransposedView, loadRows, expandedSections, expandedStages, expandedDocuments, visibleHeaders, visibleStats]);
+  }, [tasks, isTransposedView, loadRows, expandedSections, expandedStages, expandedDocuments, visibleHeaders, visibleStats, visibleStageIds]);
+
+  // Effect to initialize/reset visible stages when stages data changes
+  useEffect(() => {
+    if (stages && stages.length > 0) {
+      setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
+    } else {
+      setVisibleStageIds(new Set())
+    }
+  }, [stages])
+
+  // Effect to fetch KYC data for expanded documents in standard view
+  useEffect(() => {
+    if (isTransposedView) return;
+
+    const idsToFetch = new Set<string>();
+    stages.forEach(stage => {
+      if (expandedStages.has(stage.id)) {
+        stage.documents?.forEach(doc => {
+          if (expandedDocuments.has(doc.id) && doc.kycId && !kycDocuments.has(doc.kycId)) {
+            idsToFetch.add(doc.kycId);
+          }
+        });
+      }
+    });
+
+    if (idsToFetch.size > 0) {
+      idsToFetch.forEach(async (id) => {
+        const kycDoc = await fetchKycDocument(id);
+        if (kycDoc) {
+          setKycDocuments(prev => new Map(prev.set(id, kycDoc)));
+        }
+      });
+    }
+  }, [isTransposedView, stages, expandedStages, expandedDocuments, kycDocuments]);
+
+  // Initial data loading
+  useEffect(() => {
+    loadInitialData()
+  }, [loadInitialData])
+
+  // Load tasks and stages when department or subdepartment changes
+  useEffect(() => {
+    if (activeDepartmentTab && departments.length > 0) {
+      loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
+    }
+  }, [activeDepartmentTab, activeSubdepartmentTab, departments, loadTasksData])
+
+  // Update activeSubdepartmentTab when department changes
+  useEffect(() => {
+    if (activeDepartmentTab && departments.length > 0) {
+      const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
+      if (currentDept) {
+        const defaultSubs = currentDept.tm_subdepartments?.filter(sub => sub.default_display) || []
+        if (defaultSubs.length > 0) {
+          setActiveSubdepartmentTab(defaultSubs[0].id.toString())
+        } else {
+          setActiveSubdepartmentTab("")
+        }
+      }
+    }
+  }, [activeDepartmentTab, departments])
+
+  // Check if any data is still loading
+  const isAnyDataLoading = Object.values(dataLoading).some(loading => loading)
 
   const renderStandardTable = useCallback((tasks: any[], tableType: string) => {
     if (!tasks.length) {
@@ -1419,7 +1259,9 @@ export default function DepartmentTasksManager({
       Array.from(kycDocuments.entries()).map(([kycId, kycDoc]) => [kycId, kycDoc.fields || []])
     );
 
-    const visibleStages = stages.filter(stage => stage).sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
+    const visibleStages = stages
+      .filter(stage => stage && visibleStageIds.has(stage.id.toString()))
+      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
 
     const totalStageColumns = visibleStages.reduce((total, stage) => {
       let stageCols = 0;
@@ -1530,7 +1372,7 @@ export default function DepartmentTasksManager({
           </TableHeader>
 
           <TableBody className="divide-y divide-slate-200">
-            {(tasksLoading || departmentsLoading || companiesLoading) ? (
+            {(dataLoading.tasks || dataLoading.stages || dataLoading.companies) ? (
               <TableRow><TableCell colSpan={20} className="h-32 text-center text-slate-500">Loading...</TableCell></TableRow>
             ) : error ? (
               <TableRow><TableCell colSpan={20} className="h-32 text-center text-destructive">{error}</TableCell></TableRow>
@@ -1564,7 +1406,7 @@ export default function DepartmentTasksManager({
                     }
 
                     return stage.documents.map(doc => {
-                      const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
+                      const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] }, allDocuments)
                       const isOldDoc = document && task.created_at &&
                         isDocumentOlderThanTask(document.created_at, task.created_at)
                       const hasIndicator = document?.indicator === true;
@@ -1610,7 +1452,7 @@ export default function DepartmentTasksManager({
         </Table>
       </div>
     )
-  }, [stages, tasksLoading, departmentsLoading, companiesLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, getDocumentForTaskStage, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, isDocumentApplicableToTask])
+  }, [stages, dataLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, isDocumentApplicableToTask, visibleStageIds])
 
   // Enhanced render function for transposed table with better dependants positioning
   const renderEnhancedTransposedTable = useCallback((tasks: any[], tableType: string) => {
@@ -1802,13 +1644,23 @@ export default function DepartmentTasksManager({
     )
   }, [loading, error, tableRows, renderCellContent, expandedSections, expandedStages, expandedDocuments, expandedDependants, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies, toggleDependantsExpansion, getTaskHierarchy])
 
-  if (departmentsLoading) {
+  const defaultSubdepartments = getDefaultSubdepartments()
+
+  // Loading state for all initial data
+  if (dataLoading.departments || isAnyDataLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-slate-50/30">
         <div className="text-center space-y-3">
           <Loader2 className="h-12 w-12 animate-spin text-slate-600 mx-auto" />
           <p className="font-semibold text-slate-800">Loading Workspace...</p>
-          <p className="text-sm text-slate-600">Fetching departments and tasks.</p>
+          <p className="text-sm text-slate-600">
+            {dataLoading.departments ? 'Loading departments...' :
+             dataLoading.companies ? 'Loading companies...' :
+             dataLoading.documents ? 'Loading documents...' :
+             dataLoading.kycFields ? 'Loading KYC fields...' :
+             dataLoading.tasks ? 'Loading tasks...' :
+             dataLoading.stages ? 'Loading stages...' : 'Finalizing...'}
+          </p>
         </div>
       </div>
     )
@@ -1830,8 +1682,6 @@ export default function DepartmentTasksManager({
       </div>
     )
   }
-
-  const defaultSubdepartments = getDefaultSubdepartments()
 
   return (
     <div className="flex-1 space-y-2 p-2 bg-slate-50/30 min-h-screen">
@@ -1942,23 +1792,23 @@ export default function DepartmentTasksManager({
                               <PopoverTrigger asChild>
                                 <Button variant="outline" size="sm" className="flex items-center gap-2">
                                   <Settings className="h-4 w-4" />
-                                  {isTransposedView ? `Fields (${visibleHeaders.size + visibleStats.size})` : `Columns (${visibleHeaders.size})`}
+                                  {isTransposedView ? `Fields (${visibleHeaders.size + visibleStats.size + visibleStageIds.size})` : `Columns (${visibleHeaders.size + visibleStageIds.size})`}
                                 </Button>
                               </PopoverTrigger>
                               <PopoverContent className="w-80">
                                 <div className="space-y-4">
                                   <div className="space-y-2">
                                     <h4 className="font-medium">
-                                      {isTransposedView ? 'Visible Fields' : 'Visible Columns'}
+                                      {isTransposedView ? 'Visible Fields & Rows' : 'Visible Columns'}
                                     </h4>
                                     <p className="text-sm text-muted-foreground">
-                                      {isTransposedView ? 'Select which fields to display as rows' : 'Select which columns to display in the table'}
+                                      {isTransposedView ? 'Select which fields and stages to display' : 'Select which columns to display'}
                                     </p>
                                   </div>
                                   {/* Stats Fields (only in transposed view) */}
                                   {isTransposedView && (
                                     <div className="space-y-2 border-t pt-2">
-                                      <h5 className="text-sm font-medium text-slate-700">Statistics</h5>
+                                      <h5 className="text-sm font-medium text-slate-700">Statistics ({visibleStats.size})</h5>
                                       {STATS_HEADERS.map((stat) => (
                                         <div key={stat.id} className="flex items-center space-x-2">
                                           <Checkbox
@@ -1977,8 +1827,8 @@ export default function DepartmentTasksManager({
                                     </div>
                                   )}
                                   {/* Case Details Fields */}
-                                  <div className="space-y-2">
-                                    <h5 className="text-sm font-medium text-slate-700">Case Details</h5>
+                                  <div className="space-y-2 border-t pt-2">
+                                    <h5 className="text-sm font-medium text-slate-700">Case Details ({visibleHeaders.size})</h5>
                                     {TABLE_HEADERS.map((header) => (
                                       <div key={header.id} className="flex items-center space-x-2">
                                         <Checkbox
@@ -1996,6 +1846,28 @@ export default function DepartmentTasksManager({
                                     ))}
                                   </div>
 
+                                  {/* Visible Stages Section */}
+                                  <div className="space-y-2 border-t pt-2">
+                                    <h5 className="text-sm font-medium text-slate-700">Visible Stages ({visibleStageIds.size})</h5>
+                                    <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
+                                      {stages.sort((a, b) => (a.order_num || 0) - (b.order_num || 0)).map((stage) => (
+                                        <div key={`vis-${stage.id}`} className="flex items-center space-x-2">
+                                          <Checkbox
+                                            id={`stage-vis-${stage.id}`}
+                                            checked={visibleStageIds.has(stage.id.toString())}
+                                            onCheckedChange={() => toggleStageVisibility(stage.id.toString())}
+                                          />
+                                          <Label
+                                            htmlFor={`stage-vis-${stage.id}`}
+                                            className="text-sm font-normal cursor-pointer"
+                                          >
+                                            {stage.name}
+                                          </Label>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+
                                   <div className="flex gap-2 pt-2 border-t">
                                     <Button
                                       variant="outline"
@@ -2003,6 +1875,7 @@ export default function DepartmentTasksManager({
                                       onClick={() => {
                                         setVisibleHeaders(new Set(TABLE_HEADERS.map(h => h.id)))
                                         if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.map(s => s.id)))
+                                        setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
                                       }}
                                     >
                                       Show All
@@ -2013,6 +1886,7 @@ export default function DepartmentTasksManager({
                                       onClick={() => {
                                         setVisibleHeaders(new Set(TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
                                         if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.filter(s => s.default).map(s => s.id)))
+                                        setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
                                       }}
                                     >
                                       Reset
@@ -2024,6 +1898,10 @@ export default function DepartmentTasksManager({
 
                             <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(tasksToRender, title)}>
                               <Download className="h-4 w-4" />Export to Excel
+                            </Button>
+                            
+                            <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={refreshAllData}>
+                              <RotateCcw className="h-4 w-4" />Refresh
                             </Button>
                           </div>
                         </div>

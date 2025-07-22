@@ -27,9 +27,9 @@ type DocumentExtraction = any; type Stage = any; type StageDocument = any; type 
 // Helper to create the titled sections, matching the card style in the image.
 const SectionWrapper = ({ title, icon, children, actionButton = null }: { title: string, icon: React.ReactNode, children: React.ReactNode, actionButton?: React.ReactNode }) => (
     <Card className="bg-white rounded-lg shadow-sm border border-slate-200/90 overflow-hidden">
-      <div className="p-4 bg-blue-500 border-b border-slate-200/90 flex justify-between items-center">
+      <div className="p-4 bg-blue-50 border-b border-slate-200/90 flex justify-between items-center">
         <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-          {React.cloneElement(icon as React.ReactElement, { className: "h-5 w-5 text-blue-600" })}
+          {React.cloneElement(icon as React.ReactElement, { className: "h-5 w-5 text-slate-600" })}
           {title}
         </h3>
         {actionButton}
@@ -499,7 +499,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
           {/* Department Selection - Using SectionWrapper */}
           <SectionWrapper title="Department Selection" icon={<Building2 />}>
               <div className="space-y-2">
-                <Label htmlFor="department" className="text-xs font-medium text-gray-700">
+                <Label htmlFor="department" className="text-xs font-medium text-white">
                   Department
                   <span className="text-destructive ml-1">*</span>
                 </Label>
@@ -976,7 +976,7 @@ function DocumentsSection({
           <p className="text-sm text-muted-foreground mb-4">
             Add documents that are required for this stage.
           </p>
-          <div className="flex gap-2 justify-center">
+          {/* <div className="flex gap-2 justify-center">
             <Button onClick={() => onAddDocument(false)} variant="outline" size="sm" className="text-blue-600 border-blue-300 hover:bg-blue-50">
               <Plus className="h-4 w-4 mr-2" />
               Add Regular Document
@@ -991,7 +991,7 @@ function DocumentsSection({
               <Star className="h-4 w-4 mr-2" />
               Add Special Document
             </Button>
-          </div>
+          </div> */}
         </div>
       )}
     </div>

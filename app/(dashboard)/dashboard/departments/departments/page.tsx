@@ -23,23 +23,23 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, UserPlus, UserCheck, UserX, ChevronDown, Check, Eye, EyeOff, ChevronRight, ChevronUp, Trash2, FileText, Layers, Target, UserIcon, Minus, Search, Workflow, Building, FolderOpen } from "lucide-react"
+import supabase from "@/lib/supabase/client"
+import { toast } from "sonner"
+import DepartmentDialog from "./components/DepartmentDialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, UserPlus, UserCheck, UserX, ChevronDown, Check, Eye, EyeOff, ChevronRight, ChevronUp, Trash2, FileText, Layers, Target, UserIcon, Minus, ChevronsUpDown, Search, FileDown, Workflow, Building, FolderOpen } from "lucide-react"
-import supabase from "@/lib/supabase/client"
-import { toast } from "sonner"
 
 // Helper function for deep cloning
 const deepClone = (obj: any) => JSON.parse(JSON.stringify(obj))
 
 // Helper function for updating nested state
-const updateNestedState = (state: any, path: (string | number)[], value: any) => {
+export const updateNestedState = (state: any, path: (string | number)[], value: any) => {
   const newState = deepClone(state)
   let current = newState
   for (let i = 0; i < path.length - 1; i++) {
@@ -101,207 +101,14 @@ function UserDetailsPopover({ userId, users, role, children }: {
   )
 }
 
-// --- Dialog Form Components ---
 
-// Requirement Component (for Dialog)
-function RequirementComponent({
-  requirement, onUpdate, onRemove, path, index
-}: {
-  requirement: RequirementForm, onUpdate: (path: string[], value: any) => void, onRemove: () => void, path: string[], index: string
-}) {
-  return (
-    <div className="p-3 bg-white border-l-4 border-gray-300 rounded-r-md border">
-      <div className="flex items-start justify-between">
-        <div className="flex-1 space-y-3 pr-4">
-          <div className="flex items-center space-x-2">
-            <Badge variant="outline" className="font-mono">{index}</Badge>
-            <Input
-              placeholder="Requirement name"
-              value={requirement.name}
-              onChange={(e) => onUpdate([...path, 'name'], e.target.value)}
-              className="flex-1 font-medium"
-            />
-          </div>
-          <Textarea
-            placeholder="Description (optional)"
-            value={requirement.description}
-            onChange={(e) => onUpdate([...path, 'description'], e.target.value)}
-            className="min-h-[50px]"
-          />
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                checked={requirement.isVisible}
-                onCheckedChange={(checked) => onUpdate([...path, 'isVisible'], Boolean(checked))}
-                id={`visible-${path.join('-')}`}
-              />
-              <Label htmlFor={`visible-${path.join('-')}`} className="text-sm text-gray-700">Visible</Label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                checked={requirement.isRequired}
-                onCheckedChange={(checked) => onUpdate([...path, 'isRequired'], Boolean(checked))}
-                id={`required-${path.join('-')}`}
-              />
-              <Label htmlFor={`required-${path.join('-')}`} className="text-sm text-gray-700">Required</Label>
-            </div>
-          </div>
-        </div>
-        <Button variant="ghost" size="icon" onClick={onRemove} className="text-red-500 hover:text-red-700 hover:bg-red-50 h-8 w-8">
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-// SubClass Component (for Dialog)
-function SubClassComponent({
-  subClass, onUpdate, onRemove, path, index
-}: {
-  subClass: SubClassForm, onUpdate: (path: string[], value: any) => void, onRemove: () => void, path: string[], index: string
-}) {
-  const [isExpanded, setIsExpanded] = useState(true);
-  const addRequirement = () => {
-    onUpdate([...path, 'requirements'], [...subClass.requirements, { id: Date.now().toString(), name: '', description: '', isRequired: true, order: subClass.requirements.length + 1, isVisible: true }]);
-  };
-  const removeRequirement = (reqIndex: number) => {
-    onUpdate([...path, 'requirements'], subClass.requirements.filter((_, i) => i !== reqIndex));
-  };
-
-  return (
-    <Card className="bg-gray-50/50 border-gray-200">
-      <CardHeader className="p-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2 flex-1">
-            <Button variant="ghost" size="icon" onClick={() => setIsExpanded(!isExpanded)} className="h-7 w-7">
-              <ChevronsUpDown className="h-4 w-4 text-gray-500" />
-            </Button>
-            <Badge variant="secondary" className="font-mono bg-gray-200 text-gray-700">{index}</Badge>
-            <Input placeholder="Sub-class name" value={subClass.name} onChange={(e) => onUpdate([...path, 'name'], e.target.value)} className="font-semibold" />
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                checked={subClass.default_display}
-                onCheckedChange={(checked) => onUpdate([...path, 'default_display'], Boolean(checked))}
-                id={`default-display-${path.join('-')}`}
-              />
-              <Label htmlFor={`default-display-${path.join('-')}`} className="text-sm text-gray-700">Default Display</Label>
-            </div>
-          </div>
-          <div className="flex items-center space-x-2 ml-2">
-            <Badge variant="outline">{subClass.requirements.length} reqs</Badge>
-            <Button variant="ghost" size="icon" onClick={onRemove} className="text-red-500 hover:bg-red-50 h-8 w-8">
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-      {isExpanded && (
-        <CardContent className="pt-0 p-4 space-y-4">
-          <div className="space-y-3 pl-12">
-            <Textarea placeholder="Sub-class description" value={subClass.description} onChange={(e) => onUpdate([...path, 'description'], e.target.value)} />
-            <div className="flex items-center justify-between mb-4">
-              <Label className="font-semibold text-gray-700">Requirements</Label>
-              <Button variant="outline" size="sm" onClick={addRequirement}>
-                <Plus className="h-4 w-4 mr-1" /> Add Requirement
-              </Button>
-            </div>
-            <div className="space-y-3">
-              {subClass.requirements.map((req, reqIndex) => (
-                <RequirementComponent
-                  key={req.id}
-                  requirement={req}
-                  onUpdate={onUpdate}
-                  onRemove={() => removeRequirement(reqIndex)}
-                  path={[...path, 'requirements', reqIndex.toString()]}
-                  index={`${index}.${reqIndex + 1}`}
-                />
-              ))}
-            </div>
-          </div>
-        </CardContent>
-      )}
-    </Card>
-  );
-}
-
-// Class Component (for Dialog)
-function ClassComponent({
-  classItem, onUpdate, onRemove, path, index
-}: {
-  classItem: ClassForm, onUpdate: (path: string[], value: any) => void, onRemove: () => void, path: string[], index: string
-}) {
-  const addSubClass = () => {
-    onUpdate([...path, 'subClasses'], [...classItem.subClasses, {
-      id: Date.now(),
-      name: '',
-      description: '',
-      order: classItem.subClasses.length + 1,
-      isVisible: true,
-      default_display: true,
-      requirements: []
-    }]);
-  };
-  const removeSubClass = (subClassIndex: number) => {
-    onUpdate([...path, 'subClasses'], classItem.subClasses.filter((_, i) => i !== subClassIndex));
-  };
-
-  return (
-    <Card className="border-l-4 border-blue-500 bg-white">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3 flex-1">
-            <Badge className="text-sm font-mono bg-blue-500 text-white">{index}</Badge>
-            <Layers className="h-5 w-5 text-blue-600" />
-            <Input placeholder="Class name" value={classItem.name} onChange={(e) => onUpdate([...path, 'name'], e.target.value)} className="flex-1 font-bold text-lg" />
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                checked={classItem.default_display}
-                onCheckedChange={(checked) => onUpdate([...path, 'default_display'], Boolean(checked))}
-                id={`class-default-display-${path.join('-')}`}
-              />
-              <Label htmlFor={`class-default-display-${path.join('-')}`} className="text-sm text-gray-700">Default Display</Label>
-            </div>
-          </div>
-          <Button variant="ghost" size="icon" onClick={onRemove} className="text-red-500 hover:bg-red-50">
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-        <Textarea placeholder="Class description" value={classItem.description} onChange={(e) => onUpdate([...path, 'description'], e.target.value)} className="mt-2" />
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h4 className="font-semibold text-gray-800">Sub-classes</h4>
-          <Button variant="outline" size="sm" onClick={addSubClass}>
-            <Plus className="h-4 w-4 mr-1" /> Add Sub-class
-          </Button>
-        </div>
-        <div className="space-y-4">
-          {classItem.subClasses.map((subClass, subClassIndex) => (
-            <SubClassComponent
-              key={subClass.id}
-              subClass={subClass}
-              onUpdate={onUpdate}
-              onRemove={() => removeSubClass(subClassIndex)}
-              path={[...path, 'subClasses', subClassIndex.toString()]}
-              index={`${index}.${subClassIndex + 1}`}
-            />
-          ))}
-          {classItem.subClasses.length === 0 && (
-            <div className="text-center py-6 text-gray-500 border-2 border-dashed rounded-lg">
-              No sub-classes added yet.
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 // Main Component
 export default function Departments() {
   const [isAddDepartmentOpen, setIsAddDepartmentOpen] = useState(false)
   const [currentDepartmentId, setCurrentDepartmentId] = useState<string | null>(null)
+  const [editingDepartmentId, setEditingDepartmentId] = useState<string | null>(null);
+  const [editingSubdepartmentId, setEditingSubdepartmentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
@@ -470,26 +277,316 @@ export default function Departments() {
 
   const updateFormState = (path: string[], value: any) => setDepartmentForm(prevState => updateNestedState(prevState, path, value));
 
+  const handleSaveDepartment = async () => {
+    setSaving(true);
+    console.log('=== DEPARTMENT FORM SUBMISSION ===');
+    console.log('Current Mode:', {
+      editingDepartment: editingDepartmentId,
+      editingSubdepartment: editingSubdepartmentId,
+      isNewDepartment: !editingDepartmentId && !editingSubdepartmentId,
+      hasSubdepartmentsInForm: departmentForm.subdepartments.length
+    });
+    console.log('Form Data:', JSON.stringify(departmentForm, null, 2));
+
+    try {
+      // Scenario 1: Creating a new department
+      if (!editingDepartmentId && !editingSubdepartmentId) {
+        console.log('→ Creating new department');
+        await createNewDepartment();
+      }
+      // Scenario 2: Editing an existing department (no subdepartments in form)
+      else if (editingDepartmentId && !editingSubdepartmentId && departmentForm.subdepartments.length === 0) {
+        console.log('→ Updating existing department');
+        await updateExistingDepartment();
+      }
+      // Scenario 3: Creating a new subdepartment under existing department
+      else if (editingDepartmentId && !editingSubdepartmentId && departmentForm.subdepartments.length > 0) {
+        console.log('→ Creating new subdepartment');
+        await createNewSubdepartment();
+      }
+      // Scenario 4: Editing an existing subdepartment
+      else if (editingSubdepartmentId) {
+        console.log('→ Updating existing subdepartment');
+        await updateExistingSubdepartment();
+      }
+
+      console.log('Save operation completed successfully');
+      toast.success('Saved successfully!');
+      setIsAddDepartmentOpen(false);
+      await fetchData();
+    } catch (error) {
+      console.error('Save error:', error);
+      toast.error(error.message || 'Failed to save. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Helper functions (same as in your code, but with better error messages)
+  const createNewDepartment = async () => {
+    console.log('Creating new department');
+
+    // Check if department name already exists
+    const { data: existingDept } = await supabase
+      .from('tm_departments')
+      .select('id, name')
+      .ilike('name', departmentForm.name.trim())
+      .limit(1);
+
+    if (existingDept && existingDept.length > 0) {
+      throw new Error('A department with this name already exists');
+    }
+
+    // Get the next order number
+    const { data: maxOrder } = await supabase
+      .from('tm_departments')
+      .select('order')
+      .order('order', { ascending: false })
+      .limit(1);
+
+    const nextOrder = (maxOrder?.[0]?.order || 0) + 1;
+
+    // Create the department
+    const { data: newDept, error: deptError } = await supabase
+      .from('tm_departments')
+      .insert({
+        name: departmentForm.name.trim(),
+        description: departmentForm.description,
+        default_display: departmentForm.default_display,
+        order: nextOrder
+      })
+      .select()
+      .single();
+
+    if (deptError) throw deptError;
+
+    // Create subdepartments if any
+    if (departmentForm.subdepartments.length > 0) {
+      await createSubdepartmentsForDepartment(newDept.id, departmentForm.subdepartments);
+    }
+  };
+
+  const updateExistingDepartment = async () => {
+    console.log('Updating existing department with ID:', editingDepartmentId);
+
+    // Check if another department with this name exists (excluding current)
+    const { data: existingDept } = await supabase
+      .from('tm_departments')
+      .select('id, name')
+      .ilike('name', departmentForm.name.trim())
+      .neq('id', editingDepartmentId)
+      .limit(1);
+
+    if (existingDept && existingDept.length > 0) {
+      throw new Error('Another department with this name already exists');
+    }
+
+    // Update the department
+    const { error: updateError } = await supabase
+      .from('tm_departments')
+      .update({
+        name: departmentForm.name.trim(),
+        description: departmentForm.description,
+        default_display: departmentForm.default_display,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', editingDepartmentId);
+
+    if (updateError) throw updateError;
+  };
+
+  const createNewSubdepartment = async () => {
+    console.log('Creating new subdepartment under department ID:', editingDepartmentId);
+
+    if (departmentForm.subdepartments.length === 0) {
+      throw new Error('No subdepartment data provided');
+    }
+
+    const subdept = departmentForm.subdepartments[0];
+
+    // Validate subdepartment name
+    if (!subdept.name.trim()) {
+      throw new Error('Subdepartment name is required');
+    }
+
+    // Check if subdepartment with this name already exists in this department
+    const { data: existingSubdept } = await supabase
+      .from('tm_subdepartments')
+      .select('id, name')
+      .ilike('name', subdept.name.trim())
+      .eq('department_id', editingDepartmentId)
+      .limit(1);
+
+    if (existingSubdept && existingSubdept.length > 0) {
+      throw new Error('A subdepartment with this name already exists in this department');
+    }
+
+    // Get the next order number for this department
+    const { data: maxOrder } = await supabase
+      .from('tm_subdepartments')
+      .select('order')
+      .eq('department_id', editingDepartmentId)
+      .order('order', { ascending: false })
+      .limit(1);
+
+    const nextOrder = (maxOrder?.[0]?.order || 0) + 1;
+
+    // Create the subdepartment
+    const { data: newSubdept, error: createError } = await supabase
+      .from('tm_subdepartments')
+      .insert({
+        name: subdept.name.trim(),
+        description: subdept.description,
+        department_id: editingDepartmentId,
+        task_manager: subdept.taskManagerId || null,
+        task_assistant: subdept.taskAssistantIds.filter(id => id !== ''),
+        default_display: subdept.default_display,
+        order: nextOrder
+      })
+      .select()
+      .single();
+
+    if (createError) throw createError;
+
+    // Handle classes and requirements if any
+    if (subdept.classes && subdept.classes.length > 0) {
+      await saveClassRequirements(newSubdept.id, subdept.classes);
+    }
+  };
+
+  const updateExistingSubdepartment = async () => {
+    console.log('Updating existing subdepartment with ID:', editingSubdepartmentId);
+
+    if (departmentForm.subdepartments.length === 0) {
+      throw new Error('No subdepartment data provided');
+    }
+
+    const subdept = departmentForm.subdepartments[0];
+
+    // Validate subdepartment name
+    if (!subdept.name.trim()) {
+      throw new Error('Subdepartment name is required');
+    }
+
+    // Get current subdepartment to find its department_id
+    const { data: currentSubdept } = await supabase
+      .from('tm_subdepartments')
+      .select('department_id')
+      .eq('id', editingSubdepartmentId)
+      .single();
+
+    if (!currentSubdept) {
+      throw new Error('Subdepartment not found');
+    }
+
+    // Check if another subdepartment with this name exists in the same department (excluding current)
+    const { data: existingSubdept } = await supabase
+      .from('tm_subdepartments')
+      .select('id, name')
+      .ilike('name', subdept.name.trim())
+      .eq('department_id', currentSubdept.department_id)
+      .neq('id', editingSubdepartmentId)
+      .limit(1);
+
+    if (existingSubdept && existingSubdept.length > 0) {
+      throw new Error('Another subdepartment with this name already exists in this department');
+    }
+
+    // Update the subdepartment
+    const { error: updateError } = await supabase
+      .from('tm_subdepartments')
+      .update({
+        name: subdept.name.trim(),
+        description: subdept.description,
+        task_manager: subdept.taskManagerId || null,
+        task_assistant: subdept.taskAssistantIds.filter(id => id !== ''),
+        default_display: subdept.default_display,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', editingSubdepartmentId);
+
+    if (updateError) throw updateError;
+
+    // Handle classes and requirements updates
+    if (subdept.classes && subdept.classes.length > 0) {
+      await updateClassRequirements(editingSubdepartmentId, subdept.classes);
+    }
+  };
+
+  const createSubdepartmentsForDepartment = async (departmentId, subdepartments) => {
+    for (let i = 0; i < subdepartments.length; i++) {
+      const subdept = subdepartments[i];
+
+      // Skip empty subdepartments
+      if (!subdept.name.trim()) continue;
+
+      // Check for duplicates within the same department
+      const { data: existingSubdept } = await supabase
+        .from('tm_subdepartments')
+        .select('id, name')
+        .ilike('name', subdept.name.trim())
+        .eq('department_id', departmentId)
+        .limit(1);
+
+      if (existingSubdept && existingSubdept.length > 0) {
+        console.warn(`Skipping duplicate subdepartment: ${subdept.name}`);
+        continue;
+      }
+
+      // Create the subdepartment
+      const { data: newSubdept, error: subdeptError } = await supabase
+        .from('tm_subdepartments')
+        .insert({
+          name: subdept.name.trim(),
+          description: subdept.description,
+          department_id: departmentId,
+          task_manager: subdept.taskManagerId || null,
+          task_assistant: subdept.taskAssistantIds.filter(id => id !== ''),
+          default_display: subdept.default_display,
+          order: i + 1
+        })
+        .select()
+        .single();
+
+      if (subdeptError) throw subdeptError;
+
+      // Handle classes and requirements
+      if (subdept.classes && subdept.classes.length > 0) {
+        await saveClassRequirements(newSubdept.id, subdept.classes);
+      }
+    }
+  };
+
   const handleAddDepartment = () => {
-    setCurrentDepartmentId(null);
+    console.log('Adding new department');
+    setEditingDepartmentId(null);
+    setEditingSubdepartmentId(null);
     setDepartmentForm({
       name: '',
       description: '',
       default_display: true,
-      subdepartments: [{
-        name: '',
-        description: '',
-        classes: [],
-        taskManagerId: '',
-        taskAssistantIds: [],
-        default_display: true
-      }]
+      subdepartments: []
     });
     setIsAddDepartmentOpen(true);
-  }
+  };
 
-  const handleAddSubdepartment = (deptId: string, deptName: string) => {
-    setCurrentDepartmentId(deptId);
+  const handleEditDepartment = (dept) => {
+    console.log('Editing department:', dept.id);
+    setEditingDepartmentId(dept.id);
+    setEditingSubdepartmentId(null);
+    setDepartmentForm({
+      name: dept.name,
+      description: dept.description || '',
+      default_display: dept.default_display || true,
+      subdepartments: [] // Empty for department editing
+    });
+    setIsAddDepartmentOpen(true);
+  };
+
+  const handleAddSubdepartment = (deptId, deptName) => {
+    console.log('Adding subdepartment to department:', deptId);
+    setEditingDepartmentId(deptId);
+    setEditingSubdepartmentId(null);
     setDepartmentForm({
       name: deptName,
       description: '',
@@ -506,68 +603,48 @@ export default function Departments() {
     setIsAddDepartmentOpen(true);
   };
 
-  const handleSaveDepartment = async () => {
-    setSaving(true);
-    try {
-      if (currentDepartmentId) {
-        // If we're editing a department
-        if (departmentForm.subdepartments.length > 0) {
-          // Editing a subdepartment - get the requirements from the form state
-          const requirements = departmentForm.subdepartments[0].requirements || [];
-          await saveSubdepartmentRequirements(currentDepartmentId, requirements);
-        } else {
-          // Editing a department
-          const { error } = await supabase
-            .from('tm_departments')
-            .update({
-              name: departmentForm.name,
-              description: departmentForm.description,
-              default_display: departmentForm.default_display,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', currentDepartmentId);
+  // FIXED: This function was being called incorrectly
+  const handleEditSubdepartment = (subdept) => {
+    console.log('Editing subdepartment:', subdept.id);
+    setEditingDepartmentId(null);
+    setEditingSubdepartmentId(subdept.id);
 
-          if (error) throw error;
-        }
-      } else {
-        // Creating a new department
-        await createDepartmentDb(departmentForm);
-      }
-      toast.success('Saved successfully!');
-      setIsAddDepartmentOpen(false);
-      await fetchData();
-    } catch (error) {
-      console.error('Save error:', error);
-      toast.error('Failed to save. Please try again.');
-    } finally {
-      setSaving(false);
-    }
-  };
+    // Find the department name for this subdepartment
+    const dept = departments.find(d =>
+      d.tm_subdepartments?.some(s => s.id === subdept.id)
+    );
 
-  const handleEditDepartment = (dept: Department) => {
-    setCurrentDepartmentId(dept.id);
     setDepartmentForm({
-      name: dept.name,
-      description: dept.description || '',
-      default_display: dept.default_display || true,
-      subdepartments: [] // Empty array ensures department fields are enabled
-    });
-    setIsAddDepartmentOpen(true);
-  };
-
-  const handleEditSubdepartment = (deptId: string, subdept: Subdepartment) => {
-    setCurrentDepartmentId(deptId);
-    setDepartmentForm({
-      name: departments.find(d => d.id === deptId)?.name || '',
-      description: departments.find(d => d.id === deptId)?.description || '',
-      default_display: departments.find(d => d.id === deptId)?.default_display || true,
+      name: dept?.name || '',
+      description: dept?.description || '',
+      default_display: dept?.default_display || true,
       subdepartments: [{
-        ...subdept,
+        name: subdept.name,
+        description: subdept.description || '',
+        classes: subdept.classes || [],
+        taskManagerId: subdept.taskManagerId || '',
         taskAssistantIds: subdept.taskAssistants?.map(ta => ta.userId) || [],
+        default_display: subdept.default_display || true
       }]
     });
     setIsAddDepartmentOpen(true);
   };
+
+  // FIXED: Clear state when dialog closes
+  useEffect(() => {
+    if (!isAddDepartmentOpen) {
+      setDepartmentForm({
+        name: '',
+        description: '',
+        default_display: true,
+        subdepartments: []
+      });
+      setEditingDepartmentId(null);
+      setEditingSubdepartmentId(null);
+      // Remove reference to old currentDepartmentId
+    }
+  }, [isAddDepartmentOpen]);
+
 
   const handleDeleteSubdepartment = async (subdepartmentId: string) => {
     if (!confirm('Are you sure you want to delete this subdepartment and all its contents?')) return;
@@ -877,7 +954,7 @@ export default function Departments() {
                               <Button
                                 variant="outline"
                                 size="icon"
-                                onClick={() => handleEditSubdepartment(dept.id, subdept)}
+                                onClick={() => handleEditSubdepartment(subdept)} // Remove dept.id parameter
                                 title="Edit"
                                 className="h-8 w-8"
                               >
@@ -1004,338 +1081,17 @@ export default function Departments() {
         </Table>
       </div>
 
-      <Dialog open={isAddDepartmentOpen} onOpenChange={setIsAddDepartmentOpen}>
-        <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="text-2xl text-gray-800">
-              {currentDepartmentId ? 'Edit Department Details' : 'Add New Department'}
-            </DialogTitle>
-            <DialogDescription className="text-gray-600">
-              {currentDepartmentId ? 'Edit the details of the selected department' : 'Add a new department'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex-grow overflow-y-auto -mx-6 px-6 py-4 space-y-6">
-            <div className="space-y-4 p-4 border rounded-lg bg-gray-50">
-              <h3 className="font-semibold text-lg text-gray-800">Department Details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Label htmlFor="deptName">Name</Label>
-                  <Input
-                    id="deptName"
-                    value={departmentForm.name}
-                    onChange={(e) => updateFormState(['name'], e.target.value)}
-                    disabled={!!currentDepartmentId && departmentForm.subdepartments.length > 0}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="deptDesc">Description</Label>
-                  <Textarea
-                    id="deptDesc"
-                    value={departmentForm.description}
-                    onChange={(e) => updateFormState(['description'], e.target.value)}
-                    disabled={!!currentDepartmentId && departmentForm.subdepartments.length > 0}
-                  />
-                </div>
-              </div>
-              {!currentDepartmentId && (
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    checked={departmentForm.default_display}
-                    onCheckedChange={(checked) => updateFormState(['default_display'], Boolean(checked))}
-                    id="dept-default-display"
-                  />
-                  <Label htmlFor="dept-default-display" className="text-sm text-gray-700">
-                    Set as Default Display
-                  </Label>
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-lg text-gray-800">Subdepartments</h3>
-                {!currentDepartmentId && (
-                  <Button onClick={() => handleAddSubdepartment()} variant="outline" size="sm">
-                    <Plus className="h-4 w-4 mr-2" /> Add
-                  </Button>
-                )}
-              </div>
-
-              {departmentForm.subdepartments.map((subdept, subdeptIndex) => (
-                <div key={subdeptIndex} className="p-4 border rounded-lg space-y-6 bg-white shadow-sm">
-                  <Tabs defaultValue="details">
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="details">Details & People</TabsTrigger>
-                      <TabsTrigger value="workflow">Workflow Structure</TabsTrigger>
-                    </TabsList>
-
-                    <TabsContent value="details" className="pt-6 space-y-6">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-1">
-                          <Label>Subdepartment Name</Label>
-                          <Input
-                            value={subdept.name}
-                            onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label>Description</Label>
-                          <Textarea
-                            value={subdept.description}
-                            onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)}
-                          />
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          checked={subdept.default_display}
-                          onCheckedChange={(checked) => handleSubdepartmentChange(subdeptIndex, 'default_display', Boolean(checked))}
-                          id={`subdept-default-display-${subdeptIndex}`}
-                        />
-                        <Label htmlFor={`subdept-default-display-${subdeptIndex}`} className="text-sm text-gray-700">
-                          Set as Default Display
-                        </Label>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-1">
-                          <Label>Task Manager</Label>
-                          <Select
-                            value={subdept.taskManagerId || 'none'}
-                            onValueChange={(v) => handleSubdepartmentChange(subdeptIndex, 'taskManagerId', v === 'none' ? '' : v)}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select manager" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {[<SelectItem value="none">None</SelectItem>, ...users.map(u =>
-                                <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                              )]}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <Label>Task Assistants</Label>
-                            <Button variant="outline" size="xs" onClick={() => handleAddTaskAssistant(subdeptIndex)}>
-                              <Plus className="h-3 w-3 mr-1" />Add
-                            </Button>
-                          </div>
-                          <div className="space-y-2">
-                            {subdept.taskAssistantIds.map((id, assistantIndex) => (
-                              <div key={assistantIndex} className="flex items-center gap-2">
-                                <Select
-                                  value={id || 'none'}
-                                  onValueChange={(v) => handleTaskAssistantChange(subdeptIndex, assistantIndex, v === 'none' ? '' : v)}
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select assistant" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {[<SelectItem value="none">None</SelectItem>, ...users.map(u =>
-                                      <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                                    )]}
-                                  </SelectContent>
-                                </Select>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 shrink-0"
-                                  onClick={() => handleRemoveTaskAssistant(subdeptIndex, assistantIndex)}
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="workflow" className="pt-6 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-semibold text-gray-800">Classes & Requirements</h4>
-                        <Button variant="outline" size="sm" onClick={() => handleAddClass(subdeptIndex)}>
-                          <Plus className="h-4 w-4 mr-1" /> Add Class
-                        </Button>
-                      </div>
-                      <div className="space-y-4 bg-gray-50 p-4 rounded-md border">
-                        <div className="flex items-center justify-between mb-2">
-                          <h4 className="text-sm font-medium text-gray-700">Classes</h4>
-                          <div className="flex items-center space-x-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 text-xs text-gray-600 hover:bg-gray-100"
-                              onClick={() => {
-                                const updates = {};
-                                subdept.classes?.forEach((cls, idx) => {
-                                  const classId = `class-${subdept.id}-${cls.id || idx}`;
-                                  updates[classId] = true;
-                                });
-                                setExpandedClasses(prev => ({ ...prev, ...updates }));
-                              }}
-                            >
-                              <ChevronDown className="h-3 w-3 mr-1" /> Expand All
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 text-xs text-gray-600 hover:bg-gray-100"
-                              onClick={() => {
-                                const updates = {};
-                                subdept.classes?.forEach((cls, idx) => {
-                                  const classId = `class-${subdept.id}-${cls.id || idx}`;
-                                  updates[classId] = false;
-                                });
-                                setExpandedClasses(prev => ({ ...prev, ...updates }));
-                              }}
-                            >
-                              <ChevronUp className="h-3 w-3 mr-1" /> Collapse All
-                            </Button>
-                          </div>
-                        </div>
-
-                        {subdept.classes?.length > 0 ? (
-                          <div className="space-y-3">
-                            {subdept.classes.map((classItem, classIndex) => {
-                              const classId = `class-${subdept.id}-${classItem.id || classIndex}`;
-                              const isExpanded = expandedClasses[classId] !== false; // Default to expanded
-
-                              return (
-                                <div key={classItem.id || classIndex} className="border rounded-md overflow-hidden bg-white shadow-sm">
-                                  <div
-                                    className="flex items-center justify-between p-3 border-b cursor-pointer hover:bg-gray-50"
-                                    onClick={() => toggleExpansion('class', classId)}
-                                  >
-                                    <div className="flex items-center">
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-6 w-6 mr-2 text-gray-500 hover:bg-transparent"
-                                      >
-                                        {isExpanded ? (
-                                          <Minus className="h-4 w-4" />
-                                        ) : (
-                                          <Plus className="h-4 w-4" />
-                                        )}
-                                      </Button>
-                                      <div>
-                                        <div className="font-medium">
-                                          {classItem.name || `Class ${classIndex + 1}`}
-                                        </div>
-                                        {classItem.description && (
-                                          <div className="text-xs text-gray-500 mt-1">
-                                            {classItem.description}
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center space-x-1">
-                                      <span className="text-xs text-gray-500">
-                                        {classItem.subClasses?.length || 0} subclasses • {classItem.requirements?.length || 0} requirements
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  {isExpanded && (
-                                    <div className="p-4 bg-gray-50 border-t">
-                                      <ClassComponent
-                                        classItem={classItem}
-                                        onUpdate={updateFormState}
-                                        onRemove={() => handleRemoveClass(subdeptIndex, classIndex)}
-                                        path={['subdepartments', subdeptIndex, 'classes', classIndex]}
-                                        index={`${subdeptIndex + 1}.${classIndex + 1}`}
-                                      />
-
-                                      {/* Subclasses section */}
-                                      {classItem.subClasses?.length > 0 && (
-                                        <div className="mt-4 pl-6 border-l-2 border-gray-200">
-                                          <div className="flex items-center justify-between mb-2">
-                                            <h5 className="text-xs font-medium text-gray-600 uppercase tracking-wider">
-                                              Subclasses
-                                            </h5>
-                                          </div>
-                                          <div className="space-y-2">
-                                            {classItem.subClasses.map((subClass, subClassIndex) => {
-                                              const subClassId = `subclass-${subClass.id || subClassIndex}`;
-                                              const isSubClassExpanded = expandedSubClasses[subClassId] !== false; // Default to expanded
-
-                                              return (
-                                                <div key={subClass.id || subClassIndex} className="border rounded bg-white p-3">
-                                                  <div
-                                                    className="flex items-center justify-between cursor-pointer"
-                                                    onClick={() => toggleExpansion('subclass', subClassId)}
-                                                  >
-                                                    <div className="flex items-center">
-                                                      <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="h-5 w-5 mr-2 text-gray-400 hover:bg-transparent"
-                                                      >
-                                                        {isSubClassExpanded ? (
-                                                          <Minus className="h-3 w-3" />
-                                                        ) : (
-                                                          <Plus className="h-3 w-3" />
-                                                        )}
-                                                      </Button>
-                                                      <span className="text-sm font-medium">
-                                                        {subClass.name || `Subclass ${subClassIndex + 1}`}
-                                                      </span>
-                                                    </div>
-                                                    <span className="text-xs text-gray-500">
-                                                      {subClass.requirements?.length || 0} requirements
-                                                    </span>
-                                                  </div>
-
-                                                  {isSubClassExpanded && subClass.requirements?.length > 0 && (
-                                                    <div className="mt-2 pl-7 space-y-2">
-                                                      <div className="text-xs font-medium text-gray-600 mt-2 mb-1">
-                                                        Requirements:
-                                                      </div>
-                                                      {subClass.requirements.map((req, reqIndex) => (
-                                                        <div key={reqIndex} className="text-xs text-gray-600 bg-gray-50 p-2 rounded border">
-                                                          {req.name || `Requirement ${reqIndex + 1}`}
-                                                        </div>
-                                                      ))}
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              );
-                                            })}
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <div className="text-center py-8 text-gray-500 border-2 border-dashed rounded-lg bg-white">
-                            <FolderOpen className="h-8 w-8 mx-auto text-gray-300 mb-2" />
-                            <p className="text-sm">No classes created yet.</p>
-                            <p className="text-xs text-gray-400 mt-1">Click "Add Class" to get started</p>
-                          </div>
-                        )}
-                      </div>
-                    </TabsContent>
-                  </Tabs>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="flex justify-end space-x-2 pt-4 border-t">
-            <Button variant="outline" onClick={() => setIsAddDepartmentOpen(false)} disabled={saving}>
-              Cancel
-            </Button>
-            <Button onClick={handleSaveDepartment} disabled={saving || !departmentForm.name.trim()}>
-              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-              Save
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <DepartmentDialog
+        open={isAddDepartmentOpen}
+        onOpenChange={setIsAddDepartmentOpen}
+        onSave={handleSaveDepartment}
+        departmentForm={departmentForm}
+        setDepartmentForm={setDepartmentForm}
+        users={users}
+        editingDepartmentId={editingDepartmentId}        // Use new state
+        editingSubdepartmentId={editingSubdepartmentId}  // Use new state
+        isSaving={saving}
+      />
     </div>
   )
 }

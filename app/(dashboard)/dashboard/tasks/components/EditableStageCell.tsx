@@ -475,18 +475,9 @@ export default function EditableStageCell({
       setIsLoading(true);
       await onSave(stage.id, task.id, formattedDate);
 
-      // After successful save, trigger a refetch of the table data
-      try {
-        const response = await fetch('/api/tasks'); // Adjust the API endpoint as needed
-        if (!response.ok) {
-          throw new Error('Failed to refresh task data');
-        }
-        const data = await response.json();
-        console.log('Task data refreshed successfully');
-      } catch (fetchError) {
-        console.error('Error refreshing task data:', fetchError);
-        // Don't show error toast to user as the main operation was successful
-      }
+      // The parent component handles refreshing the task data
+      // No need for an additional API call here
+      console.log('Stage update successful, parent will handle data refresh');
 
       setIsEditing(false);
 
