@@ -7,11 +7,11 @@ import { TruncatedText } from "@/app/(dashboard)/dashboard/departments/documents
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Eye, ChevronDown, Plus, Minus, Loader2, Settings, Search, Users, X, TableProperties, RotateCcw, Pencil, AlertTriangle } from "lucide-react"
+import { Eye, ChevronDown, Plus, Minus, Loader2, Settings, Search, Users, X, TableProperties, RotateCcw, Pencil, AlertTriangle, Send, DownloadCloud, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { FileText, Edit, Trash2, Download, Building, Upload, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
-import { format, parseISO, isAfter } from "date-fns"
+import { format, parseISO, isAfter, isEqual } from "date-fns"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { EditTaskDialog } from "./components/EditTaskDialog"
@@ -25,6 +25,9 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import EditableStageCell from "./components/EditableStageCell"
 import ExtractionPreview from "@/components/ExtractionPreview"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import JSZip from 'jszip'
+import { saveAs } from 'file-saver'
 import {
   fetchTasks,
   fetchStages,
@@ -182,9 +185,7 @@ export default function DepartmentTasksManager({
 }: DepartmentTasksManagerProps) {
   // State management
   const [departments, setDepartments] = useState<Department[]>([])
-  const [departmentsLoading, setDepartmentsLoading] = useState(true)
   const [companies, setCompanies] = useState<Map<number, string>>(new Map())
-  const [companiesLoading, setCompaniesLoading] = useState(true)
   const [activeDepartmentTab, setActiveDepartmentTab] = useState<string>("")
   const [activeSubTab, setActiveSubTab] = useState<string>("wip-stages")
   const [activeSubdepartmentTab, setActiveSubdepartmentTab] = useState<string>("")
@@ -199,6 +200,11 @@ export default function DepartmentTasksManager({
   const [isEnquiryDialogOpen, setIsEnquiryDialogOpen] = useState(false)
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null)
   const [isStageUploadDialogOpen, setIsStageUploadDialogOpen] = useState(false)
+  
+  // New state for sorting and actions
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null)
+  const [isPushingCase, setIsPushingCase] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
 
   // Global search state
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
@@ -884,6 +890,150 @@ export default function DepartmentTasksManager({
     }
     toast({ title: "Export Successful", description: `${tableType} data exported.` })
   }, [])
+  
+  // Handler to push a case to a new sub-department
+  const handlePushCase = useCallback(async (task: UtilTask, targetSubDeptId: number, targetSubDeptName: string) => {
+    setIsPushingCase(true)
+    toast({ title: "Pushing Case...", description: `Creating a new task in ${targetSubDeptName}.` })
+
+    try {
+      const { data: newTask, error } = await supabase
+        .from('tasks')
+        .insert([{
+          applicant_name: task.applicant_name,
+          individual_id: task.individual_id,
+          company_id: task.company_id,
+          department_id: task.department_id,
+          subdepartment_id: targetSubDeptId,
+          class_id: null, // Pushed tasks will need re-classification
+          subclass_id: null,
+          status: 'in_progress', // Start as WIP in the new department
+          job_description: task.job_description,
+          // copy other relevant fields as needed
+        }])
+        .select()
+        .single()
+
+      if (error) throw error
+
+      toast({ title: "Success", description: `Case pushed to ${targetSubDeptName} successfully. New Task ID: ${newTask.id}` })
+      await refreshAllData() // Refresh to see the new task
+    } catch (error) {
+      console.error(`Error pushing case to ${targetSubDeptName}:`, error)
+      toast({ title: "Error", description: `Failed to push case. ${error.message}`, variant: "destructive" })
+    } finally {
+      setIsPushingCase(false)
+    }
+  }, [refreshAllData])
+
+  // Handler to download all documents for a user as a ZIP file
+  const handleDownloadZip = useCallback(async (task: UtilTask) => {
+    setIsDownloading(true)
+    toast({ title: "Preparing Download", description: "Collecting documents..." })
+
+    try {
+      const userDocuments = allDocuments.filter(doc => doc.director_id === task.individual_id)
+      if (userDocuments.length === 0) {
+        toast({ title: "No Documents", description: "No documents found for this applicant to download.", variant: "default" })
+        setIsDownloading(false)
+        return
+      }
+
+      const zip = new JSZip()
+      const bucketName = 'kyc-documents'
+
+      const downloadPromises = userDocuments.map(async (doc) => {
+        if (!doc.file_path) return
+        const filePath = doc.file_path.startsWith(bucketName) ? doc.file_path : `${bucketName}/${doc.file_path}`
+        const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`
+        const fileName = doc.file_path.split('/').pop() || 'document'
+
+        try {
+          const response = await fetch(fileUrl)
+          if (!response.ok) {
+            console.error(`Failed to fetch ${fileUrl}: ${response.statusText}`)
+            return // Skip this file
+          }
+          const blob = await response.blob()
+          zip.file(fileName, blob)
+        } catch (error) {
+          console.error(`Error downloading file ${fileName}:`, error)
+        }
+      })
+
+      await Promise.all(downloadPromises)
+
+      const content = await zip.generateAsync({ type: "blob" })
+      saveAs(content, `${task.applicant_name || 'applicant'}_documents.zip`)
+      toast({ title: "Download Started", description: "Your ZIP file is being downloaded." })
+    } catch (error) {
+      console.error("Error creating ZIP file:", error)
+      toast({ title: "Error", description: "Failed to create ZIP file.", variant: "destructive" })
+    } finally {
+      setIsDownloading(false)
+    }
+  }, [allDocuments])
+
+  // Handler to calculate current immigration status
+  const getImmigrationStatus = useCallback((task: UtilTask) => {
+    const statusStageId = "072b9710-45df-4a05-ba65-01b4ef29d61d";
+    const statusStage = stages.find(s => s.id === statusStageId);
+
+    if (!statusStage || !statusStage.documents || statusStage.documents.length === 0) {
+        return { status: "N/A", date: null, type: 'na' };
+    }
+
+    const stageDocKycIds = new Set(statusStage.documents.map(d => d.kycId));
+    
+    const relevantDocs = allDocuments.filter(doc => 
+        doc.director_id === task.individual_id &&
+        stageDocKycIds.has(doc.document_id)
+    );
+
+    if (relevantDocs.length === 0) {
+        return { status: "No Status Doc", date: null, type: 'na' };
+    }
+
+    const dateFields = ['expiry date', 'valid_to', 'up_to', 'untill', 'effective_to'];
+    let latestDate: Date | null = null;
+
+    relevantDocs.forEach(doc => {
+        if (doc.extracted_details) {
+            for (const key in doc.extracted_details) {
+                if (dateFields.includes(key.toLowerCase())) {
+                    const dateValue = doc.extracted_details[key];
+                    if (dateValue) {
+                        try {
+                            const parsedDate = parseISO(dateValue);
+                            if (!isNaN(parsedDate.getTime())) {
+                                if (!latestDate || isAfter(parsedDate, latestDate)) {
+                                    latestDate = parsedDate;
+                                }
+                            }
+                        } catch (e) {
+                            // ignore parsing errors
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    if (latestDate) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Compare dates only
+        const checkDate = new Date(latestDate);
+        checkDate.setHours(0, 0, 0, 0);
+
+        if (isAfter(checkDate, today) || isEqual(checkDate, today)) {
+             return { status: `Active until ${format(latestDate, 'dd MMM yyyy')}`, date: latestDate, type: 'active' };
+        } else {
+             return { status: `Expired on ${format(latestDate, 'dd MMM yyyy')}`, date: latestDate, type: 'expired' };
+        }
+    }
+
+    return { status: "No Date Found", date: null, type: 'na' };
+  }, [stages, allDocuments]);
 
   // Generate enhanced table rows for transposed view using KYC fields
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
@@ -1153,13 +1303,31 @@ export default function DepartmentTasksManager({
         )
       case 'actions': return (
         <div className="flex items-center justify-center gap-1">
-          <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100"><Edit className="h-4 w-4" /></Button>
-          <Button variant="ghost" size="icon" onClick={() => onTaskAction?.({ type: 'delete', task })} className="h-8 w-8 text-red-600 hover:bg-red-100"><Trash2 className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100" title="Edit Task"><Edit className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" onClick={() => onTaskAction?.({ type: 'delete', task })} className="h-8 w-8 text-red-600 hover:bg-red-100" title="Delete Task"><Trash2 className="h-4 w-4" /></Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:bg-slate-100" title="More Actions">
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handlePushCase(task, 27, 'Alien')} disabled={isPushingCase}>
+                <Send className="mr-2 h-4 w-4" /> Push to Alien
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handlePushCase(task, 7, 'Re-Entry Pass')} disabled={isPushingCase}>
+                <Send className="mr-2 h-4 w-4" /> Push to Re-Entry
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleDownloadZip(task)} disabled={isDownloading}>
+                <DownloadCloud className="mr-2 h-4 w-4" /> Download Docs
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       )
       default: return <span className="text-sm text-slate-800">{value}</span>
     }
-  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, handleStageStatusSave, allDocuments])
+  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, handleStageStatusSave, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading])
 
   // State for enhanced table rendering
   const [tableRows, setTableRows] = useState([]);
@@ -1243,9 +1411,55 @@ export default function DepartmentTasksManager({
 
   // Check if any data is still loading
   const isAnyDataLoading = Object.values(dataLoading).some(loading => loading)
+  
+  // Sorting handler
+  const requestSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc'
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc'
+    }
+    setSortConfig({ key, direction })
+  }
+
+  // Memoized sorted tasks for standard view
+  const getSortedTasks = (tasksToRender: UtilTask[]) => {
+      return useMemo(() => {
+      let sortableItems = [...tasksToRender]
+      if (sortConfig) {
+        sortableItems.sort((a, b) => {
+          const getSortableValue = (task, key) => {
+            switch (key) {
+              case 'applicant_name': return task.applicant_name?.toLowerCase() || ''
+              case 'company_name': return companies.get(task.company_id)?.toLowerCase() || ''
+              case 'status': return task.status?.toLowerCase() || ''
+              default: return task[key] || ''
+            }
+          }
+
+          const valueA = getSortableValue(a, sortConfig.key)
+          const valueB = getSortableValue(b, sortConfig.key)
+
+          if (valueA === null || valueA === undefined) return 1
+          if (valueB === null || valueB === undefined) return -1
+          
+          let comparison = 0
+          if (valueA > valueB) {
+            comparison = 1
+          } else if (valueA < valueB) {
+            comparison = -1
+          }
+
+          return sortConfig.direction === 'asc' ? comparison : comparison * -1
+        })
+      }
+      return sortableItems
+    }, [tasksToRender, sortConfig, companies])
+  }
 
   const renderStandardTable = useCallback((tasks: any[], tableType: string) => {
-    if (!tasks.length) {
+    const sortedTasks = getSortedTasks(tasks);
+
+    if (!sortedTasks.length) {
       return (
         <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
           <FileText className="h-12 w-12 text-slate-400" />
@@ -1280,14 +1494,28 @@ export default function DepartmentTasksManager({
       return total + Math.max(1, stageCols);
     }, 0);
 
+    const SortableHeader = ({ sortKey, children, className }) => {
+      const isSorted = sortConfig?.key === sortKey;
+      return (
+        <TableHead className={className} onClick={() => requestSort(sortKey)}>
+          <div className="flex items-center justify-center gap-2">
+            {children}
+            {isSorted ? (
+              sortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
+            ) : <ArrowUpDown className="h-4 w-4 opacity-30" />}
+          </div>
+        </TableHead>
+      )
+    }
+
     return (
       <div className="border border-slate-200 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 400px)' }}>
         <Table className="min-w-full border-separate border-spacing-0">
           <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
             <TableRow className="h-12">
-              <TableHead rowSpan={2} className="sticky left-0 bg-blue-600 border-r border-slate-300 w-[200px] z-30 text-white font-semibold p-2">Applicant</TableHead>
-              <TableHead rowSpan={2} className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[180px]">Company</TableHead>
-              <TableHead rowSpan={2} className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[100px]">Status</TableHead>
+              <SortableHeader rowSpan={2} sortKey="applicant_name" className="sticky left-0 bg-blue-600 border-r border-slate-300 w-[200px] z-30 text-white font-semibold p-2 cursor-pointer hover:bg-blue-700">Applicant</SortableHeader>
+              <SortableHeader rowSpan={2} sortKey="company_name" className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[180px] cursor-pointer hover:bg-blue-700">Company</SortableHeader>
+              <SortableHeader rowSpan={2} sortKey="status" className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[100px] cursor-pointer hover:bg-blue-700">Status</SortableHeader>
               <TableHead colSpan={totalStageColumns} className="bg-blue-600 border-r border-slate-300 text-white text-center font-bold px-2">
                 <div className="flex items-center justify-center gap-2">
                   WORKFLOW STAGES
@@ -1377,7 +1605,7 @@ export default function DepartmentTasksManager({
             ) : error ? (
               <TableRow><TableCell colSpan={20} className="h-32 text-center text-destructive">{error}</TableCell></TableRow>
             ) : (
-              tasks.map((task) => (
+              sortedTasks.map((task) => (
                 <TableRow key={task.id} className="group bg-white hover:bg-blue-50/50">
                   <TableCell className="sticky left-0 z-10 group-hover:bg-blue-50/50 bg-white border border-gray-100 font-medium text-sm text-slate-800 p-2 align-middle">
                     <div className="truncate" title={task.applicant_name}>{task.applicant_name || 'N/A'}</div>
@@ -1441,8 +1669,26 @@ export default function DepartmentTasksManager({
 
                   <TableCell className="text-center text-sm p-2 align-middle">
                     <div className="flex items-center justify-center gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100"><Edit className="h-4 w-4" /></Button>
-                      <Button variant="ghost" size="icon" onClick={() => onTaskAction?.({ type: 'delete', task })} className="h-8 w-8 text-red-600 hover:bg-red-100"><Trash2 className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100" title="Edit Task"><Edit className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="icon" onClick={() => onTaskAction?.({ type: 'delete', task })} className="h-8 w-8 text-red-600 hover:bg-red-100" title="Delete Task"><Trash2 className="h-4 w-4" /></Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:bg-slate-100" title="More Actions">
+                            <ChevronDown className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                           <DropdownMenuItem onClick={() => handlePushCase(task, 27, 'Alien')} disabled={isPushingCase}>
+                             <Send className="mr-2 h-4 w-4" /> Push to Alien
+                           </DropdownMenuItem>
+                           <DropdownMenuItem onClick={() => handlePushCase(task, 7, 'Re-Entry Pass')} disabled={isPushingCase}>
+                             <Send className="mr-2 h-4 w-4" /> Push to Re-Entry
+                           </DropdownMenuItem>
+                           <DropdownMenuItem onClick={() => handleDownloadZip(task)} disabled={isDownloading}>
+                             <DownloadCloud className="mr-2 h-4 w-4" /> Download Docs
+                           </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -1452,7 +1698,7 @@ export default function DepartmentTasksManager({
         </Table>
       </div>
     )
-  }, [stages, dataLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, isDocumentApplicableToTask, visibleStageIds])
+  }, [stages, dataLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, isDocumentApplicableToTask, visibleStageIds, sortConfig])
 
   // Enhanced render function for transposed table with better dependants positioning
   const renderEnhancedTransposedTable = useCallback((tasks: any[], tableType: string) => {
@@ -1486,10 +1732,10 @@ export default function DepartmentTasksManager({
             <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
               {/* Row 1: Task IDs */}
               <TableRow className="border-b-2 border-slate-400">
-                <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-20" rowSpan={4}>
+                <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-20" rowSpan={5}>
                   Order
                 </TableHead>
-                <TableHead className="sticky left-20 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-[300px]" rowSpan={4}>
+                <TableHead className="sticky left-20 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-[300px]" rowSpan={5}>
                   Fields
                 </TableHead>
                 {headerStructure.map((item, index) => (
@@ -1530,8 +1776,30 @@ export default function DepartmentTasksManager({
                   </TableHead>
                 ))}
               </TableRow>
+              
+              {/* Row 3: Current Immigration Status */}
+              <TableRow className="border-b-2 border-slate-400 bg-slate-50 text-slate-700">
+                {headerStructure.map((item, index) => {
+                    let statusInfo = { status: '-', type: 'na' };
+                    if (item.type === 'principal') {
+                        statusInfo = getImmigrationStatus(item.task);
+                    }
+                    
+                    const badgeColor = statusInfo.type === 'active' ? 'bg-green-100 text-green-800' : 
+                                        statusInfo.type === 'expired' ? 'bg-red-100 text-red-800' : 
+                                        'bg-slate-100 text-slate-600';
 
-              {/* Row 3: Companies */}
+                    return (
+                        <TableHead key={`status-${index}`} className={`font-medium min-w-[200px] text-center text-xs border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? '' : 'bg-orange-50'}`}>
+                            {item.type === 'principal' ? (
+                                <Badge variant="outline" className={`whitespace-normal ${badgeColor}`}>{statusInfo.status}</Badge>
+                            ) : ''}
+                        </TableHead>
+                    );
+                })}
+              </TableRow>
+
+              {/* Row 4: Companies */}
               <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
                 {headerStructure.map((item, index) => (
                   <TableHead key={`company-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
@@ -1542,7 +1810,7 @@ export default function DepartmentTasksManager({
                 ))}
               </TableRow>
 
-              {/* Row 4: Job Level */}
+              {/* Row 5: Job Level */}
               <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
                 {headerStructure.map((item, index) => (
                   <TableHead key={`job-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
@@ -1642,7 +1910,7 @@ export default function DepartmentTasksManager({
         </div>
       </div>
     )
-  }, [loading, error, tableRows, renderCellContent, expandedSections, expandedStages, expandedDocuments, expandedDependants, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies, toggleDependantsExpansion, getTaskHierarchy])
+  }, [loading, error, tableRows, renderCellContent, expandedSections, expandedStages, expandedDocuments, expandedDependants, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies, toggleDependantsExpansion, getTaskHierarchy, getImmigrationStatus])
 
   const defaultSubdepartments = getDefaultSubdepartments()
 

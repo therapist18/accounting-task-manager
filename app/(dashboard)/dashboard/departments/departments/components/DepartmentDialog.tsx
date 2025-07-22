@@ -323,7 +323,7 @@ interface DepartmentDialogProps {
   
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-w-6xl h-[calc(100vh-10rem)]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {isCreatingNewDepartment && <FolderPlus className="h-5 w-5 text-blue-600" />}
@@ -343,7 +343,7 @@ interface DepartmentDialogProps {
             </div>
           </DialogHeader>
           
-          <div className="space-y-6">
+          <div className="space-y-6 overflow-y-auto">
             {/* Department Section - shown when creating new dept or editing existing dept */}
             {(isCreatingNewDepartment || isEditingDepartment) && (
               <div className="space-y-4 p-4 bg-blue-50 rounded-lg border">
