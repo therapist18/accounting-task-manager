@@ -57,10 +57,28 @@ export async function fetchOfficers(): Promise<Officer[]> {
 
 export async function createOfficer(officerData: Omit<Officer, 'id' | 'created_at' | 'updated_at' | 'department' | 'subdepartment'>): Promise<Officer> {
   try {
-    // Ensure the role is set to 'officer'
+    // Extract department history from the officer data
+    const { department_id, subdepartment_id, department_start_date, department_end_date, ...rest } = officerData;
+    
+    // Create the department history array
+    const department_history = [{
+      department_id,
+      subdepartment_id: subdepartment_id || null,
+      start_date: department_start_date || new Date().toISOString(),
+      end_date: department_end_date || null
+    }];
+
+    // Prepare the data to insert
     const dataToInsert = {
-      ...officerData,
-      role: 'officer' as const
+      ...rest,
+      role: 'officer' as const,
+      department_history, // Store as JSONB array
+      // Set default status history if not provided
+      status_history: officerData.status_history || [{
+        status: 'active',
+        start_date: new Date().toISOString(),
+        end_date: null
+      }]
     };
 
     const { data, error } = await supabase
@@ -73,9 +91,12 @@ export async function createOfficer(officerData: Omit<Officer, 'id' | 'created_a
 
     return {
       ...data,
-      department: data.department || { id: data.department_id, name: 'Unknown' },
-      subdepartment: data.subdepartment || 
-        (data.subdepartment_id ? { id: data.subdepartment_id, name: 'Unknown' } : undefined)
+      department: { id: department_id, name: 'Unknown' },
+      subdepartment: subdepartment_id ? { id: subdepartment_id, name: 'Unknown' } : undefined,
+      department_id,
+      subdepartment_id,
+      department_start_date,
+      department_end_date
     };
   } catch (error) {
     console.error('Error creating officer:', error);
@@ -85,9 +106,59 @@ export async function createOfficer(officerData: Omit<Officer, 'id' | 'created_a
 
 export async function updateOfficer(id: string, officerData: Partial<Officer>): Promise<Officer> {
   try {
+    // Get the current officer data to preserve existing department history
+    const { data: currentData } = await supabase
+      .from('tm_users')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (!currentData) {
+      throw new Error('Officer not found');
+    }
+
+    // Prepare the update data
+    const updateData: any = { ...officerData };
+    
+    // If department-related fields are being updated, update the department_history
+    if ('department_id' in officerData || 'subdepartment_id' in officerData || 
+        'department_start_date' in officerData || 'department_end_date' in officerData) {
+      
+      // Get the current department history or initialize if it doesn't exist
+      const currentHistory = currentData.department_history || [];
+      const lastHistory = currentHistory.length > 0 
+        ? currentHistory[currentHistory.length - 1] 
+        : null;
+      
+      // Only update if there are actual changes
+      if (lastHistory && (
+        lastHistory.department_id === officerData.department_id &&
+        lastHistory.subdepartment_id === (officerData.subdepartment_id || null) &&
+        lastHistory.start_date === officerData.department_start_date &&
+        lastHistory.end_date === (officerData.department_end_date || null)
+      )) {
+        // No changes to department history
+      } else {
+        // End the current department assignment if it exists
+        if (lastHistory) {
+          lastHistory.end_date = new Date().toISOString();
+        }
+        
+        // Add new department assignment
+        const newAssignment = {
+          department_id: officerData.department_id || lastHistory?.department_id || '',
+          subdepartment_id: officerData.subdepartment_id || lastHistory?.subdepartment_id || null,
+          start_date: officerData.department_start_date || new Date().toISOString(),
+          end_date: officerData.department_end_date || null
+        };
+        
+        updateData.department_history = [...currentHistory, newAssignment];
+      }
+    }
+
     const { data, error } = await supabase
       .from('tm_users')
-      .update(officerData)
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
@@ -96,9 +167,18 @@ export async function updateOfficer(id: string, officerData: Partial<Officer>): 
 
     return {
       ...data,
-      department: data.department || { id: data.department_id, name: 'Unknown' },
-      subdepartment: data.subdepartment || 
-        (data.subdepartment_id ? { id: data.subdepartment_id, name: 'Unknown' } : undefined)
+      department: { 
+        id: data.department_id, 
+        name: typeof data.department === 'object' ? data.department?.name : 'Unknown' 
+      },
+      subdepartment: data.subdepartment_id ? { 
+        id: data.subdepartment_id, 
+        name: typeof data.subdepartment === 'object' ? data.subdepartment?.name : 'Unknown' 
+      } : undefined,
+      department_id: data.department_id,
+      subdepartment_id: data.subdepartment_id,
+      department_start_date: data.department_start_date,
+      department_end_date: data.department_end_date
     };
   } catch (error) {
     console.error('Error updating officer:', error);

@@ -17,7 +17,12 @@ interface EditableStageCellProps {
   stage: any
   task: any
   value?: string | null
-  onSave?: (stageId: string, taskId: string, value: string) => Promise<void> | void
+  onSave?: (
+    stageId: string, 
+    taskId: string, 
+    value: string, 
+    updatedExtractedDetails?: Record<string, any>
+  ) => Promise<void> | void
   onDocumentUpload?: (task: any, stage: any) => void
   onShowDocuments?: (doc: any) => void
   getKycFields?: (documentConfig: any) => Promise<any[]>
@@ -93,6 +98,36 @@ export default function EditableStageCell({
       return null;
     }
   }, []);
+
+  // Function to process extracted data and ensure proper date handling for arrays
+  const processExtractedData = (data: any, fields: any[]): any => {
+    if (!data || typeof data !== 'object') return data;
+
+    const result = { ...data };
+    
+    // Process each field
+    fields.forEach(field => {
+      const fieldId = field.id || field.fieldName;
+      
+      // Handle array fields
+      if (field.isArray && Array.isArray(result[fieldId])) {
+        // Process each item in the array
+        result[fieldId] = result[fieldId].map((item: any) => {
+          if (field.arrayConfig?.fields) {
+            // Recursively process nested fields
+            return processExtractedData(item, field.arrayConfig.fields);
+          }
+          return item;
+        });
+      } 
+      // Handle nested objects
+      else if (typeof result[fieldId] === 'object' && result[fieldId] !== null) {
+        result[fieldId] = processExtractedData(result[fieldId], field.fields || []);
+      }
+    });
+    
+    return result;
+  };
 
   // Update preview document when dialog opens or document data changes
   useEffect(() => {
@@ -185,10 +220,10 @@ export default function EditableStageCell({
 
       // Transform KYC fields to the expected format
       const transformKycFields = (fields: any[]): any[] => {
-        if (!Array.isArray(fields)) return []
+        if (!Array.isArray(fields)) return [];
 
         return fields.map((field: any) => {
-          const isArray = field.type === 'array' || field.isArray === true
+          const isArray = field.type === 'array' || field.isArray === true;
 
           const transformedField: any = {
             id: field.id || field.fieldName || '',
@@ -198,17 +233,18 @@ export default function EditableStageCell({
             fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
             parentField: field.parentField,
             isArray: isArray,
-          }
+            fields: field.fields ? transformKycFields(field.fields) : undefined,
+          };
 
           if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
             transformedField.arrayConfig = {
               maxItems: field.arrayConfig.maxItems,
               fields: transformKycFields(field.arrayConfig.fields)
-            }
+            };
           }
 
-          return transformedField
-        })
+          return transformedField;
+        });
       };
 
       // Map KYC fields to the expected format
@@ -219,23 +255,30 @@ export default function EditableStageCell({
         required: field.isRequired,
         description: field.description,
         isArray: field.isArray,
-        arrayConfig: field.arrayConfig
+        arrayConfig: field.arrayConfig,
+        fields: field.fields || []
       }));
 
-      // Prepare extracted data, ensuring all fields have values
-      const extractedData = { ...(doc.extracted_details || {}) };
-      console.log('Extracted data from document:', extractedData);
+      // Prepare extracted data
+      const rawExtractedData = doc.extracted_details || {};
+      console.log('Raw extracted data from document:', rawExtractedData);
 
+      // Process the extracted data to handle arrays and nested fields
+      const processedExtractedData = processExtractedData(rawExtractedData, fields);
+      
       // Ensure all fields have values, using empty strings for missing ones
+      const extractedData = { ...processedExtractedData };
       fields.forEach((field: any) => {
         if (extractedData[field.id] === undefined) {
-          extractedData[field.id] = '';
+          extractedData[field.id] = field.isArray ? [] : '';
         }
       });
 
+      console.log('Processed extracted data:', extractedData);
+
       const previewData = {
         documentId: doc.id,
-        documentName: documentName, // Use KYC document name
+        documentName: documentName,
         fileUrl,
         fileName,
         extractedData,
@@ -270,7 +313,7 @@ export default function EditableStageCell({
     );
   };
 
-  // Initialize documents using passed allDocuments - Updated to handle old documents
+  // Initialize documents using passed allDocuments - Updated to handle array fields and old documents
   useEffect(() => {
     const directorId = task.individual_id;
     if (!directorId) {
@@ -280,7 +323,6 @@ export default function EditableStageCell({
     // Process KYC fields for the stage documents
     const processStageDocuments = async () => {
       const stageDocuments = filterDocumentsForStage(allDocuments, directorId, stage.documents || []);
-
 
       if (stageDocuments.length > 0) {
         const mostRecentDoc = stageDocuments[0];
@@ -292,23 +334,29 @@ export default function EditableStageCell({
         setIsOldDocument(isOldDoc);
 
         // Only set hasDocuments to true if document doesn't have indicator AND is not old
-        setHasDocuments(!mostRecentDoc.indicator && !isOldDoc);
+        const hasValidDocument = !mostRecentDoc.indicator && !isOldDoc;
+        setHasDocuments(hasValidDocument);
 
-        // Extract date from most recent document only if no indicator AND not old
-        if (!mostRecentDoc.indicator && !isOldDoc) {
-          const dateFields = ['application_date', 'date', 'upload_date', 'created_date', 'date_and_time_generated', 'invoice_date_and_time'];
-          for (const field of dateFields) {
-            if (mostRecentDoc.extracted_details && mostRecentDoc.extracted_details[field]) {
-              setStageDate(mostRecentDoc.extracted_details[field]);
-              break;
+        // Extract date from most recent document only if valid
+        if (hasValidDocument) {
+          const dateFields = [
+            'application_date', 'date', 'upload_date', 'created_date', 
+            'date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
+            'Expiry_Date', 'Date_of_Issue', 'Passport_Expiry_Date', 'Date_of_Birth'
+          ];
+          
+          if (mostRecentDoc.extracted_details) {
+            const foundDate = findDateInObject(mostRecentDoc.extracted_details, dateFields);
+            if (foundDate) {
+              setStageDate(foundDate);
+              return;
             }
           }
-        } else {
-          // Clear stage date if document has indicator or is old
-          setStageDate('');
         }
+        
+        // Clear stage date if no valid date found or document is invalid
+        setStageDate('');
       } else {
-
         setHasDocuments(false);
         setIsOldDocument(false);
         setStageDate('');
@@ -318,52 +366,67 @@ export default function EditableStageCell({
     processStageDocuments();
   }, [allDocuments, task.individual_id, task.created_at, stage.documents, requiresUpload]);
 
-  // Get extracted date from passed documents - Updated to handle old documents
-  const getExtractedDate = (): string => {
-    // Get extracted date for stage
-    const stageId = stage.id;
-    const individualId = task.individual_id;
+  // Helper function to find a date in an object, including nested arrays
+  const findDateInObject = (obj: any, dateFields: string[]): string | null => {
+    if (!obj || typeof obj !== 'object') return null;
 
-    if (!allDocuments.length) {
-      return '';
+    // First try direct fields
+    for (const field of dateFields) {
+      if (obj[field]) {
+        console.log('Found date in field:', field, obj[field]);
+        return obj[field];
+      }
     }
+
+    // Then check array fields
+    for (const key in obj) {
+      if (Array.isArray(obj[key]) && obj[key].length > 0) {
+        // Check first item in array (most recent)
+        if (typeof obj[key][0] === 'object') {
+          const dateInArray = findDateInObject(obj[key][0], dateFields);
+          if (dateInArray) return dateInArray;
+        }
+      } else if (typeof obj[key] === 'object' && obj[key] !== null) {
+        // Check nested objects
+        const dateInNested = findDateInObject(obj[key], dateFields);
+        if (dateInNested) return dateInNested;
+      }
+    }
+    return null;
+  };
+
+  // Get extracted date from passed documents - Updated to handle array fields
+  const getExtractedDate = (): string => {
+    if (!allDocuments.length) return '';
 
     const stageDocuments = filterDocumentsForStage(allDocuments, task.individual_id, stage.documents || []);
-
-
-    if (!stageDocuments.length) {
-      return '';
-    }
+    if (!stageDocuments.length) return '';
 
     const mostRecentDoc = stageDocuments[0];
 
-    // Don't extract date if document has indicator
+    // Skip if document has indicator or is old
     if (mostRecentDoc.indicator) {
       console.log('Document has indicator, skipping date extraction');
       return '';
     }
 
-    // Check if document is older than task creation
-    const isOldDoc = task.created_at &&
-      isDocumentOlderThanTask(mostRecentDoc.created_at, task.created_at);
-
+    const isOldDoc = task.created_at && isDocumentOlderThanTask(mostRecentDoc.created_at, task.created_at);
     if (isOldDoc) {
       console.log('Document is older than task creation, skipping date extraction');
       return '';
     }
 
-    const dateFields = ['application_date', 'date', 'upload_date', 'created_date', 'date_generated', 'invoice_date_and_time'];
+    const dateFields = [
+      'application_date', 'date', 'upload_date', 'created_date', 
+      'date_generated', 'invoice_date_and_time', 'With_Effect_From',
+      'Expiry_Date', 'Date_of_Issue', 'Passport_Expiry_Date', 'Date_of_Birth'
+    ];
 
     if (mostRecentDoc.extracted_details) {
-      console.log('Document details:', mostRecentDoc.extracted_details);
-      for (const field of dateFields) {
-        if (mostRecentDoc.extracted_details[field]) {
-          console.log('Found date in field:', field, mostRecentDoc.extracted_details[field]);
-          return mostRecentDoc.extracted_details[field];
-        }
-      }
+      const foundDate = findDateInObject(mostRecentDoc.extracted_details, dateFields);
+      if (foundDate) return foundDate;
     }
-    console.log('No date found in document details');
+    
     return '';
   };
 
@@ -435,6 +498,39 @@ export default function EditableStageCell({
     return dateStr;
   };
 
+  // Function to update a date in a nested object/array structure
+  const updateDateInNestedObject = (obj: any, path: string[], value: string): any => {
+    if (!obj || !path.length) return obj;
+    
+    const [current, ...rest] = path;
+    
+    // If we're at the target path, update the value
+    if (rest.length === 0) {
+      return { ...obj, [current]: value };
+    }
+    
+    // Handle arrays
+    if (Array.isArray(obj[current])) {
+      // For array fields, we'll update the first item by default
+      // You might want to enhance this to handle specific array indices
+      const updatedArray = [...obj[current]];
+      if (updatedArray.length > 0) {
+        updatedArray[0] = updateDateInNestedObject(updatedArray[0], rest, value);
+      }
+      return { ...obj, [current]: updatedArray };
+    }
+    
+    // Handle nested objects
+    if (obj[current] && typeof obj[current] === 'object') {
+      return { 
+        ...obj, 
+        [current]: updateDateInNestedObject(obj[current], rest, value) 
+      };
+    }
+    
+    return obj;
+  };
+
   const handleSave = async () => {
     if (!onSave) {
       console.error('onSave function is not provided');
@@ -463,20 +559,91 @@ export default function EditableStageCell({
       }
 
       const formattedDate = format(dateObj, 'dd/MM/yyyy');
+      
+      // Find the document to update
+      const directorId = task.individual_id;
+      const stageDocuments = directorId 
+        ? filterDocumentsForStage(allDocuments, directorId, stage.documents || [])
+        : [];
+      
+      let updatedExtractedDetails = {};
+      
+      if (stageDocuments.length > 0) {
+        const mostRecentDoc = stageDocuments[0];
+        const currentDetails = mostRecentDoc.extracted_details || {};
+        
+        // Try to find where the date was originally stored
+        const dateFields = [
+          'application_date', 'date', 'upload_date', 'created_date', 
+          'date_generated', 'invoice_date_and_time', 'With_Effect_From',
+          'Expiry_Date', 'Date_of_Issue', 'Passport_Expiry_Date', 'Date_of_Birth'
+        ];
+        
+        // Find the field that contains the date
+        let dateFieldPath: string[] = [];
+        
+        const findDateField = (obj: any, path: string[] = []): boolean => {
+          for (const key in obj) {
+            const currentPath = [...path, key];
+            const value = obj[key];
+            
+            if (dateFields.includes(key) && value) {
+              dateFieldPath = currentPath;
+              return true;
+            }
+            
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+              if (findDateField(value, currentPath)) {
+                return true;
+              }
+            } else if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object') {
+              // Check first item in array
+              if (findDateField(value[0], [...currentPath, '0'])) {
+                return true;
+              }
+            }
+          }
+          return false;
+        };
+        
+        findDateField(currentDetails);
+        
+        // Update the date in the appropriate location
+        if (dateFieldPath.length > 0) {
+          updatedExtractedDetails = updateDateInNestedObject(
+            currentDetails, 
+            dateFieldPath, 
+            formattedDate
+          );
+        } else {
+          // If we couldn't find the original field, just update the first date field
+          updatedExtractedDetails = { ...currentDetails };
+          dateFields.some(field => {
+            if (updatedExtractedDetails[field] !== undefined) {
+              updatedExtractedDetails[field] = formattedDate;
+              return true;
+            }
+            return false;
+          });
+        }
+      }
 
       console.log('About to save stage:', {
         stageId: stage.id,
         stageName: stage.name,
         taskId: task.id,
         formattedDate,
-        editValue
+        editValue,
+        updatedExtractedDetails
       });
 
       setIsLoading(true);
-      await onSave(stage.id, task.id, formattedDate);
+      
+      // Call the parent's onSave with both the formatted date and the updated extracted details
+      // The parent component can decide how to handle the update
+      await onSave(stage.id, task.id, formattedDate, updatedExtractedDetails);
 
       // The parent component handles refreshing the task data
-      // No need for an additional API call here
       console.log('Stage update successful, parent will handle data refresh');
 
       setIsEditing(false);

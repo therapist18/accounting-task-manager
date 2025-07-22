@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Officer, OfficerStatus } from '@/types/officer';
 import { OfficerDialog } from '../../users-management/officers/components/officer-dialog';
-import { format } from 'date-fns';
-import { MoreHorizontal } from 'lucide-react';
+import { format, formatDistanceToNow } from 'date-fns';
+import { MoreHorizontal, Calendar, Building2, Layers } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,6 +16,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { cn } from '@/lib/utils';
 import {
   Table,
   TableBody,
@@ -25,44 +32,83 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { fetchOfficers, createOfficer, updateOfficer, deleteOfficer } from '@/app/(dashboard)/dashboard/users-management/officers/components/officers';
+import { fetchDepartments } from '../departments';
 
-
+interface DepartmentMap {
+  [key: string]: {
+    name: string;
+    subdepartments: {[key: string]: string};
+  };
+}
 
 export default function OfficersPage() {
   const [officers, setOfficers] = useState<Officer[]>([]);
   const [activeOfficers, setActiveOfficers] = useState<Officer[]>([]);
   const [inactiveOfficers, setInactiveOfficers] = useState<Officer[]>([]);
+  const [departments, setDepartments] = useState<DepartmentMap>({});
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedOfficer, setSelectedOfficer] = useState<Officer | undefined>();
   const [isLoading, setIsLoading] = useState(false);
 
-  // Load officers from the database
+  // Load departments and officers data
   useEffect(() => {
-    const loadOfficers = async () => {
+    const loadData = async () => {
       setIsLoading(true);
       try {
-        const data = await fetchOfficers();
-        setOfficers(data);
+        // Load departments first
+        const deptsData = await fetchDepartments();
+        
+        // Create a map of department and subdepartment names
+        const deptMap: DepartmentMap = {};
+        
+        deptsData.forEach(dept => {
+          deptMap[dept.id] = {
+            name: dept.name,
+            subdepartments: {}
+          };
+          
+          // Add subdepartments
+          (dept.tm_subdepartments || []).forEach((sub: any) => {
+            deptMap[dept.id].subdepartments[sub.id] = sub.name;
+          });
+        });
+        
+        setDepartments(deptMap);
+        
+        // Then load officers
+        const officersData = await fetchOfficers();
+        setOfficers(officersData);
       } catch (error) {
-        console.error('Error fetching officers:', error);
+        console.error('Error loading data:', error);
         // Optionally show error to user
       } finally {
         setIsLoading(false);
       }
     };
 
-    loadOfficers();
+    loadData();
   }, []);
 
-  // Filter officers by active status
+  // Filter officers by active status and enrich with department data
   useEffect(() => {
     if (officers.length > 0) {
-      setActiveOfficers(officers.filter(officer => {
+      // Process officers to include department info
+      const processedOfficers = officers.map(officer => {
+        const currentDept = officer.department_history?.[0];
+        return {
+          ...officer,
+          currentDepartment: currentDept?.department,
+          currentSubdepartment: currentDept?.subdepartment,
+          departmentStartDate: currentDept?.start_date
+        };
+      });
+
+      setActiveOfficers(processedOfficers.filter(officer => {
         const status = officer.status_history?.[0];
         return status?.status === 'active' && !status?.end_date;
       }));
       
-      setInactiveOfficers(officers.filter(officer => {
+      setInactiveOfficers(processedOfficers.filter(officer => {
         const status = officer.status_history?.[0];
         return status?.status === 'inactive' || status?.end_date;
       }));
@@ -126,14 +172,178 @@ export default function OfficersPage() {
     }
   };
 
+  // Department history popover component
+  const DepartmentInfoPopover = ({ 
+    department, 
+    subdepartment, 
+    startDate, 
+    endDate,
+    children 
+  }: { 
+    department: any; 
+    subdepartment: any;
+    startDate?: string | null; 
+    endDate?: string | null;
+    children: React.ReactNode;
+  }) => {
+    const deptName = department?.name || 'Unknown Department';
+    const deptId = department?.id || 'N/A';
+    const subDeptName = subdepartment?.name || 'No Subdepartment';
+    const subDeptId = subdepartment?.id || 'N/A';
+    const isActive = !endDate || new Date(endDate) > new Date();
+    
+    return (
+      <Popover>
+        <PopoverTrigger asChild>
+          <button className="text-left hover:underline focus:outline-none">
+            {children}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-96">
+          <div className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-medium leading-none">Department Information</h4>
+                <Badge variant={isActive ? 'default' : 'outline'} className="ml-2">
+                  {isActive ? 'Active' : 'Inactive'}
+                </Badge>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <Building2 className="h-4 w-4" />
+                      Department
+                    </div>
+                    <div className="text-sm text-muted-foreground">ID: {deptId}</div>
+                  </div>
+                  <div className="pl-6 text-sm">{deptName}</div>
+                </div>
+                
+                {(subDeptName !== 'No Subdepartment') && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Layers className="h-4 w-4 opacity-70" />
+                        Subdepartment
+                      </div>
+                      <div className="text-sm text-muted-foreground">ID: {subDeptId}</div>
+                    </div>
+                    <div className="pl-6 text-sm">{subDeptName}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <Separator />
+            
+            <div className="space-y-2">
+              <h4 className="font-medium text-sm">Assignment Period</h4>
+              <div className="flex items-center gap-2 text-sm">
+                <Calendar className="h-4 w-4 opacity-70" />
+                <div className="flex items-center gap-1">
+                  <span className="font-medium">From:</span>
+                  <span className="text-muted-foreground">
+                    {formatDate(startDate) || 'Not specified'}
+                  </span>
+                </div>
+                <div className="h-1 w-1 rounded-full bg-muted-foreground/50" />
+                <div className="flex items-center gap-1">
+                  <span className="font-medium">To:</span>
+                  <span className="text-muted-foreground">
+                    {endDate ? formatDate(endDate) : 'Present'}
+                  </span>
+                </div>
+              </div>
+              
+              {startDate && (
+                <div className="text-xs text-muted-foreground mt-1">
+                  {isActive 
+                    ? `Assigned ${formatDistanceToNow(new Date(startDate), { addSuffix: true })}`
+                    : `Assignment ended ${formatDistanceToNow(new Date(endDate!), { addSuffix: true })}`
+                  }
+                </div>
+              )}
+            </div>
+            
+            <div className="pt-2 text-xs text-muted-foreground">
+              Click outside to close
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+    );
+  };
+
+  // Helper function to get department and subdepartment names by IDs
+  const getDepartmentInfo = (deptId: string | undefined, subDeptId: string | undefined | null) => {
+    if (!deptId || !departments[deptId]) {
+      return { name: 'Unknown Department', subName: 'No Subdepartment' };
+    }
+    
+    const deptName = departments[deptId].name;
+    let subDeptName = 'No Subdepartment';
+    
+    if (subDeptId && departments[deptId].subdepartments[subDeptId]) {
+      subDeptName = departments[deptId].subdepartments[subDeptId];
+    }
+    
+    return { name: deptName, subName: subDeptName };
+  };
+
+  // Helper function to get current department info
+  const getCurrentDepartment = (officer: Officer) => {
+    const currentDept = officer.department_history?.[0];
+    if (!currentDept) return { name: '-', subName: '-' };
+    
+    // Try to get names from the department object first
+    if (currentDept.department?.name) {
+      return {
+        name: currentDept.department.name,
+        subName: currentDept.subdepartment?.name || 'No Subdepartment',
+        startDate: currentDept.start_date,
+        endDate: currentDept.end_date,
+        department: currentDept.department,
+        subdepartment: currentDept.subdepartment
+      };
+    }
+    
+    // Fall back to ID-based lookup if department object is not available
+    const deptInfo = getDepartmentInfo(
+      currentDept.department_id || currentDept.department?.id,
+      currentDept.subdepartment_id || currentDept.subdepartment?.id
+    );
+    
+    return {
+      ...deptInfo,
+      startDate: currentDept.start_date,
+      endDate: currentDept.end_date,
+      department: currentDept.department || { id: currentDept.department_id, name: deptInfo.name },
+      subdepartment: currentDept.subdepartment || 
+        (currentDept.subdepartment_id ? { id: currentDept.subdepartment_id, name: deptInfo.subName } : null)
+    };
+  };
+
   // Helper function to get status badge
-  const getStatusBadge = (statusHistory: OfficerStatus[]) => {
-    const isActive = statusHistory[0]?.status === 'active' && !statusHistory[0]?.end_date;
+  const getStatusBadge = (statusHistory: OfficerStatus[] = []) => {
+    const currentStatus = statusHistory[0];
+    const isActive = currentStatus?.status === 'active' && !currentStatus?.end_date;
     return (
       <Badge variant={isActive ? 'default' : 'secondary'}>
         {isActive ? 'Active' : 'Inactive'}
       </Badge>
     );
+  };
+
+  // Format date for display
+  const formatDate = (dateString: string | undefined | null) => {
+    if (!dateString) return null;
+    try {
+      return format(new Date(dateString), 'MMM d, yyyy');
+    } catch (e) {
+      return null;
+    }
   };
 
   // Helper function to render action buttons
@@ -215,8 +425,39 @@ export default function OfficersPage() {
                     <TableRow key={officer.id}>
                       <TableCell className="font-medium">{officer.name}</TableCell>
                       <TableCell>{officer.email || '-'}</TableCell>
-                      <TableCell>{officer.department?.name || '-'}</TableCell>
-                      <TableCell>{officer.subdepartment?.name || '-'}</TableCell>
+                      <TableCell>
+                        <DepartmentInfoPopover
+                          department={officer.currentDepartment}
+                          subdepartment={officer.currentSubdepartment}
+                          startDate={officer.departmentStartDate}
+                          endDate={officer.department_history?.[0]?.end_date}
+                        >
+                          <span className={cn(
+                            'hover:underline cursor-pointer',
+                            !officer.currentDepartment?.name && 'text-muted-foreground'
+                          )}>
+                            {getCurrentDepartment(officer).name}
+                          </span>
+                        </DepartmentInfoPopover>
+                      </TableCell>
+                      <TableCell>
+                        {officer.currentSubdepartment ? (
+                          <DepartmentInfoPopover
+                            department={officer.currentDepartment}
+                            subdepartment={officer.currentSubdepartment}
+                            startDate={officer.departmentStartDate}
+                            endDate={officer.department_history?.[0]?.end_date}
+                          >
+                            <span className="hover:underline cursor-pointer">
+                              {getCurrentDepartment(officer).subName}
+                            </span>
+                          </DepartmentInfoPopover>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            {officer.department_history?.[0]?.subdepartment_id ? 'No Subdept' : '-'}
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell>{getStatusBadge(officer.status_history)}</TableCell>
                       <TableCell>{officer.created_at ? format(new Date(officer.created_at), 'MMM d, yyyy') : '-'}</TableCell>
                       <TableCell>{renderActions(officer)}</TableCell>
@@ -260,8 +501,39 @@ export default function OfficersPage() {
                     <TableRow key={officer.id}>
                       <TableCell className="font-medium">{officer.name}</TableCell>
                       <TableCell>{officer.email || '-'}</TableCell>
-                      <TableCell>{officer.department?.name || '-'}</TableCell>
-                      <TableCell>{officer.subdepartment?.name || '-'}</TableCell>
+                      <TableCell>
+                        <DepartmentInfoPopover
+                          department={officer.currentDepartment}
+                          subdepartment={officer.currentSubdepartment}
+                          startDate={officer.departmentStartDate}
+                          endDate={officer.department_history?.[0]?.end_date}
+                        >
+                          <span className={cn(
+                            'hover:underline cursor-pointer',
+                            !officer.currentDepartment?.name && 'text-muted-foreground'
+                          )}>
+                            {getCurrentDepartment(officer).name}
+                          </span>
+                        </DepartmentInfoPopover>
+                      </TableCell>
+                      <TableCell>
+                        {officer.currentSubdepartment ? (
+                          <DepartmentInfoPopover
+                            department={officer.currentDepartment}
+                            subdepartment={officer.currentSubdepartment}
+                            startDate={officer.departmentStartDate}
+                            endDate={officer.department_history?.[0]?.end_date}
+                          >
+                            <span className="hover:underline cursor-pointer">
+                              {getCurrentDepartment(officer).subName}
+                            </span>
+                          </DepartmentInfoPopover>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            {officer.department_history?.[0]?.subdepartment_id ? 'No Subdept' : '-'}
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell>{getStatusBadge(officer.status_history)}</TableCell>
                       <TableCell>{officer.created_at ? format(new Date(officer.created_at), 'MMM d, yyyy') : '-'}</TableCell>
                       <TableCell>{renderActions(officer)}</TableCell>

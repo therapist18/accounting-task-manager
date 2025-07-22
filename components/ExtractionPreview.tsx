@@ -41,6 +41,8 @@ interface Field {
       name: string
       type: string
       parentField?: string
+      isArray?: boolean
+      arrayConfig?: any
     }>
     maxItems?: number
   }
@@ -440,22 +442,93 @@ function ExtractionPreview({
     return str.replace(/_/g, ' ').replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
   }, []);
 
-  const renderField = useCallback((field: Field) => {
-    const isArrayField = field.type === 'array' || field.isArray;
-    const displayName = toTitleCase(field.name || '');
-    const currentValue = getFieldValue(field);
+  // Recursive function to render array items
+  const renderArrayItems = useCallback((field: Field, arrayData: any[] = [], parentFieldId?: string) => {
+    const fieldId = parentFieldId ? `${parentFieldId}.${field.id}` : field.id
+    const arrayFields = field.arrayConfig?.fields || []
 
-    console.log(`🎨 Rendering field:`, {
-      fieldName: field.name,
-      fieldId: field.id,
-      isArrayField,
-      currentValue,
-      fieldType: field.type
-    });
+    return arrayData.map((item, index) => (
+      <div key={index} className="border rounded-md p-4 mb-4 bg-muted/10">
+        <div className="flex justify-between items-center mb-2">
+          <h4 className="font-medium">{field.name} #{index + 1}</h4>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              // Remove this array item
+              const newArray = [...arrayData]
+              newArray.splice(index, 1)
+              onDataChange(fieldId, newArray)
+            }}
+            className="text-destructive hover:text-destructive/80"
+          >
+            <Minus className="h-4 w-4" />
+          </Button>
+        </div>
+        
+        <div className="space-y-4 pl-4 border-l-2 border-muted">
+          {arrayFields.map(subField => {
+            const subFieldId = `${fieldId}[${index}].${subField.id}`
+            const subFieldValue = item && typeof item === 'object' ? item[subField.id] : ''
+            
+            if (subField.isArray && Array.isArray(subFieldValue)) {
+              return renderArrayItems(subField, subFieldValue, `${fieldId}[${index}]`)
+            }
+            
+            return (
+              <div key={subField.id} className="grid grid-cols-4 gap-4 items-center">
+                <Label htmlFor={subFieldId} className="text-sm font-medium">
+                  {subField.name}
+                  {subField.required && <span className="text-destructive ml-1">*</span>}
+                </Label>
+                <Input
+                  id={subFieldId}
+                  type={subField.type === 'date' ? 'date' : 'text'}
+                  value={subFieldValue || ''}
+                  onChange={(e) => {
+                    const newArray = [...arrayData]
+                    if (!newArray[index]) newArray[index] = {}
+                    newArray[index][subField.id] = e.target.value
+                    onDataChange(fieldId, newArray)
+                  }}
+                  className="col-span-3"
+                  disabled={viewMode}
+                />
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    ))
+  }, [onDataChange, viewMode])
 
+  const renderField = useCallback((field: Field, parentField?: string, arrayIndex?: number) => {
+    const fieldId = parentField ? `${parentField}.${field.id}` : field.id
+    const value = extractedData[field.id] || ''
+    const isArrayField = field.isArray || field.type === 'array'
+    
     if (isArrayField && field.arrayConfig?.fields) {
-      const arrayValue = currentValue;
-      const arrayData = Array.isArray(arrayValue) && arrayValue.length > 0 ? arrayValue : [{}];
+      // Get the array value from extractedData using the field id
+      const arrayValue = extractedData[field.id] || [];
+      const arrayData = Array.isArray(arrayValue) ? arrayValue : [];
+      const displayName = field.name || field.id;
+
+      const addArrayItem = () => {
+        const newItem = {};
+        if (field.arrayConfig?.fields) {
+          field.arrayConfig.fields.forEach(subField => {
+            newItem[subField.id] = '';
+          });
+        }
+        onDataChange(fieldId, [...arrayData, newItem]);
+      };
+
+      const removeArrayItem = (index: number) => {
+        const newArray = [...arrayData];
+        newArray.splice(index, 1);
+        onDataChange(fieldId, newArray);
+      };
 
       return (
         <div key={field.id} className="space-y-4 rounded-lg border bg-background p-4">
