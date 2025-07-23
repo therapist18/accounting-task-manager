@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Officer, OfficerStatus } from '@/types/officer';
+import { Officer, OfficerStatus } from '@/app/(dashboard)/dashboard/users-management/officers/components/officers-fields';
 import { OfficerDialog } from '../../users-management/officers/components/officer-dialog';
 import { format, formatDistanceToNow } from 'date-fns';
 import { MoreHorizontal, Calendar, Building2, Layers } from 'lucide-react';

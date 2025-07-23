@@ -1,4 +1,5 @@
-// components/DocumentSelectionDialog.tsx
+// @ts-nocheck
+"use client"
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Dialog,
@@ -27,7 +28,7 @@ interface DocumentSelectionDialogProps {
   onDocumentLinked: () => void
 }
 
-interface DirectorDocument {
+interface DirectorDocument {    
   id: string
   director_id: number
   document_id: string

@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { User, UserStatus } from '@/types/user';
+import { User, UserStatus } from '@/app/(dashboard)/dashboard/users-management/users/components/user-fields';
 import { UserDialog } from './components/user-dialog';
 import { format } from 'date-fns';
 import { MoreHorizontal } from 'lucide-react';

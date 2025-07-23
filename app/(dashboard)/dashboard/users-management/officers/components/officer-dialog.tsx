@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Officer, OfficerFormValues, officerFormSchema } from '@/types/officer';
+import { Officer, OfficerFormValues, officerFormSchema } from '@/app/(dashboard)/dashboard/users-management/officers/components/officers-fields';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,

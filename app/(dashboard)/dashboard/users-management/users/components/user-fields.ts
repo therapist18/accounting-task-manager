@@ -31,12 +31,8 @@ export const userFormSchema = z.object({
   name: z.string().min(2, {
     message: 'Name must be at least 2 characters.',
   }),
-  email: z.string().email({
-    message: 'Please enter a valid email address.',
-  }),
-  password: z.string().min(8, {
-    message: 'Password must be at least 8 characters.',
-  }).optional(),
+  email: z.string().optional(),
+  password: z.string().optional(),
   role: z.enum(['user', 'officer', 'admin']).default('user'),
   phone_number: z.string().optional(),
   start_date: z.string().min(1, 'Start date is required'),

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { User, UserFormValues, userFormSchema } from '@/types/user';
+import { User, UserFormValues, userFormSchema } from '@/app/(dashboard)/dashboard/users-management/users/components/user-fields';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,

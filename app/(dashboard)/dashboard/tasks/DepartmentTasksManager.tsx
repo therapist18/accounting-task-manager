@@ -26,24 +26,9 @@ import { Label } from "@/components/ui/label"
 import EditableStageCell from "./components/EditableStageCell"
 import ExtractionPreview from "@/components/ExtractionPreview"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { DocumentSelectionDialog } from "./components/DocumentSelectionDialog"
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
-import {
-  fetchTasks,
-  fetchStages,
-  fetchCompanies,
-  fetchAllDocuments,
-  fetchAllKycFields,
-  fetchKycDocument,
-  isDocumentOlderThanTask,
-  formatDateValue,
-  getDocumentForTaskStage,
-  type Task as UtilTask,
-  type Department,
-  type KycDocument,
-  type Document
-} from "./utils/taskManagerData"
+import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchKycDocument, isDocumentOlderThanTask, formatDateValue, getDocumentForTaskStage, type Task as UtilTask, type Department, type KycDocument, type Document } from "./utils/taskManagerData"
 
 // Document field cell component - Updated to hide data for old documents or those with indicators
 function DocumentFieldCell({ document, field, isOldDocument = false }) {
@@ -68,14 +53,13 @@ function DocumentFieldCell({ document, field, isOldDocument = false }) {
 }
 
 // Enhanced Document Stage Cell with KYC document names and indicator handling
-// Updated to use linked documents
 function DocumentStageCell({
   stage,
   task,
   onDocumentUpload,
   onShowDocuments,
   getKycFields,
-  taskDocuments, // Now receives task-specific documents
+  allDocuments,
   isStageApplicableToTask,
   isDocumentApplicableToTask,
   kycDocuments
@@ -108,8 +92,7 @@ function DocumentStageCell({
   const kycData = kycDocuments.get(applicableDoc.kycId)
   const documentDisplayName = kycData?.display_name || kycData?.name || applicableDoc.display_name || applicableDoc.name || 'Document'
 
-  // Use task-specific documents instead of all documents
-  const document = taskDocuments.find(doc =>
+  const document = allDocuments.find(doc =>
     doc.director_id === task.individual_id &&
     doc.document_id === applicableDoc.kycId
   )
@@ -205,42 +188,26 @@ export default function DepartmentTasksManager({
   const [isEnquiryDialogOpen, setIsEnquiryDialogOpen] = useState(false)
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null)
   const [isStageUploadDialogOpen, setIsStageUploadDialogOpen] = useState(false)
-  // New state for sorting and actions
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null)
   const [isPushingCase, setIsPushingCase] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
-  // Global search state
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
   const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(
     new Set(ENHANCED_TABLE_HEADERS.filter(h => h.default).map(h => h.id))
   )
-  // Stats visibility state
   const [visibleStats, setVisibleStats] = useState<Set<string>>(
     new Set(STATS_HEADERS.filter(h => h.default).map(h => h.id))
   )
-  // Stage visibility state
   const [visibleStageIds, setVisibleStageIds] = useState<Set<string>>(new Set())
-  // Dependant expansion state
   const [expandedDependants, setExpandedDependants] = useState<Set<string>>(new Set())
-  // KYC documents cache - Updated to include display_name
   const [kycDocuments, setKycDocuments] = useState<Map<string, KycDocument>>(new Map())
   const [allKycFields, setAllKycFields] = useState<Record<string, any[]>>({})
-  // State for document preview
   const [previewDocument, setPreviewDocument] = useState<any>(null);
-  // State for document selection dialog
-  const [documentSelectionOpen, setDocumentSelectionOpen] = useState(false)
-  const [selectedTaskForDocuments, setSelectedTaskForDocuments] = useState<any>(null)
-
-  // Enhanced state management for expansions
   const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set())
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
-
-  // NEW: State for tm_users data
   const [tmUsers, setTmUsers] = useState<Map<number, any>>(new Map())
-
-  // Data loading states
   const [dataLoading, setDataLoading] = useState({
     departments: true,
     companies: true,
@@ -338,76 +305,6 @@ export default function DepartmentTasksManager({
     }
   }, [fetchTmUsers])
 
-  // NEW: Function to fetch linked documents for a specific task
-  const fetchLinkedDocumentsForTask = useCallback(async (task: any) => {
-    if (!task?.individual_id || !task?.source_document_id) {
-      return []
-    }
-
-    try {
-      const sourceDocumentId = typeof task.source_document_id === 'string' 
-        ? JSON.parse(task.source_document_id)
-        : task.source_document_id
-
-      if (!sourceDocumentId || typeof sourceDocumentId !== 'object') {
-        return []
-      }
-
-      // Get all linked document IDs
-      const linkedDocIds = Object.values(sourceDocumentId).filter(Boolean)
-      
-      if (linkedDocIds.length === 0) {
-        return []
-      }
-
-      // Fetch the actual documents from acc_portal_directors_documents
-      const { data, error } = await supabase
-        .from('acc_portal_directors_documents')
-        .select('*')
-        .in('id', linkedDocIds)
-        .eq('director_id', task.individual_id)
-
-      if (error) throw error
-
-      // Transform to match the expected document structure
-      return (data || []).map(doc => ({
-        id: doc.id,
-        director_id: doc.director_id,
-        individual_id: doc.director_id, // Alias for compatibility
-        document_id: doc.document_id, // This is the KYC document ID
-        file_path: doc.file_path,
-        extracted_details: doc.extracted_details,
-        created_at: doc.created_at,
-        updated_at: doc.updated_at,
-        status: doc.status,
-        indicator: false // Linked documents shouldn't have indicators
-      }))
-    } catch (error) {
-      console.error('Error fetching linked documents for task:', error)
-      return []
-    }
-  }, [])
-
-  // NEW: Function to get documents for a task (prioritizes linked documents)
-  const getDocumentsForTask = useCallback(async (task: any) => {
-    // If task has linked documents, use those
-    if (task?.source_document_id) {
-      const linkedDocs = await fetchLinkedDocumentsForTask(task)
-      if (linkedDocs.length > 0) {
-        return linkedDocs
-      }
-    }
-
-    // Fallback to all documents for the individual
-    return allDocuments.filter(doc => doc.director_id === task.individual_id)
-  }, [allDocuments, fetchLinkedDocumentsForTask])
-
-  // Handle opening document selection dialog
-  const handleOpenDocumentSelection = (task: any) => {
-    setSelectedTaskForDocuments(task)
-    setDocumentSelectionOpen(true)
-  }
-
   // Load tasks data
   const loadTasksData = useCallback(async (departmentId?: string, subdepartmentId?: string) => {
     try {
@@ -435,18 +332,6 @@ export default function DepartmentTasksManager({
     }
   }, [departments])
 
-  
-  // Handle document linked callback
-  const handleDocumentLinked = useCallback(async () => {
-    // Refresh tasks data to get updated source_document_id
-    await loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
-    toast({
-      title: "Success",
-      description: "Documents linked successfully. The table will now show only linked documents.",
-      variant: "default"
-    })
-  }, [loadTasksData, activeDepartmentTab, activeSubdepartmentTab])
-  
   // Refresh all data
   const refreshAllData = useCallback(async () => {
     try {
@@ -672,7 +557,6 @@ export default function DepartmentTasksManager({
 
     return currentStage
   }, [isStageApplicableToTask, allDocuments])
-
   const getEnhancedImmigrationStatus = useCallback((task: UtilTask) => {
     const statusStageId = "072b9710-45df-4a05-ba65-01b4ef29d61d";
     const statusStage = stages.find(s => s.id === statusStageId);
@@ -1052,12 +936,10 @@ export default function DepartmentTasksManager({
   }, [departments])
 
   // Handle document view using KYC fields with proper KYC document name fetching
-  // Updated to use linked documents and prevent preview for old documents
+  // Updated to prevent preview for old documents
   const handleViewDocument = useCallback(async (task: any, stage: any) => {
     try {
-      // Get documents for this task (prioritizes linked documents)
-      const taskDocuments = await getDocumentsForTask(task)
-      const document = getDocumentForTaskStage(task, stage, taskDocuments);
+      const document = getDocumentForTaskStage(task, stage, allDocuments);
 
       if (!document) {
         toast({
@@ -1176,7 +1058,7 @@ export default function DepartmentTasksManager({
         variant: 'destructive',
       });
     }
-  }, [getDocumentsForTask, kycDocuments]);
+  }, [allDocuments, kycDocuments]);
 
   // Handle new enquiry creation
   const handleEnquiryCreated = useCallback(async (newEnquiry: any) => {
@@ -1379,16 +1261,13 @@ export default function DepartmentTasksManager({
       setIsPushingCase(false)
     }
   }, [refreshAllData])
-
   // Handler to download all documents for a user as a ZIP file
   const handleDownloadZip = useCallback(async (task: UtilTask) => {
     setIsDownloading(true)
     toast({ title: "Preparing Download", description: "Collecting documents..." })
 
     try {
-      // Use task-specific documents for download
-      const userDocuments = await getDocumentsForTask(task)
-      
+      const userDocuments = allDocuments.filter(doc => doc.director_id === task.individual_id)
       if (userDocuments.length === 0) {
         toast({ title: "No Documents", description: "No documents found for this applicant to download.", variant: "default" })
         setIsDownloading(false)
@@ -1428,7 +1307,7 @@ export default function DepartmentTasksManager({
     } finally {
       setIsDownloading(false)
     }
-  }, [getDocumentsForTask])
+  }, [allDocuments])
 
   // Helper function to parse date from various formats
   const parseDate = (dateStr: string): Date | null => {
@@ -1677,12 +1556,10 @@ export default function DepartmentTasksManager({
               stage,
               document: doc,
               isSubRow: true,
-              getValue: async (task: UtilTask) => {
+              getValue: (task: UtilTask) => {
                 if (!isStageApplicableToTask(stage, task)) return 'N/A';
 
-                // Use task-specific documents instead of all documents
-                const taskDocuments = await getDocumentsForTask(task);
-                const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] }, taskDocuments);
+                const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] }, allDocuments);
                 const isOldDoc = document && task.created_at &&
                   isDocumentOlderThanTask(document.created_at, task.created_at);
                 const hasIndicator = document?.indicator === true;
@@ -1712,12 +1589,9 @@ export default function DepartmentTasksManager({
                     field,
                     isSubRow: true,
                     isSubSubRow: true,
-                    getValue: async (task: UtilTask) => {
+                    getValue: (task: UtilTask) => {
                       if (!isStageApplicableToTask(stage, task)) return 'N/A'
-                      
-                      // Use task-specific documents instead of all documents
-                      const taskDocuments = await getDocumentsForTask(task);
-                      const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] }, taskDocuments)
+                      const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] }, allDocuments)
 
                       // Check if document is old
                       const isOldDoc = document && task.created_at &&
@@ -1745,11 +1619,11 @@ export default function DepartmentTasksManager({
     }
 
     return rows
-  }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleHeaders, visibleStats, kycDocuments, visibleStageIds, getUserDisplayName, getDocumentsForTask])
+  }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleHeaders, visibleStats, kycDocuments, allDocuments, visibleStageIds, getUserDisplayName])
 
   // Enhanced render cell content for transposed view
-  const renderCellContent = useCallback(async (row: any, task: any) => {
-    const value = row.getValue ? await row.getValue(task) : '';
+  const renderCellContent = useCallback((row: any, task: any) => {
+    const value = row.getValue ? row.getValue(task) : '';
 
     if (row.type === 'immigration_status') {
       return renderImmigrationStatusCell(task);
@@ -1813,7 +1687,7 @@ export default function DepartmentTasksManager({
             onDocumentUpload={handleStageDocumentUpload}
             onShowDocuments={handleViewDocument}
             getKycFields={getKycFields}
-            allDocuments={await getDocumentsForTask(task)} // Use task-specific documents
+            allDocuments={allDocuments}
           />
         )
       case 'document':
@@ -1868,7 +1742,7 @@ export default function DepartmentTasksManager({
       )
       default: return <span className="text-sm text-slate-800">{value}</span>
     }
-  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, renderImmigrationStatusCell, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getDocumentsForTask])
+  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, renderImmigrationStatusCell, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading])
 
   // State for enhanced table rendering
   const [tableRows, setTableRows] = useState([]);
@@ -2049,193 +1923,12 @@ export default function DepartmentTasksManager({
       )
     }
 
-    // TaskRow component to handle individual task rendering with document fetching
-    const TaskRow = React.memo(({ 
-      task, 
-      handleOpenDocumentSelection, 
-      renderImmigrationStatusCell, 
-      companies,
-      visibleStages,
-      isStageApplicableToTask,
-      expandedStages,
-      expandedDocuments,
-      handleStageDocumentUpload,
-      handleViewDocument,
-      getKycFields,
-      kycDocuments,
-      kycFieldsMap,
-      isDocumentApplicableToTask,
-      getDocumentForTaskStage,
-      isDocumentOlderThanTask,
-      DocumentFieldCell,
-      enhancedHandleStageStatusSave,
-      handleTaskEdit,
-      onTaskAction,
-      handlePushCase,
-      handleDownloadZip,
-      isPushingCase,
-      isDownloading,
-      getDocumentsForTask
-    }) => {
-      const [taskDocuments, setTaskDocuments] = React.useState([])
-      
-      React.useEffect(() => {
-        getDocumentsForTask(task).then(setTaskDocuments)
-      }, [task, task.source_document_id, getDocumentsForTask])
-
-      return (
-        <TableRow className="group bg-white hover:bg-blue-50/50">
-          <TableCell className="sticky left-0 z-10 group-hover:bg-blue-50/50 bg-white border border-gray-100 font-medium text-sm text-slate-800 p-2 align-middle">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex-1">
-                <div className="truncate" title={task.applicant_name}>{task.applicant_name || 'N/A'}</div>
-                <div className="text-xs text-slate-500">ID: {task.id}</div>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 p-0 text-blue-600 hover:bg-blue-100 flex-shrink-0"
-                onClick={() => handleOpenDocumentSelection(task)}
-                title="Link Documents"
-              >
-                <FileText className="h-3 w-3" />
-              </Button>
-            </div>
-          </TableCell>
-          <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle">
-            {renderImmigrationStatusCell(task)}
-          </TableCell>
-          <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle">
-            <div className="max-w-[160px] mx-auto truncate" title={companies.get(task.company_id)}>
-              {companies.get(task.company_id) || 'N/A'}
-            </div>
-          </TableCell>
-          <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle">
-            <Badge variant={task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">
-              {task.status || 'pending'}
-            </Badge>
-          </TableCell>
-
-          {visibleStages.map(stage => {
-            if (!isStageApplicableToTask(stage, task)) {
-              let stageCols = 1;
-              if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
-                stageCols = stage.documents.reduce((acc, doc) => {
-                  if (expandedDocuments.has(doc.id) && doc.kycId) {
-                    const kycFields = kycFieldsMap.get(doc.kycId) || [];
-                    return acc + (kycFields.length || 1);
-                  }
-                  return acc + 1;
-                }, 0);
-              }
-              return <TableCell key={`${stage.id}-na`} colSpan={Math.max(1, stageCols)} className="border border-gray-100 text-center text-slate-400 italic text-xs align-middle">N/A</TableCell>
-            }
-
-            if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
-              return (
-                <TableCell key={stage.id} className="border border-gray-100 p-1 align-middle">
-                  <EditableStageCell 
-                    stage={stage} 
-                    task={task} 
-                    value={task.stages?.[stage.id]} 
-                    allDocuments={taskDocuments} 
-                    onDocumentUpload={handleStageDocumentUpload} 
-                    onShowDocuments={handleViewDocument} 
-                    getKycFields={getKycFields} 
-                    onSave={enhancedHandleStageStatusSave} 
-                  />
-                </TableCell>
-              )
-            }
-
-            return stage.documents.map(doc => {
-              const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] }, taskDocuments)
-              const isOldDoc = document && task.created_at &&
-                isDocumentOlderThanTask(document.created_at, task.created_at)
-              const hasIndicator = document?.indicator === true;
-
-              // Don't render fields if doc isn't expanded, has no fields, has an indicator, or is old
-              if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0 || hasIndicator || isOldDoc) {
-                return (
-                  <TableCell key={`${doc.id}`} className="border border-gray-100 p-1 align-middle">
-                    <DocumentStageCell
-                      stage={{ ...stage, documents: [doc] }}
-                      task={task}
-                      onDocumentUpload={handleStageDocumentUpload}
-                      onShowDocuments={handleViewDocument}
-                      getKycFields={getKycFields}
-                      taskDocuments={taskDocuments}
-                      isStageApplicableToTask={isStageApplicableToTask}
-                      isDocumentApplicableToTask={isDocumentApplicableToTask}
-                      kycDocuments={kycDocuments}
-                    />
-                  </TableCell>
-                )
-              } else {
-                const kycFields = kycFieldsMap.get(doc.kycId) || [];
-                return kycFields.map(field => (
-                  <TableCell key={`${field.id || field.fieldName}`} className="border border-gray-100 p-1 align-middle">
-                    <DocumentFieldCell document={document} field={field} isOldDocument={isOldDoc} />
-                  </TableCell>
-                ))
-              }
-            }).flat()
-          })}
-
-          <TableCell className="text-center text-sm p-2 align-middle">
-            <div className="flex items-center justify-center gap-1">
-              <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100" title="Edit Task">
-                <Edit className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" onClick={() => onTaskAction?.({ type: 'delete', task })} className="h-8 w-8 text-red-600 hover:bg-red-100" title="Delete Task">
-                <Trash2 className="h-4 w-4" />
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:bg-slate-100" title="More Actions">
-                    <ChevronDown className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => handlePushCase(task, 27, 'Alien')} disabled={isPushingCase}>
-                    <Send className="mr-2 h-4 w-4" /> Push to Alien
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handlePushCase(task, 7, 'Re-Entry Pass')} disabled={isPushingCase}>
-                    <Send className="mr-2 h-4 w-4" /> Push to Re-Entry
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleDownloadZip(task)} disabled={isDownloading}>
-                    <DownloadCloud className="mr-2 h-4 w-4" /> Download Docs
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </TableCell>
-        </TableRow>
-      )
-    })
-
     return (
       <div className="border border-slate-200 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 200px)' }}>
         <Table className="min-w-full border-separate border-spacing-0">
           <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
             <TableRow className="h-12">
-              <SortableHeader rowSpan={2} sortKey="applicant_name" className="sticky left-0 bg-blue-600 border-r border-slate-300 w-[200px] z-30 text-white font-semibold p-2 cursor-pointer hover:bg-blue-700">
-                <div className="flex items-center gap-2">
-                  <span>Applicant</span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5 p-0 text-white hover:bg-blue-500"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      // This will be handled per row in the table body
-                    }}
-                    title="Link Documents"
-                  >
-                    <FileText className="h-3 w-3" />
-                  </Button>
-                </div>
-              </SortableHeader>
+              <SortableHeader rowSpan={2} sortKey="applicant_name" className="sticky left-0 bg-blue-600 border-r border-slate-300 w-[200px] z-30 text-white font-semibold p-2 cursor-pointer hover:bg-blue-700">Applicant</SortableHeader>
               <SortableHeader rowSpan={2} sortKey="current_immigration_status" className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[200px] cursor-pointer hover:bg-blue-700">Immigration Status</SortableHeader>
               <SortableHeader rowSpan={2} sortKey="company_name" className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[180px] cursor-pointer hover:bg-blue-700">Company</SortableHeader>
               <SortableHeader rowSpan={2} sortKey="status" className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[100px] cursor-pointer hover:bg-blue-700">Status</SortableHeader>
@@ -2329,44 +2022,105 @@ export default function DepartmentTasksManager({
               <TableRow><TableCell colSpan={20} className="h-32 text-center text-destructive">{error}</TableCell></TableRow>
             ) : (
               sortedTasks.map((task) => (
-                <TaskRow 
-                  key={task.id} 
-                  task={task}
-                  handleOpenDocumentSelection={handleOpenDocumentSelection}
-                  renderImmigrationStatusCell={renderImmigrationStatusCell}
-                  companies={companies}
-                  visibleStages={visibleStages}
-                  isStageApplicableToTask={isStageApplicableToTask}
-                  expandedStages={expandedStages}
-                  expandedDocuments={expandedDocuments}
-                  handleStageDocumentUpload={handleStageDocumentUpload}
-                  handleViewDocument={handleViewDocument}
-                  getKycFields={getKycFields}
-                  kycDocuments={kycDocuments}
-                  kycFieldsMap={kycFieldsMap}
-                  isDocumentApplicableToTask={isDocumentApplicableToTask}
-                  getDocumentForTaskStage={getDocumentForTaskStage}
-                  isDocumentOlderThanTask={isDocumentOlderThanTask}
-                  DocumentFieldCell={DocumentFieldCell}
-                  enhancedHandleStageStatusSave={enhancedHandleStageStatusSave}
-                  handleTaskEdit={handleTaskEdit}
-                  onTaskAction={onTaskAction}
-                  handlePushCase={handlePushCase}
-                  handleDownloadZip={handleDownloadZip}
-                  isPushingCase={isPushingCase}
-                  isDownloading={isDownloading}
-                  getDocumentsForTask={getDocumentsForTask}
-                />
+                <TableRow key={task.id} className="group bg-white hover:bg-blue-50/50">
+                  <TableCell className="sticky left-0 z-10 group-hover:bg-blue-50/50 bg-white border border-gray-100 font-medium text-sm text-slate-800 p-2 align-middle">
+                    <div className="truncate" title={task.applicant_name}>{task.applicant_name || 'N/A'}</div>
+                    <div className="text-xs text-slate-500">ID: {task.id}</div>
+                  </TableCell>
+                  <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle">
+  {renderImmigrationStatusCell(task)}
+</TableCell>
+                  <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle"><div className="max-w-[160px] mx-auto truncate" title={companies.get(task.company_id)}>{companies.get(task.company_id) || 'N/A'}</div></TableCell>
+                  <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle"><Badge variant={task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{task.status || 'pending'}</Badge></TableCell>
+
+                  {visibleStages.map(stage => {
+                    if (!isStageApplicableToTask(stage, task)) {
+                      let stageCols = 1;
+                      if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
+                        stageCols = stage.documents.reduce((acc, doc) => {
+                          if (expandedDocuments.has(doc.id) && doc.kycId) {
+                            const kycFields = kycFieldsMap.get(doc.kycId) || [];
+                            return acc + (kycFields.length || 1);
+                          }
+                          return acc + 1;
+                        }, 0);
+                      }
+                      return <TableCell key={`${stage.id}-na`} colSpan={Math.max(1, stageCols)} className="border border-gray-100 text-center text-slate-400 italic text-xs align-middle">N/A</TableCell>
+                    }
+
+                    if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
+                      return <TableCell key={stage.id} className="border border-gray-100 p-1 align-middle"><EditableStageCell stage={stage} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={handleViewDocument} getKycFields={getKycFields} onSave={enhancedHandleStageStatusSave} /></TableCell>
+                    }
+
+                    return stage.documents.map(doc => {
+                      const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] }, allDocuments)
+                      const isOldDoc = document && task.created_at &&
+                        isDocumentOlderThanTask(document.created_at, task.created_at)
+                      const hasIndicator = document?.indicator === true;
+
+                      // Don't render fields if doc isn't expanded, has no fields, has an indicator, or is old
+                      if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0 || hasIndicator || isOldDoc) {
+                        return (
+                          <TableCell key={`${doc.id}`} className="border border-gray-100 p-1 align-middle">
+                            <DocumentStageCell
+                              stage={{ ...stage, documents: [doc] }}
+                              task={task}
+                              onDocumentUpload={handleStageDocumentUpload}
+                              onShowDocuments={handleViewDocument}
+                              getKycFields={getKycFields}
+                              allDocuments={allDocuments}
+                              isStageApplicableToTask={isStageApplicableToTask}
+                              isDocumentApplicableToTask={isDocumentApplicableToTask}
+                              kycDocuments={kycDocuments}
+                            />
+                          </TableCell>
+                        )
+                      } else {
+                        const kycFields = kycFieldsMap.get(doc.kycId) || [];
+                        return kycFields.map(field => (
+                          <TableCell key={`${field.id || field.fieldName}`} className="border border-gray-100 p-1 align-middle">
+                            <DocumentFieldCell document={document} field={field} isOldDocument={isOldDoc} />
+                          </TableCell>
+                        ))
+                      }
+                    }).flat()
+                  })}
+
+                  <TableCell className="text-center text-sm p-2 align-middle">
+                    <div className="flex items-center justify-center gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100" title="Edit Task"><Edit className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="icon" onClick={() => onTaskAction?.({ type: 'delete', task })} className="h-8 w-8 text-red-600 hover:bg-red-100" title="Delete Task"><Trash2 className="h-4 w-4" /></Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:bg-slate-100" title="More Actions">
+                            <ChevronDown className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handlePushCase(task, 27, 'Alien')} disabled={isPushingCase}>
+                            <Send className="mr-2 h-4 w-4" /> Push to Alien
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handlePushCase(task, 7, 'Re-Entry Pass')} disabled={isPushingCase}>
+                            <Send className="mr-2 h-4 w-4" /> Push to Re-Entry
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleDownloadZip(task)} disabled={isDownloading}>
+                            <DownloadCloud className="mr-2 h-4 w-4" /> Download Docs
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </TableCell>
+                </TableRow>
               ))
             )}
           </TableBody>
         </Table>
       </div>
     )
-  }, [stages, dataLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, isDocumentApplicableToTask, visibleStageIds, sortConfig, enhancedHandleStageStatusSave, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, handleOpenDocumentSelection, getDocumentsForTask])
+  }, [stages, dataLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, isDocumentApplicableToTask, visibleStageIds, sortConfig, enhancedHandleStageStatusSave, handlePushCase, handleDownloadZip, isPushingCase, isDownloading])
 
   // Enhanced render function for transposed table with better dependants positioning
-  const renderEnhancedTransposedTable = useCallback(async (tasks: any[], tableType: string) => {
+  const renderEnhancedTransposedTable = useCallback((tasks: any[], tableType: string) => {
     if (!tasks.length) {
       return (
         <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
@@ -2397,122 +2151,109 @@ export default function DepartmentTasksManager({
             <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
               {/* Row 1: Task IDs */}
               <TableRow className="border-b-2 border-slate-400">
-                <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-20" rowSpan={6}>
-                  Order
-                </TableHead>
-                <TableHead className="sticky left-20 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-[300px]" rowSpan={6}>
-                  Fields
-                </TableHead>
-                {headerStructure.map((item, index) => (
-                  <TableHead key={`header-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm py-2 border-r border-slate-400 border-b ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
-                    {item.type === 'principal' ? (
-                      <div className="font-bold">{`Task ${item.task.id}`}</div>
-                    ) : (
-                      <div className="font-bold text-xs">{`Dep ${item.index + 1}`}</div>
-                    )}
-                  </TableHead>
-                ))}
-              </TableRow>
+  <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-20" rowSpan={6}>
+    Order
+  </TableHead>
+  <TableHead className="sticky left-20 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-[300px]" rowSpan={6}>
+    Fields
+  </TableHead>
+  {headerStructure.map((item, index) => (
+    <TableHead key={`header-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm py-2 border-r border-slate-400 border-b ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
+      {item.type === 'principal' ? (
+        <div className="font-bold">{`Task ${item.task.id}`}</div>
+      ) : (
+        <div className="font-bold text-xs">{`Dep ${item.index + 1}`}</div>
+      )}
+    </TableHead>
+  ))}
+</TableRow>
 
               {/* Row 2: Names */}
               <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
-                {headerStructure.map((item, index) => (
-                  <TableHead key={`name-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
-                    {item.type === 'principal' ? (
-                      <div className="flex items-center justify-center gap-1">
-                        <span className="font-bold">{item.task.applicant_name || 'N/A'}</span>
-                        <div className="flex items-center gap-1">
-                          {/* Document Link Button */}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-5 w-5 p-0 text-white hover:bg-blue-600"
-                            onClick={() => handleOpenDocumentSelection(item.task)}
-                            title="Link Documents"
-                          >
-                            <FileText className="h-3 w-3" />
-                          </Button>
-                          {/* Dependants Expansion Button */}
-                          {item.task.dependnats_members && Array.isArray(item.task.dependnats_members) && item.task.dependnats_members.length > 0 && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-5 w-5 p-0 text-white hover:bg-blue-600"
-                              onClick={() => toggleDependantsExpansion(item.task.id.toString())}
-                            >
-                              {expandedDependants.has(item.task.id.toString()) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="font-bold text-xs">{item.dependant.name || `Dependant ${item.index + 1}`}</span>
-                        <span className="text-xs opacity-80">{item.dependant.relationship || 'Dependant'}</span>
-                      </div>
-                    )}
-                  </TableHead>
-                ))}
-              </TableRow>
+  {headerStructure.map((item, index) => (
+    <TableHead key={`name-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
+      {item.type === 'principal' ? (
+        <div className="flex items-center justify-center gap-1">
+          <span className="font-bold">{item.task.applicant_name || 'N/A'}</span>
+          {item.task.dependnats_members && Array.isArray(item.task.dependnats_members) && item.task.dependnats_members.length > 0 && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 p-0 text-white hover:bg-blue-600"
+              onClick={() => toggleDependantsExpansion(item.task.id.toString())}
+            >
+              {expandedDependants.has(item.task.id.toString()) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-1">
+          <span className="font-bold text-xs">{item.dependant.name || `Dependant ${item.index + 1}`}</span>
+          <span className="text-xs opacity-80">{item.dependant.relationship || 'Dependant'}</span>
+        </div>
+      )}
+    </TableHead>
+  ))}
+</TableRow>
 
               {/* Row 3: Current Immigration Status */}
               <TableRow className="border-b-2 border-slate-400 bg-slate-50 text-slate-700">
-                {headerStructure.map((item, index) => {
-                  let statusComponent = <span className="text-xs text-gray-400">-</span>;
-                  if (item.type === 'principal') {
-                    statusComponent = renderImmigrationStatusCell(item.task);
-                  }
-                  
-                  return (
-                    <TableHead key={`status-${index}`} className={`font-medium min-w-[200px] text-center text-xs border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? '' : 'bg-orange-50'}`}>
-                      {statusComponent}
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
+  {headerStructure.map((item, index) => {
+    let statusComponent = <span className="text-xs text-gray-400">-</span>;
+    if (item.type === 'principal') {
+      statusComponent = renderImmigrationStatusCell(item.task);
+    }
+    
+    return (
+      <TableHead key={`status-${index}`} className={`font-medium min-w-[200px] text-center text-xs border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? '' : 'bg-orange-50'}`}>
+        {statusComponent}
+      </TableHead>
+    );
+  })}
+</TableRow>
 
-              {/* Row 4: Company Names */}
-              <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
-                {headerStructure.map((item, index) => (
-                  <TableHead key={`company-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
-                    {item.type === 'principal' ? (
-                      companies.get(item.task.company_id) || 'No Company'
-                    ) : ''}
-                  </TableHead>
-                ))}
-              </TableRow>
+{/* Row 4: Company Names */}
+<TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
+  {headerStructure.map((item, index) => (
+    <TableHead key={`company-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
+      {item.type === 'principal' ? (
+        companies.get(item.task.company_id) || 'No Company'
+      ) : ''}
+    </TableHead>
+  ))}
+</TableRow>
 
-              {/* Row 5: Job Level */}
-              <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
-                {headerStructure.map((item, index) => (
-                  <TableHead key={`job-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
-                    {item.type === 'principal' ? (
-                      getTaskHierarchy(item.task)?.subclass?.name || getTaskHierarchy(item.task)?.class?.name || getTaskHierarchy(item.task)?.subdepartment?.name || 'N/A'
-                    ) : ''}
-                  </TableHead>
-                ))}
-              </TableRow>
+{/* Row 5: Job Level */}
+<TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
+  {headerStructure.map((item, index) => (
+    <TableHead key={`job-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
+      {item.type === 'principal' ? (
+        getTaskHierarchy(item.task)?.subclass?.name || getTaskHierarchy(item.task)?.class?.name || getTaskHierarchy(item.task)?.subdepartment?.name || 'N/A'
+      ) : ''}
+    </TableHead>
+  ))}
+</TableRow>
 
-              {/* Row 6: Current Stage (New) */}
-              <TableRow className="border-b-2 border-slate-400 bg-slate-100 text-slate-700">
-                {headerStructure.map((item, index) => {
-                  let currentStageInfo = null;
-                  if (item.type === 'principal') {
-                    const currentStage = determineCurrentStage(item.task, stages);
-                    currentStageInfo = currentStage ? currentStage.name : 'No Stage';
-                  }
-                  
-                  return (
-                    <TableHead key={`current-stage-${index}`} className={`font-medium min-w-[200px] text-center text-xs border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? '' : 'bg-orange-50'}`}>
-                      {item.type === 'principal' ? (
-                        <Badge variant="outline" className="text-xs">
-                          {currentStageInfo}
-                        </Badge>
-                      ) : ''}
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
+{/* Row 6: Current Stage (New) */}
+<TableRow className="border-b-2 border-slate-400 bg-slate-100 text-slate-700">
+  {headerStructure.map((item, index) => {
+    let currentStageInfo = null;
+    if (item.type === 'principal') {
+      const currentStage = determineCurrentStage(item.task, stages);
+      currentStageInfo = currentStage ? currentStage.name : 'No Stage';
+    }
+    
+    return (
+      <TableHead key={`current-stage-${index}`} className={`font-medium min-w-[200px] text-center text-xs border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? '' : 'bg-orange-50'}`}>
+        {item.type === 'principal' ? (
+          <Badge variant="outline" className="text-xs">
+            {currentStageInfo}
+          </Badge>
+        ) : ''}
+      </TableHead>
+    );
+  })}
+</TableRow>
             </TableHeader>
 
             <TableBody className="divide-y divide-slate-200">
@@ -2532,7 +2273,7 @@ export default function DepartmentTasksManager({
                   </TableCell>
                 </TableRow>
               ) : (
-                await Promise.all(tableRows.map(async (row, index) => {
+                tableRows.map((row, index) => {
                   const rowBg = row.isSubSubRow ? 'bg-slate-100/50' : row.isSubRow ? 'bg-slate-50/60' : 'bg-white';
                   const hoverBg = 'hover:bg-blue-50/50';
 
@@ -2580,10 +2321,10 @@ export default function DepartmentTasksManager({
                           )}
                         </div>
                       </TableCell>
-                      {await Promise.all(headerStructure.map(async (item, colIndex) => (
+                      {headerStructure.map((item, colIndex) => (
                         <TableCell key={`${row.key}-${colIndex}`} className={`text-center text-sm py-1 px-2 align-middle border border-gray-100 w-[200px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}>
                           {item.type === 'principal' ? (
-                            await renderCellContent(row, item.task)
+                            renderCellContent(row, item.task)
                           ) : (
                             // Render dependant data
                             row.key === 'applicant_name' && item.dependant.name ? item.dependant.name :
@@ -2593,17 +2334,17 @@ export default function DepartmentTasksManager({
                                     <span className="text-xs text-gray-400">-</span>
                           )}
                         </TableCell>
-                      )))}
+                      ))}
                     </TableRow>
                   )
-                }))
+                })
               )}
             </TableBody>
           </Table>
         </div>
       </div>
     )
-  }, [loading, error, tableRows, renderCellContent, expandedSections, expandedStages, expandedDocuments, expandedDependants, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies, toggleDependantsExpansion, getTaskHierarchy, getImmigrationStatus, handleOpenDocumentSelection, renderImmigrationStatusCell, determineCurrentStage, stages])
+  }, [loading, error, tableRows, renderCellContent, expandedSections, expandedStages, expandedDocuments, expandedDependants, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies, toggleDependantsExpansion, getTaskHierarchy, getImmigrationStatus])
 
   const defaultSubdepartments = getDefaultSubdepartments()
 
@@ -2792,20 +2533,20 @@ export default function DepartmentTasksManager({
                                   <div className="space-y-2 border-t pt-2">
                                     <h5 className="text-sm font-medium text-slate-700">Case Details ({visibleHeaders.size})</h5>
                                     {ENHANCED_TABLE_HEADERS.map((header) => (
-                                      <div key={header.id} className="flex items-center space-x-2">
-                                        <Checkbox
-                                          id={header.id}
-                                          checked={visibleHeaders.has(header.id)}
-                                          onCheckedChange={() => toggleHeaderVisibility(header.id)}
-                                        />
-                                        <Label
-                                          htmlFor={header.id}
-                                          className="text-sm font-normal cursor-pointer"
-                                        >
-                                          {header.label}
-                                        </Label>
-                                      </div>
-                                    ))}
+  <div key={header.id} className="flex items-center space-x-2">
+    <Checkbox
+      id={header.id}
+      checked={visibleHeaders.has(header.id)}
+      onCheckedChange={() => toggleHeaderVisibility(header.id)}
+    />
+    <Label
+      htmlFor={header.id}
+      className="text-sm font-normal cursor-pointer"
+    >
+      {header.label}
+    </Label>
+  </div>
+))}
 
                                   </div>
 
@@ -2920,18 +2661,6 @@ export default function DepartmentTasksManager({
           // This will be called when a stage is completed in StageUploadDialog
           enhancedHandleStageStatusSave(stageId, taskId, stageData.date || new Date().toLocaleDateString('en-GB'), stageData)
         }}
-      />
-
-      {/* Document Selection Dialog */}
-      <DocumentSelectionDialog
-        open={documentSelectionOpen}
-        onOpenChange={setDocumentSelectionOpen}
-        task={selectedTaskForDocuments}
-        stages={stages}
-        kycDocuments={kycDocuments}
-        isStageApplicableToTask={isStageApplicableToTask}
-        isDocumentApplicableToTask={isDocumentApplicableToTask}
-        onDocumentLinked={handleDocumentLinked}
       />
 
       {/* Extraction Preview Dialog */}
