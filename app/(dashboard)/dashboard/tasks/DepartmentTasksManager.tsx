@@ -2123,6 +2123,18 @@ export default function DepartmentTasksManager({
                     {item.type === 'principal' ? (
                       <div className="flex items-center justify-center gap-1">
                         <span className="font-bold">{item.task.applicant_name || 'N/A'}</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5 p-0 text-white hover:bg-blue-600"
+                          onClick={() => {
+                            setLinkingTask(item.task);
+                            setIsLinkDialogOpen(true);
+                          }}
+                          title="Link Source Document"
+                        >
+                          <LinkIcon className="h-3 w-3" />
+                        </Button>
                         {item.task.dependnats_members && Array.isArray(item.task.dependnats_members) && item.task.dependnats_members.length > 0 && (
                           <Button
                             variant="ghost"
