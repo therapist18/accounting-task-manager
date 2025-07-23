@@ -18,13 +18,16 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCw,
-  Image as ImageIcon
+  Image as ImageIcon,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import Image from 'next/image'
 import { toast } from 'sonner'
 import dynamic from 'next/dynamic'
 import { Badge } from '@/components/ui/badge'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 
 // Dynamically import PDF viewer to avoid SSR issues
 const PDFViewer = dynamic(() => import('@/components/PDFViewer'), { ssr: false })
@@ -201,8 +204,6 @@ const DocumentViewer = React.memo(({ fileUrl, fileName, documentName }) => {
 
   const fileType = getFileType(fileName);
 
-  console.log('DocumentViewer rendering with:', { fileUrl, fileName, fileType });
-
   if (!fileUrl) {
     return (
       <div className="p-4 text-center text-muted-foreground">
@@ -265,7 +266,6 @@ const DocumentViewer = React.memo(({ fileUrl, fileName, documentName }) => {
   );
 });
 
-// FIXED: Wrap the main component in React.memo with custom comparison
 function ExtractionPreview({
   documentName,
   extractedData = {},
@@ -295,29 +295,25 @@ function ExtractionPreview({
   const [fields, setFields] = useState<Field[]>(initialFields);
   const [loadingFields, setLoadingFields] = useState(!!fieldsPromise);
   const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // FIXED: Use a single source of truth for form data
   const [localFormData, setLocalFormData] = useState<Record<string, any>>({});
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
 
-  console.log('ExtractionPreview rendering with:', {
-    documentName,
-    fileUrl,
-    fileName,
-    extractedData,
-    localFormData,
-    initialFields,
-    viewMode,
-    documentId,
-    documentIndex
-  });
-
-  // FIXED: Initialize form data only from extractedData prop
+  // Initialize form data from extractedData
   useEffect(() => {
     console.log('🔄 Initializing form data from extractedData:', extractedData);
     setLocalFormData(extractedData || {});
+    
+    // Auto-expand sections that have data
+    const newExpandedSections: Record<string, boolean> = {};
+    Object.keys(extractedData || {}).forEach(key => {
+      if (Array.isArray(extractedData[key]) && extractedData[key].length > 0) {
+        newExpandedSections[key] = true;
+      }
+    });
+    setExpandedSections(newExpandedSections);
   }, [JSON.stringify(extractedData)]);
 
-  // FIXED: Handle fields loading more efficiently
+  // Handle fields loading
   useEffect(() => {
     if (fieldsPromise) {
       setLoadingFields(true);
@@ -336,98 +332,131 @@ function ExtractionPreview({
     } else if (initialFields?.length > 0 && fields !== initialFields) {
       setFields(initialFields);
     }
-  }, [fieldsPromise]); // Only depend on fieldsPromise
+  }, [fieldsPromise]);
 
+  // Get field value - check both field name and ID
   const getFieldValue = useCallback((field: Field): any => {
-    // FIXED: Only use localFormData as the source of truth
-    const value = localFormData[field.name] ?? localFormData[field.id] ?? '';
+    // First try field name, then field ID
+    let value = localFormData[field.name] ?? localFormData[field.id];
+    
+    // For array fields, ensure we use field names consistently
+    if (Array.isArray(value)) {
+      value = value.map(item => {
+        if (!item || typeof item !== 'object') return item;
+        
+        const newItem = {};
+        // Process each field in the array config to ensure consistent naming
+        if (field.arrayConfig?.fields) {
+          field.arrayConfig.fields.forEach(subField => {
+            const fieldName = subField.name || subField.id;
+            
+            // Always use field name as the primary key
+            if (item[fieldName] !== undefined) {
+              newItem[fieldName] = item[fieldName];
+            } else if (item[subField.id] !== undefined) {
+              // If we only have the ID, use it but also set the name
+              newItem[fieldName] = item[subField.id];
+            }
+            
+            // Maintain backward compatibility with ID keys
+            if (fieldName !== subField.id) {
+              newItem[subField.id] = newItem[fieldName];
+            }
+            
+            // Initialize with empty string if no value exists
+            if (newItem[fieldName] === undefined) {
+              newItem[fieldName] = '';
+            }
+          });
+        }
+        return newItem;
+      });
+    }
     
     console.log('🔍 Getting value for field:', {
       fieldName: field.name,
       fieldId: field.id,
       value: value,
-      localFormData: localFormData
+      availableKeys: Object.keys(localFormData)
     });
 
-    return value;
+    return value ?? '';
   }, [localFormData]);
 
-  // FIXED: Simplified field change handler that immediately syncs with parent
+  // Handle field changes
   const handleFieldChange = useCallback((field: Field, value: any) => {
     if (viewMode) return;
 
-    console.log(`🔄 Field changed in ExtractionPreview:`, {
+    console.log(`🔄 Field changed:`, {
       fieldName: field.name,
       fieldId: field.id,
-      newValue: value,
-      timestamp: new Date().toISOString()
+      newValue: value
     });
 
-    // FIXED: Update local form data immediately
     setLocalFormData(prev => {
       const updatedData = {
         ...prev,
         [field.name]: value,
-        [field.id]: value // Store under both keys for compatibility
+        [field.id]: value
       };
-
-      console.log(`📊 Local form data updated:`, {
-        fieldName: field.name,
-        fieldId: field.id,
-        previousValue: prev[field.name],
-        newValue: value,
-        allData: updatedData
-      });
-
       return updatedData;
     });
 
-    // FIXED: Immediately call parent's onDataChange
     if (onDataChange) {
-      console.log(`📤 Calling parent onDataChange IMMEDIATELY:`, {
-        fieldId: field.id,
-        fieldName: field.name,
-        keyUsed: field.name,
-        value: value
-      });
-
-      // Call onDataChange immediately, not in a setTimeout or async operation
       onDataChange(field.name, value);
-    } else {
-      console.warn('⚠️ onDataChange callback not provided');
     }
   }, [viewMode, onDataChange]);
 
-  const handleArrayItemChange = useCallback((field: Field, itemIndex: number, subFieldName: string, value: any) => {
+  // Handle array item changes
+  const handleArrayItemChange = useCallback((field: Field, itemIndex: number, subField: { id: string, name: string }, value: any) => {
     if (viewMode) return;
-
-    console.log(`📝 Array item changed:`, {
-      fieldName: field.name,
-      fieldId: field.id,
-      itemIndex,
-      subFieldName,
-      value
-    });
 
     const currentArray = Array.isArray(getFieldValue(field)) ? [...getFieldValue(field)] : [];
     while (currentArray.length <= itemIndex) currentArray.push({});
-    currentArray[itemIndex] = { ...currentArray[itemIndex], [subFieldName]: value };
-
-    console.log(`📊 Updated array:`, {
-      fieldName: field.name,
-      newArray: currentArray
-    });
-
+    
+    // Always use field name as the primary key, with fallback to ID
+    const fieldName = subField.name || subField.id;
+    
+    // Create updated item with both name and ID mappings
+    const updatedItem = { 
+      ...currentArray[itemIndex],
+      [fieldName]: value
+    };
+    
+    // Maintain backward compatibility with ID keys
+    if (fieldName !== subField.id) {
+      updatedItem[subField.id] = value;
+    }
+    
+    currentArray[itemIndex] = updatedItem;
     handleFieldChange(field, currentArray);
   }, [viewMode, getFieldValue, handleFieldChange]);
 
+  // Add array item
   const addArrayItem = useCallback((field: Field) => {
     if (viewMode) return;
     const currentArray = Array.isArray(getFieldValue(field)) ? [...getFieldValue(field)] : [];
-    currentArray.push({});
+    const newItem = {};
+    
+    // Initialize new item with empty values for all sub-fields using consistent naming
+    if (field.arrayConfig?.fields) {
+      field.arrayConfig.fields.forEach(subField => {
+        const fieldName = subField.name || subField.id;
+        // Always use field name as the primary key
+        newItem[fieldName] = '';
+        
+        // Maintain backward compatibility with ID keys
+        if (fieldName !== subField.id) {
+          newItem[subField.id] = '';
+        }
+      });
+    }
+    
+    currentArray.push(newItem);
     handleFieldChange(field, currentArray);
   }, [viewMode, getFieldValue, handleFieldChange]);
 
+  // Remove array item
   const removeArrayItem = useCallback((field: Field, itemIndex: number) => {
     if (viewMode) return;
     let currentArray = Array.isArray(getFieldValue(field)) ? [...getFieldValue(field)] : [];
@@ -437,215 +466,172 @@ function ExtractionPreview({
     }
   }, [viewMode, getFieldValue, handleFieldChange]);
 
+  // Toggle section expansion
+  const toggleSection = useCallback((sectionKey: string) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [sectionKey]: !prev[sectionKey]
+    }));
+  }, []);
+
+  // Convert field names to title case
   const toTitleCase = useCallback((str: string | undefined | null) => {
     if (!str) return '';
     return str.replace(/_/g, ' ').replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
   }, []);
 
-  // Recursive function to render array items
-  const renderArrayItems = useCallback((field: Field, arrayData: any[] = [], parentFieldId?: string) => {
-    const fieldId = parentFieldId ? `${parentFieldId}.${field.id}` : field.id
-    const arrayFields = field.arrayConfig?.fields || []
-
-    return arrayData.map((item, index) => (
-      <div key={index} className="border rounded-md p-4 mb-4 bg-muted/10">
-        <div className="flex justify-between items-center mb-2">
-          <h4 className="font-medium">{field.name} #{index + 1}</h4>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              // Remove this array item
-              const newArray = [...arrayData]
-              newArray.splice(index, 1)
-              onDataChange(fieldId, newArray)
-            }}
-            className="text-destructive hover:text-destructive/80"
-          >
-            <Minus className="h-4 w-4" />
-          </Button>
-        </div>
-        
-        <div className="space-y-4 pl-4 border-l-2 border-muted">
-          {arrayFields.map(subField => {
-            const subFieldId = `${fieldId}[${index}].${subField.id}`
-            const subFieldValue = item && typeof item === 'object' ? item[subField.id] : ''
-            
-            if (subField.isArray && Array.isArray(subFieldValue)) {
-              return renderArrayItems(subField, subFieldValue, `${fieldId}[${index}]`)
-            }
-            
-            return (
-              <div key={subField.id} className="grid grid-cols-4 gap-4 items-center">
-                <Label htmlFor={subFieldId} className="text-sm font-medium">
-                  {subField.name}
-                  {subField.required && <span className="text-destructive ml-1">*</span>}
-                </Label>
-                <Input
-                  id={subFieldId}
-                  type={subField.type === 'date' ? 'date' : 'text'}
-                  value={subFieldValue || ''}
-                  onChange={(e) => {
-                    const newArray = [...arrayData]
-                    if (!newArray[index]) newArray[index] = {}
-                    newArray[index][subField.id] = e.target.value
-                    onDataChange(fieldId, newArray)
-                  }}
-                  className="col-span-3"
-                  disabled={viewMode}
-                />
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    ))
-  }, [onDataChange, viewMode])
-
-  const renderField = useCallback((field: Field, parentField?: string, arrayIndex?: number) => {
-    const fieldId = parentField ? `${parentField}.${field.id}` : field.id
-    const value = extractedData[field.id] || ''
-    const isArrayField = field.isArray || field.type === 'array'
+  // Render individual field
+  const renderSimpleField = useCallback((field: Field, value: any, onChange: (value: any) => void) => {
+    const displayName = toTitleCase(field.name) || field.id;
     
-    if (isArrayField && field.arrayConfig?.fields) {
-      // Get the array value from extractedData using the field id
-      const arrayValue = extractedData[field.id] || [];
-      const arrayData = Array.isArray(arrayValue) ? arrayValue : [];
-      const displayName = field.name || field.id;
-
-      const addArrayItem = () => {
-        const newItem = {};
-        if (field.arrayConfig?.fields) {
-          field.arrayConfig.fields.forEach(subField => {
-            newItem[subField.id] = '';
-          });
-        }
-        onDataChange(fieldId, [...arrayData, newItem]);
-      };
-
-      const removeArrayItem = (index: number) => {
-        const newArray = [...arrayData];
-        newArray.splice(index, 1);
-        onDataChange(fieldId, newArray);
-      };
-
-      return (
-        <div key={field.id} className="space-y-4 rounded-lg border bg-background p-4">
-          <div className="flex items-center justify-between">
-            <h4 className="font-semibold text-base text-foreground">{displayName}</h4>
-            {!viewMode && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => addArrayItem(field)}
-                className="flex items-center gap-1.5"
-              >
-                <Plus className="h-4 w-4" /> Add
-              </Button>
-            )}
-          </div>
-          <div className="space-y-3">
-            {arrayData.map((item, itemIndex) => (
-              <Card key={`${field.id}-${itemIndex}`} className="bg-muted/50">
-                <CardHeader className="flex flex-row items-center justify-between py-3 px-4">
-                  <CardTitle className="text-sm font-medium">Item {itemIndex + 1}</CardTitle>
-                  {!viewMode && arrayData.length > 1 && (
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => removeArrayItem(field, itemIndex)}
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      <span className="sr-only">Remove Item</span>
-                    </Button>
-                  )}
-                </CardHeader>
-                <CardContent className="p-4 pt-0">
-                  <div className="space-y-4 pl-4 border-l-2 border-muted">
-                    {field.arrayConfig.fields.map((subField) => {
-                      const subFieldId = `${fieldId}[${itemIndex}].${subField.id}`;
-                      const subFieldValue = item && typeof item === 'object' ? item[subField.id] || '' : '';
-                      const subFieldDisplayName = subField.name || subField.id;
-                      
-                      if (subField.isArray && Array.isArray(subFieldValue)) {
-                        return renderArrayItems(subField, subFieldValue, `${fieldId}[${itemIndex}]`);
-                      }
-                      
-                      return (
-                        <div key={`${field.id}-${itemIndex}-${subField.id}`} className="grid grid-cols-4 gap-4 items-center">
-                          <Label htmlFor={subFieldId} className="text-sm font-medium">
-                            {subFieldDisplayName}
-                            {subField.required && <span className="text-destructive ml-1">*</span>}
-                          </Label>
-                          <Input
-                            id={subFieldId}
-                            type={subField.type === 'date' ? 'date' : 'text'}
-                            value={subFieldValue}
-                            onChange={(e) => {
-                              console.log(`📝 Array subfield changed:`, {
-                                parentField: field.name,
-                                itemIndex,
-                                subFieldId: subField.id,
-                                newValue: e.target.value
-                              });
-                              
-                              // Create a new array with the updated value
-                              const newArray = [...arrayData];
-                              if (!newArray[itemIndex]) newArray[itemIndex] = {};
-                              newArray[itemIndex] = {
-                                ...newArray[itemIndex],
-                                [subField.id]: e.target.value
-                              };
-                              
-                              onDataChange(fieldId, newArray);
-                            }}
-                            className="col-span-3"
-                            disabled={viewMode}
-                            placeholder={subFieldDisplayName}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
     return (
-      <div key={field.id} className="space-y-2">
-        <Label htmlFor={field.id}>
+      <div className="space-y-2">
+        <Label htmlFor={field.id} className="text-sm font-medium text-foreground">
           {displayName}
           {field.required && <span className="text-destructive ml-1">*</span>}
         </Label>
         <Input
           id={field.id}
-          data-field-name={field.name}
-          data-field-id={field.id}
-          value={currentValue || ''}
-          onChange={(e) => {
-            console.log(`📝 Simple field changed:`, {
-              fieldName: field.name,
-              fieldId: field.id,
-              previousValue: currentValue,
-              newValue: e.target.value
-            });
-            handleFieldChange(field, e.target.value);
-          }}
+          type={field.type === 'date' ? 'date' : 'text'}
+          value={value || ''}
+          onChange={(e) => onChange(e.target.value)}
           placeholder={`Enter ${displayName}`}
           disabled={viewMode}
+          className="w-full"
         />
       </div>
     );
-  }, [getFieldValue, handleFieldChange, handleArrayItemChange, addArrayItem, removeArrayItem, toTitleCase, viewMode]);
+  }, [toTitleCase, viewMode]);
 
+  // Render array field with nested items
+  const renderArrayField = useCallback((field: Field) => {
+    const arrayValue = getFieldValue(field);
+    const arrayData = Array.isArray(arrayValue) ? arrayValue : [];
+    const displayName = toTitleCase(field.name) || field.id;
+    const sectionKey = field.name || field.id;
+    const isExpanded = expandedSections[sectionKey];
+
+    return (
+      <div key={field.id} className="space-y-3">
+        <Collapsible open={isExpanded} onOpenChange={() => toggleSection(sectionKey)}>
+          <CollapsibleTrigger asChild>
+            <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors">
+              <div className="flex items-center gap-2">
+                {isExpanded ? (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                )}
+                <h4 className="font-semibold text-base text-foreground">{displayName}</h4>
+                <Badge variant="secondary" className="text-xs">
+                  {arrayData.length} {arrayData.length === 1 ? 'item' : 'items'}
+                </Badge>
+              </div>
+              {!viewMode && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    addArrayItem(field);
+                  }}
+                  className="flex items-center gap-1.5 ml-2"
+                >
+                  <Plus className="h-4 w-4" /> Add Item
+                </Button>
+              )}
+            </div>
+          </CollapsibleTrigger>
+          
+          <CollapsibleContent className="space-y-3 mt-3">
+            {arrayData.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground bg-muted/20 rounded-lg border-2 border-dashed">
+                <p className="font-medium">No items in {displayName}</p>
+                <p className="text-sm">Click "Add Item" to create the first entry</p>
+              </div>
+            ) : (
+              arrayData.map((item, itemIndex) => (
+                <Card key={`${field.id}-${itemIndex}`} className="bg-background border-l-4 border-l-primary/20">
+                  <CardHeader className="flex flex-row items-center justify-between py-3 px-4 bg-muted/10">
+                    <CardTitle className="text-sm font-medium text-foreground">
+                      {displayName} #{itemIndex + 1}
+                    </CardTitle>
+                    {!viewMode && arrayData.length > 1 && (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => removeArrayItem(field, itemIndex)}
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        <span className="sr-only">Remove Item</span>
+                      </Button>
+                    )}
+                  </CardHeader>
+                  <CardContent className="p-4 space-y-4">
+                    {field.arrayConfig?.fields?.map((subField) => {
+                      // Use field name as the primary key, with fallback to ID
+                      const fieldName = subField.name || subField.id;
+                      // Get value using field name first, then fall back to ID
+                      const subFieldValue = (item && typeof item === 'object') 
+                        ? (item[fieldName] !== undefined ? item[fieldName] : (item[subField.id] || ''))
+                        : '';
+                      
+                      const subFieldDisplayName = toTitleCase(subField.name) || subField.id;
+                      const inputId = `${field.id}-${itemIndex}-${fieldName.replace(/\s+/g, '-').toLowerCase()}`;
+                      
+                      return (
+                        <div key={`${field.id}-${itemIndex}-${fieldName}`} className="grid grid-cols-1 gap-2">
+                          <Label 
+                            htmlFor={inputId} 
+                            className="text-sm font-medium text-foreground"
+                          >
+                            {subFieldDisplayName}
+                            {subField.required && <span className="text-destructive ml-1">*</span>}
+                          </Label>
+                          <Input
+                            id={inputId}
+                            type={subField.type === 'date' ? 'date' : 'text'}
+                            value={subFieldValue || ''}
+                            onChange={(e) => {
+                              handleArrayItemChange(field, itemIndex, subField, e.target.value);
+                            }}
+                            disabled={viewMode}
+                            placeholder={`Enter ${subFieldDisplayName}`}
+                            className="w-full"
+                          />
+                        </div>
+                      );
+                    })}
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </CollapsibleContent>
+        </Collapsible>
+      </div>
+    );
+  }, [getFieldValue, addArrayItem, removeArrayItem, handleArrayItemChange, toTitleCase, viewMode, expandedSections, toggleSection]);
+
+  // Main render function for fields
+  const renderField = useCallback((field: Field) => {
+    const isArrayField = field.isArray || field.type === 'array';
+    
+    if (isArrayField && field.arrayConfig?.fields) {
+      return renderArrayField(field);
+    }
+
+    const value = getFieldValue(field);
+    return (
+      <div key={field.id}>
+        {renderSimpleField(field, value, (newValue) => handleFieldChange(field, newValue))}
+      </div>
+    );
+  }, [renderArrayField, renderSimpleField, getFieldValue, handleFieldChange]);
+
+  // Handle save
   const handleSave = useCallback(() => {
     console.log(`💾 Save initiated:`, {
       documentName,
@@ -655,17 +641,13 @@ function ExtractionPreview({
     });
 
     if (onSave) {
-      console.log(`📤 Calling onSave with data:`, localFormData);
       onSave(localFormData);
     } else if (onVerify) {
-      console.log(`✅ Calling onVerify`);
       onVerify();
-    } else {
-      console.warn('⚠️ No save or verify callback available');
     }
   }, [onSave, onVerify, localFormData, documentName]);
 
-  // FIXED: Memoize the rendered fields to prevent re-renders
+  // Memoize rendered fields
   const renderedFields = useMemo(() => {
     if (!fields?.length) {
       return (
@@ -688,8 +670,6 @@ function ExtractionPreview({
       </div>
     );
   }
-
-  const styles = getStylesByType?.(type || 'principal') || {};
 
   const content = (
     <div 
@@ -760,30 +740,15 @@ function ExtractionPreview({
 
   return (
     <div className="space-y-6 max-w-9xl">
-        <div className="flex flex-col h-full bg-muted/40">
-          <div className="flex-1 overflow-y-auto p-6">
-            {content}
-          </div>
+      <div className="flex flex-col h-full bg-muted/40">
+        <div className="flex-1 overflow-y-auto p-6">
+          {content}
         </div>
+      </div>
     </div>
   );
 }
 
 ExtractionPreview.displayName = 'ExtractionPreview';
 
-export default React.memo(ExtractionPreview, (prevProps, nextProps) => {
-  // FIXED: Custom comparison function to prevent unnecessary re-renders
-  // Only re-render if these specific props change
-  return (
-    prevProps.documentName === nextProps.documentName &&
-    prevProps.fileUrl === nextProps.fileUrl &&
-    prevProps.fileName === nextProps.fileName &&
-    prevProps.expanded === nextProps.expanded &&
-    prevProps.showSaveButton === nextProps.showSaveButton &&
-    prevProps.type === nextProps.type &&
-    prevProps.viewMode === nextProps.viewMode &&
-    JSON.stringify(prevProps.extractedData) === JSON.stringify(nextProps.extractedData) &&
-    prevProps.fieldsPromise === nextProps.fieldsPromise &&
-    prevProps.onDataChange === nextProps.onDataChange
-  );
-});
+export default React.memo(ExtractionPreview);

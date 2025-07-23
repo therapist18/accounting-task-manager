@@ -122,7 +122,13 @@ const filterByDefaultDisplay = <T extends { default_display?: boolean }>(items: 
   return items.filter((item) => item.default_display !== false)
 }
 
+// Debug logging utility
+const debugLog = (message: string, data?: any) => {
+  console.log(`[Stages] ${message}`, data || '');
+};
+
 export default function Stages() {
+  debugLog('Component mounted');
   const [departments, setDepartments] = useState<Department[]>([])
   const [activeTab, setActiveTab] = useState<string>("")
   const [loading, setLoading] = useState(true)
@@ -133,6 +139,11 @@ export default function Stages() {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false)
   const [isTransposed, setIsTransposed] = useState(false) // New state for view toggle
+  
+  // Debug effect to log when isTransposed changes
+  useEffect(() => {
+    debugLog('isTransposed changed', { isTransposed });
+  }, [isTransposed]);
   const { toast } = useToast()
 
   // State for KYC documents
@@ -818,6 +829,7 @@ export default function Stages() {
   }, [expandedRows, departments, activeTab, showDefaultDisplayOnly, entityVisibility, isTransposed])
 
   useEffect(() => {
+    debugLog('Fetching data...');
     const fetchData = async () => {
       try {
         setLoading(true)
@@ -863,8 +875,9 @@ export default function Stages() {
           setActiveTab(sortedDepartments[0].id)
         }
       } catch (err) {
-        console.error("Error fetching data:", err)
-        setError("Failed to load data. Please try again.")
+        console.error("Error fetching data:", err);
+        debugLog('Error fetching data', err);
+        setError("Failed to load data. Please try again.");
       } finally {
         setLoading(false)
       }
@@ -885,6 +898,19 @@ export default function Stages() {
   const handleAllocationChangeInternal = async (subdeptId: number, stageId: string, shouldAllocate: boolean) => {
     return handleAllocationChange(subdeptId, stageId, shouldAllocate)
   }
+
+  // Debug logging for allocation changes
+  const logAllocationChange = (subdeptId: number, stageId: string, shouldAllocate: boolean, classIndex?: number | null, subclassIndex?: number | null) => {
+    debugLog('Allocation change', {
+      subdeptId,
+      stageId,
+      shouldAllocate,
+      classIndex,
+      subclassIndex,
+      timestamp: new Date().toISOString()
+    });
+  };
+
 
   const handleAllocationChange = async (
     subdeptId: number,

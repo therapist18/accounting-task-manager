@@ -161,7 +161,7 @@ export default function UsersPage() {
   );
 
   return (
-    <div className="container mx-auto py-10">
+    <div className="mx-auto py-10">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">User Management</h1>
         <Button onClick={() => {
@@ -183,12 +183,13 @@ export default function UsersPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="w-[50px]">Actions</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">#</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Name</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Email</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Role</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Status</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Created</TableHead>
+                  <TableHead className="w-[50px] bg-blue-600 border-r text-white">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -205,18 +206,19 @@ export default function UsersPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  activeUsers.map((user) => (
+                  activeUsers.map((user, index) => (
                     <TableRow key={user.id}>
-                      <TableCell className="font-medium">{user.name}</TableCell>
-                      <TableCell>{user.email}</TableCell>
-                      <TableCell>
+                      <TableCell className="font-medium border-r">{index + 1}</TableCell>
+                      <TableCell className="font-medium border-r">{user.name}</TableCell>
+                      <TableCell className="border-r">{user.email}</TableCell>
+                      <TableCell className="border-r">
                         <Badge variant={user.role === 'admin' ? 'default' : 'outline'}>
                           {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
                         </Badge>
                       </TableCell>
-                      <TableCell>{getStatusBadge(user.status_history)}</TableCell>
-                      <TableCell>{user.created_at ? format(new Date(user.created_at), 'MMM d, yyyy') : '-'}</TableCell>
-                      <TableCell>{renderActions(user)}</TableCell>
+                      <TableCell className="border-r">{getStatusBadge(user.status_history)}</TableCell>
+                      <TableCell className="border-r">{user.created_at ? format(new Date(user.created_at), 'MMM d, yyyy') : '-'}</TableCell>
+                      <TableCell className="border-r">{renderActions(user)}</TableCell>
                     </TableRow>
                   ))
                 )}
@@ -230,12 +232,12 @@ export default function UsersPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="w-[50px]">Actions</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Name</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Email</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Role</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Status</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Created</TableHead>
+                  <TableHead className="w-[50px] bg-blue-600 border-r text-white">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -254,16 +256,16 @@ export default function UsersPage() {
                 ) : (
                   inactiveUsers.map((user) => (
                     <TableRow key={user.id}>
-                      <TableCell className="font-medium">{user.name}</TableCell>
-                      <TableCell>{user.email}</TableCell>
-                      <TableCell>
+                      <TableCell className="font-medium border-r">{user.name}</TableCell>
+                      <TableCell className="border-r">{user.email}</TableCell>
+                      <TableCell className="border-r">
                         <Badge variant={user.role === 'admin' ? 'default' : 'outline'}>
                           {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
                         </Badge>
                       </TableCell>
-                      <TableCell>{getStatusBadge(user.status_history)}</TableCell>
-                      <TableCell>{user.created_at ? format(new Date(user.created_at), 'MMM d, yyyy') : '-'}</TableCell>
-                      <TableCell>{renderActions(user)}</TableCell>
+                      <TableCell className="border-r">{getStatusBadge(user.status_history)}</TableCell>
+                      <TableCell className="border-r">{user.created_at ? format(new Date(user.created_at), 'MMM d, yyyy') : '-'}</TableCell>
+                      <TableCell className="border-r">{renderActions(user)}</TableCell>
                     </TableRow>
                   ))
                 )}

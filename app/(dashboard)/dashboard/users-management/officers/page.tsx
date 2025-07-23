@@ -413,7 +413,7 @@ export default function OfficersPage() {
   );
 
   return (
-    <div className="container mx-auto py-10">
+    <div className="mx-auto py-10">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Officer Management</h1>
         <Button onClick={() => {
@@ -435,13 +435,14 @@ export default function OfficersPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Department</TableHead>
-                  <TableHead>Subdepartment</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="w-[50px]">Actions</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">#</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Name</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Email</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Department</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Subdepartment</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Status</TableHead>
+                  <TableHead className="bg-blue-600 border-r text-white">Created</TableHead>
+                  <TableHead className="w-[50px] bg-blue-600 border-r text-white">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -458,11 +459,12 @@ export default function OfficersPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  activeOfficers.map((officer) => (
+                  activeOfficers.map((officer, index) => (
                     <TableRow key={officer.id}>
-                      <TableCell className="font-medium">{officer.name}</TableCell>
-                      <TableCell>{officer.email || '-'}</TableCell>
-                      <TableCell>
+                      <TableCell className="font-medium border-r">{index + 1}</TableCell>
+                      <TableCell className="font-medium border-r">{officer.name}</TableCell>
+                      <TableCell className="border-r">{officer.email || '-'}</TableCell>
+                      <TableCell className="border-r">
                         <DepartmentInfoPopover
                           department={officer.currentDepartment}
                           subdepartment={officer.currentSubdepartment}
@@ -477,7 +479,7 @@ export default function OfficersPage() {
                           </span>
                         </DepartmentInfoPopover>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="border-r">
                         {officer.currentSubdepartment ? (
                           <DepartmentInfoPopover
                             department={officer.currentDepartment}
@@ -490,14 +492,14 @@ export default function OfficersPage() {
                             </span>
                           </DepartmentInfoPopover>
                         ) : (
-                          <span className="text-muted-foreground">
+                          <span className="text-muted-foreground border-r">
                             {officer.department_history?.[0]?.subdepartment_id ? 'No Subdept' : '-'}
                           </span>
                         )}
                       </TableCell>
-                      <TableCell>{getStatusBadge(officer.status_history)}</TableCell>
-                      <TableCell>{officer.created_at ? format(new Date(officer.created_at), 'MMM d, yyyy') : '-'}</TableCell>
-                      <TableCell>{renderActions(officer)}</TableCell>
+                      <TableCell className="border-r">{getStatusBadge(officer.status_history)}</TableCell>
+                      <TableCell className="border-r">{officer.created_at ? format(new Date(officer.created_at), 'MMM d, yyyy') : '-'}</TableCell>
+                      <TableCell className="border-r">{renderActions(officer)}</TableCell>
                     </TableRow>
                   ))
                 )}

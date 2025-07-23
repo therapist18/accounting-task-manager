@@ -21,6 +21,11 @@ interface StagesTableViewProps {
   DocumentDisplay: React.FC<{ doc: any }>
 }
 
+// Debug logging utility
+const debugLog = (message: string, data?: any) => {
+  console.log(`[StagesTableView] ${message}`, data || '');
+};
+
 export function StagesTableView({
   currentDept,
   processedSubdepartments,
@@ -35,6 +40,13 @@ export function StagesTableView({
   handleKeyDown,
   DocumentDisplay
 }: StagesTableViewProps) {
+  // Log when component renders
+  debugLog('Rendering StagesTableView', {
+    currentDeptId: currentDept?.id,
+    subdepartmentsCount: processedSubdepartments?.length,
+    expandedRows: Array.from(expandedRows),
+    columnVisibility
+  });
   return (
     <div className="overflow-x-auto">
       <Table className="min-w-full">

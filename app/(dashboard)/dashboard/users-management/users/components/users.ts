@@ -28,6 +28,7 @@ export async function fetchUsers(): Promise<User[]> {
     const { data, error } = await supabase
       .from('tm_users')
       .select('*')
+      .in('role', ['user', 'admin'])
       .order('name');
 
     if (error) throw error;

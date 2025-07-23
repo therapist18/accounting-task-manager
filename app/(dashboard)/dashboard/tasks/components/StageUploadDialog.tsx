@@ -32,6 +32,7 @@ interface StageUploadDialogProps {
   getCurrentRequirements: () => any[]
   fuzzyMatch: (str1: string, str2: string, threshold?: number) => boolean
   onTaskAction?: (action: { type: string; taskId: string | number; [key: string]: any }) => void
+  onStageCompleted?: (stageId: string, taskId: string, stageData: any) => void
 }
 
 // Recursive helper to transform KYC fields, handling nested arrays
@@ -148,7 +149,8 @@ export function StageUploadDialog({
   selectedStageTask,
   getCurrentRequirements,
   fuzzyMatch,
-  onTaskAction
+  onTaskAction,
+  onStageCompleted
 }: StageUploadDialogProps) {
 
   
@@ -671,6 +673,74 @@ export function StageUploadDialog({
     }
   }, [selectedStageTask])
 
+  // NEW: Function to update stage completion in tm_tasks
+  const updateStageCompletion = useCallback(async (taskId: string, stageId: string, stageData: any) => {
+    try {
+      console.log('Updating stage completion:', { taskId, stageId, stageData })
+
+      // Get current task data
+      const { data: currentTask, error: fetchError } = await supabase
+        .from('tm_tasks')
+        .select('stages, current_stage_id')
+        .eq('id', taskId)
+        .single()
+
+      if (fetchError) throw fetchError
+
+      // Update the stages object
+      const updatedStages = {
+        ...currentTask.stages,
+        [stageId]: {
+          status: 'completed',
+          date: new Date().toLocaleDateString('en-GB'), // DD/MM/YYYY format
+          completedAt: new Date().toISOString(),
+          documentsUploaded: stageData.documentsCount || 1
+        }
+      }
+
+      // Get stage data to determine follow-up
+      const { data: stageInfo, error: stageError } = await supabase
+        .from('tm_stages')
+        .select('follow_up, order_num, name')
+        .eq('id', stageId)
+        .single()
+
+      if (stageError) throw stageError
+
+      // Update task with new stages data and current stage
+      const updateData = {
+        stages: updatedStages,
+        current_stage_id: stageId,
+        current_stage_started_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+
+      const { error: updateError } = await supabase
+        .from('tm_tasks')
+        .update(updateData)
+        .eq('id', taskId)
+
+      if (updateError) throw updateError
+
+      console.log('Stage completion updated successfully')
+
+      // Call the completion callback if provided
+      if (onStageCompleted) {
+        onStageCompleted(stageId, taskId, {
+          ...stageData,
+          date: updatedStages[stageId].date,
+          status: 'completed'
+        })
+      }
+
+      return updatedStages[stageId]
+
+    } catch (error) {
+      console.error('Error updating stage completion:', error)
+      throw error
+    }
+  }, [onStageCompleted])
+
   const submitDocumentsToDatabase = useCallback(async (documents: any[], registryIndividual: any, docId: string) => {
     try {
       console.log('=== Starting document submission ===')
@@ -760,12 +830,25 @@ export function StageUploadDialog({
         submittedDocIds.push(insertedDoc.id)
         console.log(`Successfully submitted document with ID: ${insertedDoc.id}`)
       }
+
+      // NEW: Update stage completion after successful document submission
+      try {
+        await updateStageCompletion(
+          selectedStageTask.task.id.toString(), 
+          selectedStageTask.stage.id, 
+          { documentsCount: documents.length }
+        )
+        console.log('Stage completion updated successfully')
+      } catch (stageError) {
+        console.error('Error updating stage completion:', stageError)
+        // Don't throw here - document submission was successful
+      }
   
       await fetchExistingDocuments()
   
       toast({
         title: 'Success',
-        description: `${documents.length} document(s) submitted successfully with extracted data`
+        description: `${documents.length} document(s) submitted successfully with extracted data. Stage marked as completed.`
       })
   
       return submittedDocIds
@@ -773,7 +856,7 @@ export function StageUploadDialog({
       console.error('=== Document submission failed ===', error)
       throw error
     }
-  }, [selectedStageTask, existingDocuments, fetchExistingDocuments, uploadFileToStorage])
+  }, [selectedStageTask, existingDocuments, fetchExistingDocuments, uploadFileToStorage, updateStageCompletion])
   
   const convertMessageToPDF = useCallback(async (message: string, documentName: string): Promise<Blob> => {
     try {
@@ -1743,7 +1826,7 @@ export function StageUploadDialog({
               Upload Documents for {stage?.name} Stage
             </DialogTitle>
             <DialogDescription>
-              Complete this stage by uploading required documents or submitting messages as specified.
+              Complete this stage by uploading required documents or submitting messages as specified. The stage will be marked as completed upon successful submission.
               {selectedStageTask?.stage?.documents && applicableDocuments.length !== selectedStageTask.stage.documents.length && (
                 <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded">
                   <p className="text-sm text-blue-700">
@@ -1839,7 +1922,7 @@ export function StageUploadDialog({
                  Saving...
                </>
              ) : (
-               'Save All Documents'
+               'Save All Documents & Complete Stage'
              )}
            </Button>
          </div>

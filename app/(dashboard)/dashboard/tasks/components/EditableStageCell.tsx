@@ -342,7 +342,7 @@ export default function EditableStageCell({
           const dateFields = [
             'application_date', 'date', 'upload_date', 'created_date', 
             'date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
-            'Expiry_Date', 'Date_of_Issue', 'Passport_Expiry_Date', 'Date_of_Birth'
+            'Expiry_Date', 'Date_of_Issue'
           ];
           
           if (mostRecentDoc.extracted_details) {
@@ -419,7 +419,7 @@ export default function EditableStageCell({
     const dateFields = [
       'application_date', 'date', 'upload_date', 'created_date', 
       'date_generated', 'invoice_date_and_time', 'With_Effect_From',
-      'Expiry_Date', 'Date_of_Issue', 'Passport_Expiry_Date', 'Date_of_Birth'
+      'Expiry_Date', 'Date_of_Issue'
     ];
 
     if (mostRecentDoc.extracted_details) {
@@ -576,7 +576,7 @@ export default function EditableStageCell({
         const dateFields = [
           'application_date', 'date', 'upload_date', 'created_date', 
           'date_generated', 'invoice_date_and_time', 'With_Effect_From',
-          'Expiry_Date', 'Date_of_Issue', 'Passport_Expiry_Date', 'Date_of_Birth'
+          'Expiry_Date', 'Date_of_Issue'
         ];
         
         // Find the field that contains the date

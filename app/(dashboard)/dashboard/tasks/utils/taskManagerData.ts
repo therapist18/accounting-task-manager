@@ -112,8 +112,7 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
       .from('tm_tasks')
       .select(`*, 
         department:department_id (id, name), 
-        subdepartment:subdepartment_id (id, name), 
-        current_stage:current_stage_id (id, name, order_num)
+        subdepartment:subdepartment_id (id, name)
       `)
       .order('created_at', { ascending: false })
 
