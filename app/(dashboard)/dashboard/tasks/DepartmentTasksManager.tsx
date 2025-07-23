@@ -1521,15 +1521,9 @@ export default function DepartmentTasksManager({
                       if (!isStageApplicableToTask(stage, task)) return 'N/A'
                       const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] }, allDocuments)
 
-                      // Check if document is old
-                      const isOldDoc = document && task.created_at &&
-                        isDocumentOlderThanTask(document.created_at, task.created_at)
-
-                      // Return N/A if no document, no details, has an indicator, OR is old
-                      if (!document || !document.extracted_details || document.indicator === true || isOldDoc) return 'N/A'
-
+                      if (!document || !document.extracted_details || document.indicator === true) return 'N/A'
                       const value = document.extracted_details[field.fieldName] || document.extracted_details[field.id] || 'N/A'
-                      return { value, isOldDocument: false } // Since we already filtered out old docs above
+                      return { value }
                     }
                   })
                 })
@@ -1624,12 +1618,11 @@ export default function DepartmentTasksManager({
           <div className="flex items-center gap-2 justify-center">
             <Badge
               variant={docValue.hasDocument ? 'default' : 'outline'}
-              className={`text-xs ${docValue.isOldDocument ? 'border-orange-500 text-orange-700' : ''}`}
+  className="text-xs"
             >
               {docValue.status}
             </Badge>
-            {/* Conditionally render Eye button only if document exists, has no indicator, and is not old */}
-            {docValue.hasDocument && !docValue.hasIndicator && !docValue.isOldDocument && (
+            {docValue.hasDocument && !docValue.hasIndicator && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -1638,9 +1631,6 @@ export default function DepartmentTasksManager({
               >
                 <Eye className="h-3 w-3" />
               </Button>
-            )}
-            {docValue.isOldDocument && (
-              <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation - preview disabled" />
             )}
           </div>
         )
