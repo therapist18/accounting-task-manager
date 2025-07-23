@@ -2,9 +2,14 @@
 "use client"
 import { Document } from "@/types/documents";
 
+interface Field {
+  id: string;
+  fieldName?: string;
+}
+
 interface DocumentFieldCellProps {
   document: Document | null;
-  field: any;
+  field: Field;
   isOldDocument?: boolean;
 }
 

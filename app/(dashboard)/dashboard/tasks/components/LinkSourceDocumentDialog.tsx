@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 
 interface Task {

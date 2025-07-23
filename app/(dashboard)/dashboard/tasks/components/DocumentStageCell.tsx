@@ -5,16 +5,40 @@ import { Upload, Eye, AlertTriangle } from "lucide-react";
 import { isDocumentOlderThanTask } from "@/lib/utils";
 import { Document } from "@/types/documents";
 
+interface Stage {
+  id: string;
+  name: string;
+  order_num?: number;
+  documents?: Array<{
+    kycId: string;
+    display_name?: string;
+    name?: string;
+  }>;
+}
+
+interface Task {
+  id: string;
+  applicant_name: string;
+  individual_id: string;
+  created_at: string;
+}
+
+interface KycDocument {
+  id: string;
+  name: string;
+  display_name?: string;
+}
+
 interface DocumentStageCellProps {
-  stage: any;
-  task: any;
-  onDocumentUpload: (task: any, stage: any) => void;
-  onShowDocuments: (task: any, stage: any) => void;
+  stage: Stage;
+  task: Task;
+  onDocumentUpload: (task: Task, stage: Stage) => void;
+  onShowDocuments: (task: Task, stage: Stage) => void;
   getKycFields: (documentId: string) => any[];
   allDocuments: Document[];
-  isStageApplicableToTask: (stage: any, task: any) => boolean;
-  isDocumentApplicableToTask: (document: any, task: any) => boolean;
-  kycDocuments: Map<string, any>;
+  isStageApplicableToTask: (stage: Stage, task: Task) => boolean;
+  isDocumentApplicableToTask: (document: Document, task: Task) => boolean;
+  kycDocuments: Map<string, KycDocument>;
   linkedDocument: Document | null;
 }
 
@@ -67,16 +91,17 @@ export function DocumentStageCell({
           size="icon"
           className="h-8 w-8 text-green-600 hover:bg-green-100"
           onClick={() => onShowDocuments(task, stage)}
-          title={`View Linked ${documentDisplayName}`}
         >
           <Eye className="h-4 w-4" />
         </Button>
       )}
+      {/* Show alert icon for old documents */}
       {isOldDocument && (
-        <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation - preview disabled" />
+        <AlertTriangle className="h-3 w-3 text-orange-500" />
       )}
+      {/* If document exists but has an indicator or is old, show a message instead of the preview button */}
       {hasDocument && (hasIndicator || isOldDocument) && (
-        <span className="text-xs text-gray-500 ml-1" title="Preview is not available for this document.">No Preview</span>
+        <span className="text-xs text-gray-500 ml-1">No Preview</span>
       )}
       {!hasDocument && (
         <span className="text-xs text-gray-400 italic">Not Linked</span>
