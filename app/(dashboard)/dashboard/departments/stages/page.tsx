@@ -414,7 +414,7 @@ export default function Stages() {
       },
       {
         id: "stageName",
-        label: isTransposed ? "Stage Name" : "Stage Names",
+        label: isTransposed ? "Stage Details" : "Stage Names",
         visible: columnVisibility.stageName,
         isDefault: true,
         group: "Stage Info",
@@ -435,7 +435,7 @@ export default function Stages() {
       },
       {
         id: "controls",
-        label: "Controls (Applicable/Default Display)",
+        label: "Controls (Applicable/Display)",
         visible: columnVisibility.controls,
         isDefault: true,
         group: "Controls",
@@ -590,9 +590,8 @@ export default function Stages() {
   const getCurrentDepartment = () => {
     return departments.find((d) => d.id === activeTab)
   }
-
-  // Process subdepartments based on display settings and entity visibility
-  const getProcessedSubdepartments = (dept: Department) => {
+  
+  const getProcessedSubdepartments = useCallback((dept: Department) => {
     let subdepartments = dept.subdepartments || []
 
     // Filter by default display if needed
@@ -609,15 +608,15 @@ export default function Stages() {
       ...subdept,
       classes: filterByDefaultDisplay(
         (subdept.classes || [])
-          .filter((cls) => {
-            const classId = `class-${subdept.id}-${cls.id}`
+          .filter((cls, clsIndex) => {
+            const classId = `class-${subdept.id}-${cls.id || clsIndex}`
             return entityVisibility[classId] !== false
           })
-          .map((cls) => ({
+          .map((cls, clsIndex) => ({
             ...cls,
             subClasses: filterByDefaultDisplay(
-              (cls.subClasses || []).filter((subCls) => {
-                const subclassId = `subclass-${subdept.id}-${cls.id}-${subCls.id}`
+              (cls.subClasses || []).filter((subCls, subClsIndex) => {
+                const subclassId = `subclass-${subdept.id}-${cls.id || clsIndex}-${subCls.id || subClsIndex}`
                 return entityVisibility[subclassId] !== false
               }),
               showDefaultDisplayOnly,
@@ -626,7 +625,7 @@ export default function Stages() {
         showDefaultDisplayOnly,
       ),
     }))
-  }
+  }, [showDefaultDisplayOnly, entityVisibility]);
 
   // Get all leaf entities (entities that should appear as columns in transposed view)
   const getLeafEntities = (dept: Department) => {
@@ -761,7 +760,7 @@ export default function Stages() {
 
       return totalExpandableRows > 0 && expandedCount === totalExpandableRows
     }
-  }, [expandedRows, departments, activeTab, showDefaultDisplayOnly, entityVisibility, isTransposed])
+  }, [expandedRows, departments, activeTab, getProcessedSubdepartments, isTransposed])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -1689,17 +1688,24 @@ export default function Stages() {
             stageAllocation = subdept?.stages?.find((s) => s.stage_id === stage.id)
           } else if (entity.type === "class" && entity.classIndex !== undefined) {
             const subdept = processedSubdepartments.find((sd) => sd.id === entity.subdeptId)
-            const cls = subdept?.classes?.[entity.classIndex]
-            stageAllocation = cls?.stages?.find((s) => s.stage_id === stage.id)
+            // Need to find the original class index as getProcessedSubdepartments filters the array
+            const originalSubdept = currentDept.subdepartments.find(sd => sd.id === entity.subdeptId);
+            const originalCls = originalSubdept?.classes?.[entity.classIndex];
+            const processedCls = subdept?.classes?.find(c => c.id === originalCls.id);
+
+            stageAllocation = processedCls?.stages?.find((s) => s.stage_id === stage.id)
           } else if (
             entity.type === "subclass" &&
             entity.classIndex !== undefined &&
             entity.subclassIndex !== undefined
           ) {
             const subdept = processedSubdepartments.find((sd) => sd.id === entity.subdeptId)
-            const cls = subdept?.classes?.[entity.classIndex]
-            const subCls = cls?.subClasses?.[entity.subclassIndex]
-            stageAllocation = subCls?.stages?.find((s) => s.stage_id === stage.id)
+            const originalSubdept = currentDept.subdepartments.find(sd => sd.id === entity.subdeptId);
+            const originalCls = originalSubdept?.classes?.[entity.classIndex];
+            const originalSubCls = originalCls?.subClasses?.[entity.subclassIndex];
+            const processedCls = subdept?.classes?.find(c => c.id === originalCls.id);
+            const processedSubCls = processedCls?.subClasses?.find(sc => sc.id === originalSubCls.id);
+            stageAllocation = processedSubCls?.stages?.find((s) => s.stage_id === stage.id)
           }
 
           const isApplicable = stageAllocation?.applicable ?? true
@@ -1826,46 +1832,150 @@ export default function Stages() {
 
   // Function to get stage allocation for an entity
   const getStageAllocation = (stage: Stage, entity: any) => {
-    let stageAllocation
-
+    if (!currentDept) return { applicable: true, display: true };
+  
+    const processedSubdepartments = getProcessedSubdepartments(currentDept);
+    let stageAllocation;
+  
+    const subdept = processedSubdepartments.find((sd) => sd.id === entity.subdeptId);
+    if (!subdept) return { applicable: true, display: true };
+  
     if (entity.type === "subdepartment") {
-      const subdept = getProcessedSubdepartments(currentDept!).find((sd) => sd.id === entity.subdeptId)
-      stageAllocation = subdept?.stages?.find((s) => s.stage_id === stage.id)
+      stageAllocation = subdept.stages?.find((s) => s.stage_id === stage.id);
     } else if (entity.type === "class" && entity.classIndex !== undefined) {
-      const subdept = getProcessedSubdepartments(currentDept!).find((sd) => sd.id === entity.subdeptId)
-      const cls = subdept?.classes?.[entity.classIndex]
-      stageAllocation = cls?.stages?.find((s) => s.stage_id === stage.id)
+      const originalSubdept = currentDept.subdepartments.find(sd => sd.id === entity.subdeptId);
+      const originalClass = originalSubdept?.classes?.[entity.classIndex];
+      const processedClass = subdept.classes.find(c => c.id === originalClass.id);
+      stageAllocation = processedClass?.stages?.find((s) => s.stage_id === stage.id);
     } else if (entity.type === "subclass" && entity.classIndex !== undefined && entity.subclassIndex !== undefined) {
-      const subdept = getProcessedSubdepartments(currentDept!).find((sd) => sd.id === entity.subdeptId)
-      const cls = subdept?.classes?.[entity.classIndex]
-      const subCls = cls?.subClasses?.[entity.subclassIndex]
-      stageAllocation = subCls?.stages?.find((s) => s.stage_id === stage.id)
+      const originalSubdept = currentDept.subdepartments.find(sd => sd.id === entity.subdeptId);
+      const originalClass = originalSubdept?.classes?.[entity.classIndex];
+      const originalSubClass = originalClass?.subClasses?.[entity.subclassIndex];
+      const processedClass = subdept.classes.find(c => c.id === originalClass.id);
+      const processedSubClass = processedClass?.subClasses?.find(sc => sc.id === originalSubClass.id);
+      stageAllocation = processedSubClass?.stages?.find((s) => s.stage_id === stage.id);
     }
-
+  
     return {
       applicable: stageAllocation?.applicable ?? true,
       display: stageAllocation?.display ?? true,
+    };
+  };
+
+  const buildHeaderTree = useCallback(
+    (dept: Department) => {
+      if (!dept) return []
+      const processedSubdepartments = getProcessedSubdepartments(dept)
+      const tree: any[] = []
+
+      processedSubdepartments.forEach((subdept) => {
+        const subdeptNode: any = {
+          id: `header-subdept-${subdept.id}`,
+          name: subdept.name,
+          type: "subdepartment",
+          colspan: 0,
+          children: [],
+        }
+
+        const hasClasses = subdept.classes && subdept.classes.length > 0
+        if (!hasClasses) {
+          subdeptNode.colspan = 1
+        } else {
+          subdept.classes?.forEach((cls, clsIndex) => {
+            const classNode: any = {
+              id: `header-class-${subdept.id}-${cls.id || clsIndex}`,
+              name: cls.name,
+              type: "class",
+              colspan: 0,
+              children: [],
+            }
+
+            const hasSubClasses = cls.subClasses && cls.subClasses.length > 0
+            if (!hasSubClasses) {
+              classNode.colspan = 1
+            } else {
+              cls.subClasses?.forEach((subCls, subClsIndex) => {
+                const subClassNode: any = {
+                  id: `header-subclass-${subdept.id}-${cls.id || clsIndex}-${subCls.id || subClsIndex}`,
+                  name: subCls.name,
+                  type: "subclass",
+                  colspan: 1, // Leaf node
+                  children: [],
+                }
+                classNode.children.push(subClassNode)
+              })
+              classNode.colspan = classNode.children.reduce((sum, child) => sum + child.colspan, 0)
+            }
+            subdeptNode.children.push(classNode)
+          })
+          subdeptNode.colspan = subdeptNode.children.reduce((sum, child) => sum + child.colspan, 0)
+        }
+        tree.push(subdeptNode)
+      })
+      return tree
+    },
+    [getProcessedSubdepartments],
+  )
+
+  const generateHeaderRows = (tree: any[]) => {
+    if (!tree || tree.length === 0) return { rows: [], maxDepth: 0 }
+
+    let maxDepth = 0
+    const findMaxDepth = (nodes: any[], depth: number) => {
+      maxDepth = Math.max(maxDepth, depth)
+      nodes.forEach((node) => {
+        if (node.children && node.children.length > 0) {
+          findMaxDepth(node.children, depth + 1)
+        }
+      })
     }
+    findMaxDepth(tree, 1)
+
+    const rows: any[][] = Array.from({ length: maxDepth }, () => [])
+
+    function traverse(node: any, depth: number) {
+      const rowspan = !node.children || node.children.length === 0 ? maxDepth - depth + 1 : 1
+      const colspan = node.colspan * (columnVisibility.controls ? 2 : 1) // Each leaf has 2 controls columns if visible
+
+      rows[depth - 1].push({
+        ...node,
+        rowspan,
+        colspan,
+      })
+
+      if (node.children && node.children.length > 0) {
+        node.children.forEach((child) => traverse(child, depth + 1))
+      }
+    }
+
+    tree.forEach((node) => traverse(node, 1))
+    return { rows, maxDepth }
   }
+
 
   // Render transposed table
   const renderTransposedTable = () => {
-    if (!currentDept) return null
+    if (!currentDept) return null;
 
-    const leafEntities = getLeafEntities(currentDept)
+    const leafEntities = getLeafEntities(currentDept);
+    const headerTree = buildHeaderTree(currentDept);
+    const { rows: headerRowsData, maxDepth } = generateHeaderRows(headerTree);
+    
+    // Total rows in the header, including the final controls row if visible
+    const totalHeaderRows = maxDepth + (columnVisibility.controls ? 1 : 0);
 
     return (
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
         <div className="relative overflow-auto max-h-[calc(100vh-300px)]">
           <Table className="min-w-max">
-            {/* Sticky Headers for Transposed View */}
+            {/* Sticky Headers for Transposed View with Hierarchy */}
             <TableHeader className="sticky top-0 z-30">
-              {/* Entity Names Row */}
+              {/* Static columns + First level of hierarchy */}
               <TableRow className="border-b-0">
                 {columnVisibility.index && (
                   <TableHead
-                    className="sticky left-0 bg-blue-700 border-r-2 border-blue-500 font-bold w-16 z-40 text-center text-white"
-                    rowSpan={2}
+                    className="sticky left-0 bg-blue-700 border-r-2 border-blue-500 font-bold w-16 z-40 text-center text-white align-middle"
+                    rowSpan={totalHeaderRows}
                   >
                     #
                   </TableHead>
@@ -1873,10 +1983,10 @@ export default function Stages() {
                 {columnVisibility.entity && (
                   <TableHead
                     className={cn(
-                      "sticky bg-blue-700 border-r-2 border-blue-500 font-bold w-64 z-40 text-white",
+                      "sticky bg-blue-700 border-r-2 border-blue-500 font-bold w-64 z-40 text-white align-middle",
                       columnVisibility.index ? "left-16" : "left-0",
                     )}
-                    rowSpan={2}
+                    rowSpan={totalHeaderRows}
                   >
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4" />
@@ -1887,45 +1997,71 @@ export default function Stages() {
                 {columnVisibility.stageName && (
                   <TableHead
                     className={cn(
-                      "sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white",
+                      "sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white align-middle",
                       columnVisibility.index && columnVisibility.entity
                         ? "left-80"
                         : columnVisibility.index || columnVisibility.entity
                           ? "left-64"
                           : "left-0",
                     )}
-                    rowSpan={2}
+                    rowSpan={totalHeaderRows}
                   >
                     Stage Details
                   </TableHead>
                 )}
-                {leafEntities.map((entity, index) => (
+                
+                {/* Render the first level of the hierarchy */}
+                {(headerRowsData[0] || []).map((node) => (
                   <TableHead
-                    key={entity.id}
-                    className="border-r border-blue-500 text-center font-bold text-white min-w-[120px] bg-blue-700"
-                    colSpan={2}
+                    key={node.id}
+                    colSpan={node.colspan}
+                    rowSpan={node.rowspan}
+                    className="border-r border-blue-500 text-center font-bold text-white min-w-[120px] bg-blue-700 p-2 align-middle"
                   >
-                    <div className="flex flex-col items-center p-2 space-y-1">
-                      <div className="font-medium text-sm truncate max-w-[100px]" title={entity.path}>
-                        {entity.name}
+                    <div className="flex flex-col items-center space-y-1">
+                      <div className="font-medium text-sm truncate max-w-[200px]" title={node.name}>
+                        {node.name}
                       </div>
-                      <div className="text-xs opacity-75 truncate max-w-[100px]" title={entity.path}>
-                        {entity.type}
-                      </div>
+                      <Badge variant="secondary" className="text-xs capitalize">{node.type}</Badge>
                     </div>
                   </TableHead>
                 ))}
               </TableRow>
-              {/* Applicable/Display Headers Row */}
+
+              {/* Subsequent hierarchical rows */}
+              {headerRowsData.slice(1).map((row, rowIndex) => (
+                <TableRow key={`header-row-${rowIndex + 1}`} className="border-b-0">
+                  {row.map((node) => (
+                    <TableHead
+                      key={node.id}
+                      colSpan={node.colspan}
+                      rowSpan={node.rowspan}
+                      className={cn(
+                        "border-r border-blue-400 text-center font-semibold text-white min-w-[120px] p-2 align-middle",
+                        rowIndex === 0 ? "bg-blue-600" : "bg-blue-500" // different color for depth
+                      )}
+                    >
+                       <div className="flex flex-col items-center space-y-1">
+                        <div className="font-medium text-sm truncate max-w-[200px]" title={node.name}>
+                          {node.name}
+                        </div>
+                        <Badge variant="secondary" className="text-xs capitalize">{node.type}</Badge>
+                      </div>
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
+
+              {/* Applicable/Display Controls Header Row */}
               {columnVisibility.controls && (
                 <TableRow className="border-b-0">
-                  {leafEntities.map((entity, index) => (
+                  {leafEntities.map((entity) => (
                     <React.Fragment key={`controls-${entity.id}`}>
-                      <TableHead className="border-r border-slate-300 bg-slate-500 text-center text-xs font-medium text-white w-16">
+                      <TableHead className="border-r border-slate-300 bg-slate-500 text-center text-xs font-medium text-white w-16 p-1">
                         Applicable
                       </TableHead>
-                      <TableHead className="border-r border-slate-300 bg-slate-500 text-center text-xs font-medium text-white w-16">
-                        Default Display
+                      <TableHead className="border-r border-slate-300 bg-slate-500 text-center text-xs font-medium text-white w-16 p-1">
+                        Display
                       </TableHead>
                     </React.Fragment>
                   ))}
@@ -2023,7 +2159,7 @@ export default function Stages() {
                             onClick={() => moveStage(stage.id, "up")}
                             disabled={stage.order_num === 1}
                           >
-                            <ChevronLeft className="h-3 w-3 text-slate-600" />
+                            <ChevronUp className="h-3 w-3 text-slate-600" />
                           </Button>
                           <Button
                             variant="ghost"
@@ -2032,13 +2168,16 @@ export default function Stages() {
                             onClick={() => moveStage(stage.id, "down")}
                             disabled={stage.order_num === currentDept.stages.length}
                           >
-                            <ChevronRight className="h-3 w-3 text-slate-600" />
+                            <ChevronDown className="h-3 w-3 text-slate-600" />
                           </Button>
                           <Button
                             variant="ghost"
                             size="icon"
                             className="h-5 w-5 hover:bg-slate-300/50"
-                            onClick={() => setEditingStage(stage)}
+                            onClick={() => {
+                                setEditingStage(stage);
+                                setIsEditDialogOpen(true);
+                            }}
                           >
                             <Pencil className="h-3 w-3 text-slate-600" />
                           </Button>
@@ -2071,7 +2210,7 @@ export default function Stages() {
 
                     return (
                       <React.Fragment key={`${stage.id}-${entity.id}`}>
-                        {columnVisibility.controls && (
+                        {columnVisibility.controls ? (
                           <>
                             <TableCell className={cn("border-x border-gray-200 p-1", columnClass)}>
                               <div className="flex justify-center">
@@ -2133,6 +2272,10 @@ export default function Stages() {
                               </div>
                             </TableCell>
                           </>
+                        ) : (
+                           <TableCell className={cn("border-x border-gray-200 p-1 text-center", columnClass)}>
+                             <div className={`w-2 h-2 rounded-full mx-auto ${allocation.applicable ? "bg-green-500" : "bg-red-500"}`} title={allocation.applicable ? "Applicable" : "Not Applicable"}></div>
+                           </TableCell>
                         )}
                       </React.Fragment>
                     )
@@ -2340,7 +2483,7 @@ export default function Stages() {
                             onClick={() => moveStage(stage.id, "up")}
                             disabled={stage.order_num === 1}
                           >
-                            <ChevronLeft className="h-3 w-3 text-white" />
+                            <ChevronUp className="h-3 w-3 text-white" />
                           </Button>
                           <Button
                             variant="ghost"
@@ -2349,13 +2492,16 @@ export default function Stages() {
                             onClick={() => moveStage(stage.id, "down")}
                             disabled={stage.order_num === currentDept.stages.length}
                           >
-                            <ChevronRight className="h-3 w-3 text-white" />
+                            <ChevronDown className="h-3 w-3 text-white" />
                           </Button>
                           <Button
                             variant="ghost"
                             size="icon"
                             className="h-6 w-6 hover:bg-white/20"
-                            onClick={() => setEditingStage(stage)}
+                            onClick={() => {
+                                setEditingStage(stage);
+                                setIsEditDialogOpen(true);
+                            }}
                           >
                             <Pencil className="h-3 w-3 text-white" />
                           </Button>
@@ -2603,7 +2749,7 @@ export default function Stages() {
                 if (isExpanded && hasClasses) {
                   subdept.classes?.forEach((cls, clsIndex) => {
                     const hasSubClasses = cls.subClasses && cls.subClasses.length > 0
-                    const classRowId = `class-${subdept.id}-${cls.id}`
+                    const classRowId = `class-${subdept.id}-${cls.id || clsIndex}`
                     const isClassExpanded = expandedRows.has(classRowId)
 
                     rows.push(
@@ -3017,7 +3163,7 @@ export default function Stages() {
         </Tabs>
 
         <EditStageDialog
-          open={!!editingStage}
+          open={isEditDialogOpen || !!editingStage}
           onOpenChange={(open) => {
             if (!open) {
               setEditingStage(null)
