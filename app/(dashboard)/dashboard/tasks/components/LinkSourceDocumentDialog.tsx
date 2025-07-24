@@ -72,24 +72,47 @@ export function LinkSourceDocumentDialog({
   onLinkSuccess,
   isStageApplicableToTask
 }: LinkSourceDocumentDialogProps) {
-  const [selectedDocs, setSelectedDocs] = useState<Record<string, string>>({});
+  interface SelectedDoc {
+    id: string;
+    document_id: string;
+  }
+  
+  const [selectedDocs, setSelectedDocs] = useState<Record<string, SelectedDoc>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
 
   useEffect(() => {
     if (task?.source_document_id && typeof task.source_document_id === 'object') {
-      setSelectedDocs(task.source_document_id as Record<string, string>);
+      // Convert existing data to new format if needed
+      const formattedSelections = Object.entries(task.source_document_id).reduce((acc, [stageId, docData]) => {
+        if (typeof docData === 'string') {
+          // Handle legacy format (just the ID)
+          const doc = allDocuments.find(d => d.id === docData);
+          if (doc) {
+            acc[stageId] = { id: doc.id, document_id: doc.document_id };
+          }
+        } else if (docData && typeof docData === 'object') {
+          // Handle new format with both IDs
+          acc[stageId] = docData as SelectedDoc;
+        }
+        return acc;
+      }, {} as Record<string, SelectedDoc>);
+      
+      setSelectedDocs(formattedSelections);
     } else {
       setSelectedDocs({});
     }
-  }, [task, open]);
+  }, [task, open, allDocuments]);
 
   const handleSave = async () => {
     setIsLoading(true);
     try {
       const { error } = await supabase
         .from('tm_tasks')
-        .update({ source_document_id: selectedDocs, updated_at: new Date().toISOString() })
+        .update({ 
+          source_document_id: selectedDocs, 
+          updated_at: new Date().toISOString() 
+        })
         .eq('id', task.id);
 
       if (error) throw error;
@@ -110,22 +133,63 @@ export function LinkSourceDocumentDialog({
       setIsLoading(false);
     }
   };
+  
+  const toggleDocSelection = (stageId: string, doc: Document) => {
+    setSelectedDocs(prev => {
+      const currentSelection = prev[stageId];
+      if (currentSelection?.id === doc.id) {
+        // If document is already selected, unselect it
+        const newSelections = { ...prev };
+        delete newSelections[stageId];
+        return newSelections;
+      } else {
+        // Select new document for this stage
+        return {
+          ...prev,
+          [stageId]: {
+            id: doc.id,
+            document_id: doc.document_id
+          }
+        };
+      }
+    });
+  };
 
   const handlePreview = (document: Document) => {
     const kycDoc = kycDocuments.get(document.document_id);
-    // Ensure the storage bucket is included in the path
-    const storagePath = document.file_path?.startsWith('kyc-documents/') 
-      ? document.file_path 
-      : `kyc-documents/${document.file_path}`;
-    const fileUrl = `/storage/${storagePath}`;
-    setPreviewDocument({
-      documentId: document.document_id,
-      documentName: document.file_path?.split('/').pop() || 'Document',
+    const docName = kycDoc?.display_name || kycDoc?.name || 'Document';
+    const fileName = document.file_path?.split('/').pop() || 'document';
+    
+    // Create the full file URL with the correct Supabase storage path
+    const bucketName = 'kyc-documents';
+    
+    // Clean up the file path - remove any leading slashes or the bucket name if present
+    let cleanPath = document.file_path || '';
+    cleanPath = cleanPath.replace(/^[\\/]+/, ''); // Remove leading slashes
+    cleanPath = cleanPath.replace(new RegExp(`^${bucketName}[\\/]?`), ''); // Remove bucket name if present
+    
+    // Construct the full Supabase storage public URL
+    const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${bucketName}/${cleanPath}?t=${Date.now()}`;
+    
+    // Format the data to match what ExtractionPreview expects
+    const previewData = {
+      documentId: document.id,
+      documentName: docName,
       fileUrl: fileUrl,
+      fileName: fileName,
       extractedData: document.extracted_details || {},
-      file: document,
-      type: 'document'
-    });
+      fields: [], // We'll need to get the fields from kycDoc if available
+      type: 'document',
+      file: {
+        name: fileName,
+        type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
+        url: fileUrl
+      }
+    };
+    
+    console.log('Preview data:', JSON.stringify(previewData, null, 2));
+    console.log('File URL:', fileUrl); // Log the file URL for debugging
+    setPreviewDocument(previewData);
     setIsPreviewDialogOpen(true);
   };
 
@@ -162,16 +226,7 @@ export function LinkSourceDocumentDialog({
                       if (d.director_id !== task.individual_id) {
                         return false;
                       }
-                      
-                      // Only restrict to source_document_id for stage 072b9710-45df-4a05-ba65-01b4ef29d61d
-                      if (stage.id === '072b9710-45df-4a05-ba65-01b4ef29d61d') {
-                        // Find the document_id in the source_document_id array
-                        const linkedDoc = task.source_document_id?.find(
-                          (item: any) => item.document_id === d.document_id
-                        );
-                        return linkedDoc !== undefined;
-                      }
-                      // For other stages, allow any document of the correct type
+                      // Allow any document of the correct type for this stage
                       return stageDocTypes.includes(d.document_id);
                     })
                     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -181,30 +236,49 @@ export function LinkSourceDocumentDialog({
                       <h3 className="font-semibold text-lg text-slate-800 mb-3">{stage.name}</h3>
                       {availableDocs.length > 0 ? (
                         <RadioGroup
-                          value={selectedDocs[stage.id]}
+                          value={selectedDocs[stage.id]?.id || ''}
                           onValueChange={(docId) => {
-                            setSelectedDocs(prev => ({ ...prev, [stage.id]: docId }));
+                            const selectedDoc = availableDocs.find(doc => doc.id === docId);
+                            if (selectedDoc) {
+                              setSelectedDocs(prev => ({
+                                ...prev,
+                                [stage.id]: { id: selectedDoc.id, document_id: selectedDoc.document_id }
+                              }));
+                            }
                           }}
                         >
                           <div className="space-y-2">
                             {availableDocs.map(doc => {
                               const kycDoc = kycDocuments.get(doc.document_id);
+                              const docName = kycDoc?.display_name || kycDoc?.name || 'Document';
+                              const fileName = doc.file_path?.split('/').pop() || 'document';
+                              
                               return (
-                                <Label
+                                <div 
                                   key={doc.id}
-                                  htmlFor={doc.id}
-                                  className={`flex items-center gap-4 p-3 border rounded-md cursor-pointer transition-colors hover:bg-slate-50 ${selectedDocs[stage.id] === doc.id ? 'bg-blue-50 border-blue-300' : ''}`}
-                                  title={`View ${kycDoc?.display_name || kycDoc?.name || 'Document'}`}
+                                  className={`flex items-center gap-4 p-3 border rounded-md transition-colors hover:bg-slate-50 ${selectedDocs[stage.id]?.id === doc.id ? 'bg-blue-50 border-blue-300' : ''}`}
                                 >
-                                  <div className="flex items-center gap-2">
-                                    <FileText className="h-5 w-5 text-slate-600" />
-                                    <p className="font-medium text-slate-900">{kycDoc?.display_name || kycDoc?.name || 'Document'}</p>
-                                    <p className="text-xs text-slate-500">{doc.file_path?.split('/').pop()}</p>
-                                  </div>
-                                  <FileText className="h-5 w-5 text-slate-600" />
-                                  <div className="flex-grow">
-                                    <p className="font-medium text-slate-900">{kycDoc?.display_name || kycDoc?.name || 'Document'}</p>
-                                    <p className="text-xs text-slate-500">{doc.file_path?.split('/').pop()}</p>
+                                  <div className="flex items-center gap-3 flex-1">
+                                    <input
+                                      type="checkbox"
+                                      id={`${stage.id}-${doc.id}`}
+                                      checked={selectedDocs[stage.id]?.id === doc.id}
+                                      onChange={() => toggleDocSelection(stage.id, doc)}
+                                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                    />
+                                    <FileText className="h-5 w-5 text-slate-600 flex-shrink-0" />
+                                    <div className="min-w-0">
+                                      <Label 
+                                        htmlFor={`${stage.id}-${doc.id}`}
+                                        className="font-medium text-slate-900 cursor-pointer block truncate"
+                                        title={`View ${docName}`}
+                                      >
+                                        {docName}
+                                      </Label>
+                                      <p className="text-xs text-slate-500 truncate" title={fileName}>
+                                        {fileName}
+                                      </p>
+                                    </div>
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <Button
@@ -212,9 +286,9 @@ export function LinkSourceDocumentDialog({
                                       size="icon"
                                       className="h-6 w-6 text-green-600 hover:bg-green-100"
                                       onClick={() => {
-                                      setPreviewDocument(doc);
-                                      setIsPreviewDialogOpen(true);
-                                    }}
+                                        setPreviewDocument(doc);
+                                        setIsPreviewDialogOpen(true);
+                                      }}
                                       title="Preview Document Extraction"
                                     >
                                       <EyeIcon className="h-4 w-4" />
@@ -224,7 +298,7 @@ export function LinkSourceDocumentDialog({
                                       <p>{format(parseISO(doc.created_at), 'dd MMM yyyy, HH:mm')}</p>
                                     </div>
                                   </div>
-                                </Label>
+                                </div>
                               )
                             })}
                             {availableDocs.length === 0 && (

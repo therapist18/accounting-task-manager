@@ -11,8 +11,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardDescription, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ChevronDown, ChevronUp, Plus, Trash2, Layers, UserIcon, ChevronsUpDown, FolderPlus, Edit, Building, Workflow, Loader2 } from "lucide-react"
-import { Department, Subdepartment, Class, SubClass, Requirement, SubdepartmentForm, ClassForm, SubClassForm, RequirementForm, User } from "../database"
+import { ChevronDown, ChevronUp, Plus, Trash2, Layers, UserIcon, ChevronsUpDown, FolderPlus, Edit, Building, Workflow, Loader2, Shield } from "lucide-react"
+import { Department, Subdepartment, Class, SubClass, Requirement, SubdepartmentForm, ClassForm, SubClassForm, RequirementForm, User, DepartmentForm } from "../database"
 import { updateNestedState } from "../page"
 
 // Helper function for hierarchical numbering
@@ -225,155 +225,162 @@ function ClassComponent({
     </Card>
   );
 }
-// Updated DepartmentDialog with clearer state management
 
+// Updated DepartmentDialog with officer management
 interface DepartmentDialogProps {
-    open: boolean
-    onOpenChange: (open: boolean) => void
-    onSave: () => void
-    departmentForm: SubdepartmentForm
-    setDepartmentForm: React.Dispatch<React.SetStateAction<SubdepartmentForm>>
-    users: User[]
-    editingDepartmentId?: string | null
-    editingSubdepartmentId?: string | null
-    isSaving: boolean
-  }
-  
-  export default function DepartmentDialog({
-    open,
-    onOpenChange,
-    onSave,
-    departmentForm,
-    setDepartmentForm,
-    users,
-    editingDepartmentId,
-    editingSubdepartmentId,
-    isSaving
-  }: DepartmentDialogProps) {
-    const updateFormState = (path: string[], value: any) => 
-      setDepartmentForm(prevState => updateNestedState(prevState, path, value));
-  
-    // Determine the current mode
-    const isCreatingNewDepartment = !editingDepartmentId && !editingSubdepartmentId;
-    const isEditingDepartment = editingDepartmentId && !editingSubdepartmentId && departmentForm.subdepartments.length === 0;
-    const isCreatingSubdepartment = editingDepartmentId && !editingSubdepartmentId && departmentForm.subdepartments.length > 0;
-    const isEditingSubdepartment = editingSubdepartmentId;
-  
-    // Get dialog title and description based on mode
-    const getDialogTitle = () => {
-      if (isCreatingNewDepartment) return 'Add New Department';
-      if (isEditingDepartment) return 'Edit Department';
-      if (isCreatingSubdepartment) return 'Add Subdepartment';
-      if (isEditingSubdepartment) return 'Edit Subdepartment';
-      return 'Department Management';
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onSave: () => void
+  departmentForm: DepartmentForm
+  setDepartmentForm: React.Dispatch<React.SetStateAction<DepartmentForm>>
+  users: User[]
+  officers: User[]
+  editingDepartmentId?: string | null
+  editingSubdepartmentId?: string | null
+  isSaving: boolean
+}
+
+export default function DepartmentDialog({
+  open,
+  onOpenChange,
+  onSave,
+  departmentForm,
+  setDepartmentForm,
+  users,
+  officers,
+  editingDepartmentId,
+  editingSubdepartmentId,
+  isSaving
+}: DepartmentDialogProps) {
+  const updateFormState = (path: string[], value: any) => 
+    setDepartmentForm(prevState => updateNestedState(prevState, path, value));
+
+  // Determine the current mode
+  const isCreatingNewDepartment = !editingDepartmentId && !editingSubdepartmentId;
+  const isEditingDepartment = editingDepartmentId && !editingSubdepartmentId && departmentForm.subdepartments.length === 0;
+  const isCreatingSubdepartment = editingDepartmentId && !editingSubdepartmentId && departmentForm.subdepartments.length > 0;
+  const isEditingSubdepartment = editingSubdepartmentId;
+
+  // Get dialog title and description based on mode
+  const getDialogTitle = () => {
+    if (isCreatingNewDepartment) return 'Add New Department';
+    if (isEditingDepartment) return 'Edit Department';
+    if (isCreatingSubdepartment) return 'Add Subdepartment';
+    if (isEditingSubdepartment) return 'Edit Subdepartment';
+    return 'Department Management';
+  };
+
+  const getDialogDescription = () => {
+    if (isCreatingNewDepartment) return 'Create a new department with its structure';
+    if (isEditingDepartment) return 'Edit department details';
+    if (isCreatingSubdepartment) return `Add a new subdepartment to ${departmentForm.name}`;
+    if (isEditingSubdepartment) return `Edit subdepartment details`;
+    return 'Manage department structure';
+  };
+
+  const handleAddClass = (subdeptIndex: number) => {
+    const newClass = {
+      id: Date.now(),
+      name: '',
+      description: '',
+      order: departmentForm.subdepartments[subdeptIndex].classes.length + 1,
+      isVisible: true,
+      default_display: true,
+      requirements: [],
+      subClasses: []
     };
-  
-    const getDialogDescription = () => {
-      if (isCreatingNewDepartment) return 'Create a new department with its structure';
-      if (isEditingDepartment) return 'Edit department details';
-      if (isCreatingSubdepartment) return `Add a new subdepartment to ${departmentForm.name}`;
-      if (isEditingSubdepartment) return `Edit subdepartment details`;
-      return 'Manage department structure';
-    };
-  
-    const handleAddClass = (subdeptIndex: number) => {
-      const newClass = {
-        id: Date.now(),
-        name: '',
-        description: '',
-        order: departmentForm.subdepartments[subdeptIndex].classes.length + 1,
-        isVisible: true,
-        default_display: true,
-        requirements: [],
-        subClasses: []
-      };
-      updateFormState(
-        ['subdepartments', subdeptIndex, 'classes'],
-        [...departmentForm.subdepartments[subdeptIndex].classes, newClass]
-      );
-    };
-  
-    const handleRemoveClass = (subdeptIndex: number, classIndex: number) => {
-      updateFormState(
-        ['subdepartments', subdeptIndex, 'classes'],
-        departmentForm.subdepartments[subdeptIndex].classes.filter((_, i) => i !== classIndex)
-      );
-    };
-  
-    const handleSubdepartmentChange = (subdeptIndex: number, field: string, value: any) =>
-      updateFormState(['subdepartments', subdeptIndex, field], value);
-  
-    const handleAddTaskAssistant = (subdeptIndex: number) =>
-      updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'],
-        [...departmentForm.subdepartments[subdeptIndex].taskAssistantIds, '']
-      );
-  
-    const handleRemoveTaskAssistant = (subdeptIndex: number, assistantIndex: number) =>
-      updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'],
-        departmentForm.subdepartments[subdeptIndex].taskAssistantIds.filter((_, i) => i !== assistantIndex)
-      );
-  
-    const handleTaskAssistantChange = (subdeptIndex: number, assistantIndex: number, userId: string) => {
-      const currentIds = [...departmentForm.subdepartments[subdeptIndex].taskAssistantIds];
-      currentIds[assistantIndex] = userId;
-      updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'], currentIds);
-    };
-  
-    const getUserName = (userId: string) => users.find(u => u.id === userId)?.name || 'Unassigned';
-  
-    return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-6xl h-[calc(100vh-10rem)]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {isCreatingNewDepartment && <FolderPlus className="h-5 w-5 text-blue-600" />}
-              {isEditingDepartment && <Edit className="h-5 w-5 text-blue-600" />}
-              {isCreatingSubdepartment && <Plus className="h-5 w-5 text-blue-600" />}
-              {isEditingSubdepartment && <Edit className="h-5 w-5 text-blue-600" />}
-              {getDialogTitle()}
-            </DialogTitle>
-            <DialogDescription>{getDialogDescription()}</DialogDescription>
-            
-            {/* Debug info - remove in production */}
-            <div className="text-xs text-gray-500 bg-gray-100 p-2 rounded">
-              Mode: {isCreatingNewDepartment ? 'New Dept' : isEditingDepartment ? 'Edit Dept' : 
-                     isCreatingSubdepartment ? 'New Subdept' : 'Edit Subdept'} | 
-              DeptID: {editingDepartmentId || 'none'} | 
-              SubdeptID: {editingSubdepartmentId || 'none'}
-            </div>
-          </DialogHeader>
-          
-          <div className="space-y-6 overflow-y-auto">
-            {/* Department Section - shown when creating new dept or editing existing dept */}
-            {(isCreatingNewDepartment || isEditingDepartment) && (
-              <div className="space-y-4 p-4 bg-blue-50 rounded-lg border">
-                <h3 className="text-lg font-semibold text-blue-800 flex items-center gap-2">
-                  <Building className="h-5 w-5" />
-                  Department Details
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="department-name">Department Name *</Label>
-                    <Input
-                      id="department-name"
-                      placeholder="Enter department name"
-                      value={departmentForm.name}
-                      onChange={(e) => updateFormState(['name'], e.target.value)}
-                      disabled={isEditingDepartment && editingDepartmentId !== null}
-                      className="font-medium"
-                    />
-                  </div>
-                  <div className="flex items-center space-x-2 pt-6">
-                    <Checkbox
-                      checked={departmentForm.default_display}
-                      onCheckedChange={(checked) => updateFormState(['default_display'], Boolean(checked))}
-                      id="dept-default-display"
-                    />
-                    <Label htmlFor="dept-default-display" className="text-sm text-gray-700">
-                      Default Display
-                    </Label>
-                  </div>
+    updateFormState(
+      ['subdepartments', subdeptIndex, 'classes'],
+      [...departmentForm.subdepartments[subdeptIndex].classes, newClass]
+    );
+  };
+
+  const handleRemoveClass = (subdeptIndex: number, classIndex: number) => {
+    updateFormState(
+      ['subdepartments', subdeptIndex, 'classes'],
+      departmentForm.subdepartments[subdeptIndex].classes.filter((_, i) => i !== classIndex)
+    );
+  };
+
+  const handleSubdepartmentChange = (subdeptIndex: number, field: string, value: any) =>
+    updateFormState(['subdepartments', subdeptIndex, field], value);
+
+  const handleAddTaskAssistant = (subdeptIndex: number) =>
+    updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'],
+      [...departmentForm.subdepartments[subdeptIndex].taskAssistantIds, '']
+    );
+
+  const handleRemoveTaskAssistant = (subdeptIndex: number, assistantIndex: number) =>
+    updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'],
+      departmentForm.subdepartments[subdeptIndex].taskAssistantIds.filter((_, i) => i !== assistantIndex)
+    );
+
+  const handleTaskAssistantChange = (subdeptIndex: number, assistantIndex: number, userId: string) => {
+    const currentIds = [...departmentForm.subdepartments[subdeptIndex].taskAssistantIds];
+    currentIds[assistantIndex] = userId;
+    updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'], currentIds);
+  };
+
+  const getUserName = (userId: string) => users.find(u => u.id === userId)?.name || 'Unassigned';
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-6xl h-[calc(100vh-10rem)]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            {isCreatingNewDepartment && <FolderPlus className="h-5 w-5 text-blue-600" />}
+            {isEditingDepartment && <Edit className="h-5 w-5 text-blue-600" />}
+            {isCreatingSubdepartment && <Plus className="h-5 w-5 text-blue-600" />}
+            {isEditingSubdepartment && <Edit className="h-5 w-5 text-blue-600" />}
+            {getDialogTitle()}
+          </DialogTitle>
+          <DialogDescription>{getDialogDescription()}</DialogDescription>
+        </DialogHeader>
+        
+        <div className="space-y-6 overflow-y-auto">
+          {/* Department Section - shown when creating new dept or editing existing dept */}
+          {(isCreatingNewDepartment || isEditingDepartment) && (
+            <div className="space-y-4 p-4 bg-blue-50 rounded-lg border">
+              <h3 className="text-lg font-semibold text-blue-800 flex items-center gap-2">
+                <Building className="h-5 w-5" />
+                Department Details
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="department-name">Department Name *</Label>
+                  <Input
+                    id="department-name"
+                    placeholder="Enter department name"
+                    value={departmentForm.name}
+                    onChange={(e) => updateFormState(['name'], e.target.value)}
+                    disabled={isEditingDepartment && editingDepartmentId !== null}
+                    className="font-medium"
+                  />
                 </div>
+                <div>
+                  <Label htmlFor="department-officer">Department Officer</Label>
+                  <Select
+                    value={departmentForm.officerId || ''}
+                    onValueChange={(value) => updateFormState(['officerId'], value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select department officer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">None</SelectItem>
+                      {officers.map((officer) => (
+                        <SelectItem key={officer.id} value={officer.id}>
+                          <div className="flex items-center gap-2">
+                            <Shield className="h-4 w-4 text-purple-600" />
+                            {officer.name}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="department-description">Department Description</Label>
                   <Textarea
@@ -384,217 +391,234 @@ interface DepartmentDialogProps {
                     className="min-h-[80px]"
                   />
                 </div>
+                <div className="flex items-center space-x-2 pt-6">
+                  <Checkbox
+                    checked={departmentForm.default_display}
+                    onCheckedChange={(checked) => updateFormState(['default_display'], Boolean(checked))}
+                    id="dept-default-display"
+                  />
+                  <Label htmlFor="dept-default-display" className="text-sm text-gray-700">
+                    Default Display
+                  </Label>
+                </div>
               </div>
-            )}
-  
-            {/* Subdepartments Section */}
-            {departmentForm.subdepartments.length > 0 && (
+            </div>
+          )}
+
+          {/* Subdepartments Section */}
+          {departmentForm.subdepartments.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <Workflow className="h-5 w-5 text-blue-600" />
+                  {isCreatingSubdepartment || isEditingSubdepartment ? 'Subdepartment Details' : 'Subdepartments'}
+                </h3>
+                {isCreatingNewDepartment && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => updateFormState(['subdepartments'], [...departmentForm.subdepartments, {
+                      name: '',
+                      description: '',
+                      classes: [],
+                      taskManagerId: '',
+                      taskAssistantIds: [],
+                      default_display: true
+                    }])}
+                  >
+                    <Plus className="h-4 w-4 mr-1" /> Add Subdepartment
+                  </Button>
+                )}
+              </div>
+
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold flex items-center gap-2">
-                    <Workflow className="h-5 w-5 text-blue-600" />
-                    {isCreatingSubdepartment || isEditingSubdepartment ? 'Subdepartment Details' : 'Subdepartments'}
-                  </h3>
-                  {isCreatingNewDepartment && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => updateFormState(['subdepartments'], [...departmentForm.subdepartments, {
-                        name: '',
-                        description: '',
-                        classes: [],
-                        taskManagerId: '',
-                        taskAssistantIds: [],
-                        default_display: true
-                      }])}
-                    >
-                      <Plus className="h-4 w-4 mr-1" /> Add Subdepartment
-                    </Button>
-                  )}
-                </div>
-  
-                <div className="space-y-4">
-                  {departmentForm.subdepartments.map((subdept, subdeptIndex) => (
-                    <Card key={subdeptIndex} className="bg-gray-50">
-                      <CardHeader className="pb-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-4">
-                            <div>
-                              <Label htmlFor={`subdept-name-${subdeptIndex}`}>
-                                Subdepartment Name *
-                              </Label>
-                              <div className="flex items-center space-x-2">
-                                <Badge variant="outline" className="font-mono bg-gray-200 text-gray-700">
-                                  {subdeptIndex + 1}
-                                </Badge>
-                                <Input
-                                  id={`subdept-name-${subdeptIndex}`}
-                                  placeholder="Enter subdepartment name"
-                                  value={subdept.name}
-                                  onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)}
-                                  className="flex-1 font-medium"
-                                />
-                              </div>
-                            </div>
-                            <div>
-                              <Label htmlFor={`subdept-desc-${subdeptIndex}`}>Description</Label>
-                              <Textarea
-                                id={`subdept-desc-${subdeptIndex}`}
-                                placeholder="Enter subdepartment description"
-                                value={subdept.description}
-                                onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)}
-                                className="min-h-[60px]"
-                              />
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <Checkbox
-                                checked={subdept.default_display}
-                                onCheckedChange={(checked) => handleSubdepartmentChange(subdeptIndex, 'default_display', Boolean(checked))}
-                                id={`subdept-default-display-${subdeptIndex}`}
-                              />
-                              <Label htmlFor={`subdept-default-display-${subdeptIndex}`} className="text-sm text-gray-700">
-                                Default Display
-                              </Label>
-                            </div>
-                          </div>
-  
-                          <div className="space-y-4">
-                            <div>
-                              <Label>Task Manager</Label>
-                              <Select
-                                value={subdept.taskManagerId || ''}
-                                onValueChange={(value) => handleSubdepartmentChange(subdeptIndex, 'taskManagerId', value)}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select task manager" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="none">None</SelectItem>
-                                  {users.map((user) => (
-                                    <SelectItem key={user.id} value={user.id}>
-                                      {user.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-  
-                            <div>
-                              <Label>Task Assistants</Label>
-                              <div className="space-y-2 max-h-32 overflow-y-auto">
-                                {subdept.taskAssistantIds.map((userId, assistantIndex) => (
-                                  <div key={assistantIndex} className="flex items-center space-x-2">
-                                    <Select
-                                      value={userId}
-                                      onValueChange={(value) => handleTaskAssistantChange(subdeptIndex, assistantIndex, value)}
-                                    >
-                                      <SelectTrigger>
-                                        <SelectValue placeholder="Select assistant" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="none">None</SelectItem>
-                                        {users.map((user) => (
-                                          <SelectItem key={user.id} value={user.id}>
-                                            {user.name}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => handleRemoveTaskAssistant(subdeptIndex, assistantIndex)}
-                                      className="text-red-500 hover:text-red-700 hover:bg-red-50 h-8 w-8 flex-shrink-0"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                ))}
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleAddTaskAssistant(subdeptIndex)}
-                                  className="w-full"
-                                >
-                                  <Plus className="h-4 w-4 mr-1" /> Add Assistant
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </CardHeader>
-  
-                      <CardContent>
+                {departmentForm.subdepartments.map((subdept, subdeptIndex) => (
+                  <Card key={subdeptIndex} className="bg-gray-50">
+                    <CardHeader className="pb-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <Label className="font-semibold text-gray-700">Classes</Label>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleAddClass(subdeptIndex)}
-                            >
-                              <Plus className="h-4 w-4 mr-1" /> Add Class
-                            </Button>
+                          <div>
+                            <Label htmlFor={`subdept-name-${subdeptIndex}`}>
+                              Subdepartment Name *
+                            </Label>
+                            <div className="flex items-center space-x-2">
+                              <Badge variant="outline" className="font-mono bg-gray-200 text-gray-700">
+                                {subdeptIndex + 1}
+                              </Badge>
+                              <Input
+                                id={`subdept-name-${subdeptIndex}`}
+                                placeholder="Enter subdepartment name"
+                                value={subdept.name}
+                                onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)}
+                                className="flex-1 font-medium"
+                              />
+                            </div>
                           </div>
-                          
-                          <div className="space-y-4">
-                            {subdept.classes && subdept.classes.length > 0 ? (
-                              subdept.classes.map((cls, clsIndex) => (
-                                <ClassComponent
-                                  key={cls.id}
-                                  classItem={cls}
-                                  onUpdate={updateFormState}
-                                  onRemove={() => handleRemoveClass(subdeptIndex, clsIndex)}
-                                  path={['subdepartments', subdeptIndex, 'classes', clsIndex.toString()]} 
-                                  index={`${subdeptIndex + 1}.${clsIndex + 1}`}
-                                />
-                              ))
-                            ) : (
-                              <div className="text-center py-6 text-gray-500 border-2 border-dashed rounded-lg">
-                                No classes added yet. Click "Add Class" to get started.
-                              </div>
-                            )}
+                          <div>
+                            <Label htmlFor={`subdept-desc-${subdeptIndex}`}>Description</Label>
+                            <Textarea
+                              id={`subdept-desc-${subdeptIndex}`}
+                              placeholder="Enter subdepartment description"
+                              value={subdept.description}
+                              onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)}
+                              className="min-h-[60px]"
+                            />
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              checked={subdept.default_display}
+                              onCheckedChange={(checked) => handleSubdepartmentChange(subdeptIndex, 'default_display', Boolean(checked))}
+                              id={`subdept-default-display-${subdeptIndex}`}
+                            />
+                            <Label htmlFor={`subdept-default-display-${subdeptIndex}`} className="text-sm text-gray-700">
+                              Default Display
+                            </Label>
                           </div>
                         </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+
+                        <div className="space-y-4">
+                          <div>
+                            <Label>Task Manager</Label>
+                            <Select
+                              value={subdept.taskManagerId || ''}
+                              onValueChange={(value) => handleSubdepartmentChange(subdeptIndex, 'taskManagerId', value)}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select task manager" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="">None</SelectItem>
+                                {users.filter(user => user.role === 'task_manager' || user.role === 'admin').map((user) => (
+                                  <SelectItem key={user.id} value={user.id}>
+                                    <div className="flex items-center gap-2">
+                                      <UserIcon className="h-4 w-4 text-blue-600" />
+                                      {user.name}
+                                    </div>
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div>
+                            <Label>Task Assistants</Label>
+                            <div className="space-y-2 max-h-32 overflow-y-auto">
+                              {subdept.taskAssistantIds.map((userId, assistantIndex) => (
+                                <div key={assistantIndex} className="flex items-center space-x-2">
+                                  <Select
+                                    value={userId}
+                                    onValueChange={(value) => handleTaskAssistantChange(subdeptIndex, assistantIndex, value)}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select assistant" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="">None</SelectItem>
+                                      {users.filter(user => user.role === 'task_assistant' || user.role === 'admin').map((user) => (
+                                        <SelectItem key={user.id} value={user.id}>
+                                          <div className="flex items-center gap-2">
+                                            <UserIcon className="h-4 w-4 text-green-600" />
+                                            {user.name}
+                                          </div>
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleRemoveTaskAssistant(subdeptIndex, assistantIndex)}
+                                    className="text-red-500 hover:text-red-700 hover:bg-red-50 h-8 w-8 flex-shrink-0"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              ))}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleAddTaskAssistant(subdeptIndex)}
+                                className="w-full"
+                              >
+                                <Plus className="h-4 w-4 mr-1" /> Add Assistant
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardHeader>
+
+                    <CardContent>
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <Label className="font-semibold text-gray-700">Classes</Label>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleAddClass(subdeptIndex)}
+                          >
+                            <Plus className="h-4 w-4 mr-1" /> Add Class
+                          </Button>
+                        </div>
+                        
+                        <div className="space-y-4">
+                          {subdept.classes && subdept.classes.length > 0 ? (
+                            subdept.classes.map((cls, clsIndex) => (
+                              <ClassComponent
+                                key={cls.id}
+                                classItem={cls}
+                                onUpdate={updateFormState}
+                                onRemove={() => handleRemoveClass(subdeptIndex, clsIndex)}
+                                path={['subdepartments', subdeptIndex, 'classes', clsIndex.toString()]} 
+                                index={`${subdeptIndex + 1}.${clsIndex + 1}`}
+                              />
+                            ))
+                          ) : (
+                            <div className="text-center py-6 text-gray-500 border-2 border-dashed rounded-lg">
+                              No classes added yet. Click "Add Class" to get started.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
-            )}
-  
-            {/* Add first subdepartment section for new departments */}
-            {isCreatingNewDepartment && departmentForm.subdepartments.length === 0 && (
-              <div className="text-center py-8 border-2 border-dashed rounded-lg bg-gray-50">
-                <Workflow className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 mb-4">This department doesn't have any subdepartments yet.</p>
-                <Button
-                  variant="outline"
-                  onClick={() => updateFormState(['subdepartments'], [{
-                    name: '',
-                    description: '',
-                    classes: [],
-                    taskManagerId: '',
-                    taskAssistantIds: [],
-                    default_display: true
-                  }])}
-                >
-                  <Plus className="h-4 w-4 mr-1" /> Add First Subdepartment
-                </Button>
-              </div>
-            )}
-          </div>
-  
-          <div className="flex justify-end gap-2 mt-6 pt-6 border-t">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
-              Cancel
-            </Button>
-            <Button onClick={onSave} disabled={isSaving}>
-              {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isCreatingNewDepartment || isCreatingSubdepartment ? 'Create' : 'Update'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    );
-  }
+            </div>
+          )}
+
+          {/* Add first subdepartment section for new departments */}
+          {isCreatingNewDepartment && departmentForm.subdepartments.length === 0 && (
+            <div className="text-center py-8 border-2 border-dashed rounded-lg bg-gray-50">
+              <Workflow className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-600 mb-4">This department doesn't have any subdepartments yet.</p>
+              <Button
+                variant="outline"
+                onClick={() => updateFormState(['subdepartments'], [{
+                  name: '',
+                  description: '',
+                  classes: [],
+                  taskManagerId: '',
+                  taskAssistantIds: [],
+                  default_display: true
+                }])}
+              >
+                <Plus className="h-4 w-4 mr-1" /> Add First Subdepartment
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 mt-6 pt-6 border-t">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
+            Cancel
+          </Button>
+          <Button onClick={onSave} disabled={isSaving}>
+            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isCreatingNewDepartment || isCreatingSubdepartment ? 'Create' : 'Update'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

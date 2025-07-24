@@ -24,6 +24,25 @@ export type User = {
   role: 'admin' | 'task_manager' | 'task_assistant' | 'officer' | string
 }
 
+// History types for tracking assignments
+export type OfficerHistory = {
+  id: string
+  start_date: string
+  end_date?: string
+}
+
+export type ManagerHistory = {
+  id: string
+  start_date: string
+  end_date?: string
+}
+
+export type AssistantHistory = {
+  id: string
+  start_date: string
+  end_date?: string
+}
+
 export type Requirement = {
   id: string
   name: string
@@ -108,6 +127,9 @@ export type Subdepartment = {
   upload_requirements?: Requirement[]
   default_display?: boolean
   order?: number
+  // History tracking for managers and assistants
+  manager_history?: ManagerHistory[]
+  assistant_history?: AssistantHistory[]
 }
 
 export type Department = {
@@ -118,6 +140,9 @@ export type Department = {
   tm_subdepartments?: Subdepartment[]
   default_display?: boolean
   order?: number
+  // Officers are at department level
+  officers_history?: OfficerHistory[]
+  currentOfficerId?: string
 }
 
 // Form types
@@ -169,6 +194,14 @@ export type SubdepartmentForm = {
   }
 }
 
+export type DepartmentForm = {
+  name: string
+  description: string
+  default_display: boolean
+  subdepartments: SubdepartmentForm[]
+  officerId?: string // Current officer for the department
+}
+
 export async function fetchUsers(): Promise<User[]> {
   try {
     const { data, error } = await supabase
@@ -184,6 +217,179 @@ export async function fetchUsers(): Promise<User[]> {
   }
 }
 
+export async function fetchOfficers(): Promise<User[]> {
+  try {
+    const { data, error } = await supabase
+      .from('tm_users')
+      .select('id, name, email, role')
+      .eq('role', 'officer')
+      .order('name')
+
+    if (error) throw error
+    return data || []
+  } catch (error) {
+    console.error('Error fetching officers:', error)
+    throw new Error('Failed to fetch officers')
+  }
+}
+
+// Helper function to get current officer from officers_history
+export function getCurrentOfficer(officers_history: OfficerHistory[]): OfficerHistory | null {
+  if (!officers_history || officers_history.length === 0) return null
+  
+  // Find officer without end_date (current) or with the latest start_date
+  const currentOfficer = officers_history.find(officer => !officer.end_date)
+  if (currentOfficer) return currentOfficer
+  
+  // If no current officer, return the one with latest start_date
+  return officers_history.reduce((latest, officer) => 
+    new Date(officer.start_date) > new Date(latest.start_date) ? officer : latest
+  )
+}
+
+// Helper function to get current manager from manager_history
+export function getCurrentManager(manager_history: ManagerHistory[]): ManagerHistory | null {
+  if (!manager_history || manager_history.length === 0) return null
+  
+  const currentManager = manager_history.find(manager => !manager.end_date)
+  if (currentManager) return currentManager
+  
+  return manager_history.reduce((latest, manager) => 
+    new Date(manager.start_date) > new Date(latest.start_date) ? manager : latest
+  )
+}
+
+// Helper function to get current assistants from assistant_history
+export function getCurrentAssistants(assistant_history: AssistantHistory[]): AssistantHistory[] {
+  if (!assistant_history || assistant_history.length === 0) return []
+  
+  return assistant_history.filter(assistant => !assistant.end_date)
+}
+
+// Helper function to assign officer to department
+export async function assignOfficerToDepartment(departmentId: string, officerId: string): Promise<void> {
+  try {
+    // Get current officers_history
+    const { data: dept, error: fetchError } = await supabase
+      .from('tm_departments')
+      .select('officers_history')
+      .eq('id', departmentId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    const officers_history = dept?.officers_history || []
+    
+    // End current officer assignments
+    const updatedHistory = officers_history.map(officer => 
+      !officer.end_date ? { ...officer, end_date: new Date().toISOString() } : officer
+    )
+    
+    // Add new officer
+    updatedHistory.push({
+      id: officerId,
+      start_date: new Date().toISOString()
+    })
+
+    // Update department
+    const { error: updateError } = await supabase
+      .from('tm_departments')
+      .update({ officers_history: updatedHistory })
+      .eq('id', departmentId)
+
+    if (updateError) throw updateError
+  } catch (error) {
+    console.error('Error assigning officer to department:', error)
+    throw error
+  }
+}
+
+// Helper function to assign manager to subdepartment
+export async function assignManagerToSubdepartment(subdepartmentId: string, managerId: string): Promise<void> {
+  try {
+    // Get current manager_history
+    const { data: subdept, error: fetchError } = await supabase
+      .from('tm_subdepartments')
+      .select('manager_history, task_manager')
+      .eq('id', subdepartmentId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    const manager_history = subdept?.manager_history || []
+    
+    // End current manager assignments
+    const updatedHistory = manager_history.map(manager => 
+      !manager.end_date ? { ...manager, end_date: new Date().toISOString() } : manager
+    )
+    
+    // Add new manager
+    if (managerId) {
+      updatedHistory.push({
+        id: managerId,
+        start_date: new Date().toISOString()
+      })
+    }
+
+    // Update subdepartment
+    const { error: updateError } = await supabase
+      .from('tm_subdepartments')
+      .update({ 
+        manager_history: updatedHistory,
+        task_manager: managerId || null
+      })
+      .eq('id', subdepartmentId)
+
+    if (updateError) throw updateError
+  } catch (error) {
+    console.error('Error assigning manager to subdepartment:', error)
+    throw error
+  }
+}
+
+// Helper function to assign assistants to subdepartment
+export async function assignAssistantsToSubdepartment(subdepartmentId: string, assistantIds: string[]): Promise<void> {
+  try {
+    // Get current assistant_history
+    const { data: subdept, error: fetchError } = await supabase
+      .from('tm_subdepartments')
+      .select('assistant_history, task_assistant')
+      .eq('id', subdepartmentId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    const assistant_history = subdept?.assistant_history || []
+    
+    // End current assistant assignments
+    const updatedHistory = assistant_history.map(assistant => 
+      !assistant.end_date ? { ...assistant, end_date: new Date().toISOString() } : assistant
+    )
+    
+    // Add new assistants
+    assistantIds.filter(id => id).forEach(assistantId => {
+      updatedHistory.push({
+        id: assistantId,
+        start_date: new Date().toISOString()
+      })
+    })
+
+    // Update subdepartment
+    const { error: updateError } = await supabase
+      .from('tm_subdepartments')
+      .update({ 
+        assistant_history: updatedHistory,
+        task_assistant: assistantIds.filter(id => id)
+      })
+      .eq('id', subdepartmentId)
+
+    if (updateError) throw updateError
+  } catch (error) {
+    console.error('Error assigning assistants to subdepartment:', error)
+    throw error
+  }
+}
+
 export async function createDepartment(departmentData: any): Promise<Department> {
   try {
     // Get the next order number for departments
@@ -195,14 +401,21 @@ export async function createDepartment(departmentData: any): Promise<Department>
 
     const nextOrder = (maxOrderData?.[0]?.order || 0) + 1
 
-    // Create department with order and default_display
+    // Prepare officers_history if officer is assigned
+    const officers_history = departmentData.officerId ? [{
+      id: departmentData.officerId,
+      start_date: new Date().toISOString()
+    }] : []
+
+    // Create department with order, default_display, and officers_history
     const { data: department, error: deptError } = await supabase
       .from('tm_departments')
       .insert({
         name: departmentData.name,
         description: departmentData.description,
         order: nextOrder,
-        default_display: departmentData.default_display || true
+        default_display: departmentData.default_display || true,
+        officers_history
       })
       .select()
       .single()
@@ -232,6 +445,19 @@ export async function createDepartment(departmentData: any): Promise<Department>
         }))
       }))
 
+      // Prepare manager_history and assistant_history
+      const manager_history = subdept.taskManagerId ? [{
+        id: subdept.taskManagerId,
+        start_date: new Date().toISOString()
+      }] : []
+
+      const assistant_history = subdept.taskAssistantIds
+        .filter(id => id)
+        .map(id => ({
+          id,
+          start_date: new Date().toISOString()
+        }))
+
       const subdeptData = {
         name: subdept.name,
         description: subdept.description,
@@ -239,8 +465,10 @@ export async function createDepartment(departmentData: any): Promise<Department>
         order: subdeptOrder,
         default_display: subdept.default_display || true,
         classes: classesForStorage,
-        task_manager: subdept.task_manager,
-        task_assistant: subdept.task_assistants
+        task_manager: subdept.taskManagerId,
+        task_assistant: subdept.taskAssistantIds.filter(id => id),
+        manager_history,
+        assistant_history
       }
 
       // Create or update subdepartment
@@ -373,7 +601,7 @@ export async function fetchDepartments(): Promise<Department[]> {
                 }))
             }))
 
-          // Process task assistants
+          // Process task assistants (backward compatibility)
           const taskAssistants = Array.isArray(subdept.task_assistant)
             ? subdept.task_assistant
             : subdept.task_assistant
@@ -391,15 +619,23 @@ export async function fetchDepartments(): Promise<Department[]> {
               endDate: ta.endDate || ta.end_date,
               isActive: ta.isActive !== false
             })),
-            taskManagerId: subdept.task_manager?.id || subdept.task_manager_id
+            taskManagerId: subdept.task_manager?.id || subdept.task_manager_id || subdept.task_manager,
+            // Add history fields
+            manager_history: subdept.manager_history || [],
+            assistant_history: subdept.assistant_history || []
           }
         })
+
+      // Get current officer from officers_history
+      const currentOfficer = getCurrentOfficer(dept.officers_history || [])
 
       return {
         ...dept,
         default_display: dept.default_display || false,
         subdepartments,
-        tm_subdepartments: subdepartments
+        tm_subdepartments: subdepartments,
+        officers_history: dept.officers_history || [],
+        currentOfficerId: currentOfficer?.id
       }
     })
 
@@ -417,7 +653,8 @@ export async function saveOrderAndDefaultDisplay(departments: Department[]): Pro
     const deptUpdates = departments.map((dept, index) => ({
       id: dept.id,
       order: index + 1,
-      default_display: dept.default_display || false
+      default_display: dept.default_display || false,
+      officers_history: dept.officers_history || []
     }))
 
     // Prepare subdepartment updates with order and default_display
@@ -426,6 +663,8 @@ export async function saveOrderAndDefaultDisplay(departments: Department[]): Pro
         id: subdept.id,
         order: index + 1,
         default_display: subdept.default_display || false,
+        manager_history: subdept.manager_history || [],
+        assistant_history: subdept.assistant_history || [],
         // Update classes JSON with default_display
         classes: (subdept.classes || []).map((cls, clsIndex) => ({
           ...cls,
@@ -477,43 +716,85 @@ export async function fetchDepartmentById(id: string): Promise<Department> {
 }
 
 // Helper function to save class requirements (deletes existing and creates new)
-export async function saveClassRequirements(classId: string, requirements: RequirementForm[], type: 'class' | 'subclass' = 'class'): Promise<void> {
+export async function saveClassRequirements(subdepartmentId: string, classes: ClassForm[]): Promise<void> {
   try {
-    // Delete existing requirements for this class
-    await supabase
-      .from('tm_class_requirements')
-      .delete()
-      .eq('class_id', classId)
+    for (const [clsIndex, cls] of classes.entries()) {
+      const classId = `${subdepartmentId}_${cls.id}`
 
-    // Insert new requirements if any exist
-    if (requirements.length > 0) {
-      const requirementsArray = requirements.map((req, index) => {
-        // Generate ID based on existing requirements and current index
-        const newId = req.id || generateRequirementId(
-          requirements.slice(0, index).filter(r => r.id)
-        );
-        
-        return {
-          id: newId,
-          name: req.name,
-          description: req.description || null,
-          isRequired: req.isRequired,
-          order: req.order,
-          isVisible: req.isVisible,
-          type: req.type || 'standard'
-        };
-      })
-
-      const { error } = await supabase
+      // Delete existing requirements for this class
+      await supabase
         .from('tm_class_requirements')
-        .insert({
-          class_id: classId,
-          requirements: requirementsArray,
-          type,
-          is_mandatory: true
+        .delete()
+        .eq('class_id', classId)
+
+      // Insert class requirements if any exist
+      if (cls.requirements && cls.requirements.length > 0) {
+        const requirementsArray = cls.requirements.map((req, reqIndex) => {
+          const newId = req.id || generateRequirementId(
+            cls.requirements.slice(0, reqIndex).filter(r => r.id)
+          );
+          
+          return {
+            id: newId,
+            name: req.name,
+            description: req.description || null,
+            isRequired: req.isRequired,
+            order: req.order || reqIndex + 1,
+            isVisible: req.isVisible,
+            type: req.type || 'standard'
+          };
         })
 
-      if (error) throw error
+        const { error } = await supabase
+          .from('tm_class_requirements')
+          .insert({
+            class_id: classId,
+            requirements: requirementsArray,
+            type: 'class',
+            is_mandatory: true
+          })
+
+        if (error) throw error
+      }
+
+      // Handle sub-class requirements
+      for (const [subClsIndex, subCls] of (cls.subClasses || []).entries()) {
+        const subClassId = `${classId}_${subCls.id}`
+
+        await supabase
+          .from('tm_class_requirements')
+          .delete()
+          .eq('class_id', subClassId)
+
+        if (subCls.requirements && subCls.requirements.length > 0) {
+          const subRequirementsArray = subCls.requirements.map((req, reqIndex) => {
+            const newId = req.id || generateRequirementId(
+              subCls.requirements.slice(0, reqIndex).filter(r => r.id)
+            );
+            
+            return {
+              id: newId,
+              name: req.name,
+              description: req.description || null,
+              isRequired: req.isRequired,
+              order: req.order || reqIndex + 1,
+              isVisible: req.isVisible,
+              type: req.type || 'standard'
+            };
+          })
+
+          const { error: subReqError } = await supabase
+            .from('tm_class_requirements')
+            .insert({
+              class_id: subClassId,
+              requirements: subRequirementsArray,
+              type: 'subclass',
+              is_mandatory: true
+            })
+
+          if (subReqError) throw subReqError
+        }
+      }
     }
   } catch (error) {
     console.error('Error saving class requirements:', error)
@@ -522,56 +803,9 @@ export async function saveClassRequirements(classId: string, requirements: Requi
 }
 
 // Helper function to update class requirements while preserving IDs
-export async function updateClassRequirements(classId: string, requirements: RequirementForm[], type: 'class' | 'subclass' = 'class'): Promise<void> {
+export async function updateClassRequirements(subdepartmentId: string, classes: ClassForm[]): Promise<void> {
   try {
-    // First, get the existing requirements to preserve IDs
-    const { data: existingData, error: fetchError } = await supabase
-      .from('tm_class_requirements')
-      .select('*')
-      .eq('class_id', classId)
-      .single()
-
-    if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
-      throw fetchError
-    }
-
-    // Prepare the requirements array with preserved IDs
-    const requirementsArray = requirements.map((req, index) => {
-      // Try to find a matching requirement by name to preserve the ID
-      const existingReq = existingData?.requirements?.find((r: any) => r.name === req.name) || {};
-      const existingReqs = existingData?.requirements || [];
-      
-      // Generate ID based on existing requirements and current index
-      const newId = req.id || existingReq.id || generateRequirementId(
-        [...existingReqs, ...requirements.slice(0, index).filter(r => r.id)]
-      );
-
-      return {
-        id: newId,
-        name: req.name,
-        description: req.description || null,
-        isRequired: req.isRequired,
-        order: req.order,
-        isVisible: req.isVisible,
-        type: req.type || 'standard'
-      };
-    })
-
-    // Upsert the requirements (update if exists, insert if not)
-    const { error: upsertError } = await supabase
-      .from('tm_class_requirements')
-      .upsert({
-        class_id: classId,
-        requirements: requirementsArray,
-        type,
-        is_mandatory: true,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'class_id',
-        ignoreDuplicates: false
-      })
-
-    if (upsertError) throw upsertError
+    await saveClassRequirements(subdepartmentId, classes)
   } catch (error) {
     console.error('Error updating class requirements:', error)
     throw error
