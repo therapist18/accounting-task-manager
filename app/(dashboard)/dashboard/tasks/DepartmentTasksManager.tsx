@@ -139,16 +139,9 @@ export default function DepartmentTasksManager({
     task: UtilTask,
     stage: { id: string; documents?: { kycId: string }[] },
   ): Document | undefined => {
-    console.log('🔍 getDocumentForTaskStage called for:', {
-      taskId: task.id,
-      stageId: stage.id,
-      stageName: stages.find(s => s.id === stage.id)?.name,
-      sourceDocumentId: task.source_document_id
-    });
-
     // 1. Check for a specifically linked source document for this stage
     const linkedDocumentData = task.source_document_id?.[stage.id];
-    console.log('🔗 Linked document data for stage:', linkedDocumentData);
+
 
     if (linkedDocumentData) {
       // Handle both old format (string ID) and new format (object with id and document_id)
@@ -156,21 +149,15 @@ export default function DepartmentTasksManager({
         ? linkedDocumentData 
         : linkedDocumentData.id;
 
-      console.log('📄 Looking for document with ID:', documentId);
+
 
       // Find the document instance from allDocuments by its unique ID
       const linkedDoc = allDocuments.find(doc => doc.id === documentId);
-      console.log('📄 Found linked document:', linkedDoc ? {
-        id: linkedDoc.id,
-        document_id: linkedDoc.document_id,
-        file_path: linkedDoc.file_path,
-        created_at: linkedDoc.created_at
-      } : null);
 
       return linkedDoc;
     }
 
-    console.log('❌ No linked document found for this stage');
+
     // 2. If no document is linked for this stage, return undefined.
     return undefined;
   }, [allDocuments, stages]);
@@ -184,7 +171,7 @@ export default function DepartmentTasksManager({
 
       if (error) throw error
 
-      console.log('📋 Fetched tm_users data:', data);
+
 
       const usersMap = new Map()
       data?.forEach(user => {
@@ -195,7 +182,7 @@ export default function DepartmentTasksManager({
         })
       })
 
-      console.log('👥 Processed tm_users map:', Array.from(usersMap.values()));
+
       setTmUsers(usersMap)
       return usersMap
     } catch (error) {
@@ -275,17 +262,7 @@ export default function DepartmentTasksManager({
         departmentId ? fetchStages(departmentId, departments) : Promise.resolve([])
       ])
 
-      console.log('📊 Loaded tasks data:', {
-        tasksCount: tasksData.length,
-        stagesCount: stagesData.length,
-        sampleTask: tasksData[0] ? {
-          id: tasksData[0].id,
-          applicant_name: tasksData[0].applicant_name,
-          source_document_id: tasksData[0].source_document_id,
-          stages: tasksData[0].stages,
-          current_stage_id: tasksData[0].current_stage_id
-        } : null
-      });
+
 
       setTasks(tasksData)
       setDataLoading(prev => ({ ...prev, tasks: false }))
@@ -456,16 +433,9 @@ export default function DepartmentTasksManager({
 
   // UPDATED: Enhanced current stage determination logic to consider linked documents
   const determineCurrentStage = useCallback((task: any, stages: any[]) => {
-    console.log('🎯 Determining current stage for task:', {
-      taskId: task.id,
-      applicantName: task.applicant_name,
-      currentStageId: task.current_stage_id,
-      sourceDocumentId: task.source_document_id,
-      taskStages: task.stages
-    });
 
     if (!task.stages || !stages.length) {
-      console.log('❌ No task stages or stages data available');
+
       return null;
     }
 
@@ -474,7 +444,7 @@ export default function DepartmentTasksManager({
       .filter(stage => isStageApplicableToTask(stage, task))
       .sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
 
-    console.log('📋 Applicable stages:', applicableStages.map(s => ({ id: s.id, name: s.name, order: s.order_num })));
+
 
     // Find the last stage that has either a LINKED document or a date
     let lastStageWithEvidence = null
@@ -489,16 +459,10 @@ export default function DepartmentTasksManager({
       // Check if this stage has a date
       const hasDate = stageStatus && (stageStatus.status === 'completed' || stageStatus.date)
 
-      console.log(`🔍 Stage ${stage.name}:`, {
-        hasLinkedDocument,
-        hasDate,
-        stageStatus,
-        linkedDocId: task.source_document_id?.[stage.id]
-      });
 
       if (hasLinkedDocument || hasDate) {
         lastStageWithEvidence = stage
-        console.log(`✅ Found evidence in stage: ${stage.name}`);
+
       }
     }
 
@@ -510,16 +474,16 @@ export default function DepartmentTasksManager({
       // or the last stage with evidence if it's the final stage
       if (lastStageIndex < applicableStages.length - 1) {
         currentStage = applicableStages[lastStageIndex + 1]
-        console.log(`➡️ Current stage is next stage: ${currentStage.name}`);
+
       } else {
         currentStage = lastStageWithEvidence
-        console.log(`🏁 Current stage is final stage: ${currentStage.name}`);
+
       }
     }
 
     // Fallback to the original logic if no evidence found
     if (!currentStage) {
-      console.log('🔄 Using fallback logic');
+
       for (const stage of applicableStages) {
         const stageStatus = task.stages[stage.id]
 
@@ -543,10 +507,10 @@ export default function DepartmentTasksManager({
     // Final fallback to database value
     if (!currentStage && task.current_stage_id) {
       currentStage = stages.find(s => s.id === task.current_stage_id)
-      console.log('💾 Using database current stage:', currentStage?.name);
+
     }
 
-    console.log('🎯 Final determined current stage:', currentStage?.name);
+
     return currentStage
   }, [isStageApplicableToTask, getDocumentForTaskStage])
 
@@ -820,12 +784,6 @@ export default function DepartmentTasksManager({
     updatedExtractedDetails?: Record<string, any>
   ) => {
     try {
-      console.log('💾 Saving stage status:', {
-        stageId,
-        taskId,
-        value,
-        updatedExtractedDetails
-      });
 
       // Call the original save function
       if (handleStageStatusSave) {
@@ -849,7 +807,7 @@ export default function DepartmentTasksManager({
       // Determine the new current stage
       const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages)
 
-      console.log('🎯 New current stage determined:', currentStage?.name);
+
 
       // Update the database
       const updateData: any = {
@@ -872,7 +830,7 @@ export default function DepartmentTasksManager({
       // Refresh data
       await loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
 
-      console.log('✅ Stage status and current stage updated successfully')
+
 
     } catch (error) {
       console.error('Error updating stage status and current stage:', error)
@@ -1040,13 +998,13 @@ export default function DepartmentTasksManager({
   // UPDATED: Only handle view for LINKED documents - completely rewritten
   const handleViewDocument = useCallback(async (task: any, stage: any) => {
     try {
-      console.log('👀 handleViewDocument called with:', { taskId: task.id, stageId: stage.id });
+
 
       // Use the updated function to get LINKED document ONLY
       const document = getDocumentForTaskStage(task, stage);
 
       if (!document) {
-        console.log('❌ No linked document found');
+
         toast({
           title: 'No Linked Document',
           description: `No document has been linked for this stage yet. Please use the 'Link' button to link a document first.`,
@@ -1055,12 +1013,7 @@ export default function DepartmentTasksManager({
         return;
       }
 
-      console.log('📄 Found linked document:', {
-        id: document.id,
-        document_id: document.document_id,
-        file_path: document.file_path,
-        indicator: document.indicator
-      });
+
 
       if (document.indicator === true) {
         toast({
@@ -1144,7 +1097,7 @@ export default function DepartmentTasksManager({
       const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
       const fileName = document.file_path?.split('/').pop() || documentName;
 
-      console.log('🔗 Generated file URL:', fileUrl);
+
 
       // Prepare preview data
       const previewData = {
@@ -1258,14 +1211,7 @@ export default function DepartmentTasksManager({
 
       const stageFollowUp = currentStage.follow_up?.toLowerCase() || null
 
-      console.log(`🏷️ Task ${task.id} follow-up filtering:`, {
-        taskId: task.id,
-        applicantName: task.applicant_name,
-        determinedCurrentStage: currentStage.name,
-        stageFollowUp,
-        filterRequested: followUpFilter,
-        matches: stageFollowUp === followUpFilter
-      });
+
 
       switch (followUpFilter) {
         case 'bcl':
@@ -2235,16 +2181,6 @@ export default function DepartmentTasksManager({
                       // UPDATED: Get the linked document for this specific stage/document type
                       const linkedDocumentForType = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
 
-                      console.log(`📋 Standard table cell for stage ${stage.name}, doc ${doc.kycId}:`, {
-                        taskId: task.id,
-                        stageId: stage.id,
-                        docKycId: doc.kycId,
-                        linkedDocument: linkedDocumentForType ? {
-                          id: linkedDocumentForType.id,
-                          document_id: linkedDocumentForType.document_id,
-                          file_path: linkedDocumentForType.file_path
-                        } : null
-                      });
 
                       const isOldDoc = linkedDocumentForType && task.created_at &&
                         isDocumentOlderThanTask(linkedDocumentForType.created_at, task.created_at)
@@ -2916,7 +2852,7 @@ export default function DepartmentTasksManager({
               fields={previewDocument.fields}
               onClose={() => setPreviewDocument(null)}
               onSave={(updatedData) => {
-                console.log("Saving updated data:", updatedData);
+
                 setPreviewDocument(null);
                 toast({ title: "Success", description: "Document details saved." });
               }}
