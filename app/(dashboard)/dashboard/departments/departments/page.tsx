@@ -92,6 +92,28 @@ function OfficerHistoryPopover({ officers_history, users, children }: {
     new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
   )
 
+  const getAssignmentDuration = (history: OfficerHistory): string => {
+    const startDate = new Date(history.start_date)
+    const endDate = history.end_date ? new Date(history.end_date) : new Date()
+    
+    const diffTime = Math.abs(endDate.getTime() - startDate.getTime())
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    
+    if (diffDays < 30) {
+      return `${diffDays} day${diffDays !== 1 ? 's' : ''}`
+    } else if (diffDays < 365) {
+      const months = Math.floor(diffDays / 30)
+      return `${months} month${months !== 1 ? 's' : ''}`
+    } else {
+      const years = Math.floor(diffDays / 365)
+      const remainingMonths = Math.floor((diffDays % 365) / 30)
+      if (remainingMonths === 0) {
+        return `${years} year${years !== 1 ? 's' : ''}`
+      }
+      return `${years} year${years !== 1 ? 's' : ''}, ${remainingMonths} month${remainingMonths !== 1 ? 's' : ''}`
+    }
+  }
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -103,16 +125,17 @@ function OfficerHistoryPopover({ officers_history, users, children }: {
         <div className="space-y-3">
           <h4 className="font-semibold text-gray-900 flex items-center gap-2">
             <Shield className="h-4 w-4" />
-            Officer History
+            Officer History ({sortedHistory.length} assignment{sortedHistory.length !== 1 ? 's' : ''})
           </h4>
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {sortedHistory.map((officer, index) => {
               const user = users.find(u => u.id === officer.id)
               const isCurrent = !officer.end_date
+              const duration = getAssignmentDuration(officer)
               
               return (
-                <div key={index} className={`p-2 rounded border ${isCurrent ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
-                  <div className="flex items-center justify-between">
+                <div key={index} className={`p-3 rounded border ${isCurrent ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+                  <div className="flex items-center justify-between mb-2">
                     <div>
                       <p className="font-medium text-gray-900">{user?.name || 'Unknown Officer'}</p>
                       <p className="text-xs text-gray-500">{user?.email}</p>
@@ -121,11 +144,21 @@ function OfficerHistoryPopover({ officers_history, users, children }: {
                       <Badge variant="default" className="bg-green-500">Current</Badge>
                     )}
                   </div>
-                  <div className="mt-1 text-xs text-gray-600">
-                    <p>Started: {new Date(officer.start_date).toLocaleDateString()}</p>
+                  <div className="text-xs text-gray-600 space-y-1">
+                    <div className="flex justify-between">
+                      <span>Started:</span>
+                      <span className="font-medium">{new Date(officer.start_date).toLocaleDateString()}</span>
+                    </div>
                     {officer.end_date && (
-                      <p>Ended: {new Date(officer.end_date).toLocaleDateString()}</p>
+                      <div className="flex justify-between">
+                        <span>Ended:</span>
+                        <span className="font-medium">{new Date(officer.end_date).toLocaleDateString()}</span>
+                      </div>
                     )}
+                    <div className="flex justify-between">
+                      <span>Duration:</span>
+                      <span className="font-medium text-blue-600">{duration}</span>
+                    </div>
                   </div>
                 </div>
               )
@@ -150,6 +183,28 @@ function ManagerHistoryPopover({ manager_history, users, children }: {
     new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
   )
 
+  const getAssignmentDuration = (history: ManagerHistory): string => {
+    const startDate = new Date(history.start_date)
+    const endDate = history.end_date ? new Date(history.end_date) : new Date()
+    
+    const diffTime = Math.abs(endDate.getTime() - startDate.getTime())
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    
+    if (diffDays < 30) {
+      return `${diffDays} day${diffDays !== 1 ? 's' : ''}`
+    } else if (diffDays < 365) {
+      const months = Math.floor(diffDays / 30)
+      return `${months} month${months !== 1 ? 's' : ''}`
+    } else {
+      const years = Math.floor(diffDays / 365)
+      const remainingMonths = Math.floor((diffDays % 365) / 30)
+      if (remainingMonths === 0) {
+        return `${years} year${years !== 1 ? 's' : ''}`
+      }
+      return `${years} year${years !== 1 ? 's' : ''}, ${remainingMonths} month${remainingMonths !== 1 ? 's' : ''}`
+    }
+  }
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -161,16 +216,17 @@ function ManagerHistoryPopover({ manager_history, users, children }: {
         <div className="space-y-3">
           <h4 className="font-semibold text-gray-900 flex items-center gap-2">
             <UserIcon className="h-4 w-4" />
-            Manager History
+            Manager History ({sortedHistory.length} assignment{sortedHistory.length !== 1 ? 's' : ''})
           </h4>
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {sortedHistory.map((manager, index) => {
               const user = users.find(u => u.id === manager.id)
               const isCurrent = !manager.end_date
+              const duration = getAssignmentDuration(manager)
               
               return (
-                <div key={index} className={`p-2 rounded border ${isCurrent ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
-                  <div className="flex items-center justify-between">
+                <div key={index} className={`p-3 rounded border ${isCurrent ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+                  <div className="flex items-center justify-between mb-2">
                     <div>
                       <p className="font-medium text-gray-900">{user?.name || 'Unknown Manager'}</p>
                       <p className="text-xs text-gray-500">{user?.email}</p>
@@ -179,11 +235,21 @@ function ManagerHistoryPopover({ manager_history, users, children }: {
                       <Badge variant="default" className="bg-green-500">Current</Badge>
                     )}
                   </div>
-                  <div className="mt-1 text-xs text-gray-600">
-                    <p>Started: {new Date(manager.start_date).toLocaleDateString()}</p>
+                  <div className="text-xs text-gray-600 space-y-1">
+                    <div className="flex justify-between">
+                      <span>Started:</span>
+                      <span className="font-medium">{new Date(manager.start_date).toLocaleDateString()}</span>
+                    </div>
                     {manager.end_date && (
-                      <p>Ended: {new Date(manager.end_date).toLocaleDateString()}</p>
+                      <div className="flex justify-between">
+                        <span>Ended:</span>
+                        <span className="font-medium">{new Date(manager.end_date).toLocaleDateString()}</span>
+                      </div>
                     )}
+                    <div className="flex justify-between">
+                      <span>Duration:</span>
+                      <span className="font-medium text-blue-600">{duration}</span>
+                    </div>
                   </div>
                 </div>
               )
@@ -208,6 +274,32 @@ function AssistantHistoryPopover({ assistant_history, users, children }: {
     new Date(b.start_date).getTime() - new Date(a.start_date).getTime()
   )
 
+  const getAssignmentDuration = (history: AssistantHistory): string => {
+    const startDate = new Date(history.start_date)
+    const endDate = history.end_date ? new Date(history.end_date) : new Date()
+    
+    const diffTime = Math.abs(endDate.getTime() - startDate.getTime())
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    
+    if (diffDays < 30) {
+      return `${diffDays} day${diffDays !== 1 ? 's' : ''}`
+    } else if (diffDays < 365) {
+      const months = Math.floor(diffDays / 30)
+      return `${months} month${months !== 1 ? 's' : ''}`
+    } else {
+      const years = Math.floor(diffDays / 365)
+      const remainingMonths = Math.floor((diffDays % 365) / 30)
+      if (remainingMonths === 0) {
+        return `${years} year${years !== 1 ? 's' : ''}`
+      }
+      return `${years} year${years !== 1 ? 's' : ''}, ${remainingMonths} month${remainingMonths !== 1 ? 's' : ''}`
+    }
+  }
+
+  // Group assistants by current/historical status
+  const currentAssistants = sortedHistory.filter(a => !a.end_date)
+  const historicalAssistants = sortedHistory.filter(a => a.end_date)
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -219,33 +311,78 @@ function AssistantHistoryPopover({ assistant_history, users, children }: {
         <div className="space-y-3">
           <h4 className="font-semibold text-gray-900 flex items-center gap-2">
             <Users className="h-4 w-4" />
-            Assistant History
+            Assistant History ({sortedHistory.length} assignment{sortedHistory.length !== 1 ? 's' : ''})
           </h4>
-          <div className="space-y-2 max-h-64 overflow-y-auto">
-            {sortedHistory.map((assistant, index) => {
-              const user = users.find(u => u.id === assistant.id)
-              const isCurrent = !assistant.end_date
-              
-              return (
-                <div key={index} className={`p-2 rounded border ${isCurrent ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-gray-900">{user?.name || 'Unknown Assistant'}</p>
-                      <p className="text-xs text-gray-500">{user?.email}</p>
-                    </div>
-                    {isCurrent && (
-                      <Badge variant="default" className="bg-green-500">Current</Badge>
-                    )}
-                  </div>
-                  <div className="mt-1 text-xs text-gray-600">
-                    <p>Started: {new Date(assistant.start_date).toLocaleDateString()}</p>
-                    {assistant.end_date && (
-                      <p>Ended: {new Date(assistant.end_date).toLocaleDateString()}</p>
-                    )}
-                  </div>
+          <div className="space-y-3 max-h-64 overflow-y-auto">
+            {currentAssistants.length > 0 && (
+              <div>
+                <h5 className="text-sm font-medium text-green-700 mb-2">Current Assistants</h5>
+                <div className="space-y-2">
+                  {currentAssistants.map((assistant, index) => {
+                    const user = users.find(u => u.id === assistant.id)
+                    const duration = getAssignmentDuration(assistant)
+                    
+                    return (
+                      <div key={index} className="p-3 rounded border bg-green-50 border-green-200">
+                        <div className="flex items-center justify-between mb-2">
+                          <div>
+                            <p className="font-medium text-gray-900">{user?.name || 'Unknown Assistant'}</p>
+                            <p className="text-xs text-gray-500">{user?.email}</p>
+                          </div>
+                          <Badge variant="default" className="bg-green-500">Current</Badge>
+                        </div>
+                        <div className="text-xs text-gray-600 space-y-1">
+                          <div className="flex justify-between">
+                            <span>Started:</span>
+                            <span className="font-medium">{new Date(assistant.start_date).toLocaleDateString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Duration:</span>
+                            <span className="font-medium text-blue-600">{duration}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
-              )
-            })}
+              </div>
+            )}
+
+            {historicalAssistants.length > 0 && (
+              <div>
+                <h5 className="text-sm font-medium text-gray-700 mb-2">Previous Assistants</h5>
+                <div className="space-y-2">
+                  {historicalAssistants.map((assistant, index) => {
+                    const user = users.find(u => u.id === assistant.id)
+                    const duration = getAssignmentDuration(assistant)
+                    
+                    return (
+                      <div key={index} className="p-3 rounded border bg-gray-50 border-gray-200">
+                        <div className="mb-2">
+                          <p className="font-medium text-gray-900">{user?.name || 'Unknown Assistant'}</p>
+                          <p className="text-xs text-gray-500">{user?.email}</p>
+                        </div>
+                        <div className="text-xs text-gray-600 space-y-1">
+                          <div className="flex justify-between">
+                            <span>Started:</span>
+                            <span className="font-medium">{new Date(assistant.start_date).toLocaleDateString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Ended:</span>
+                            <span className="font-medium">{new Date(assistant.end_date!).toLocaleDateString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Duration:</span>
+                            <span className="font-medium text-blue-600">{duration}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {sortedHistory.length === 0 && (
               <p className="text-gray-500 text-sm">No assistant history available</p>
             )}
@@ -601,22 +738,34 @@ export default function Departments() {
 
     let officers_history = currentDept?.officers_history || [];
 
-    // If officer assignment changed, update the history
-    const currentOfficer = getCurrentOfficer(officers_history);
-    if (departmentForm.officerId !== currentOfficer?.id) {
-      // End current officer assignment
-      officers_history = officers_history.map(officer => 
-        !officer.end_date ? { ...officer, end_date: new Date().toISOString() } : officer
-      );
+    // Get current officers that don't have an end date
+    const currentOfficers = officers_history.filter(officer => !officer.end_date);
+    
+    // Find officers that were removed
+    const removedOfficers = currentOfficers.filter(
+      officer => !departmentForm.officerIds?.includes(officer.id)
+    );
+    
+    // Find newly added officers
+    const newOfficers = departmentForm.officerIds?.filter(
+      id => !currentOfficers.some(officer => officer.id === id)
+    ) || [];
 
-      // Add new officer if selected
-      if (departmentForm.officerId) {
-        officers_history.push({
-          id: departmentForm.officerId,
-          start_date: new Date().toISOString()
-        });
+    // Update history for removed officers
+    officers_history = officers_history.map(officer => {
+      if (removedOfficers.some(removed => removed.id === officer.id && !officer.end_date)) {
+        return { ...officer, end_date: new Date().toISOString() };
       }
-    }
+      return officer;
+    });
+
+    // Add new officers to history
+    newOfficers.forEach(officerId => {
+      officers_history.push({
+        id: officerId,
+        start_date: new Date().toISOString()
+      });
+    });
 
     // Update the department
     const { error: updateError } = await supabase
@@ -689,8 +838,6 @@ export default function Departments() {
         name: subdept.name.trim(),
         description: subdept.description,
         department_id: editingDepartmentId,
-        task_manager: subdept.taskManagerId || null,
-        task_assistant: subdept.taskAssistantIds.filter(id => id !== ''),
         default_display: subdept.default_display,
         order: nextOrder,
         manager_history,
@@ -724,7 +871,7 @@ export default function Departments() {
     // Get current subdepartment to find its department_id and existing history
     const { data: currentSubdept } = await supabase
       .from('tm_subdepartments')
-      .select('department_id, manager_history, assistant_history, task_manager, task_assistant')
+      .select('department_id, manager_history, assistant_history')
       .eq('id', editingSubdepartmentId)
       .single();
 
@@ -793,8 +940,6 @@ export default function Departments() {
       .update({
         name: subdept.name.trim(),
         description: subdept.description,
-        task_manager: subdept.taskManagerId || null,
-        task_assistant: newAssistantIds,
         default_display: subdept.default_display,
         manager_history,
         assistant_history,
@@ -850,8 +995,6 @@ export default function Departments() {
           name: subdept.name.trim(),
           description: subdept.description,
           department_id: departmentId,
-          task_manager: subdept.taskManagerId || null,
-          task_assistant: subdept.taskAssistantIds.filter(id => id !== ''),
           default_display: subdept.default_display,
           order: i + 1,
           manager_history,

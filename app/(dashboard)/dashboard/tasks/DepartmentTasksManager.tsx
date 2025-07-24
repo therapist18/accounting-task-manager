@@ -53,6 +53,7 @@ const ENHANCED_TABLE_HEADERS = [
   { id: 'id', label: 'Task ID', default: true, width: 'w-20' },
   { id: 'applicant_name', label: 'Applicant Name', default: true, width: 'w-48' },
   { id: 'current_immigration_status', label: 'Current Immigration Status', default: true, width: 'w-64' },
+  { id: 'current_stage_status', label: 'Current Stage Status', default: true, width: 'w-48' }, // NEW: Added current stage status
   { id: 'company_name', label: 'Company Name', default: true, width: 'w-48' },
   { id: 'job_level', label: 'Job Level', default: true, width: 'w-32' },
   { id: 'renewal_new', label: 'Renewal/New', default: false, width: 'w-28' },
@@ -133,25 +134,46 @@ export default function DepartmentTasksManager({
     users: true
   })
 
-  // NEW LOGIC: This function now ONLY returns a document if it's explicitly linked in `source_document_id`.
-  // This enforces the new workflow where documents must be linked to be displayed.
+  // UPDATED: This function now ONLY returns a document if it's explicitly linked in `source_document_id`.
   const getDocumentForTaskStage = useCallback((
     task: UtilTask,
     stage: { id: string; documents?: { kycId: string }[] },
   ): Document | undefined => {
+    console.log('🔍 getDocumentForTaskStage called for:', {
+      taskId: task.id,
+      stageId: stage.id,
+      stageName: stages.find(s => s.id === stage.id)?.name,
+      sourceDocumentId: task.source_document_id
+    });
+
     // 1. Check for a specifically linked source document for this stage
-    const linkedDocumentId = task.source_document_id?.[stage.id];
-    if (linkedDocumentId) {
+    const linkedDocumentData = task.source_document_id?.[stage.id];
+    console.log('🔗 Linked document data for stage:', linkedDocumentData);
+
+    if (linkedDocumentData) {
+      // Handle both old format (string ID) and new format (object with id and document_id)
+      const documentId = typeof linkedDocumentData === 'string' 
+        ? linkedDocumentData 
+        : linkedDocumentData.id;
+
+      console.log('📄 Looking for document with ID:', documentId);
+
       // Find the document instance from allDocuments by its unique ID
-      const linkedDoc = allDocuments.find(doc => doc.id === linkedDocumentId);
+      const linkedDoc = allDocuments.find(doc => doc.id === documentId);
+      console.log('📄 Found linked document:', linkedDoc ? {
+        id: linkedDoc.id,
+        document_id: linkedDoc.document_id,
+        file_path: linkedDoc.file_path,
+        created_at: linkedDoc.created_at
+      } : null);
+
       return linkedDoc;
     }
 
+    console.log('❌ No linked document found for this stage');
     // 2. If no document is linked for this stage, return undefined.
-    // The UI will now only show documents that are explicitly linked.
     return undefined;
-  }, [allDocuments]);
-
+  }, [allDocuments, stages]);
 
   // NEW: Function to fetch tm_users data
   const fetchTmUsers = useCallback(async () => {
@@ -162,6 +184,8 @@ export default function DepartmentTasksManager({
 
       if (error) throw error
 
+      console.log('📋 Fetched tm_users data:', data);
+
       const usersMap = new Map()
       data?.forEach(user => {
         const displayName = user.full_name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email
@@ -171,6 +195,7 @@ export default function DepartmentTasksManager({
         })
       })
 
+      console.log('👥 Processed tm_users map:', Array.from(usersMap.values()));
       setTmUsers(usersMap)
       return usersMap
     } catch (error) {
@@ -249,6 +274,18 @@ export default function DepartmentTasksManager({
         fetchTasks(departmentId, subdepartmentId),
         departmentId ? fetchStages(departmentId, departments) : Promise.resolve([])
       ])
+
+      console.log('📊 Loaded tasks data:', {
+        tasksCount: tasksData.length,
+        stagesCount: stagesData.length,
+        sampleTask: tasksData[0] ? {
+          id: tasksData[0].id,
+          applicant_name: tasksData[0].applicant_name,
+          source_document_id: tasksData[0].source_document_id,
+          stages: tasksData[0].stages,
+          current_stage_id: tasksData[0].current_stage_id
+        } : null
+      });
 
       setTasks(tasksData)
       setDataLoading(prev => ({ ...prev, tasks: false }))
@@ -417,34 +454,55 @@ export default function DepartmentTasksManager({
     })
   }
 
-  // 4. Enhanced current stage determination logic
+  // UPDATED: Enhanced current stage determination logic to consider linked documents
   const determineCurrentStage = useCallback((task: any, stages: any[]) => {
-    if (!task.stages || !stages.length) return null
+    console.log('🎯 Determining current stage for task:', {
+      taskId: task.id,
+      applicantName: task.applicant_name,
+      currentStageId: task.current_stage_id,
+      sourceDocumentId: task.source_document_id,
+      taskStages: task.stages
+    });
+
+    if (!task.stages || !stages.length) {
+      console.log('❌ No task stages or stages data available');
+      return null;
+    }
 
     // Get applicable stages in order
     const applicableStages = stages
       .filter(stage => isStageApplicableToTask(stage, task))
       .sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
 
-    // NEW: Find the last stage that has either a document or a date
+    console.log('📋 Applicable stages:', applicableStages.map(s => ({ id: s.id, name: s.name, order: s.order_num })));
+
+    // Find the last stage that has either a LINKED document or a date
     let lastStageWithEvidence = null
     let currentStage = null
 
     for (const stage of applicableStages) {
       const stageStatus = task.stages[stage.id]
 
-      // Check if this stage has a LINKED document
-      const hasDocument = !!getDocumentForTaskStage(task, stage);
+      // Check if this stage has a LINKED document using the updated function
+      const hasLinkedDocument = !!getDocumentForTaskStage(task, stage);
 
       // Check if this stage has a date
       const hasDate = stageStatus && (stageStatus.status === 'completed' || stageStatus.date)
 
-      if (hasDocument || hasDate) {
+      console.log(`🔍 Stage ${stage.name}:`, {
+        hasLinkedDocument,
+        hasDate,
+        stageStatus,
+        linkedDocId: task.source_document_id?.[stage.id]
+      });
+
+      if (hasLinkedDocument || hasDate) {
         lastStageWithEvidence = stage
+        console.log(`✅ Found evidence in stage: ${stage.name}`);
       }
     }
 
-    // If we found a stage with evidence, use it as current stage
+    // If we found a stage with evidence, determine current stage
     if (lastStageWithEvidence) {
       const lastStageIndex = applicableStages.findIndex(s => s.id === lastStageWithEvidence.id)
 
@@ -452,13 +510,16 @@ export default function DepartmentTasksManager({
       // or the last stage with evidence if it's the final stage
       if (lastStageIndex < applicableStages.length - 1) {
         currentStage = applicableStages[lastStageIndex + 1]
+        console.log(`➡️ Current stage is next stage: ${currentStage.name}`);
       } else {
         currentStage = lastStageWithEvidence
+        console.log(`🏁 Current stage is final stage: ${currentStage.name}`);
       }
     }
 
     // Fallback to the original logic if no evidence found
     if (!currentStage) {
+      console.log('🔄 Using fallback logic');
       for (const stage of applicableStages) {
         const stageStatus = task.stages[stage.id]
 
@@ -482,10 +543,30 @@ export default function DepartmentTasksManager({
     // Final fallback to database value
     if (!currentStage && task.current_stage_id) {
       currentStage = stages.find(s => s.id === task.current_stage_id)
+      console.log('💾 Using database current stage:', currentStage?.name);
     }
 
+    console.log('🎯 Final determined current stage:', currentStage?.name);
     return currentStage
   }, [isStageApplicableToTask, getDocumentForTaskStage])
+
+  // NEW: Get current stage status for a task
+  const getCurrentStageStatus = useCallback((task: UtilTask) => {
+    const currentStage = determineCurrentStage(task, stages);
+    if (!currentStage) {
+      return {
+        stageName: 'No Stage',
+        stageStatus: 'N/A',
+        stageFollowUp: null
+      };
+    }
+
+    return {
+      stageName: currentStage.name,
+      stageStatus: currentStage.status || 'Pending',
+      stageFollowUp: currentStage.follow_up || null
+    };
+  }, [determineCurrentStage, stages]);
 
   const getEnhancedImmigrationStatus = useCallback((task: UtilTask) => {
     const statusStageId = "072b9710-45df-4a05-ba65-01b4ef29d61d";
@@ -648,8 +729,56 @@ export default function DepartmentTasksManager({
     );
   }, [getEnhancedImmigrationStatus, expandedImmigrationStatus, toggleImmigrationStatusExpansion]);
 
+  // NEW: Render current stage status cell
+  const renderCurrentStageStatusCell = useCallback((task: any) => {
+    const stageStatusInfo = getCurrentStageStatus(task);
+    
+    const getStatusBadgeColor = (status: string) => {
+      switch (status.toLowerCase()) {
+        case 'completed': return 'bg-green-100 text-green-800 border-green-300';
+        case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+        case 'in_progress': return 'bg-blue-100 text-blue-800 border-blue-300';
+        case 'to enquire': return 'bg-purple-100 text-purple-800 border-purple-300';
+        case 'to raise bill': return 'bg-orange-100 text-orange-800 border-orange-300';
+        default: return 'bg-slate-100 text-slate-600 border-slate-300';
+      }
+    };
 
-  // NEW: Enhanced handleStageStatusSave that updates current_stage
+    const getFollowUpBadgeColor = (followUp: string) => {
+      switch (followUp?.toLowerCase()) {
+        case 'bcl': return 'bg-blue-100 text-blue-800 border-blue-300';
+        case 'officer': return 'bg-green-100 text-green-800 border-green-300';
+        case 'client': return 'bg-purple-100 text-purple-800 border-purple-300';
+        default: return 'bg-slate-100 text-slate-600 border-slate-300';
+      }
+    };
+
+    return (
+      <div className="space-y-2">
+        <div className="flex flex-col gap-2">
+          <Badge
+            variant="outline"
+            className={`whitespace-normal text-xs ${getStatusBadgeColor(stageStatusInfo.stageStatus)}`}
+          >
+            {stageStatusInfo.stageStatus}
+          </Badge>
+          {stageStatusInfo.stageFollowUp && (
+            <Badge
+              variant="outline"
+              className={`whitespace-normal text-xs ${getFollowUpBadgeColor(stageStatusInfo.stageFollowUp)}`}
+            >
+              Follow-up: {stageStatusInfo.stageFollowUp}
+            </Badge>
+          )}
+        </div>
+        <div className="text-xs text-slate-600 text-center">
+          Stage: {stageStatusInfo.stageStatus}
+        </div>
+      </div>
+    );
+  }, [getCurrentStageStatus]);
+
+  // UPDATED: Enhanced handleStageStatusSave that updates current_stage
   const enhancedHandleStageStatusSave = useCallback(async (
     stageId: string,
     taskId: string,
@@ -657,6 +786,13 @@ export default function DepartmentTasksManager({
     updatedExtractedDetails?: Record<string, any>
   ) => {
     try {
+      console.log('💾 Saving stage status:', {
+        stageId,
+        taskId,
+        value,
+        updatedExtractedDetails
+      });
+
       // Call the original save function
       if (handleStageStatusSave) {
         await handleStageStatusSave(stageId, taskId, value, updatedExtractedDetails)
@@ -679,6 +815,8 @@ export default function DepartmentTasksManager({
       // Determine the new current stage
       const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages)
 
+      console.log('🎯 New current stage determined:', currentStage?.name);
+
       // Update the database
       const updateData: any = {
         stages: updatedStages,
@@ -700,7 +838,7 @@ export default function DepartmentTasksManager({
       // Refresh data
       await loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
 
-      console.log('Stage status and current stage updated successfully')
+      console.log('✅ Stage status and current stage updated successfully')
 
     } catch (error) {
       console.error('Error updating stage status and current stage:', error)
@@ -865,19 +1003,31 @@ export default function DepartmentTasksManager({
     setIsStageUploadDialogOpen(true)
   }, [departments])
 
+  // UPDATED: Only handle view for LINKED documents
   const handleViewDocument = useCallback(async (task: any, stage: any) => {
     try {
-      // THIS NOW USES THE NEW LOGIC, so it gets the LINKED document
+      console.log('👀 handleViewDocument called with:', { taskId: task.id, stageId: stage.id });
+
+      // Use the updated function to get LINKED document ONLY
       const document = getDocumentForTaskStage(task, stage);
 
       if (!document) {
+        console.log('❌ No linked document found');
         toast({
           title: 'No Linked Document',
-          description: `No document has been linked for this stage yet. Please use the 'Link' button on the applicant row.`,
+          description: `No document has been linked for this stage yet. Please use the 'Link' button to link a document first.`,
           variant: 'default',
         });
         return;
       }
+
+      console.log('📄 Found linked document:', {
+        id: document.id,
+        document_id: document.document_id,
+        file_path: document.file_path,
+        indicator: document.indicator
+      });
+
       if (document.indicator === true) {
         toast({
           title: 'Preview not available',
@@ -960,6 +1110,8 @@ export default function DepartmentTasksManager({
       const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
       const fileName = document.file_path?.split('/').pop() || documentName;
 
+      console.log('🔗 Generated file URL:', fileUrl);
+
       // Prepare preview data
       const previewData = {
         documentId: document.id,
@@ -986,7 +1138,6 @@ export default function DepartmentTasksManager({
       });
     }
   }, [getDocumentForTaskStage, kycDocuments]);
-
 
   // Handle new enquiry creation
   const handleEnquiryCreated = useCallback(async (newEnquiry: any) => {
@@ -1061,17 +1212,26 @@ export default function DepartmentTasksManager({
     return filteredTasks
   }, [tasks, departments, activeDepartmentTab, activeSubdepartmentTab])
 
-  // Filter WIP tasks by follow-up
+  // UPDATED: Filter WIP tasks by follow-up using Smart Current Stage Detection (ALREADY IMPLEMENTED CORRECTLY)
   const getWIPTasksByFollowUp = useCallback((followUpFilter: string) => {
     const wipTasks = getFilteredTasks('in_progress')
     if (followUpFilter === 'all') return wipTasks
 
     return wipTasks.filter(task => {
-      if (!task.current_stage_id) return false
-      const currentStage = stages.find(s => s.id === task.current_stage_id)
+      // Use Smart Current Stage Detection instead of database current_stage_id
+      const currentStage = determineCurrentStage(task, stages)
       if (!currentStage) return false
 
       const stageFollowUp = currentStage.follow_up?.toLowerCase() || null
+
+      console.log(`🏷️ Task ${task.id} follow-up filtering:`, {
+        taskId: task.id,
+        applicantName: task.applicant_name,
+        determinedCurrentStage: currentStage.name,
+        stageFollowUp,
+        filterRequested: followUpFilter,
+        matches: stageFollowUp === followUpFilter
+      });
 
       switch (followUpFilter) {
         case 'bcl':
@@ -1084,7 +1244,7 @@ export default function DepartmentTasksManager({
           return true
       }
     })
-  }, [getFilteredTasks, stages])
+  }, [getFilteredTasks, stages, determineCurrentStage])
 
   // Global search functionality
   const filterTasksBySearch = useCallback((tasks: any[]) => {
@@ -1134,8 +1294,35 @@ export default function DepartmentTasksManager({
   const completedTasks = useMemo(() => filterTasksBySearch(getFilteredTasks('completed')), [getFilteredTasks, filterTasksBySearch])
 
   // Task actions handlers
-  const handleTaskEdit = (task: any) => { setEditingTask(task); setEditDialogOpen(true) }
-  const handleTaskUpdate = (updatedTask: any) => { onTaskUpdate?.(updatedTask); setEditDialogOpen(false); setEditingTask(null) }
+  const handleTaskEdit = (task: any) => { 
+    console.log('✏️ Opening edit dialog for task:', {
+      id: task.id,
+      applicant_name: task.applicant_name,
+      department_id: task.department_id,
+      subdepartment_id: task.subdepartment_id,
+      class_id: task.class_id,
+      subclass_id: task.subclass_id,
+      task_manager_id: task.task_manager_id,
+      officer_id: task.officer_id,
+      task_assistant_id: task.task_assistant_id,
+      status: task.status,
+      renewal_status: task.renewal_status,
+      nationality: task.nationality,
+      age: task.age,
+      job_description: task.job_description
+    });
+    setEditingTask(task); 
+    setEditDialogOpen(true) 
+  }
+
+  const handleTaskUpdate = (updatedTask: any) => { 
+    console.log('💾 Task update callback received:', updatedTask);
+    onTaskUpdate?.(updatedTask); 
+    setEditDialogOpen(false); 
+    setEditingTask(null);
+    // Refresh the tasks data to see the changes
+    loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+  }
 
   // Export to CSV
   const handleExport = useCallback((tasks: any[], tableType: string) => {
@@ -1189,6 +1376,7 @@ export default function DepartmentTasksManager({
       setIsPushingCase(false)
     }
   }, [refreshAllData])
+
   // Handler to download all documents for a user as a ZIP file
   const handleDownloadZip = useCallback(async (task: UtilTask) => {
     setIsDownloading(true)
@@ -1426,6 +1614,15 @@ export default function DepartmentTasksManager({
           getValue: (task: any) => task // Pass the whole task for complex rendering
         })
       }
+      // NEW: Add current stage status row
+      if (visibleHeaders.has('current_stage_status')) {
+        rows.push({
+          key: 'current_stage_status',
+          label: 'Current Stage Status',
+          type: 'current_stage_status',
+          getValue: (task: any) => task // Pass the whole task for complex rendering
+        })
+      }
       if (visibleHeaders.has('company_name')) {
         rows.push({ key: 'company_name', label: 'Company Name', type: 'basic', getValue: (task: any) => companies.get(task.company_id) || 'N/A' })
       }
@@ -1487,23 +1684,24 @@ export default function DepartmentTasksManager({
               getValue: (task: UtilTask) => {
                 if (!isStageApplicableToTask(stage, task)) return 'N/A';
 
-                const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] }, allDocuments);
-                const isOldDoc = document && task.created_at &&
-                  isDocumentOlderThanTask(document.created_at, task.created_at);
-                const hasIndicator = document?.indicator === true;
+                // UPDATED: Use the new function to get linked document ONLY
+                const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
+                const isOldDoc = linkedDocument && task.created_at &&
+                  isDocumentOlderThanTask(linkedDocument.created_at, task.created_at);
+                const hasIndicator = linkedDocument?.indicator === true;
 
                 return {
-                  hasDocument: !!document,
+                  hasDocument: !!linkedDocument,
                   isOldDocument: isOldDoc,
                   hasIndicator,
                   status: hasIndicator ? 'Preview Not Available' :
                     isOldDoc ? 'Old Document - No Preview' :
-                      (document ? 'Uploaded' : 'Not Uploaded')
+                      (linkedDocument ? 'Linked' : 'Not Linked')
                 };
               }
             })
 
-            // Only show fields if document is expanded AND it does not have an indicator AND is not old
+            // Only show fields if document is expanded AND has a linked document AND it does not have an indicator AND is not old
             if (expandedDocuments.has(doc.id) && doc.kycId) {
               const kycFields = await getKycFields(doc);
               if (kycFields && kycFields.length > 0) {
@@ -1519,10 +1717,12 @@ export default function DepartmentTasksManager({
                     isSubSubRow: true,
                     getValue: (task: UtilTask) => {
                       if (!isStageApplicableToTask(stage, task)) return 'N/A'
-                      const document = getDocumentForTaskStage(task, { ...stage, documents: [doc] }, allDocuments)
+                      
+                      // UPDATED: Use linked document ONLY
+                      const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
 
-                      if (!document || !document.extracted_details || document.indicator === true) return 'N/A'
-                      const value = document.extracted_details[field.fieldName] || document.extracted_details[field.id] || 'N/A'
+                      if (!linkedDocument || !linkedDocument.extracted_details || linkedDocument.indicator === true) return 'N/A'
+                      const value = linkedDocument.extracted_details[field.fieldName] || linkedDocument.extracted_details[field.id] || 'N/A'
                       return { value }
                     }
                   })
@@ -1541,7 +1741,7 @@ export default function DepartmentTasksManager({
     }
 
     return rows
-  }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleHeaders, visibleStats, kycDocuments, allDocuments, visibleStageIds, getUserDisplayName])
+  }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleHeaders, visibleStats, kycDocuments, allDocuments, visibleStageIds, getUserDisplayName, getDocumentForTaskStage])
 
   // Enhanced render cell content for transposed view
   const renderCellContent = useCallback((row: any, task: any) => {
@@ -1549,6 +1749,11 @@ export default function DepartmentTasksManager({
 
     if (row.type === 'immigration_status') {
       return renderImmigrationStatusCell(task);
+    }
+
+    // NEW: Handle current stage status rendering
+    if (row.type === 'current_stage_status') {
+      return renderCurrentStageStatusCell(task);
     }
 
     if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
@@ -1592,8 +1797,6 @@ export default function DepartmentTasksManager({
     }
 
     switch (row.type) {
-      case 'immigration_status':
-        return renderImmigrationStatusCell(task);
       case 'basic': return <span className="text-sm font-medium text-slate-800">{value}</span>;
       case 'badge': return <Badge variant={value === 'completed' ? 'default' : value === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{value}</Badge>;
       case 'date': return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
@@ -1618,11 +1821,12 @@ export default function DepartmentTasksManager({
           <div className="flex items-center gap-2 justify-center">
             <Badge
               variant={docValue.hasDocument ? 'default' : 'outline'}
-  className="text-xs"
+              className="text-xs"
             >
               {docValue.status}
             </Badge>
-            {docValue.hasDocument && !docValue.hasIndicator && (
+            {/* UPDATED: Only show Eye button for LINKED documents */}
+            {docValue.hasDocument && !docValue.hasIndicator && !docValue.isOldDocument && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -1660,7 +1864,7 @@ export default function DepartmentTasksManager({
       )
       default: return <span className="text-sm text-slate-800">{value}</span>
     }
-  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, renderImmigrationStatusCell, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading])
+  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, renderImmigrationStatusCell, renderCurrentStageStatusCell, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading])
 
   // State for enhanced table rendering
   const [tableRows, setTableRows] = useState([]);
@@ -1848,6 +2052,7 @@ export default function DepartmentTasksManager({
             <TableRow className="h-12">
               <SortableHeader rowSpan={2} sortKey="applicant_name" className="sticky left-0 bg-blue-600 border-r border-slate-300 w-[200px] z-30 text-white font-semibold p-2 cursor-pointer hover:bg-blue-700">Applicant</SortableHeader>
               <SortableHeader rowSpan={2} sortKey="current_immigration_status" className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[200px] cursor-pointer hover:bg-blue-700">Immigration Status</SortableHeader>
+              <SortableHeader rowSpan={2} sortKey="current_stage_status" className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[200px] cursor-pointer hover:bg-blue-700">Current Stage Status</SortableHeader>
               <SortableHeader rowSpan={2} sortKey="company_name" className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[180px] cursor-pointer hover:bg-blue-700">Company</SortableHeader>
               <SortableHeader rowSpan={2} sortKey="status" className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[100px] cursor-pointer hover:bg-blue-700">Status</SortableHeader>
               <TableHead colSpan={totalStageColumns} className="bg-blue-600 border-r border-slate-300 text-white text-center font-bold px-2">
@@ -1965,11 +2170,15 @@ export default function DepartmentTasksManager({
                   <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle">
                     {renderImmigrationStatusCell(task)}
                   </TableCell>
+                  {/* NEW: Current Stage Status cell */}
+                  <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle">
+                    {renderCurrentStageStatusCell(task)}
+                  </TableCell>
                   <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle"><div className="max-w-[160px] mx-auto truncate" title={companies.get(task.company_id)}>{companies.get(task.company_id) || 'N/A'}</div></TableCell>
                   <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle"><Badge variant={task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{task.status || 'pending'}</Badge></TableCell>
 
                   {visibleStages.map(stage => {
-                    const document = getDocumentForTaskStage(task, stage);
+                    // UPDATED: Check if this stage is applicable to the task
                     if (!isStageApplicableToTask(stage, task)) {
                       let stageCols = 1;
                       if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
@@ -1989,8 +2198,19 @@ export default function DepartmentTasksManager({
                     }
 
                     return stage.documents.map(doc => {
-                      // This now gets the single linked document, or undefined
+                      // UPDATED: Get the linked document for this specific stage/document type
                       const linkedDocumentForType = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
+
+                      console.log(`📋 Standard table cell for stage ${stage.name}, doc ${doc.kycId}:`, {
+                        taskId: task.id,
+                        stageId: stage.id,
+                        docKycId: doc.kycId,
+                        linkedDocument: linkedDocumentForType ? {
+                          id: linkedDocumentForType.id,
+                          document_id: linkedDocumentForType.document_id,
+                          file_path: linkedDocumentForType.file_path
+                        } : null
+                      });
 
                       const isOldDoc = linkedDocumentForType && task.created_at &&
                         isDocumentOlderThanTask(linkedDocumentForType.created_at, task.created_at)
@@ -2056,7 +2276,7 @@ export default function DepartmentTasksManager({
         </Table>
       </div>
     )
-  }, [stages, dataLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, isDocumentApplicableToTask, visibleStageIds, sortConfig, enhancedHandleStageStatusSave, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getDocumentForTaskStage, renderImmigrationStatusCell, getSortedTasks])
+  }, [stages, dataLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, isDocumentApplicableToTask, visibleStageIds, sortConfig, enhancedHandleStageStatusSave, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getDocumentForTaskStage, renderImmigrationStatusCell, renderCurrentStageStatusCell, getSortedTasks])
 
   const renderEnhancedTransposedTable = useCallback((tasks: any[], tableType: string) => {
     if (!tasks.length) {
@@ -2089,10 +2309,10 @@ export default function DepartmentTasksManager({
             <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
               {/* Row 1: Task IDs */}
               <TableRow className="border-b-2 border-slate-400">
-                <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-20" rowSpan={6}>
+                <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-20" rowSpan={7}>
                   Order
                 </TableHead>
-                <TableHead className="sticky left-20 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-[300px]" rowSpan={6}>
+                <TableHead className="sticky left-20 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-[300px]" rowSpan={7}>
                   Fields
                 </TableHead>
                 {headerStructure.map((item, index) => (
@@ -2162,7 +2382,23 @@ export default function DepartmentTasksManager({
                 })}
               </TableRow>
 
-              {/* Row 4: Company Names */}
+              {/* NEW: Row 4: Current Stage Status */}
+              <TableRow className="border-b-2 border-slate-400 bg-slate-50 text-slate-700">
+                {headerStructure.map((item, index) => {
+                  let stageStatusComponent = <span className="text-xs text-gray-400">-</span>;
+                  if (item.type === 'principal') {
+                    stageStatusComponent = renderCurrentStageStatusCell(item.task);
+                  }
+
+                  return (
+                    <TableHead key={`stage-status-${index}`} className={`font-medium min-w-[200px] text-center text-xs border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? '' : 'bg-orange-50'}`}>
+                      {stageStatusComponent}
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
+
+              {/* Row 5: Company Names */}
               <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
                 {headerStructure.map((item, index) => (
                   <TableHead key={`company-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
@@ -2173,7 +2409,7 @@ export default function DepartmentTasksManager({
                 ))}
               </TableRow>
 
-              {/* Row 5: Job Level */}
+              {/* Row 6: Job Level */}
               <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
                 {headerStructure.map((item, index) => (
                   <TableHead key={`job-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
@@ -2184,7 +2420,7 @@ export default function DepartmentTasksManager({
                 ))}
               </TableRow>
 
-              {/* Row 6: Current Stage (New) */}
+              {/* Row 7: Current Stage (Updated to show determined stage name only) */}
               <TableRow className="border-b-2 border-slate-400 bg-slate-100 text-slate-700">
                 {headerStructure.map((item, index) => {
                   let currentStageInfo = null;
@@ -2294,7 +2530,7 @@ export default function DepartmentTasksManager({
         </div>
       </div>
     )
-  }, [loading, error, tableRows, renderCellContent, expandedSections, expandedStages, expandedDocuments, expandedDependants, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies, toggleDependantsExpansion, getTaskHierarchy, getImmigrationStatus])
+  }, [loading, error, tableRows, renderCellContent, expandedSections, expandedStages, expandedDocuments, expandedDependants, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies, toggleDependantsExpansion, getTaskHierarchy, getImmigrationStatus, renderCurrentStageStatusCell, determineCurrentStage])
 
   const defaultSubdepartments = getDefaultSubdepartments()
 

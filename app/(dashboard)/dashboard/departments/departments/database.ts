@@ -199,7 +199,7 @@ export type DepartmentForm = {
   description: string
   default_display: boolean
   subdepartments: SubdepartmentForm[]
-  officerId?: string // Current officer for the department
+  officerIds: string[] // Array of officer IDs for the department
 }
 
 export async function fetchUsers(): Promise<User[]> {
@@ -248,15 +248,21 @@ export function getCurrentOfficer(officers_history: OfficerHistory[]): OfficerHi
 }
 
 // Helper function to get current manager from manager_history
-export function getCurrentManager(manager_history: ManagerHistory[]): ManagerHistory | null {
-  if (!manager_history || manager_history.length === 0) return null
+export function getCurrentManager(manager_history: ManagerHistory[] | undefined | null): ManagerHistory | null {
+  // Ensure manager_history is an array
+  const history = Array.isArray(manager_history) ? manager_history : [];
   
-  const currentManager = manager_history.find(manager => !manager.end_date)
-  if (currentManager) return currentManager
+  if (history.length === 0) return null;
   
-  return manager_history.reduce((latest, manager) => 
-    new Date(manager.start_date) > new Date(latest.start_date) ? manager : latest
-  )
+  const currentManager = history.find(manager => manager && !manager.end_date);
+  if (currentManager) return currentManager;
+  
+  // Safely handle the case where start_date might be missing or invalid
+  return history.reduce((latest, manager) => {
+    if (!manager || !manager.start_date) return latest || null;
+    if (!latest) return manager;
+    return new Date(manager.start_date) > new Date(latest.start_date) ? manager : latest;
+  }, null as ManagerHistory | null);
 }
 
 // Helper function to get current assistants from assistant_history
@@ -310,7 +316,7 @@ export async function assignManagerToSubdepartment(subdepartmentId: string, mana
     // Get current manager_history
     const { data: subdept, error: fetchError } = await supabase
       .from('tm_subdepartments')
-      .select('manager_history, task_manager')
+      .select('manager_history')
       .eq('id', subdepartmentId)
       .single()
 
@@ -353,7 +359,7 @@ export async function assignAssistantsToSubdepartment(subdepartmentId: string, a
     // Get current assistant_history
     const { data: subdept, error: fetchError } = await supabase
       .from('tm_subdepartments')
-      .select('assistant_history, task_assistant')
+      .select('assistant_history')
       .eq('id', subdepartmentId)
       .single()
 
@@ -851,5 +857,105 @@ export async function saveSubdepartmentRequirements(subdepartmentId: string, req
   } catch (error) {
     console.error('Error saving subdepartment requirements:', error);
     throw error;
+  }
+}
+export async function removeOfficerFromDepartment(departmentId: string): Promise<void> {
+  try {
+    // Get current officers_history
+    const { data: dept, error: fetchError } = await supabase
+      .from('tm_departments')
+      .select('officers_history')
+      .eq('id', departmentId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    const officers_history = dept?.officers_history || []
+    
+    // End current officer assignments
+    const updatedHistory = officers_history.map(officer => 
+      !officer.end_date ? { ...officer, end_date: new Date().toISOString() } : officer
+    )
+
+    // Update department
+    const { error: updateError } = await supabase
+      .from('tm_departments')
+      .update({ officers_history: updatedHistory })
+      .eq('id', departmentId)
+
+    if (updateError) throw updateError
+  } catch (error) {
+    console.error('Error removing officer from department:', error)
+    throw error
+  }
+}
+
+// Utility function to remove manager from subdepartment
+export async function removeManagerFromSubdepartment(subdepartmentId: string): Promise<void> {
+  try {
+    // Get current manager_history
+    const { data: subdept, error: fetchError } = await supabase
+      .from('tm_subdepartments')
+      .select('manager_history')
+      .eq('id', subdepartmentId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    const manager_history = subdept?.manager_history || []
+    
+    // End current manager assignments
+    const updatedHistory = manager_history.map(manager => 
+      !manager.end_date ? { ...manager, end_date: new Date().toISOString() } : manager
+    )
+
+    // Update subdepartment
+    const { error: updateError } = await supabase
+      .from('tm_subdepartments')
+      .update({ 
+        manager_history: updatedHistory,
+        task_manager: null
+      })
+      .eq('id', subdepartmentId)
+
+    if (updateError) throw updateError
+  } catch (error) {
+    console.error('Error removing manager from subdepartment:', error)
+    throw error
+  }
+}
+
+// Utility function to remove all assistants from subdepartment
+export async function removeAllAssistantsFromSubdepartment(subdepartmentId: string): Promise<void> {
+  try {
+    // Get current assistant_history
+    const { data: subdept, error: fetchError } = await supabase
+      .from('tm_subdepartments')
+      .select('assistant_history')
+      .eq('id', subdepartmentId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    const assistant_history = subdept?.assistant_history || []
+    
+    // End current assistant assignments
+    const updatedHistory = assistant_history.map(assistant => 
+      !assistant.end_date ? { ...assistant, end_date: new Date().toISOString() } : assistant
+    )
+
+    // Update subdepartment
+    const { error: updateError } = await supabase
+      .from('tm_subdepartments')
+      .update({ 
+        assistant_history: updatedHistory,
+        task_assistant: []
+      })
+      .eq('id', subdepartmentId)
+
+    if (updateError) throw updateError
+  } catch (error) {
+    console.error('Error removing assistants from subdepartment:', error)
+    throw error
   }
 }

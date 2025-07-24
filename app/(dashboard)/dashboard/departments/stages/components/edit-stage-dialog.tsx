@@ -119,6 +119,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
       setFormData({
         ...stage,
         description: stage.description || '',
+        status: stage.status || '',
         documents: (stage.documents || []).map(doc => ({
           ...doc,
           extractionSpecs: transformKycFields(doc.extractionSpecs)
@@ -244,7 +245,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => (prev ? { ...prev, [name]: value } : null));
   };
@@ -419,6 +420,13 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                     <Input
                       id="name" name="name" value={formData.name || ''}
                       onChange={handleInputChange} placeholder="e.g., Application Review" required
+                    />
+                  </FormField>
+                  <FormField label="Status" description="Current status of this stage (e.g., To Enquire)">
+                    <Input
+                      id="status" name="status" value={formData.status || ''}
+                      onChange={handleInputChange} placeholder="e.g., To Enquire"
+                      className="font-medium text-blue-600"
                     />
                   </FormField>
                   <Separator />

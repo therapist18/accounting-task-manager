@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardDescription, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ChevronDown, ChevronUp, Plus, Trash2, Layers, UserIcon, ChevronsUpDown, FolderPlus, Edit, Building, Workflow, Loader2, Shield } from "lucide-react"
+import { ChevronDown, ChevronUp, Plus, Trash2, Layers, UserIcon, ChevronsUpDown, FolderPlus, Edit, Building, Workflow, Loader2, Shield, X } from "lucide-react"
 import { Department, Subdepartment, Class, SubClass, Requirement, SubdepartmentForm, ClassForm, SubClassForm, RequirementForm, User, DepartmentForm } from "../database"
 import { updateNestedState } from "../page"
 
@@ -234,7 +234,7 @@ interface DepartmentDialogProps {
   departmentForm: DepartmentForm
   setDepartmentForm: React.Dispatch<React.SetStateAction<DepartmentForm>>
   users: User[]
-  officers: User[]
+  officerIds: string[] // Array of officer IDs
   editingDepartmentId?: string | null
   editingSubdepartmentId?: string | null
   isSaving: boolean
@@ -247,11 +247,15 @@ export default function DepartmentDialog({
   departmentForm,
   setDepartmentForm,
   users,
-  officers,
+  officers = [],
   editingDepartmentId,
   editingSubdepartmentId,
   isSaving
 }: DepartmentDialogProps) {
+  const [newOfficer, setNewOfficer] = React.useState<{ id: string; start_date: string; end_date?: string }>({ 
+    id: '', 
+    start_date: new Date().toISOString().split('T')[0] 
+  });
   const updateFormState = (path: string[], value: any) => 
     setDepartmentForm(prevState => updateNestedState(prevState, path, value));
 
@@ -357,27 +361,116 @@ export default function DepartmentDialog({
                     className="font-medium"
                   />
                 </div>
-                <div>
-                  <Label htmlFor="department-officer">Department Officer</Label>
-                  <Select
-                    value={departmentForm.officerId || ''}
-                    onValueChange={(value) => updateFormState(['officerId'], value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select department officer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">None</SelectItem>
-                      {officers.map((officer) => (
-                        <SelectItem key={officer.id} value={officer.id}>
+                <div className="space-y-2">
+                  <Label>Department Officers</Label>
+                  <div className="flex gap-2">
+                    <Select
+                      value={newOfficer.id}
+                      onValueChange={(value) => {
+                        const officer = officers.find(o => o.id === value);
+                        if (officer) {
+                          setNewOfficer(prev => ({
+                            ...prev,
+                            id: value,
+                            start_date: new Date().toISOString().split('T')[0]
+                          }));
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder="Select officer" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {officers
+                          .filter(officer => !departmentForm.officers?.some(o => o.id === officer.id))
+                          .map((officer) => (
+                            <SelectItem key={officer.id} value={officer.id}>
+                              <div className="flex items-center gap-2">
+                                <Shield className="h-4 w-4 text-purple-600" />
+                                {officer.name}
+                              </div>
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        if (newOfficer.id) {
+                          updateFormState(
+                            ['officers'],
+                            [...(departmentForm.officers || []), { ...newOfficer }]
+                          );
+                          setNewOfficer({ id: '', start_date: new Date().toISOString().split('T')[0] });
+                        }
+                      }}
+                      disabled={!newOfficer.id}
+                    >
+                      Add
+                    </Button>
+                  </div>
+                  
+                  <div className="space-y-2 mt-2">
+                    {departmentForm.officers?.map((officer, index) => {
+                      const officerData = officers.find(o => o.id === officer.id);
+                      return officerData ? (
+                        <div key={`${officer.id}-${index}`} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center p-2 bg-gray-50 rounded-md">
                           <div className="flex items-center gap-2">
-                            <Shield className="h-4 w-4 text-purple-600" />
-                            {officer.name}
+                            <Shield className="h-4 w-4 text-purple-600 flex-shrink-0" />
+                            <span className="truncate">{officerData.name}</span>
                           </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                          <div>
+                            <Label className="text-xs text-gray-500">Start Date</Label>
+                            <Input
+                              type="date"
+                              value={officer.start_date || ''}
+                              onChange={(e) => {
+                                const updatedOfficers = [...(departmentForm.officers || [])];
+                                updatedOfficers[index] = {
+                                  ...updatedOfficers[index],
+                                  start_date: e.target.value
+                                };
+                                updateFormState(['officers'], updatedOfficers);
+                              }}
+                              className="h-8 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs text-gray-500">End Date (Optional)</Label>
+                            <Input
+                              type="date"
+                              value={officer.end_date || ''}
+                              onChange={(e) => {
+                                const updatedOfficers = [...(departmentForm.officers || [])];
+                                updatedOfficers[index] = {
+                                  ...updatedOfficers[index],
+                                  end_date: e.target.value || undefined
+                                };
+                                updateFormState(['officers'], updatedOfficers);
+                              }}
+                              min={officer.start_date}
+                              className="h-8 text-sm"
+                            />
+                          </div>
+                          <div className="flex justify-end">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-red-500 hover:bg-red-50"
+                              onClick={() => {
+                                const updatedOfficers = [...(departmentForm.officers || [])];
+                                updatedOfficers.splice(index, 1);
+                                updateFormState(['officers'], updatedOfficers);
+                              }}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null;
+                    })}
+                  </div>
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -487,8 +580,8 @@ export default function DepartmentDialog({
                                 <SelectValue placeholder="Select task manager" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="">None</SelectItem>
-                                {users.filter(user => user.role === 'task_manager' || user.role === 'admin').map((user) => (
+                                <SelectItem value="none">None</SelectItem>
+                                {users.filter(user => user.role === 'task_manager' || user.role === 'admin' || user.role === 'user').map((user) => (
                                   <SelectItem key={user.id} value={user.id}>
                                     <div className="flex items-center gap-2">
                                       <UserIcon className="h-4 w-4 text-blue-600" />
@@ -513,8 +606,8 @@ export default function DepartmentDialog({
                                       <SelectValue placeholder="Select assistant" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                      <SelectItem value="">None</SelectItem>
-                                      {users.filter(user => user.role === 'task_assistant' || user.role === 'admin').map((user) => (
+                                      <SelectItem value="none">None</SelectItem>
+                                      {users.filter(user => user.role === 'task_assistant' || user.role === 'admin' || user.role === 'user').map((user) => (
                                         <SelectItem key={user.id} value={user.id}>
                                           <div className="flex items-center gap-2">
                                             <UserIcon className="h-4 w-4 text-green-600" />
