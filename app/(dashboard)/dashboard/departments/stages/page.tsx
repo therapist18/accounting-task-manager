@@ -590,7 +590,7 @@ export default function Stages() {
   const getCurrentDepartment = () => {
     return departments.find((d) => d.id === activeTab)
   }
-  
+
   const getProcessedSubdepartments = useCallback((dept: Department) => {
     let subdepartments = dept.subdepartments || []
 
@@ -1833,13 +1833,13 @@ export default function Stages() {
   // Function to get stage allocation for an entity
   const getStageAllocation = (stage: Stage, entity: any) => {
     if (!currentDept) return { applicable: true, display: true };
-  
+
     const processedSubdepartments = getProcessedSubdepartments(currentDept);
     let stageAllocation;
-  
+
     const subdept = processedSubdepartments.find((sd) => sd.id === entity.subdeptId);
     if (!subdept) return { applicable: true, display: true };
-  
+
     if (entity.type === "subdepartment") {
       stageAllocation = subdept.stages?.find((s) => s.stage_id === stage.id);
     } else if (entity.type === "class" && entity.classIndex !== undefined) {
@@ -1855,7 +1855,7 @@ export default function Stages() {
       const processedSubClass = processedClass?.subClasses?.find(sc => sc.id === originalSubClass.id);
       stageAllocation = processedSubClass?.stages?.find((s) => s.stage_id === stage.id);
     }
-  
+
     return {
       applicable: stageAllocation?.applicable ?? true,
       display: stageAllocation?.display ?? true,
@@ -1960,7 +1960,7 @@ export default function Stages() {
     const leafEntities = getLeafEntities(currentDept);
     const headerTree = buildHeaderTree(currentDept);
     const { rows: headerRowsData, maxDepth } = generateHeaderRows(headerTree);
-    
+
     // Total rows in the header, including the final controls row if visible
     const totalHeaderRows = maxDepth + (columnVisibility.controls ? 1 : 0);
 
@@ -1995,38 +1995,52 @@ export default function Stages() {
                   </TableHead>
                 )}
                 {columnVisibility.stageName && (
-                  <TableHead
-                    className={cn(
-                      "sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white align-middle",
-                      columnVisibility.index && columnVisibility.entity
-                        ? "left-80"
-                        : columnVisibility.index || columnVisibility.entity
-                          ? "left-64"
-                          : "left-0",
-                    )}
-                    rowSpan={totalHeaderRows}
-                  >
-                    Stage Details
-                  </TableHead>
+                  <React.Fragment>
+                    <TableHead
+                      className={cn(
+                        "sticky bg-blue-700 border-r border-blue-500 z-20 text-white align-middle",
+                        columnVisibility.index && columnVisibility.entity
+                          ? "left-80"
+                          : columnVisibility.index || columnVisibility.entity
+                            ? "left-64"
+                            : "left-0",
+                      )}
+                      rowSpan={totalHeaderRows}
+                    >
+                      Duration
+                    </TableHead>
+                    <TableHead
+                      className="sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white align-middle"
+                      rowSpan={totalHeaderRows}
+                    >
+                      Follow-up
+                    </TableHead>
+                    <TableHead
+                      className="sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white align-middle"
+                      rowSpan={totalHeaderRows}
+                    >
+                      Actions
+                    </TableHead>
+                  </React.Fragment>
                 )}
-                
-                {/* Render the first level of the hierarchy */}
-                {(headerRowsData[0] || []).map((node) => (
-                  <TableHead
-                    key={node.id}
-                    colSpan={node.colspan}
-                    rowSpan={node.rowspan}
-                    className="border-r border-blue-500 text-center font-bold text-white min-w-[120px] bg-blue-700 p-2 align-middle"
-                  >
-                    <div className="flex flex-col items-center space-y-1">
-                      <div className="font-medium text-sm truncate max-w-[200px]" title={node.name}>
-                        {node.name}
-                      </div>
-                      <Badge variant="secondary" className="text-xs capitalize">{node.type}</Badge>
-                    </div>
-                  </TableHead>
-                ))}
+
               </TableRow>
+              {/* Render the first level of the hierarchy */}
+              {(headerRowsData[0] || []).map((node) => (
+                <TableHead
+                  key={node.id}
+                  colSpan={node.colspan}
+                  rowSpan={node.rowspan}
+                  className="border-r border-blue-500 text-center font-bold text-white min-w-[120px] bg-blue-700 p-2 align-middle"
+                >
+                  <div className="flex flex-col items-center space-y-1">
+                    <div className="font-medium text-sm truncate max-w-[200px]" title={node.name}>
+                      {node.name}
+                    </div>
+                    <Badge variant="secondary" className="text-xs capitalize">{node.type}</Badge>
+                  </div>
+                </TableHead>
+              ))}
 
               {/* Subsequent hierarchical rows */}
               {headerRowsData.slice(1).map((row, rowIndex) => (
@@ -2041,7 +2055,7 @@ export default function Stages() {
                         rowIndex === 0 ? "bg-blue-600" : "bg-blue-500" // different color for depth
                       )}
                     >
-                       <div className="flex flex-col items-center space-y-1">
+                      <div className="flex flex-col items-center space-y-1">
                         <div className="font-medium text-sm truncate max-w-[200px]" title={node.name}>
                           {node.name}
                         </div>
@@ -2138,71 +2152,97 @@ export default function Stages() {
                     </TableCell>
                   )}
                   {columnVisibility.stageName && (
-                    <TableCell
-                      className={cn(
-                        "sticky bg-slate-100 border-r-2 border-slate-300 z-10",
-                        columnVisibility.index && columnVisibility.entity
-                          ? "left-80"
-                          : columnVisibility.index || columnVisibility.entity
-                            ? "left-64"
-                            : "left-0",
-                      )}
-                    >
-                      <div className="space-y-1 text-sm">
-                        <div className="font-medium">{minutesToTimeString(stage.estimated_time)}</div>
-                        <div className="text-gray-600">{stage.follow_up || "-"}</div>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-5 w-5 hover:bg-slate-300/50"
-                            onClick={() => moveStage(stage.id, "up")}
-                            disabled={stage.order_num === 1}
-                          >
-                            <ChevronUp className="h-3 w-3 text-slate-600" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-5 w-5 hover:bg-slate-300/50"
-                            onClick={() => moveStage(stage.id, "down")}
-                            disabled={stage.order_num === currentDept.stages.length}
-                          >
-                            <ChevronDown className="h-3 w-3 text-slate-600" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-5 w-5 hover:bg-slate-300/50"
-                            onClick={() => {
+                    <>
+                      <TableCell
+                        className={cn(
+                          "sticky bg-slate-100 border-r border-slate-300 z-10",
+                          columnVisibility.index && columnVisibility.entity
+                            ? "left-80"
+                            : columnVisibility.index || columnVisibility.entity
+                              ? "left-64"
+                              : "left-0",
+                        )}
+                      >
+                        <div className="font-medium text-sm text-center">
+                          {minutesToTimeString(stage.estimated_time) || "-"}
+                        </div>
+                      </TableCell>
+                      <TableCell className="sticky bg-slate-100 border-r-2 border-slate-300 z-10">
+                        <div className="text-gray-700 text-sm">{stage.follow_up || "-"}</div>
+                      </TableCell>
+                    </>
+                  )}
+                  {columnVisibility.stageName && (
+                    <>
+                      <TableCell
+                        className={cn(
+                          "sticky bg-slate-100 border-r border-slate-300 z-10",
+                          columnVisibility.index && columnVisibility.entity
+                            ? "left-80"
+                            : columnVisibility.index || columnVisibility.entity
+                              ? "left-64"
+                              : "left-0",
+                        )}
+                      >
+                        <div className="font-medium text-sm text-center"> 
+                          {minutesToTimeString(stage.estimated_time) || "-"}
+                        </div>
+                      </TableCell>
+                      <TableCell className="sticky bg-slate-100 border-r-2 border-slate-300 z-10">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1 justify-center">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 hover:bg-slate-300/50"
+                              onClick={() => moveStage(stage.id, "up")}
+                              disabled={stage.order_num === 1}
+                            >
+                              <ChevronUp className="h-3 w-3 text-slate-600" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 hover:bg-slate-300/50"
+                              onClick={() => moveStage(stage.id, "down")}
+                              disabled={stage.order_num === currentDept.stages.length}
+                            >
+                              <ChevronDown className="h-3 w-3 text-slate-600" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 hover:bg-slate-300/50"
+                              onClick={() => {
                                 setEditingStage(stage);
                                 setIsEditDialogOpen(true);
-                            }}
-                          >
-                            <Pencil className="h-3 w-3 text-slate-600" />
-                          </Button>
-                          {stage.status && (
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-5 w-5 hover:bg-slate-300/50 relative"
-                                >
-                                  <Info className="h-3 w-3 text-blue-600" />
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-64 p-4" side="bottom" align="start">
-                                <div className="space-y-2">
-                                  <h4 className="font-medium">Stage Status</h4>
-                                  <p className="text-sm text-muted-foreground">{stage.status}</p>
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          )}
+                              }}
+                            >
+                              <Pencil className="h-3 w-3 text-slate-600" />
+                            </Button>
+                            {stage.status && (
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-5 w-5 hover:bg-slate-300/50 relative"
+                                  >
+                                    <Info className="h-3 w-3 text-blue-600" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-64 p-4" side="bottom" align="start">
+                                  <div className="space-y-2">
+                                    <h4 className="font-medium">Stage Status</h4>
+                                    <p className="text-sm text-muted-foreground">{stage.status}</p>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </TableCell>
+                      </TableCell>
+                    </>
                   )}
                   {leafEntities.map((entity, entityIndex) => {
                     const allocation = getStageAllocation(stage, entity)
@@ -2273,9 +2313,9 @@ export default function Stages() {
                             </TableCell>
                           </>
                         ) : (
-                           <TableCell className={cn("border-x border-gray-200 p-1 text-center", columnClass)}>
-                             <div className={`w-2 h-2 rounded-full mx-auto ${allocation.applicable ? "bg-green-500" : "bg-red-500"}`} title={allocation.applicable ? "Applicable" : "Not Applicable"}></div>
-                           </TableCell>
+                          <TableCell className={cn("border-x border-gray-200 p-1 text-center", columnClass)}>
+                            <div className={`w-2 h-2 rounded-full mx-auto ${allocation.applicable ? "bg-green-500" : "bg-red-500"}`} title={allocation.applicable ? "Applicable" : "Not Applicable"}></div>
+                          </TableCell>
                         )}
                       </React.Fragment>
                     )
@@ -2499,8 +2539,8 @@ export default function Stages() {
                             size="icon"
                             className="h-6 w-6 hover:bg-white/20"
                             onClick={() => {
-                                setEditingStage(stage);
-                                setIsEditDialogOpen(true);
+                              setEditingStage(stage);
+                              setIsEditDialogOpen(true);
                             }}
                           >
                             <Pencil className="h-3 w-3 text-white" />
