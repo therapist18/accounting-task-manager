@@ -154,8 +154,8 @@ export default function DepartmentTasksManager({
 
     if (linkedDocumentData) {
       // Handle both old format (string ID) and new format (object with id and document_id)
-      const documentId = typeof linkedDocumentData === 'string' 
-        ? linkedDocumentData 
+      const documentId = typeof linkedDocumentData === 'string'
+        ? linkedDocumentData
         : linkedDocumentData.id;
 
 
@@ -537,22 +537,22 @@ export default function DepartmentTasksManager({
     // Get the stage data from the departments data to access the actual status
     const department = departments.find(d => d.id === task.department_id);
     const subdepartment = department?.tm_subdepartments?.find(s => s.id === task.subdepartment_id);
-    
+
     // Find the stage in the department data to get the actual status
     let stageStatus = currentStage.status || 'Pending';
-    
+
     // First check if the stage exists in the department's stages
     const departmentStage = department?.stages?.find(s => s.id === currentStage.id);
     if (departmentStage?.status) {
       stageStatus = departmentStage.status;
     }
-    
+
     // Then check in subdepartment's stages if not found in department
     const subdepartmentStage = subdepartment?.stages?.find(s => s.stage_id === currentStage.id);
     if (!stageStatus && subdepartmentStage?.status) {
       stageStatus = subdepartmentStage.status;
     }
-    
+
     // If still no status, check in the task's stages data
     if (!stageStatus && task.stages?.[currentStage.id]?.status) {
       stageStatus = task.stages[currentStage.id].status;
@@ -729,7 +729,7 @@ export default function DepartmentTasksManager({
   // UPDATED: Render current stage status cell with better status handling
   const renderCurrentStageStatusCell = useCallback((task: any) => {
     const stageStatusInfo = getCurrentStageStatus(task);
-    
+
     const getStatusBadgeColor = (status: string) => {
       switch (status.toLowerCase()) {
         case 'completed': return 'bg-green-100 text-green-800 border-green-300';
@@ -742,7 +742,7 @@ export default function DepartmentTasksManager({
         case 'to review': return 'bg-amber-100 text-amber-800 border-amber-300';
         case 'to process': return 'bg-emerald-100 text-emerald-800 border-emerald-300';
         case 'n/a': return 'bg-slate-100 text-slate-600 border-slate-300';
-        default: 
+        default:
           // Handle any "To [Action]" pattern
           if (status.toLowerCase().startsWith('to ')) {
             return 'bg-blue-100 text-blue-800 border-blue-300';
@@ -1283,7 +1283,7 @@ export default function DepartmentTasksManager({
   const completedTasks = useMemo(() => filterTasksBySearch(getFilteredTasks('completed')), [getFilteredTasks, filterTasksBySearch])
 
   // Task actions handlers
-  const handleTaskEdit = (task: any) => { 
+  const handleTaskEdit = (task: any) => {
     console.log('✏️ Opening edit dialog for task:', {
       id: task.id,
       applicant_name: task.applicant_name,
@@ -1300,14 +1300,14 @@ export default function DepartmentTasksManager({
       age: task.age,
       job_description: task.job_description
     });
-    setEditingTask(task); 
-    setEditDialogOpen(true) 
+    setEditingTask(task);
+    setEditDialogOpen(true)
   }
 
-  const handleTaskUpdate = (updatedTask: any) => { 
+  const handleTaskUpdate = (updatedTask: any) => {
     console.log('💾 Task update callback received:', updatedTask);
-    onTaskUpdate?.(updatedTask); 
-    setEditDialogOpen(false); 
+    onTaskUpdate?.(updatedTask);
+    setEditDialogOpen(false);
     setEditingTask(null);
     // Refresh the tasks data to see the changes
     loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
@@ -1596,57 +1596,57 @@ export default function DepartmentTasksManager({
       if (visibleHeaders.has('applicant_name')) {
         rows.push({ key: 'applicant_name', label: 'Applicant Name', type: 'basic', getValue: (task: any) => task.applicant_name || 'N/A' })
       }
-       
+
       // NEW: Immigration Status Breakdown
       if (visibleHeaders.has('immigration_document_type')) {
-          rows.push({
-              key: 'immigration_document_type',
-              label: 'Immigration Doc Type',
-              type: 'immigration_doc_type',
-              getValue: (task: any) => getEnhancedImmigrationStatus(task).documentType
-          });
+        rows.push({
+          key: 'immigration_document_type',
+          label: 'Immigration Doc Type',
+          type: 'immigration_doc_type',
+          getValue: (task: any) => getEnhancedImmigrationStatus(task).documentType
+        });
       }
       if (visibleHeaders.has('immigration_expiry_date')) {
-          rows.push({
-              key: 'immigration_expiry_date',
-              label: 'Immigration Expiry Date',
-              type: 'immigration_expiry_date',
-              getValue: (task: any) => getEnhancedImmigrationStatus(task).date
-          });
+        rows.push({
+          key: 'immigration_expiry_date',
+          label: 'Immigration Expiry Date',
+          type: 'immigration_expiry_date',
+          getValue: (task: any) => getEnhancedImmigrationStatus(task).date
+        });
       }
       if (visibleHeaders.has('immigration_status')) {
-          rows.push({
-              key: 'immigration_status',
-              label: 'Immigration Status',
-              type: 'immigration_status',
-              getValue: (task: any) => getEnhancedImmigrationStatus(task) // pass whole object
-          });
+        rows.push({
+          key: 'immigration_status',
+          label: 'Immigration Status',
+          type: 'immigration_status',
+          getValue: (task: any) => getEnhancedImmigrationStatus(task) // pass whole object
+        });
       }
 
       // NEW: Current Stage Status Breakdown
       if (visibleHeaders.has('current_stage_name')) {
-          rows.push({
-              key: 'current_stage_name',
-              label: 'Current Stage Name',
-              type: 'current_stage_name',
-              getValue: (task: any) => getCurrentStageStatus(task).stageName
-          });
+        rows.push({
+          key: 'current_stage_name',
+          label: 'Current Stage Name',
+          type: 'current_stage_name',
+          getValue: (task: any) => getCurrentStageStatus(task).stageName
+        });
       }
       if (visibleHeaders.has('current_stage_status_value')) {
-          rows.push({
-              key: 'current_stage_status_value',
-              label: 'Current Stage Status',
-              type: 'current_stage_status_value',
-              getValue: (task: any) => getCurrentStageStatus(task).stageStatus
-          });
+        rows.push({
+          key: 'current_stage_status_value',
+          label: 'Current Stage Status',
+          type: 'current_stage_status_value',
+          getValue: (task: any) => getCurrentStageStatus(task).stageStatus
+        });
       }
       if (visibleHeaders.has('current_stage_follow_up')) {
-          rows.push({
-              key: 'current_stage_follow_up',
-              label: 'Current Stage Follow-up',
-              type: 'current_stage_follow_up',
-              getValue: (task: any) => getCurrentStageStatus(task).stageFollowUp
-          });
+        rows.push({
+          key: 'current_stage_follow_up',
+          label: 'Current Stage Follow-up',
+          type: 'current_stage_follow_up',
+          getValue: (task: any) => getCurrentStageStatus(task).stageFollowUp
+        });
       }
 
       if (visibleHeaders.has('company_name')) {
@@ -1743,7 +1743,7 @@ export default function DepartmentTasksManager({
                     isSubSubRow: true,
                     getValue: (task: UtilTask) => {
                       if (!isStageApplicableToTask(stage, task)) return 'N/A'
-                      
+
                       // UPDATED: Use linked document ONLY
                       const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
 
@@ -1816,56 +1816,56 @@ export default function DepartmentTasksManager({
       case 'badge': return <Badge variant={value === 'completed' ? 'default' : value === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{value}</Badge>;
       case 'date': return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
       case 'stat': return <Badge variant="outline" className="text-xs font-semibold">{value}</Badge>;
-      
+
       // NEW: Granular status renderers for transposed view
       case 'immigration_doc_type':
         return <span className="text-sm text-slate-800">{value || '-'}</span>;
 
       case 'immigration_expiry_date':
-          return <span className="text-sm text-slate-600">{value ? format(value, 'dd MMM yyyy') : '-'}</span>;
-      
+        return <span className="text-sm text-slate-600">{value ? format(value, 'dd MMM yyyy') : '-'}</span>;
+
       case 'immigration_status': {
         const statusInfo = value; // value is the whole object from getEnhancedImmigrationStatus
         if (!statusInfo || statusInfo.type === 'na' || statusInfo.daysRemaining === null) {
-            return <span className="text-sm text-slate-500">-</span>;
+          return <span className="text-sm text-slate-500">-</span>;
         }
         if (statusInfo.type === 'expired') {
-            const timeDiff = new Date().getTime() - statusInfo.date.getTime();
-            const daysOverdue = Math.ceil(timeDiff / (1000 * 3600 * 24));
-            return <span className="text-sm text-red-600 font-semibold">{daysOverdue} days overdue</span>;
+          const timeDiff = new Date().getTime() - statusInfo.date.getTime();
+          const daysOverdue = Math.ceil(timeDiff / (1000 * 3600 * 24));
+          return <span className="text-sm text-red-600 font-semibold">{daysOverdue} days overdue</span>;
         }
         const daysRemainingColor = statusInfo.daysRemaining <= 30 ? 'text-blue-600 font-semibold' : 'text-green-600';
         return <span className={`text-sm ${daysRemainingColor}`}>{statusInfo.daysRemaining} days left</span>;
       }
-      
+
       case 'current_stage_name':
-          return <span className="text-sm font-medium text-slate-800">{value || 'N/A'}</span>;
-      
+        return <span className="text-sm font-medium text-slate-800">{value || 'N/A'}</span>;
+
       case 'current_stage_status_value': {
-          const getStatusBadgeColor = (status: string) => {
-              switch (status?.toLowerCase()) {
-                  case 'completed': return 'bg-green-100 text-green-800 border-green-300';
-                  case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-                  case 'in_progress': return 'bg-blue-100 text-blue-800 border-blue-300';
-                  case 'to enquire': return 'bg-purple-100 text-purple-800 border-purple-300';
-                  default: 
-                    if (status?.toLowerCase().startsWith('to ')) return 'bg-blue-100 text-blue-800 border-blue-300';
-                    return 'bg-slate-100 text-slate-600 border-slate-300';
-              }
-          };
-          return <Badge variant="outline" className={`whitespace-normal text-xs ${getStatusBadgeColor(value || '')}`}>{value || 'N/A'}</Badge>;
+        const getStatusBadgeColor = (status: string) => {
+          switch (status?.toLowerCase()) {
+            case 'completed': return 'bg-green-100 text-green-800 border-green-300';
+            case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+            case 'in_progress': return 'bg-blue-100 text-blue-800 border-blue-300';
+            case 'to enquire': return 'bg-purple-100 text-purple-800 border-purple-300';
+            default:
+              if (status?.toLowerCase().startsWith('to ')) return 'bg-blue-100 text-blue-800 border-blue-300';
+              return 'bg-slate-100 text-slate-600 border-slate-300';
+          }
+        };
+        return <Badge variant="outline" className={`whitespace-normal text-xs ${getStatusBadgeColor(value || '')}`}>{value || 'N/A'}</Badge>;
       }
-      
+
       case 'current_stage_follow_up': {
-          const getFollowUpBadgeColor = (followUp: string) => {
-              switch (followUp?.toLowerCase()) {
-                  case 'bcl': return 'bg-blue-100 text-blue-800 border-blue-300';
-                  case 'officer': return 'bg-green-100 text-green-800 border-green-300';
-                  case 'client': return 'bg-purple-100 text-purple-800 border-purple-300';
-                  default: return 'bg-slate-100 text-slate-600 border-slate-300';
-              }
-          };
-          return value ? <Badge variant="outline" className={`whitespace-normal text-xs ${getFollowUpBadgeColor(value)}`}>Follow-up: {value}</Badge> : <span className="text-sm text-slate-500">-</span>;
+        const getFollowUpBadgeColor = (followUp: string) => {
+          switch (followUp?.toLowerCase()) {
+            case 'bcl': return 'bg-blue-100 text-blue-800 border-blue-300';
+            case 'officer': return 'bg-green-100 text-green-800 border-green-300';
+            case 'client': return 'bg-purple-100 text-purple-800 border-purple-300';
+            default: return 'bg-slate-100 text-slate-600 border-slate-300';
+          }
+        };
+        return value ? <Badge variant="outline" className={`whitespace-normal text-xs ${getFollowUpBadgeColor(value)}`}>Follow-up: {value}</Badge> : <span className="text-sm text-slate-500">-</span>;
       }
 
       case 'stage':
@@ -2024,40 +2024,43 @@ export default function DepartmentTasksManager({
     setSortConfig({ key, direction })
   }
 
-  // Memoized sorted tasks for standard view
-  const getSortedTasks = (tasksToRender: UtilTask[]) => {
-    return useMemo(() => {
-      let sortableItems = [...tasksToRender]
-      if (sortConfig) {
-        sortableItems.sort((a, b) => {
-          const getSortableValue = (task, key) => {
-            switch (key) {
-              case 'applicant_name': return task.applicant_name?.toLowerCase() || ''
-              case 'company_name': return companies.get(task.company_id)?.toLowerCase() || ''
-              case 'status': return task.status?.toLowerCase() || ''
-              default: return task[key] || ''
-            }
+  // Function to sort tasks (no hooks inside)
+  const sortTasks = (tasksToSort: UtilTask[], sortConfig: any) => {
+    let sortableItems = [...tasksToSort]
+    if (sortConfig) {
+      sortableItems.sort((a, b) => {
+        const getSortableValue = (task, key) => {
+          switch (key) {
+            case 'applicant_name': return task.applicant_name?.toLowerCase() || ''
+            case 'company_name': return companies.get(task.company_id)?.toLowerCase() || ''
+            case 'status': return task.status?.toLowerCase() || ''
+            default: return task[key] || ''
           }
+        }
 
-          const valueA = getSortableValue(a, sortConfig.key)
-          const valueB = getSortableValue(b, sortConfig.key)
+        const valueA = getSortableValue(a, sortConfig.key)
+        const valueB = getSortableValue(b, sortConfig.key)
 
-          if (valueA === null || valueA === undefined) return 1
-          if (valueB === null || valueB === undefined) return -1
+        if (valueA === null || valueA === undefined) return 1
+        if (valueB === null || valueB === undefined) return -1
 
-          let comparison = 0
-          if (valueA > valueB) {
-            comparison = 1
-          } else if (valueA < valueB) {
-            comparison = -1
-          }
+        let comparison = 0
+        if (valueA > valueB) {
+          comparison = 1
+        } else if (valueA < valueB) {
+          comparison = -1
+        }
 
-          return sortConfig.direction === 'asc' ? comparison : comparison * -1
-        })
-      }
-      return sortableItems
-    }, [tasksToRender, sortConfig, companies])
+        return sortConfig.direction === 'asc' ? comparison : comparison * -1
+      })
+    }
+    return sortableItems
   }
+
+  // Memoized sorted tasks for standard view
+  const getSortedTasks = useCallback((tasksToRender: UtilTask[]) => {
+    return sortTasks(tasksToRender, sortConfig)
+  }, [sortConfig, companies])
 
   const renderStandardTable = useCallback((tasks: any[], tableType: string) => {
     const sortedTasks = getSortedTasks(tasks);
@@ -2111,16 +2114,38 @@ export default function DepartmentTasksManager({
       )
     }
 
+    // Filter headers based on visibleHeaders
+    const visibleTableHeaders = ENHANCED_TABLE_HEADERS.filter(header =>
+      visibleHeaders.has(header.id)
+    );
+
     return (
       <div className="border border-slate-200 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 200px)' }}>
         <Table className="min-w-full border-separate border-spacing-0">
           <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
             <TableRow className="h-12">
-              <SortableHeader rowSpan={2} sortKey="applicant_name" className="sticky left-0 bg-blue-600 border-r border-slate-300 w-[200px] z-30 text-white font-semibold p-2 cursor-pointer hover:bg-blue-700">Applicant</SortableHeader>
-              <SortableHeader rowSpan={2} sortKey="current_immigration_status" className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[200px] cursor-pointer hover:bg-blue-700">Immigration Status</SortableHeader>
-              <SortableHeader rowSpan={2} sortKey="current_stage_status" className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[200px] cursor-pointer hover:bg-blue-700">Current Stage Status</SortableHeader>
-              <SortableHeader rowSpan={2} sortKey="company_name" className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[180px] cursor-pointer hover:bg-blue-700">Company</SortableHeader>
-              <SortableHeader rowSpan={2} sortKey="status" className="bg-blue-600 border-r border-slate-300 text-white font-semibold text-center w-[100px] cursor-pointer hover:bg-blue-700">Status</SortableHeader>
+              {/* Always show ID column for reference */}
+              <SortableHeader
+                rowSpan={2}
+                sortKey="id"
+                className="sticky left-0 bg-blue-600 border-r border-slate-300 w-[80px] z-30 text-white font-semibold p-2 cursor-pointer hover:bg-blue-700"
+              >
+                ID
+              </SortableHeader>
+
+              {/* Render visible headers */}
+              {visibleTableHeaders.map(header => (
+                <SortableHeader
+                  key={header.id}
+                  rowSpan={2}
+                  sortKey={header.id}
+                  className={`bg-blue-600 border-r border-slate-300 text-white font-semibold text-center ${header.width || 'w-auto'} cursor-pointer hover:bg-blue-700`}
+                >
+                  {header.label}
+                </SortableHeader>
+              ))}
+
+              {/* Workflow stages section */}
               <TableHead colSpan={totalStageColumns} className="bg-blue-600 border-r border-slate-300 text-white text-center font-bold px-2">
                 <div className="flex items-center justify-center gap-2">
                   WORKFLOW STAGES
@@ -2128,82 +2153,25 @@ export default function DepartmentTasksManager({
                   <Button variant="ghost" size="icon" className="h-6 w-6 p-0 text-white hover:bg-blue-600" onClick={collapseAll} title="Collapse All"><Minus className="h-4 w-4" /></Button>
                 </div>
               </TableHead>
-              <TableHead rowSpan={2} className="bg-blue-600 border-r-0 text-white font-semibold text-center w-[100px]">Actions</TableHead>
+              <TableHead rowSpan={2} className="bg-blue-600 border-r-0 text-white font-semibold text-center w-[100px] sticky right-0 z-20">
+                Actions
+              </TableHead>
             </TableRow>
             <TableRow className="h-14">
-              {visibleStages.map((stage) => {
-                let stageCols = 0;
-                let subHeaders = [];
+              {/* Empty cell for the ID column */}
+              <TableHead className="sticky left-0 bg-blue-500 border-r border-slate-500 z-10"></TableHead>
 
-                if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
-                  stage.documents.forEach(doc => {
-                    // Get document name from KYC data with proper fallback
-                    const kycData = kycDocuments.get(doc.kycId);
-                    const docDisplayName = kycData?.display_name || kycData?.name || doc.display_name || doc.name || 'Document';
-
-                    if (expandedDocuments.has(doc.id) && doc.kycId) {
-                      const kycFields = kycFieldsMap.get(doc.kycId) || [];
-                      if (kycFields.length > 0) {
-                        stageCols += kycFields.length;
-                        kycFields.forEach(field => subHeaders.push({ type: 'field', name: field.fieldName }));
-                      } else {
-                        stageCols += 1;
-                        subHeaders.push({ type: 'doc', name: docDisplayName, id: doc.id, hasFields: false });
-                      }
-                    } else {
-                      stageCols += 1;
-                      const hasKycFields = doc.kycId && kycFieldsMap.has(doc.kycId) && kycFieldsMap.get(doc.kycId).length > 0;
-                      subHeaders.push({ type: 'doc', name: docDisplayName, id: doc.id, hasFields: hasKycFields });
-                    }
-                  });
-                } else {
-                  stageCols = 1;
-                }
-                stageCols = Math.max(1, stageCols);
-
-                if (!expandedStages.has(stage.id) || stage.documents?.length === 0) {
-                  return (
-                    <TableHead key={stage.id} className="bg-blue-500 border-r border-slate-500 text-white text-center font-semibold min-w-[150px] px-2 py-2 align-middle">
-                      <div className="flex items-center justify-center gap-2">
-                        <span className="truncate max-w-[100px]" title={stage.name}>{stage.name}</span>
-                        {stage.documents?.length > 0 && (
-                          <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-white hover:bg-slate-500" onClick={() => toggleStageExpansion(stage.id)}>
-                            <Plus className="h-3 w-3" />
-                          </Button>
-                        )}
-                      </div>
-                    </TableHead>
-                  );
-                } else {
-                  return (
-                    <TableHead key={stage.id} colSpan={stageCols} className="bg-blue-500 border-r border-slate-500 text-white text-center font-semibold p-0 align-top">
-                      <div className="flex flex-col h-full">
-                        <div className="flex items-center justify-center gap-2 px-2 py-1 border-b border-slate-500">
-                          <span className="truncate max-w-[100px]" title={stage.name}>{stage.name}</span>
-                          <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-white hover:bg-slate-500" onClick={() => toggleStageExpansion(stage.id)}>
-                            <Minus className="h-3 w-3" />
-                          </Button>
-                        </div>
-                        <div className="flex-grow grid" style={{ gridTemplateColumns: `repeat(${stageCols}, 1fr)` }}>
-                          {subHeaders.map((sub, i) => (
-                            <div key={i} className="text-xs font-normal bg-slate-500 border-r border-slate-400 last:border-r-0 flex items-center justify-center p-1 gap-1 min-w-[120px]">
-                              <span className="truncate" title={sub.name}>{sub.name}</span>
-                              {sub.type === 'doc' && sub.hasFields && (
-                                <Button variant="ghost" size="icon" className="h-4 w-4 p-0 text-white hover:bg-slate-400" onClick={() => toggleDocumentExpansion(sub.id)}>
-                                  {expandedDocuments.has(sub.id) ? <Minus className="h-2 w-2" /> : <Plus className="h-2 w-2" />}
-                                </Button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </TableHead>
-                  );
-                }
-              })}
+              {/* Empty cells for visible headers */}
+              {visibleTableHeaders.map(header => (
+                <TableHead
+                  key={`sub-${header.id}`}
+                  className="bg-blue-500 border-r border-slate-500 text-white text-center text-xs font-medium"
+                >
+                  {header.label}
+                </TableHead>
+              ))}
             </TableRow>
           </TableHeader>
-
           <TableBody className="divide-y divide-slate-200">
             {(dataLoading.tasks || dataLoading.stages || dataLoading.companies) ? (
               <TableRow><TableCell colSpan={20} className="h-32 text-center text-slate-500">Loading...</TableCell></TableRow>
@@ -2212,27 +2180,75 @@ export default function DepartmentTasksManager({
             ) : (
               sortedTasks.map((task) => (
                 <TableRow key={task.id} className="group bg-white hover:bg-blue-50/50">
-                  {/* MODIFIED: Applicant Name cell with new Link button */}
-                  <TableCell className="sticky left-0 z-10 group-hover:bg-blue-50/50 bg-white border border-gray-100 font-medium text-sm text-slate-800 p-2 align-middle">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex-grow">
-                        <div className="truncate" title={task.applicant_name}>{task.applicant_name || 'N/A'}</div>
-                        <div className="text-xs text-slate-500">ID: {task.id}</div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-blue-500 hover:bg-blue-100 flex-shrink-0"
-                        title="Link source documents"
-                        onClick={() => {
-                          setLinkingTask(task);
-                          setIsLinkDialogOpen(true);
-                        }}
-                      >
-                        <LinkIcon className="h-4 w-4" />
-                      </Button>
-                    </div>
+                  {/* ID column - always visible */}
+                  <TableCell className="sticky left-0 z-10 group-hover:bg-blue-50/50 bg-white border border-gray-100 font-semibold text-sm text-slate-800 p-2 align-middle text-center">
+                    {task.id}
                   </TableCell>
+
+                  {/* Dynamic columns based on visible headers */}
+                  {visibleTableHeaders.map(header => {
+                    let cellContent;
+
+                    // Handle special rendering for specific columns
+                    switch (header.id) {
+                      case 'applicant_name':
+                        cellContent = (
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex-grow">
+                              <div className="truncate" title={task.applicant_name}>{task.applicant_name || 'N/A'}</div>
+                              <div className="text-xs text-slate-500">ID: {task.id}</div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-blue-500 hover:bg-blue-100 flex-shrink-0"
+                              title="Link source documents"
+                              onClick={() => {
+                                setLinkingTask(task);
+                                setIsLinkDialogOpen(true);
+                              }}
+                            >
+                              <LinkIcon className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        );
+                        break;
+
+                      case 'status':
+                        cellContent = (
+                          <Badge
+                            variant={task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'secondary' : 'outline'}
+                            className="text-xs font-semibold"
+                          >
+                            {task.status || 'pending'}
+                          </Badge>
+                        );
+                        break;
+
+                      case 'company_name':
+                        cellContent = (
+                          <div className="max-w-[160px] mx-auto truncate" title={companies.get(task.company_id)}>
+                            {companies.get(task.company_id) || 'N/A'}
+                          </div>
+                        );
+                        break;
+
+                      // Add more special cases as needed
+
+                      default:
+                        // Default rendering for other fields
+                        cellContent = task[header.id] || 'N/A';
+                    }
+
+                    return (
+                      <TableCell
+                        key={`${task.id}-${header.id}`}
+                        className="border border-gray-100 text-sm p-2 align-middle"
+                      >
+                        {cellContent}
+                      </TableCell>
+                    );
+                  })}
                   <TableCell className="border border-gray-100 text-center text-sm p-2 align-middle">
                     {renderImmigrationStatusCell(task)}
                   </TableCell>
@@ -2246,8 +2262,7 @@ export default function DepartmentTasksManager({
                   {visibleStages.map(stage => {
                     // UPDATED: Check if this stage is applicable to the task
                     if (!isStageApplicableToTask(stage, task)) {
-                      let stageCols = 1;
-                      if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
+                      let stageCols = 1; if (expandedStages.has(stage.id) && stage.documents?.length > 0) {
                         stageCols = stage.documents.reduce((acc, doc) => {
                           if (expandedDocuments.has(doc.id) && doc.kycId) {
                             const kycFields = kycFieldsMap.get(doc.kycId) || [];
