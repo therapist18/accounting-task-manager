@@ -187,6 +187,25 @@ export function StagesTransposedView({
                     <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setEditingStage(stage)}>
                       <Pencil className="h-3 w-3" />
                     </Button>
+                    {stage.status && (
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                          >
+                            <Info className="h-3 w-3 text-blue-600" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-64 p-4" side="bottom" align="start">
+                          <div className="space-y-2">
+                            <h4 className="font-medium">Stage Status</h4>
+                            <p className="text-sm text-muted-foreground">{stage.status}</p>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    )}
                   </div>
                 </TableHead>
               );

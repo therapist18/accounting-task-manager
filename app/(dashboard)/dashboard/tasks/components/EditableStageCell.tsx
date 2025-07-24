@@ -24,7 +24,7 @@ interface EditableStageCellProps {
     updatedExtractedDetails?: Record<string, any>
   ) => Promise<void> | void
   onDocumentUpload?: (task: any, stage: any) => void
-  onShowDocuments?: (doc: any) => void
+  onShowDocuments?: (task: any, stage: any) => void
   getKycFields?: (documentConfig: any) => Promise<any[]>
   allDocuments?: any[]
 }
@@ -41,19 +41,41 @@ const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolea
   }
 }
 
-// Helper function to filter documents for a specific stage and director
-const filterDocumentsForStage = (documents: any[], directorId: number | string, stageDocuments: any[]): any[] => {
-  if (!documents || documents.length === 0) return [];
-
-  // Get all kycIds from stage documents
-  const stageKycIds = stageDocuments?.map(doc => doc.kycId) || [];
-
-  // Filter documents that match both director_id and kycId
-  return documents.filter(doc => {
-    const matchesDirector = doc.director_id === directorId;
-    const matchesKycId = stageKycIds.includes(doc.document_id || doc.kyc_document_id);
-    return matchesDirector && matchesKycId;
+// UPDATED: Helper function to get LINKED document for a stage
+const getLinkedDocumentForStage = (task: any, stage: any, allDocuments: any[]): any | null => {
+  console.log('🔍 getLinkedDocumentForStage called for:', {
+    taskId: task.id,
+    stageId: stage.id,
+    stageName: stage.name,
+    sourceDocumentId: task.source_document_id
   });
+
+  // Check for a specifically linked source document for this stage
+  const linkedDocumentData = task.source_document_id?.[stage.id];
+  console.log('🔗 Linked document data for stage:', linkedDocumentData);
+
+  if (linkedDocumentData) {
+    // Handle both old format (string ID) and new format (object with id and document_id)
+    const documentId = typeof linkedDocumentData === 'string' 
+      ? linkedDocumentData 
+      : linkedDocumentData.id;
+
+    console.log('📄 Looking for document with ID:', documentId);
+
+    // Find the document instance from allDocuments by its unique ID
+    const linkedDoc = allDocuments.find(doc => doc.id === documentId);
+    console.log('📄 Found linked document:', linkedDoc ? {
+      id: linkedDoc.id,
+      document_id: linkedDoc.document_id,
+      file_path: linkedDoc.file_path,
+      created_at: linkedDoc.created_at
+    } : null);
+
+    return linkedDoc || null;
+  }
+
+  console.log('❌ No linked document found for this stage');
+  return null;
 };
 
 export default function EditableStageCell({
@@ -69,13 +91,12 @@ export default function EditableStageCell({
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
   const [isLoading, setIsLoading] = useState(false);
-  const [hasDocuments, setHasDocuments] = useState(false);
+  const [hasLinkedDocument, setHasLinkedDocument] = useState(false); // UPDATED: Track linked documents only
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<any>(null);
   const [stageDate, setStageDate] = useState('');
-  const [cachedDocuments, setCachedDocuments] = useState<any[]>([]);
   const [kycDocumentData, setKycDocumentData] = useState<any>(null);
-  const [isOldDocument, setIsOldDocument] = useState(false); // New state for old document detection
+  const [isOldDocument, setIsOldDocument] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const requiresUpload = stage.documents && stage.documents.length > 0;
 
@@ -138,26 +159,22 @@ export default function EditableStageCell({
       console.log('Task:', { id: task.id, name: task.name });
       console.log('Stage:', { id: stage.id, name: stage.name });
 
-      // Get the director_id from the task
-      const directorId = task.individual_id;
-      if (!directorId) {
-        console.log('No director ID found in task');
+      // UPDATED: Get LINKED document only
+      const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
+
+      if (!linkedDoc) {
+        console.log('No linked document found for preview');
+        setIsPreviewOpen(false);
+        toast({
+          title: 'No Linked Document',
+          description: 'No document has been linked for this stage yet.',
+          variant: 'default',
+        });
         return null;
       }
-
-      // Get the most recent document from allDocuments
-      const stageDocuments = filterDocumentsForStage(allDocuments, directorId, stage.documents || []);
-      console.log('Found stage documents:', stageDocuments);
-
-      if (!stageDocuments.length) {
-        console.log('No documents found for stage');
-        return null;
-      }
-
-      const doc = stageDocuments[0];
 
       // Check if document has indicator - if so, don't show preview
-      if (doc.indicator === true) {
+      if (linkedDoc.indicator === true) {
         console.log('Document has indicator, skipping preview');
         toast({
           title: 'Preview not available',
@@ -170,7 +187,7 @@ export default function EditableStageCell({
 
       // Check if document is older than task creation - if so, don't show preview
       const isOldDoc = task.created_at &&
-        isDocumentOlderThanTask(doc.created_at, task.created_at);
+        isDocumentOlderThanTask(linkedDoc.created_at, task.created_at);
 
       if (isOldDoc) {
         console.log('Document is older than task creation, skipping preview');
@@ -184,7 +201,7 @@ export default function EditableStageCell({
       }
 
       // Get the KYC document data using the document_id (which should match kycId)
-      const kycId = doc.document_id;
+      const kycId = linkedDoc.document_id;
       if (!kycId) {
         console.log('No KYC ID found in document');
         return null;
@@ -198,19 +215,19 @@ export default function EditableStageCell({
       }
 
       console.log('KYC Data:', kycData);
-      console.log('Raw document data:', doc);
+      console.log('Raw document data:', linkedDoc);
 
       // Use KYC document display_name or name, not stage document name
       const documentName = kycData.display_name || kycData.name || 'Document';
 
       // Format the file path and URL
       const bucketName = 'kyc-documents';
-      const filePath = doc.file_path?.startsWith(bucketName)
-        ? doc.file_path
-        : `${bucketName}/${doc.file_path}`;
+      const filePath = linkedDoc.file_path?.startsWith(bucketName)
+        ? linkedDoc.file_path
+        : `${bucketName}/${linkedDoc.file_path}`;
 
       const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
-      const fileName = doc.file_path?.split('/').pop() || documentName;
+      const fileName = linkedDoc.file_path?.split('/').pop() || documentName;
       const fileType = fileName.split('.').pop()?.toLowerCase() || 'pdf';
 
       // Get KYC fields from the KYC document data (not from stage documents)
@@ -260,7 +277,7 @@ export default function EditableStageCell({
       }));
 
       // Prepare extracted data
-      const rawExtractedData = doc.extracted_details || {};
+      const rawExtractedData = linkedDoc.extracted_details || {};
       console.log('Raw extracted data from document:', rawExtractedData);
 
       // Process the extracted data to handle arrays and nested fields
@@ -277,7 +294,7 @@ export default function EditableStageCell({
       console.log('Processed extracted data:', extractedData);
 
       const previewData = {
-        documentId: doc.id,
+        documentId: linkedDoc.id,
         documentName: documentName,
         fileUrl,
         fileName,
@@ -305,66 +322,69 @@ export default function EditableStageCell({
     }
   }, [isPreviewOpen]);
 
-  // Helper function to find matching document in cache
-  const findMatchingDocument = (documentId: string, directorId: string): any => {
-    return cachedDocuments.find(doc =>
-      doc.document_id === documentId &&
-      doc.director_id === directorId
-    );
-  };
-
-  // Initialize documents using passed allDocuments - Updated to handle array fields and old documents
+  // UPDATED: Initialize documents using LINKED documents only
   useEffect(() => {
-    const directorId = task.individual_id;
-    if (!directorId) {
-      return;
-    }
+    console.log('🔄 Initializing EditableStageCell for:', {
+      taskId: task.id,
+      stageId: stage.id,
+      stageName: stage.name,
+      sourceDocumentId: task.source_document_id
+    });
 
-    // Process KYC fields for the stage documents
-    const processStageDocuments = async () => {
-      const stageDocuments = filterDocumentsForStage(allDocuments, directorId, stage.documents || []);
+    // Get LINKED document for this stage
+    const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
 
-      if (stageDocuments.length > 0) {
-        const mostRecentDoc = stageDocuments[0];
+    if (linkedDoc) {
+      console.log('📄 Found linked document:', {
+        id: linkedDoc.id,
+        document_id: linkedDoc.document_id,
+        file_path: linkedDoc.file_path,
+        indicator: linkedDoc.indicator
+      });
 
-        // Check if document is older than task creation
-        const isOldDoc = task.created_at &&
-          isDocumentOlderThanTask(mostRecentDoc.created_at, task.created_at);
+      // Check if document is older than task creation
+      const isOldDoc = task.created_at &&
+        isDocumentOlderThanTask(linkedDoc.created_at, task.created_at);
 
-        setIsOldDocument(isOldDoc);
+      setIsOldDocument(isOldDoc);
 
-        // Only set hasDocuments to true if document doesn't have indicator AND is not old
-        const hasValidDocument = !mostRecentDoc.indicator && !isOldDoc;
-        setHasDocuments(hasValidDocument);
+      // Only set hasLinkedDocument to true if document doesn't have indicator AND is not old
+      const hasValidDocument = !linkedDoc.indicator && !isOldDoc;
+      setHasLinkedDocument(hasValidDocument);
 
-        // Extract date from most recent document only if valid
-        if (hasValidDocument) {
-          const dateFields = [
-            'application_date', 'date', 'upload_date', 'created_date', 
-            'date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
-            'Expiry_Date', 'Date_of_Issue'
-          ];
-          
-          if (mostRecentDoc.extracted_details) {
-            const foundDate = findDateInObject(mostRecentDoc.extracted_details, dateFields);
-            if (foundDate) {
-              setStageDate(foundDate);
-              return;
-            }
+      console.log('📊 Document validation:', {
+        hasIndicator: linkedDoc.indicator,
+        isOldDoc,
+        hasValidDocument
+      });
+
+      // Extract date from linked document only if valid
+      if (hasValidDocument) {
+        const dateFields = [
+          'application_date', 'date', 'upload_date', 'created_date', 
+          'date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
+          'Expiry_Date', 'Date_of_Issue'
+        ];
+        
+        if (linkedDoc.extracted_details) {
+          const foundDate = findDateInObject(linkedDoc.extracted_details, dateFields);
+          if (foundDate) {
+            console.log('📅 Found date in linked document:', foundDate);
+            setStageDate(foundDate);
+            return;
           }
         }
-        
-        // Clear stage date if no valid date found or document is invalid
-        setStageDate('');
-      } else {
-        setHasDocuments(false);
-        setIsOldDocument(false);
-        setStageDate('');
       }
-    };
-
-    processStageDocuments();
-  }, [allDocuments, task.individual_id, task.created_at, stage.documents, requiresUpload]);
+      
+      // Clear stage date if no valid date found or document is invalid
+      setStageDate('');
+    } else {
+      console.log('❌ No linked document found for this stage');
+      setHasLinkedDocument(false);
+      setIsOldDocument(false);
+      setStageDate('');
+    }
+  }, [allDocuments, task.individual_id, task.created_at, task.source_document_id, stage.id, stage.documents, requiresUpload]);
 
   // Helper function to find a date in an object, including nested arrays
   const findDateInObject = (obj: any, dateFields: string[]): string | null => {
@@ -393,41 +413,6 @@ export default function EditableStageCell({
       }
     }
     return null;
-  };
-
-  // Get extracted date from passed documents - Updated to handle array fields
-  const getExtractedDate = (): string => {
-    if (!allDocuments.length) return '';
-
-    const stageDocuments = filterDocumentsForStage(allDocuments, task.individual_id, stage.documents || []);
-    if (!stageDocuments.length) return '';
-
-    const mostRecentDoc = stageDocuments[0];
-
-    // Skip if document has indicator or is old
-    if (mostRecentDoc.indicator) {
-      console.log('Document has indicator, skipping date extraction');
-      return '';
-    }
-
-    const isOldDoc = task.created_at && isDocumentOlderThanTask(mostRecentDoc.created_at, task.created_at);
-    if (isOldDoc) {
-      console.log('Document is older than task creation, skipping date extraction');
-      return '';
-    }
-
-    const dateFields = [
-      'application_date', 'date', 'upload_date', 'created_date', 
-      'date_generated', 'invoice_date_and_time', 'With_Effect_From',
-      'Expiry_Date', 'Date_of_Issue'
-    ];
-
-    if (mostRecentDoc.extracted_details) {
-      const foundDate = findDateInObject(mostRecentDoc.extracted_details, dateFields);
-      if (foundDate) return foundDate;
-    }
-    
-    return '';
   };
 
   const isEnquiryStage = stage.name === 'Enquiry';
@@ -560,17 +545,13 @@ export default function EditableStageCell({
 
       const formattedDate = format(dateObj, 'dd/MM/yyyy');
       
-      // Find the document to update
-      const directorId = task.individual_id;
-      const stageDocuments = directorId 
-        ? filterDocumentsForStage(allDocuments, directorId, stage.documents || [])
-        : [];
+      // UPDATED: Find the LINKED document to update
+      const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
       
       let updatedExtractedDetails = {};
       
-      if (stageDocuments.length > 0) {
-        const mostRecentDoc = stageDocuments[0];
-        const currentDetails = mostRecentDoc.extracted_details || {};
+      if (linkedDoc) {
+        const currentDetails = linkedDoc.extracted_details || {};
         
         // Try to find where the date was originally stored
         const dateFields = [
@@ -709,42 +690,26 @@ export default function EditableStageCell({
     }
   };
 
-  // Updated handleViewDocument to prevent viewing old documents
+  // UPDATED: Only handle view for LINKED documents
   const handleViewDocument = useCallback((e?: React.MouseEvent) => {
     console.log('--- handleViewDocument called ---');
     e?.stopPropagation();
 
-    // Get the director_id from the task
-    const directorId = task.individual_id;
-    console.log('Director ID:', directorId);
+    // UPDATED: Get LINKED document only
+    const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
 
-    if (!directorId) {
-      console.error('No director ID found in task');
+    if (!linkedDoc) {
+      console.log('No linked document found');
       toast({
-        title: 'Error',
-        description: 'No director associated with this task',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    // Check if we have documents for this stage
-    const stageDocuments = filterDocumentsForStage(allDocuments, directorId, stage.documents || []);
-    console.log('Stage documents found:', stageDocuments);
-
-    if (!stageDocuments.length) {
-      console.log('No documents found for stage');
-      toast({
-        title: 'No documents found',
-        description: 'There are no documents available for preview.',
+        title: 'No Linked Document',
+        description: 'No document has been linked for this stage yet. Please use the Link button to link a document first.',
         variant: 'default',
       });
       return;
     }
 
     // Check if document has indicator
-    const doc = stageDocuments[0];
-    if (doc.indicator === true) {
+    if (linkedDoc.indicator === true) {
       console.log('Document has indicator, cannot preview');
       toast({
         title: 'Preview not available',
@@ -756,7 +721,7 @@ export default function EditableStageCell({
 
     // Check if document is older than task creation
     const isOldDoc = task.created_at &&
-      isDocumentOlderThanTask(doc.created_at, task.created_at);
+      isDocumentOlderThanTask(linkedDoc.created_at, task.created_at);
 
     if (isOldDoc) {
       console.log('Document is older than task creation, cannot preview');
@@ -768,22 +733,21 @@ export default function EditableStageCell({
       return;
     }
 
-    console.log('Opening preview dialog');
+    console.log('Opening preview dialog for linked document');
     setIsPreviewOpen(true);
 
     // Update stage date with extracted date if available (only if not old)
-    console.log('Document details:', doc);
+    console.log('Document details:', linkedDoc);
 
     const dateFields = ['application_date', 'date', 'upload_date', 'created_date'];
     for (const field of dateFields) {
-      if (doc.extracted_details && doc.extracted_details[field]) {
-        console.log(`Found date field '${field}':`, doc.extracted_details[field]);
-        setStageDate(doc.extracted_details[field]);
+      if (linkedDoc.extracted_details && linkedDoc.extracted_details[field]) {
+        console.log(`Found date field '${field}':`, linkedDoc.extracted_details[field]);
+        setStageDate(linkedDoc.extracted_details[field]);
         break;
       }
     }
   }, [task, stage, allDocuments]);
-
 
   const handleClick = () => {
     if (requiresUpload) {
@@ -863,8 +827,8 @@ export default function EditableStageCell({
               >
                 <Upload className="h-4 w-4" />
               </Button>
-              {/* Only show Eye button if document exists, has no indicator, and is not old */}
-              {hasDocuments && !isOldDocument && (
+              {/* UPDATED: Only show Eye button if document is LINKED, has no indicator, and is not old */}
+              {hasLinkedDocument && !isOldDocument && (
                 <Button
                   variant="ghost"
                   size="icon"
@@ -873,7 +837,7 @@ export default function EditableStageCell({
                     e.stopPropagation();
                     handleViewDocument(e);
                   }}
-                  title="View document"
+                  title="View linked document"
                 >
                   <Eye className="h-4 w-4" />
                 </Button>
@@ -888,8 +852,8 @@ export default function EditableStageCell({
                 </div>
               )}
             </div>
-            {/* Show date only if document is not old and has no indicator */}
-            {hasDocuments && !isOldDocument && stageDate && (
+            {/* UPDATED: Show date only if document is LINKED, not old and has no indicator */}
+            {hasLinkedDocument && !isOldDocument && stageDate && (
               <div className="text-xs text-gray-600 text-center mt-1">
                 {formatDateDisplay(stageDate)}
               </div>
@@ -898,6 +862,12 @@ export default function EditableStageCell({
             {isOldDocument && (
               <div className="text-xs text-orange-600 text-center mt-1">
                 Old Document
+              </div>
+            )}
+            {/* UPDATED: Show "No Linked Document" message when no document is linked */}
+            {!hasLinkedDocument && !isOldDocument && (
+              <div className="text-xs text-slate-500 text-center mt-1">
+                No Linked Document
               </div>
             )}
           </div>

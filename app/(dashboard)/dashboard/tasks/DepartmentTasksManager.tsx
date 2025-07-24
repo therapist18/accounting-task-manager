@@ -550,7 +550,7 @@ export default function DepartmentTasksManager({
     return currentStage
   }, [isStageApplicableToTask, getDocumentForTaskStage])
 
-  // NEW: Get current stage status for a task
+  // UPDATED: Get current stage status for a task - now uses actual stage status
   const getCurrentStageStatus = useCallback((task: UtilTask) => {
     const currentStage = determineCurrentStage(task, stages);
     if (!currentStage) {
@@ -561,12 +561,36 @@ export default function DepartmentTasksManager({
       };
     }
 
+    // Get the stage data from the departments data to access the actual status
+    const department = departments.find(d => d.id === task.department_id);
+    const subdepartment = department?.tm_subdepartments?.find(s => s.id === task.subdepartment_id);
+    
+    // Find the stage in the department data to get the actual status
+    let stageStatus = currentStage.status || 'Pending';
+    
+    // First check if the stage exists in the department's stages
+    const departmentStage = department?.stages?.find(s => s.id === currentStage.id);
+    if (departmentStage?.status) {
+      stageStatus = departmentStage.status;
+    }
+    
+    // Then check in subdepartment's stages if not found in department
+    const subdepartmentStage = subdepartment?.stages?.find(s => s.stage_id === currentStage.id);
+    if (!stageStatus && subdepartmentStage?.status) {
+      stageStatus = subdepartmentStage.status;
+    }
+    
+    // If still no status, check in the task's stages data
+    if (!stageStatus && task.stages?.[currentStage.id]?.status) {
+      stageStatus = task.stages[currentStage.id].status;
+    }
+
     return {
       stageName: currentStage.name,
-      stageStatus: currentStage.status || 'Pending',
+      stageStatus: stageStatus,
       stageFollowUp: currentStage.follow_up || null
     };
-  }, [determineCurrentStage, stages]);
+  }, [determineCurrentStage, stages, departments]);
 
   const getEnhancedImmigrationStatus = useCallback((task: UtilTask) => {
     const statusStageId = "072b9710-45df-4a05-ba65-01b4ef29d61d";
@@ -729,7 +753,7 @@ export default function DepartmentTasksManager({
     );
   }, [getEnhancedImmigrationStatus, expandedImmigrationStatus, toggleImmigrationStatusExpansion]);
 
-  // NEW: Render current stage status cell
+  // UPDATED: Render current stage status cell with better status handling
   const renderCurrentStageStatusCell = useCallback((task: any) => {
     const stageStatusInfo = getCurrentStageStatus(task);
     
@@ -740,7 +764,17 @@ export default function DepartmentTasksManager({
         case 'in_progress': return 'bg-blue-100 text-blue-800 border-blue-300';
         case 'to enquire': return 'bg-purple-100 text-purple-800 border-purple-300';
         case 'to raise bill': return 'bg-orange-100 text-orange-800 border-orange-300';
-        default: return 'bg-slate-100 text-slate-600 border-slate-300';
+        case 'to approve': return 'bg-indigo-100 text-indigo-800 border-indigo-300';
+        case 'to submit': return 'bg-cyan-100 text-cyan-800 border-cyan-300';
+        case 'to review': return 'bg-amber-100 text-amber-800 border-amber-300';
+        case 'to process': return 'bg-emerald-100 text-emerald-800 border-emerald-300';
+        case 'n/a': return 'bg-slate-100 text-slate-600 border-slate-300';
+        default: 
+          // Handle any "To [Action]" pattern
+          if (status.toLowerCase().startsWith('to ')) {
+            return 'bg-blue-100 text-blue-800 border-blue-300';
+          }
+          return 'bg-slate-100 text-slate-600 border-slate-300';
       }
     };
 
@@ -772,7 +806,7 @@ export default function DepartmentTasksManager({
           )}
         </div>
         <div className="text-xs text-slate-600 text-center">
-          Stage: {stageStatusInfo.stageStatus}
+          Stage: {stageStatusInfo.stageName}
         </div>
       </div>
     );
@@ -1003,7 +1037,7 @@ export default function DepartmentTasksManager({
     setIsStageUploadDialogOpen(true)
   }, [departments])
 
-  // UPDATED: Only handle view for LINKED documents
+  // UPDATED: Only handle view for LINKED documents - completely rewritten
   const handleViewDocument = useCallback(async (task: any, stage: any) => {
     try {
       console.log('👀 handleViewDocument called with:', { taskId: task.id, stageId: stage.id });
