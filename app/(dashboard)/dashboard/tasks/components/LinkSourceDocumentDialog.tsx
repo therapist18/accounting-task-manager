@@ -1,6 +1,6 @@
 // @ts-nocheck
 "use client"
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Eye, ChevronDown, Plus, Minus, Loader2, Settings, Search, Users, X, TableProperties, RotateCcw, Pencil, AlertTriangle, Send, DownloadCloud, ArrowUpDown, ArrowUp, ArrowDown, Link as LinkIcon, FileArchive, Eye as EyeIcon, FileText } from "lucide-react";
 import { toast } from "sonner";
@@ -42,12 +42,15 @@ interface Document {
   file_path: string;
   created_at: string;
   director_id: string;
+  extracted_details?: Record<string, any>;
 }
 
 interface KycDocument {
   id: string;
   name: string;
   display_name?: string;
+  fields?: any[];
+  document_type?: string;
 }
 
 interface LinkSourceDocumentDialogProps {
@@ -79,7 +82,58 @@ export function LinkSourceDocumentDialog({
   
   const [selectedDocs, setSelectedDocs] = useState<Record<string, SelectedDoc>>({});
   const [isLoading, setIsLoading] = useState(false);
-  const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
+  const [previewDocument, setPreviewDocument] = useState<any | null>(null);
+  const [isPreviewDialogOpen, setIsPreviewDialogOpen] = useState(false);
+  const [kycDocumentData, setKycDocumentData] = useState<Map<string, any>>(new Map());
+
+  // Fetch KYC document data - same as EditableStageCell
+  const fetchKycDocumentData = useCallback(async (kycId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('acc_portal_kyc')
+        .select('id, fields, name, display_name, document_type')
+        .eq('id', kycId)
+        .single();
+
+      if (error) throw error;
+
+      console.log('Fetched KYC document data:', data);
+      return data;
+    } catch (error) {
+      console.error('Error fetching KYC document:', error);
+      return null;
+    }
+  }, []);
+
+  // Function to process extracted data and ensure proper date handling for arrays - same as EditableStageCell
+  const processExtractedData = (data: any, fields: any[]): any => {
+    if (!data || typeof data !== 'object') return data;
+
+    const result = { ...data };
+    
+    // Process each field
+    fields.forEach(field => {
+      const fieldId = field.id || field.fieldName;
+      
+      // Handle array fields
+      if (field.isArray && Array.isArray(result[fieldId])) {
+        // Process each item in the array
+        result[fieldId] = result[fieldId].map((item: any) => {
+          if (field.arrayConfig?.fields) {
+            // Recursively process nested fields
+            return processExtractedData(item, field.arrayConfig.fields);
+          }
+          return item;
+        });
+      } 
+      // Handle nested objects
+      else if (typeof result[fieldId] === 'object' && result[fieldId] !== null) {
+        result[fieldId] = processExtractedData(result[fieldId], field.fields || []);
+      }
+    });
+    
+    return result;
+  };
 
   useEffect(() => {
     if (task?.source_document_id && typeof task.source_document_id === 'object') {
@@ -155,48 +209,152 @@ export function LinkSourceDocumentDialog({
     });
   };
 
-  const handlePreview = (document: Document) => {
-    const kycDoc = kycDocuments.get(document.document_id);
-    const docName = kycDoc?.display_name || kycDoc?.name || 'Document';
-    const fileName = document.file_path?.split('/').pop() || 'document';
-    
-    // Create the full file URL with the correct Supabase storage path
-    const bucketName = 'kyc-documents';
-    
-    // Clean up the file path - remove any leading slashes or the bucket name if present
-    let cleanPath = document.file_path || '';
-    cleanPath = cleanPath.replace(/^[\\/]+/, ''); // Remove leading slashes
-    cleanPath = cleanPath.replace(new RegExp(`^${bucketName}[\\/]?`), ''); // Remove bucket name if present
-    
-    // Construct the full Supabase storage public URL
-    const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${bucketName}/${cleanPath}?t=${Date.now()}`;
-    
-    // Format the data to match what ExtractionPreview expects
-    const previewData = {
-      documentId: document.id,
-      documentName: docName,
-      fileUrl: fileUrl,
-      fileName: fileName,
-      extractedData: document.extracted_details || {},
-      fields: [], // We'll need to get the fields from kycDoc if available
-      type: 'document',
-      file: {
-        name: fileName,
-        type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
-        url: fileUrl
-      }
-    };
-    
-    console.log('Preview data:', JSON.stringify(previewData, null, 2));
-    console.log('File URL:', fileUrl); // Log the file URL for debugging
-    setPreviewDocument(previewData);
-    setIsPreviewDialogOpen(true);
-  };
+  const handlePreview = async (document: Document) => {
+    console.log('--- handlePreview called ---');
+    console.log('Document:', document);
 
-  const [isPreviewDialogOpen, setIsPreviewDialogOpen] = useState(false);
+    try {
+      setIsLoading(true);
+
+      // Get the KYC document data using the document_id (which should match kycId)
+      const kycId = document.document_id;
+      if (!kycId) {
+        console.log('No KYC ID found in document');
+        toast({
+          title: 'Error',
+          description: 'No KYC document ID found',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Fetch KYC document data
+      const kycData = await fetchKycDocumentData(kycId);
+      if (!kycData) {
+        console.log('No KYC data found');
+        toast({
+          title: 'Error',
+          description: 'Could not load document configuration',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      console.log('KYC Data:', kycData);
+      console.log('Raw document data:', document);
+
+      // Use KYC document display_name or name, not stage document name
+      const documentName = kycData.display_name || kycData.name || 'Document';
+
+      // Format the file path and URL - same as EditableStageCell
+      const bucketName = 'kyc-documents';
+      const filePath = document.file_path?.startsWith(bucketName)
+        ? document.file_path
+        : `${bucketName}/${document.file_path}`;
+
+      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+      const fileName = document.file_path?.split('/').pop() || documentName;
+      const fileType = fileName.split('.').pop()?.toLowerCase() || 'pdf';
+
+      // Get KYC fields from the KYC document data
+      const kycFields = kycData.fields || [];
+
+      console.log('KYC Fields from KYC document:', kycFields);
+
+      // Transform KYC fields to the expected format - same as EditableStageCell
+      const transformKycFields = (fields: any[]): any[] => {
+        if (!Array.isArray(fields)) return [];
+
+        return fields.map((field: any) => {
+          const isArray = field.type === 'array' || field.isArray === true;
+
+          const transformedField: any = {
+            id: field.id || field.fieldName || '',
+            fieldName: field.name || field.fieldName || '',
+            description: field.description || '',
+            isRequired: field.isRequired !== false,
+            fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
+            parentField: field.parentField,
+            isArray: isArray,
+            fields: field.fields ? transformKycFields(field.fields) : undefined,
+          };
+
+          if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
+            transformedField.arrayConfig = {
+              maxItems: field.arrayConfig.maxItems,
+              fields: transformKycFields(field.arrayConfig.fields)
+            };
+          }
+
+          return transformedField;
+        });
+      };
+
+      // Map KYC fields to the expected format
+      const fields = transformKycFields(kycFields).map((field: any) => ({
+        id: field.id || field.fieldName,
+        name: field.fieldName,
+        type: field.fieldType,
+        required: field.isRequired,
+        description: field.description,
+        isArray: field.isArray,
+        arrayConfig: field.arrayConfig,
+        fields: field.fields || []
+      }));
+
+      // Prepare extracted data
+      const rawExtractedData = document.extracted_details || {};
+      console.log('Raw extracted data from document:', rawExtractedData);
+
+      // Process the extracted data to handle arrays and nested fields
+      const processedExtractedData = processExtractedData(rawExtractedData, fields);
+      
+      // Ensure all fields have values, using empty strings for missing ones
+      const extractedData = { ...processedExtractedData };
+      fields.forEach((field: any) => {
+        if (extractedData[field.id] === undefined) {
+          extractedData[field.id] = field.isArray ? [] : '';
+        }
+      });
+
+      console.log('Processed extracted data:', extractedData);
+
+      const previewData = {
+        documentId: document.id,
+        documentName: documentName,
+        fileUrl,
+        fileName,
+        extractedData,
+        fields,
+        type: kycData.document_type || 'document',
+        file: {
+          name: fileName,
+          type: fileType,
+          url: fileUrl
+        }
+      };
+
+      console.log('Final preview data being passed to ExtractionPreview:', previewData);
+      console.log('File URL:', fileUrl); // Log the file URL for debugging
+      
+      setPreviewDocument(previewData);
+      setIsPreviewDialogOpen(true);
+
+    } catch (error) {
+      console.error('Error in handlePreview:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load document preview',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleClosePreview = () => {
     setPreviewDocument(null);
+    setIsPreviewDialogOpen(false);
   };
 
   const applicableStages = useMemo(() => {
@@ -285,13 +443,15 @@ export function LinkSourceDocumentDialog({
                                       variant="ghost"
                                       size="icon"
                                       className="h-6 w-6 text-green-600 hover:bg-green-100"
-                                      onClick={() => {
-                                        setPreviewDocument(doc);
-                                        setIsPreviewDialogOpen(true);
-                                      }}
+                                      onClick={() => handlePreview(doc)}
                                       title="Preview Document Extraction"
+                                      disabled={isLoading}
                                     >
-                                      <EyeIcon className="h-4 w-4" />
+                                      {isLoading ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <EyeIcon className="h-4 w-4" />
+                                      )}
                                     </Button>
                                     <div className="text-xs text-slate-500 text-right">
                                       <p>Uploaded:</p>
@@ -328,26 +488,28 @@ export function LinkSourceDocumentDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {previewDocument && (
-        <Dialog open={isPreviewDialogOpen} onOpenChange={setIsPreviewDialogOpen}>
-          <DialogContent className="max-w-7xl w-[95vw] h-[95vh] p-0 flex flex-col">
+      
+      {/* Document Preview Dialog */}
+      <Dialog open={isPreviewDialogOpen} onOpenChange={setIsPreviewDialogOpen}>
+        <DialogContent className="max-w-7xl w-[95vw] h-[95vh] p-0 flex flex-col">
+          {previewDocument ? (
             <div className="flex flex-col h-full">
               <DialogHeader className="p-6 pb-2">
-                <DialogTitle className="text-xl">{previewDocument?.file_path?.split('/').pop() || 'Document'}</DialogTitle>
+                <DialogTitle className="text-xl">{previewDocument.documentName}</DialogTitle>
                 <DialogDescription>
                   Review extracted details for {task.applicant_name || 'this document'}
                 </DialogDescription>
               </DialogHeader>
               <div className="flex-1 overflow-y-auto p-6 pt-2">
                 <ExtractionPreview
-                  documentName={previewDocument?.file_path?.split('/').pop() || 'Document'}
-                  fileUrl={previewDocument?.file_path}
-                  fileName={previewDocument?.file_path?.split('/').pop()}
-                  extractedData={previewDocument?.extracted_details || {} }
-                  fields={[]}
+                  documentName={previewDocument.documentName}
+                  fileUrl={previewDocument.fileUrl}
+                  fileName={previewDocument.fileName}
+                  extractedData={previewDocument.extractedData || {}}
+                  fields={previewDocument.fields || []}
                   viewMode={true}
-                  file={previewDocument}
-                  type="document"
+                  file={previewDocument.file}
+                  type={previewDocument.type}
                   onDataChange={(fieldName, value) => {
                     console.log(`Field ${fieldName} changed to:`, value);
                   }}
@@ -366,9 +528,13 @@ export function LinkSourceDocumentDialog({
                 />
               </div>
             </div>
-          </DialogContent>
-        </Dialog>
-      )}
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-muted-foreground">Loading document preview...</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
