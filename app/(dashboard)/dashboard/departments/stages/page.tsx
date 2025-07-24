@@ -95,7 +95,7 @@ export default function Stages() {
   const [allKycDocuments, setAllKycDocuments] = useState<Map<string, any>>(new Map())
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map())
   const [kycDocumentsLoading, setKycDocumentsLoading] = useState(false)
-  const [columnVisibility, setColumnVisibility] = useState({ index: true, entity: true, stageName: true, duration: true, followUp: true, controls: true })
+  const [columnVisibility, setColumnVisibility] = useState({ index: true, entity: true, stageName: true, duration: true, followUp: true, status: true, controls: true })
   const [entityVisibility, setEntityVisibility] = useState<Record<string, boolean>>({})
 
   // Enhanced function to get KYC fields for a document
@@ -434,6 +434,13 @@ export default function Stages() {
         group: "Stage Info",
       },
       {
+        id: "status",
+        label: "Status",
+        visible: columnVisibility.status,
+        isDefault: true,
+        group: "Stage Info",
+      },
+      {
         id: "controls",
         label: "Controls (Applicable/Display)",
         visible: columnVisibility.controls,
@@ -511,6 +518,7 @@ export default function Stages() {
       stageName: true,
       duration: true,
       followUp: true,
+      status: true,
       controls: true,
     })
   }
@@ -522,6 +530,7 @@ export default function Stages() {
       stageName: false,
       duration: false,
       followUp: false,
+      status: false,
       controls: false,
     })
   }
@@ -533,6 +542,7 @@ export default function Stages() {
       stageName: true,
       duration: true,
       followUp: true,
+      status: true,
       controls: true,
     })
   }
@@ -2333,6 +2343,13 @@ export default function Stages() {
   const renderNormalTable = () => {
     if (!currentDept) return null
 
+    const headerRowCount =
+      1 +
+      (columnVisibility.duration ? 1 : 0) +
+      (columnVisibility.followUp ? 1 : 0) +
+      (columnVisibility.status ? 1 : 0) +
+      (columnVisibility.controls ? 1 : 0)
+
     const processedSubdepartments = getProcessedSubdepartments(currentDept)
     const normalizedSubdepartments =
       processedSubdepartments.length > 0
@@ -2359,7 +2376,7 @@ export default function Stages() {
                 {columnVisibility.index && (
                   <TableHead
                     className="sticky left-0 bg-blue-700 border-r-2 border-blue-500 font-bold w-16 z-40 text-center text-white"
-                    rowSpan={4}
+                    rowSpan={headerRowCount}
                   >
                     #
                   </TableHead>
@@ -2370,7 +2387,7 @@ export default function Stages() {
                       "sticky bg-blue-700 border-r-2 border-blue-500 font-bold w-64 z-40 text-white",
                       columnVisibility.index ? "left-16" : "left-0",
                     )}
-                    rowSpan={4}
+                    rowSpan={headerRowCount}
                   >
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4" />
@@ -2545,27 +2562,6 @@ export default function Stages() {
                           >
                             <Pencil className="h-3 w-3 text-white" />
                           </Button>
-                          {/* START: FIX - Added Status Popover */}
-                          {stage.status && (
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 hover:bg-white/20"
-                                >
-                                  <Info className="h-3 w-3 text-white" />
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-64 p-4" side="bottom" align="start">
-                                <div className="space-y-2">
-                                  <h4 className="font-medium">Stage Status</h4>
-                                  <p className="text-sm text-muted-foreground">{stage.status}</p>
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          )}
-                          {/* END: FIX */}
                         </div>
                       </div>
                     </div>
@@ -2624,6 +2620,33 @@ export default function Stages() {
                       className="border-r border-blue-400 text-center bg-blue-600"
                     >
                       <div className="font-bold text-sm text-white py-2">{stage.follow_up || "-"}</div>
+                    </TableHead>
+                  ))}
+                </TableRow>
+              )}
+              {/* Status Row */}
+              {columnVisibility.status && (
+                <TableRow className="border-b-0">
+                  {columnVisibility.stageName && (
+                    <TableHead
+                      className={cn(
+                        "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
+                        columnVisibility.index && columnVisibility.entity
+                          ? "left-80"
+                          : columnVisibility.index || columnVisibility.entity
+                            ? "left-64"
+                            : "left-0",
+                      )}
+                    >
+                      Status
+                    </TableHead>
+                  )}
+                  {currentDept.stages.map((stage) => (
+                    <TableHead
+                      key={`status-${stage.id}`}
+                      className="border-r border-blue-400 text-center bg-blue-600"
+                    >
+                      <div className="font-bold text-sm text-white py-2">{stage.status || "-"}</div>
                     </TableHead>
                   ))}
                 </TableRow>
