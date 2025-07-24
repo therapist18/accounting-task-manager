@@ -1273,20 +1273,20 @@ export default function DepartmentTasksManager({
       case 'current_stage_follow_up': {
         const statusInfo = getCurrentStageStatus(task);
         if (!statusInfo.stageFollowUp) return '-';
-        const getFollowUpBadgeColor = (followUp) => {
+        const getFollowUpTextColor = (followUp) => {
           switch (followUp?.toLowerCase()) {
-            case 'bcl': return 'bg-blue-100 text-blue-800 border-blue-300';
-            case 'officer': return 'bg-green-100 text-green-800 border-green-300';
-            case 'client': return 'bg-purple-100 text-purple-800 border-purple-300';
-            default: return 'bg-slate-100 text-slate-600 border-slate-300';
+            case 'bcl': return 'text-blue-800';
+            case 'officer': return 'text-green-800';
+            case 'client': return 'text-purple-800';
+            default: return 'text-slate-600';
           }
         };
-        return <Badge variant="outline" className={`whitespace-nowrap text-xs ${getFollowUpBadgeColor(statusInfo.stageFollowUp)}`}>Follow-up: {statusInfo.stageFollowUp}</Badge>;
+        return <span className={`whitespace-nowrap text-xs ${getFollowUpTextColor(statusInfo.stageFollowUp)}`}>Follow-up: {statusInfo.stageFollowUp}</span>;
       }
       case 'company_name': return companies.get(task.company_id) || 'N/A';
       case 'job_level': return getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || getTaskHierarchy(task)?.subdepartment?.name || 'N/A';
-      case 'renewal_new': return <Badge variant={task.renewal_status === 'Renewal' ? 'secondary' : 'outline'} className="text-xs font-semibold">{task.renewal_status || 'New'}</Badge>;
-      case 'case_status': return <Badge variant={task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{task.status || 'pending'}</Badge>;
+      case 'renewal_new': return <span className="text-xs font-semibold">{task.renewal_status || 'New'}</span>;
+      case 'case_status': return <span className="text-xs font-semibold">{task.status || 'pending'}</span>;
       case 'nationality': return task.nationality || 'N/A';
       case 'age': return task.age?.toString() || 'N/A';
       case 'task_manager': return getUserDisplayName(task.task_manager_id);

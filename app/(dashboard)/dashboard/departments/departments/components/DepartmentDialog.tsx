@@ -518,7 +518,7 @@ function RoleManagementSection({
               <BoxSelect className="h-4 w-4 text-blue-600" />
             </SelectTrigger>
             <SelectContent className="bg-white border rounded-md shadow-sm">
-              <SelectItem value="">
+              <SelectItem value="none">
                 <div className="flex items-center gap-2 p-2">
                   <UserIcon className="h-4 w-4 text-gray-400" />
                   <span className="text-gray-500">None</span>

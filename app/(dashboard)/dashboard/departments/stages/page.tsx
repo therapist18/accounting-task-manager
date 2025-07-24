@@ -2027,10 +2027,10 @@ export default function Stages() {
                       className={cn(
                         "sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white align-middle",
                         columnVisibility.index && columnVisibility.entity
-                          ? "left-100"
-                          : columnVisibility.index || columnVisibility.entity
-                            ? "left-164"
-                            : "left-0",
+                            ? "left-100"
+                            : columnVisibility.index || columnVisibility.entity
+                              ? "left-164"
+                              : "left-0",
                       )}
                       rowSpan={totalHeaderRows}
                     >
@@ -2040,10 +2040,10 @@ export default function Stages() {
                       className={cn(
                         "sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white align-middle",
                         columnVisibility.index && columnVisibility.entity
-                          ? "left-120"
-                          : columnVisibility.index || columnVisibility.entity
-                            ? "left-164"
-                            : "left-0",
+                            ? "left-120"
+                            : columnVisibility.index || columnVisibility.entity
+                              ? "left-164"
+                              : "left-0",
                       )}
                       rowSpan={totalHeaderRows}
                     >
@@ -2093,7 +2093,9 @@ export default function Stages() {
                   ))}
                 </TableRow>
               ))}
-
+              <TableRow className="border-b-0">
+                <TableCell className="sticky bg-slate-100 border-r-2 border-slate-300 z-10" rowSpan={2}> </TableCell>
+              </TableRow>
               {/* Applicable/Display Controls Header Row */}
               {columnVisibility.controls && (
                 <TableRow className="border-b-0">
@@ -2248,7 +2250,6 @@ export default function Stages() {
                       </TableCell>
                     </>
                   )}
-                  <TableCell className="sticky bg-slate-100 border-r-2 border-slate-300 z-10" rowSpan={2}> </TableCell>
                   {leafEntities.map((entity, entityIndex) => {
                     const allocation = getStageAllocation(stage, entity)
                     const columnClass = entityIndex % 2 === 0 ? "bg-white" : "bg-gray-50/80"
