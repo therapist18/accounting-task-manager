@@ -37,10 +37,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, UserPlus, UserCheck, UserX, ChevronDown, Check, Eye, EyeOff, ChevronRight, ChevronUp, Trash2, FileText, Layers, Target, UserIcon, Minus, Search, Workflow, Building, FolderOpen, History, Shield } from "lucide-react"
+import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, UserPlus, UserCheck, UserX, ChevronDown, Check, Eye, EyeOff, ChevronRight, ChevronUp, Trash2, FileText, Layers, Target, UserIcon, Minus, Search, Workflow, Building, FolderOpen, History, Shield, BarChart3 } from "lucide-react"
 import supabase from "@/lib/supabase/client"
 import { toast } from "sonner"
 import DepartmentDialog from "./components/DepartmentDialog"
+import AssignmentStatsDashboard from "./components/AssignmentStatsDashboard"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -440,6 +441,7 @@ function UserDetailsPopover({ userId, users, role, children }: {
 // Main Component
 export default function Departments() {
   const [isAddDepartmentOpen, setIsAddDepartmentOpen] = useState(false)
+  const [isStatsOpen, setIsStatsOpen] = useState(false)
   const [editingDepartmentId, setEditingDepartmentId] = useState<string | null>(null);
   const [editingSubdepartmentId, setEditingSubdepartmentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true)
@@ -738,34 +740,22 @@ export default function Departments() {
 
     let officers_history = currentDept?.officers_history || [];
 
-    // Get current officers that don't have an end date
-    const currentOfficers = officers_history.filter(officer => !officer.end_date);
-    
-    // Find officers that were removed
-    const removedOfficers = currentOfficers.filter(
-      officer => !departmentForm.officerIds?.includes(officer.id)
-    );
-    
-    // Find newly added officers
-    const newOfficers = departmentForm.officerIds?.filter(
-      id => !currentOfficers.some(officer => officer.id === id)
-    ) || [];
+    // If officer assignment changed, update the history
+    const currentOfficer = getCurrentOfficer(officers_history);
+    if (departmentForm.officerId !== currentOfficer?.id) {
+      // End current officer assignment
+      officers_history = officers_history.map(officer => 
+        !officer.end_date ? { ...officer, end_date: new Date().toISOString() } : officer
+      );
 
-    // Update history for removed officers
-    officers_history = officers_history.map(officer => {
-      if (removedOfficers.some(removed => removed.id === officer.id && !officer.end_date)) {
-        return { ...officer, end_date: new Date().toISOString() };
+      // Add new officer if selected
+      if (departmentForm.officerId) {
+        officers_history.push({
+          id: departmentForm.officerId,
+          start_date: new Date().toISOString()
+        });
       }
-      return officer;
-    });
-
-    // Add new officers to history
-    newOfficers.forEach(officerId => {
-      officers_history.push({
-        id: officerId,
-        start_date: new Date().toISOString()
-      });
-    });
+    }
 
     // Update the department
     const { error: updateError } = await supabase
@@ -818,7 +808,12 @@ export default function Departments() {
 
     const nextOrder = (maxOrder?.[0]?.order || 0) + 1;
 
-    // Prepare manager_history and assistant_history
+    // Prepare officer_history, manager_history, and assistant_history
+    const officer_history = subdept.officerId ? [{
+      id: subdept.officerId,
+      start_date: new Date().toISOString()
+    }] : []
+
     const manager_history = subdept.taskManagerId ? [{
       id: subdept.taskManagerId,
       start_date: new Date().toISOString()
@@ -840,6 +835,7 @@ export default function Departments() {
         department_id: editingDepartmentId,
         default_display: subdept.default_display,
         order: nextOrder,
+        officer_history,
         manager_history,
         assistant_history
       })
@@ -871,7 +867,7 @@ export default function Departments() {
     // Get current subdepartment to find its department_id and existing history
     const { data: currentSubdept } = await supabase
       .from('tm_subdepartments')
-      .select('department_id, manager_history, assistant_history')
+      .select('department_id, officer_history, manager_history, assistant_history')
       .eq('id', editingSubdepartmentId)
       .single();
 
@@ -890,6 +886,24 @@ export default function Departments() {
 
     if (existingSubdept && existingSubdept.length > 0) {
       throw new Error('Another subdepartment with this name already exists in this department');
+    }
+
+    // Handle officer history updates
+    let officer_history = currentSubdept?.officer_history || [];
+    const currentOfficer = getCurrentOfficer(officer_history);
+    if (subdept.officerId !== currentOfficer?.id) {
+      // End current officer assignment
+      officer_history = officer_history.map(officer => 
+        !officer.end_date ? { ...officer, end_date: new Date().toISOString() } : officer
+      );
+
+      // Add new officer if selected
+      if (subdept.officerId) {
+        officer_history.push({
+          id: subdept.officerId,
+          start_date: new Date().toISOString()
+        });
+      }
     }
 
     // Handle manager history updates
@@ -941,6 +955,7 @@ export default function Departments() {
         name: subdept.name.trim(),
         description: subdept.description,
         default_display: subdept.default_display,
+        officer_history,
         manager_history,
         assistant_history,
         updated_at: new Date().toISOString()
@@ -975,7 +990,12 @@ export default function Departments() {
         continue;
       }
 
-      // Prepare manager_history and assistant_history
+      // Prepare officer_history, manager_history, and assistant_history
+      const officer_history = subdept.officerId ? [{
+        id: subdept.officerId,
+        start_date: new Date().toISOString()
+      }] : []
+
       const manager_history = subdept.taskManagerId ? [{
         id: subdept.taskManagerId,
         start_date: new Date().toISOString()
@@ -997,6 +1017,7 @@ export default function Departments() {
           department_id: departmentId,
           default_display: subdept.default_display,
           order: i + 1,
+          officer_history,
           manager_history,
           assistant_history
         })
@@ -1058,7 +1079,8 @@ export default function Departments() {
         classes: [],
         taskManagerId: '',
         taskAssistantIds: [],
-        default_display: true
+        default_display: true,
+        officerId: '', //FIX: Initialize officerId for new subdepartment
       }],
       officerId: ''
     });
@@ -1075,9 +1097,10 @@ export default function Departments() {
       d.tm_subdepartments?.some(s => s.id === subdept.id)
     );
 
-    // Get current manager and assistants
+    // Get current manager, assistants, and officer
     const currentManager = getCurrentManager(subdept.manager_history || []);
     const currentAssistants = getCurrentAssistants(subdept.assistant_history || []);
+    const currentOfficer = getCurrentOfficer(subdept.officer_history || []); //FIX: Get current officer for the subdepartment
 
     setDepartmentForm({
       name: dept?.name || '',
@@ -1087,11 +1110,12 @@ export default function Departments() {
         name: subdept.name,
         description: subdept.description || '',
         classes: subdept.classes || [],
-        taskManagerId: currentManager?.id || subdept.taskManagerId || '',
-        taskAssistantIds: currentAssistants.map(a => a.id) || subdept.taskAssistants?.map(ta => ta.userId) || [],
-        default_display: subdept.default_display || true
+        taskManagerId: currentManager?.id || '',
+        taskAssistantIds: currentAssistants.map(a => a.id),
+        default_display: subdept.default_display || true,
+        officerId: currentOfficer?.id || '', //FIX: Set officerId in form state
       }],
-      officerId: ''
+      officerId: '' // Department officer is not being edited here
     });
     setIsAddDepartmentOpen(true);
   };
@@ -1156,6 +1180,14 @@ export default function Departments() {
           <p className="text-gray-500 mt-1">Manage all company departments and their structures.</p>
         </div>
         <div className="flex items-center space-x-2">
+          <Button 
+            variant="outline" 
+            onClick={() => setIsStatsOpen(true)}
+            className="flex items-center gap-2"
+          >
+            <BarChart3 className="h-4 w-4" />
+            Statistics
+          </Button>
           {isOrderChanged && (
             <Button onClick={handleSaveOrder} disabled={savingOrder}>
               <Loader2 className={`mr-2 h-4 w-4 ${savingOrder ? 'animate-spin' : 'hidden'}`} />
@@ -1310,8 +1342,10 @@ export default function Departments() {
                       // Get current manager and assistants from history
                       const currentManager = getCurrentManager(subdept.manager_history || []);
                       const currentAssistants = getCurrentAssistants(subdept.assistant_history || []);
+                      const currentOfficerSub = getCurrentOfficer(subdept.officer_history || []);
                       const hasManagerHistory = subdept.manager_history && subdept.manager_history.length > 1;
                       const hasAssistantHistory = subdept.assistant_history && subdept.assistant_history.length > 1;
+                      const hasOfficerHistorySub = subdept.officer_history && subdept.officer_history.length > 1;
 
                       return (
                         <React.Fragment key={subdept.id}>
@@ -1342,7 +1376,22 @@ export default function Departments() {
                               </div>
                               {subdept.description && <div className="pl-8 text-xs text-gray-500 mt-1">{subdept.description}</div>}
                             </TableCell>
-                            <TableCell className="border-r"></TableCell>
+                            <TableCell className="border-r">
+                              <div className="flex items-center gap-2">
+                                {currentOfficerSub ? (
+                                  <UserDetailsPopover userId={currentOfficerSub.id} users={users} role="officer">
+                                    {getUserName(currentOfficerSub.id)}
+                                  </UserDetailsPopover>
+                                ) : (
+                                  <span className="text-gray-400">None</span>
+                                )}
+                                {hasOfficerHistorySub && (
+                                  <OfficerHistoryPopover officers_history={subdept.officer_history || []} users={users}>
+                                    <div />
+                                  </OfficerHistoryPopover>
+                                )}
+                              </div>
+                            </TableCell>
                             <TableCell className="border-r">
                               <div className="flex items-center gap-2">
                                 {currentManager ? (
@@ -1548,6 +1597,13 @@ export default function Departments() {
         editingDepartmentId={editingDepartmentId}
         editingSubdepartmentId={editingSubdepartmentId}
         isSaving={saving}
+      />
+
+      <AssignmentStatsDashboard
+        departments={departments}
+        users={users}
+        isOpen={isStatsOpen}
+        onClose={() => setIsStatsOpen(false)}
       />
     </div>
   )

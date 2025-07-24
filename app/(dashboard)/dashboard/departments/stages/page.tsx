@@ -2094,7 +2094,7 @@ export default function Stages() {
                 </TableRow>
               ))}
               <TableRow className="border-b-0">
-                <TableCell className="sticky bg-slate-100 border-r-2 border-slate-300 z-10" rowSpan={2}> </TableCell>
+                <TableCell className="sticky bg-slate-100 border-r-2 border-slate-300 z-10" rowSpan={2} colSpan={2}></TableCell>
               </TableRow>
               {/* Applicable/Display Controls Header Row */}
               {columnVisibility.controls && (

@@ -1101,24 +1101,23 @@ export default function DepartmentTasksManager({
     const statusInfo = getEnhancedImmigrationStatus(task);
     const isExpanded = expandedImmigrationStatus.has(task.id.toString());
 
-    const getBadgeColor = (type: string) => {
+    const getColor = (type: string) => {
       switch (type) {
-        case 'active': return 'bg-green-100 text-green-800 border-green-300';
-        case 'expiring_soon': return 'bg-blue-100 text-blue-800 border-blue-300';
-        case 'expired': return 'bg-red-100 text-red-800 border-red-300';
-        default: return 'bg-slate-100 text-slate-600 border-slate-300';
+        case 'active': return 'text-green-800';
+        case 'expiring_soon': return 'text-blue-800';
+        case 'expired': return 'text-red-800';
+        default: return 'text-slate-600';
       }
     };
 
     return (
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <Badge
-            variant="outline"
-            className={`whitespace-normal text-xs ${getBadgeColor(statusInfo.type)}`}
+          <span
+            className={`whitespace-normal text-sm ${getColor(statusInfo.type)}`}
           >
             {statusInfo.status}
-          </Badge>
+          </span>
           {statusInfo.type !== 'na' && (
             <Button
               variant="ghost"
@@ -1132,7 +1131,7 @@ export default function DepartmentTasksManager({
         </div>
 
         {isExpanded && statusInfo.type !== 'na' && (
-          <div className="space-y-1 p-2 bg-slate-50 rounded border text-xs text-left">
+          <div className="space-y-1 p-2 bg-slate-50 rounded border text-sm text-left">
             <div className="flex justify-between">
               <span className="font-medium">Document Type:</span>
               <span>{statusInfo.documentType || 'Unknown'}</span>
@@ -1168,34 +1167,33 @@ export default function DepartmentTasksManager({
   const renderCurrentStageStatusCell = useCallback((task: any) => {
     const stageStatusInfo = getCurrentStageStatus(task);
 
-    const getStatusBadgeColor = (status: string) => {
+    const getStatusColor = (status: string) => {
       switch (status.toLowerCase()) {
-        case 'completed': return 'bg-green-100 text-green-800 border-green-300';
-        case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-        case 'in_progress': return 'bg-blue-100 text-blue-800 border-blue-300';
-        case 'to enquire': return 'bg-purple-100 text-purple-800 border-purple-300';
-        case 'to raise bill': return 'bg-orange-100 text-orange-800 border-orange-300';
-        case 'to approve': return 'bg-indigo-100 text-indigo-800 border-indigo-300';
-        case 'to submit': return 'bg-cyan-100 text-cyan-800 border-cyan-300';
-        case 'to review': return 'bg-amber-100 text-amber-800 border-amber-300';
-        case 'to process': return 'bg-emerald-100 text-emerald-800 border-emerald-300';
-        case 'n/a': return 'bg-slate-100 text-slate-600 border-slate-300';
+        case 'completed': return 'text-green-800';
+        case 'pending': return 'text-yellow-800';
+        case 'in_progress': return 'text-blue-800';
+        case 'to enquire': return 'text-purple-800';
+        case 'to raise bill': return 'text-orange-800';
+        case 'to approve': return 'text-indigo-800';
+        case 'to submit': return 'text-cyan-800';
+        case 'to review': return 'text-amber-800';
+        case 'to process': return 'text-emerald-800';
+        case 'n/a': return 'text-slate-600';
         default:
           if (status.toLowerCase().startsWith('to ')) {
-            return 'bg-blue-100 text-blue-800 border-blue-300';
+            return 'text-blue-800';
           }
-          return 'bg-slate-100 text-slate-600 border-slate-300';
+          return 'text-slate-600';
       }
     };
 
     return (
       <div className="space-y-2">
-        <Badge
-          variant="outline"
-          className={`whitespace-normal text-xs ${getStatusBadgeColor(stageStatusInfo.stageStatus)}`}
+        <span
+          className={`whitespace-normal text-sm ${getStatusColor(stageStatusInfo.stageStatus)}`}
         >
           {stageStatusInfo.stageStatus}
-        </Badge>
+        </span>
       </div>
     );
   }, [getCurrentStageStatus]);
@@ -1253,7 +1251,7 @@ export default function DepartmentTasksManager({
         <div className="flex items-center justify-between gap-1 w-full">
           <div className="flex-grow text-left">
             <div className="font-medium truncate" title={task.applicant_name}>{task.applicant_name || 'N/A'}</div>
-            <div className="text-xs text-slate-500">ID: {task.id}</div>
+            <div className="text-sm text-slate-500">ID: {task.id}</div>
           </div>
           <Button
             variant="ghost" size="icon" className="h-8 w-8 text-blue-500 hover:bg-blue-100 flex-shrink-0"
@@ -1281,12 +1279,12 @@ export default function DepartmentTasksManager({
             default: return 'text-slate-600';
           }
         };
-        return <span className={`whitespace-nowrap text-xs ${getFollowUpTextColor(statusInfo.stageFollowUp)}`}>Follow-up: {statusInfo.stageFollowUp}</span>;
+        return <span className={`whitespace-nowrap text-sm ${getFollowUpTextColor(statusInfo.stageFollowUp)}`}>{statusInfo.stageFollowUp}</span>;
       }
       case 'company_name': return companies.get(task.company_id) || 'N/A';
       case 'job_level': return getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || getTaskHierarchy(task)?.subdepartment?.name || 'N/A';
-      case 'renewal_new': return <span className="text-xs font-semibold">{task.renewal_status || 'New'}</span>;
-      case 'case_status': return <span className="text-xs font-semibold">{task.status || 'pending'}</span>;
+      case 'renewal_new': return <span className="text-sm font-semibold">{task.renewal_status || 'New'}</span>;
+      case 'case_status': return <span className="text-sm font-semibold">{task.status || 'pending'}</span>;
       case 'nationality': return task.nationality || 'N/A';
       case 'age': return task.age?.toString() || 'N/A';
       case 'task_manager': return getUserDisplayName(task.task_manager_id);
@@ -1469,7 +1467,7 @@ export default function DepartmentTasksManager({
       return (
         <div className="flex flex-col items-center gap-0.5">
           {stageData.date && (
-            <span className="text-xs font-medium text-slate-800">
+            <span className="text-sm font-medium text-slate-800">
               {formatDateValue(stageData.date)}
             </span>
           )}
@@ -1485,23 +1483,23 @@ export default function DepartmentTasksManager({
         const formattedDate = formatDateValue(fieldValue);
         return (
           <div className="flex items-center gap-1">
-            <span className="text-xs text-slate-700" title={formattedDate}>{formattedDate}</span>
+            <span className="text-sm text-slate-700" title={formattedDate}>{formattedDate}</span>
             {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
           </div>
         );
       }
       return (
         <div className="flex items-center gap-1">
-          <span className="text-xs text-gray-700">{fieldValue}</span>
+          <span className="text-sm text-gray-700">{fieldValue}</span>
           {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
         </div>
       );
     }
 
     switch (row.type) {
-      case 'badge': return <Badge variant={value === 'completed' ? 'default' : value === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{value}</Badge>;
+      case 'badge': return <span className="text-sm font-semibold">{value}</span>
       case 'date': return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
-      case 'stat': return <Badge variant="outline" className="text-xs font-semibold">{value}</Badge>;
+      case 'stat': return <span className="text-sm font-semibold">{value}</span>
 
       case 'stage':
         return (
@@ -1521,12 +1519,11 @@ export default function DepartmentTasksManager({
         const docValue = typeof value === 'object' ? value : { hasDocument: false, status: value };
         return (
           <div className="flex items-center gap-2 justify-center">
-            <Badge
-              variant={docValue.hasDocument ? 'default' : 'outline'}
-              className="text-xs"
+            <span
+              className="text-sm"
             >
               {docValue.status}
-            </Badge>
+            </span>
             {docValue.hasDocument && !docValue.hasIndicator && !docValue.isOldDocument && (
               <Button
                 variant="ghost"
@@ -1679,7 +1676,7 @@ export default function DepartmentTasksManager({
             <TableRow className="h-14">
               {/* Stage Sub-Headers */}
               {visibleStages.map(stage => {
-                const subHeaderBaseClasses = "bg-slate-50 border-r border-b border-slate-300 text-slate-500 text-center text-xs font-medium align-middle p-1 whitespace-nowrap";
+                const subHeaderBaseClasses = "bg-slate-50 border-r border-b border-slate-300 text-slate-500 text-center text-sm font-medium align-middle p-1 whitespace-nowrap";
                 if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
                   return <TableHead key={`subhead-stage-${stage.id}`} className={subHeaderBaseClasses}><div className="flex items-center justify-center gap-1">{stage.name} <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-500 hover:bg-slate-200" onClick={() => toggleStageExpansion(stage.id)}><Plus className="h-3 w-3" /></Button></div></TableHead>
                 }
@@ -1723,7 +1720,7 @@ export default function DepartmentTasksManager({
                   {/* STAGE CELLS */}
                   {visibleStages.map(stage => {
                     if (!isStageApplicableToTask(stage, task)) {
-                      return <TableCell key={`${stage.id}-na`} className="border border-gray-200 text-center text-slate-400 italic text-xs align-middle">N/A</TableCell>
+                      return <TableCell key={`${stage.id}-na`} className="border border-gray-200 text-center text-slate-400 italic text-sm align-middle">N/A</TableCell>
                     }
                     if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
                       return <TableCell key={stage.id} className="border border-gray-200 p-1 align-middle"><EditableStageCell stage={stage} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={handleViewDocument} getKycFields={getKycFields} onSave={enhancedHandleStageStatusSave} /></TableCell>
@@ -1843,8 +1840,8 @@ export default function DepartmentTasksManager({
                       </div>
                     ) : (
                       <div className="flex flex-col items-center gap-1">
-                        <span className="font-bold text-xs truncate max-w-[180px]" title={item.dependant.name}>{item.dependant.name || `Dependant ${item.index + 1}`}</span>
-                        <span className="text-xs opacity-80">{item.dependant.relationship || 'Dependant'}</span>
+                        <span className="font-bold text-sm truncate max-w-[180px]" title={item.dependant.name}>{item.dependant.name || `Dependant ${item.index + 1}`}</span>
+                        <span className="text-sm opacity-80">{item.dependant.relationship || 'Dependant'}</span>
                       </div>
                     )}
                   </TableHead>
@@ -1925,8 +1922,8 @@ export default function DepartmentTasksManager({
                             row.key === 'applicant_name' && item.dependant.name ? item.dependant.name :
                               row.key === 'nationality' && item.dependant.nationality ? item.dependant.nationality :
                                 row.key === 'age' && item.dependant.age ? item.dependant.age.toString() :
-                                  row.key === 'case_status' ? <Badge variant="outline">{item.dependant.relationship || 'Dependant'}</Badge> :
-                                    <span className="text-xs text-gray-400">-</span>
+                                  row.key === 'case_status' ? <span className="text-sm">{item.dependant.relationship || 'Dependant'}</span> :
+                                    <span className="text-sm text-gray-400">-</span>
                           )}
                         </TableCell>
                       ))}
@@ -2337,10 +2334,10 @@ export default function DepartmentTasksManager({
                           <div className="mt-4">
                             <Tabs value={activeFollowUpFilter} onValueChange={setActiveFollowUpFilter}>
                               <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
-                                <TabsTrigger value="all" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">All <Badge variant="outline">{wipTasks.length}</Badge></TabsTrigger>
-                                <TabsTrigger value="bcl" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">BCL <Badge variant="outline">{getWIPTasksByFollowUp('bcl').length}</Badge></TabsTrigger>
-                                <TabsTrigger value="officer" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Officer <Badge variant="outline">{getWIPTasksByFollowUp('officer').length}</Badge></TabsTrigger>
-                                <TabsTrigger value="client" className="text-xs md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Client <Badge variant="outline">{getWIPTasksByFollowUp('client').length}</Badge></TabsTrigger>
+                                <TabsTrigger value="all" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">All <Badge variant="outline">{wipTasks.length}</Badge></TabsTrigger>
+                                <TabsTrigger value="bcl" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">BCL <Badge variant="outline">{getWIPTasksByFollowUp('bcl').length}</Badge></TabsTrigger>
+                                <TabsTrigger value="officer" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Officer <Badge variant="outline">{getWIPTasksByFollowUp('officer').length}</Badge></TabsTrigger>
+                                <TabsTrigger value="client" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Client <Badge variant="outline">{getWIPTasksByFollowUp('client').length}</Badge></TabsTrigger>
                               </TabsList>
                             </Tabs>
                           </div>
