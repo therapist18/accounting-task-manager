@@ -49,11 +49,19 @@ import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog'
 import { DocumentFieldCell } from './components/DocumentFieldCell';
 import { DocumentStageCell } from './components/DocumentStageCell';
 
+// MODIFIED: Replaced composite status headers with granular ones for better control in transposed view.
 const ENHANCED_TABLE_HEADERS = [
   { id: 'id', label: 'Task ID', default: true, width: 'w-20' },
   { id: 'applicant_name', label: 'Applicant Name', default: true, width: 'w-48' },
-  { id: 'current_immigration_status', label: 'Current Immigration Status', default: true, width: 'w-64' },
-  { id: 'current_stage_status', label: 'Current Stage Status', default: true, width: 'w-48' }, // NEW: Added current stage status
+  // NEW: Immigration Status Breakdown
+  { id: 'immigration_document_type', label: 'Immigration Doc Type', default: true, width: 'w-48' },
+  { id: 'immigration_expiry_date', label: 'Immigration Expiry Date', default: true, width: 'w-40' },
+  { id: 'immigration_status', label: 'Immigration Status', default: true, width: 'w-48' },
+  // NEW: Current Stage Status Breakdown
+  { id: 'current_stage_name', label: 'Current Stage Name', default: true, width: 'w-48' },
+  { id: 'current_stage_status_value', label: 'Current Stage Status', default: true, width: 'w-48' },
+  { id: 'current_stage_follow_up', label: 'Current Stage Follow-up', default: true, width: 'w-40' },
+  // Existing fields
   { id: 'company_name', label: 'Company Name', default: true, width: 'w-48' },
   { id: 'job_level', label: 'Job Level', default: true, width: 'w-32' },
   { id: 'renewal_new', label: 'Renewal/New', default: false, width: 'w-28' },
@@ -64,6 +72,7 @@ const ENHANCED_TABLE_HEADERS = [
   { id: 'officer', label: 'Officer', default: false, width: 'w-32' },
   { id: 'task_assistant', label: 'Task Assistant', default: false, width: 'w-32' },
 ]
+
 // Stats options
 const STATS_HEADERS = [
   { id: 'stats_completed', label: 'Completed Stages', default: true },
@@ -645,7 +654,7 @@ export default function DepartmentTasksManager({
       date: latestDateInfo.date,
       type: statusType,
       documentType: latestDateInfo.documentType,
-      daysRemaining: isFuture ? daysRemaining : 0
+      daysRemaining: isFuture ? daysRemaining : null // Return null if expired to differentiate from 0
     };
   }, [stages, allDocuments, kycDocuments]);
 
@@ -1525,6 +1534,7 @@ export default function DepartmentTasksManager({
     return { status: "No Date Found", date: null, type: 'na' };
   }, [stages, allDocuments]);
 
+  // MODIFIED: This function now generates granular rows for statuses, controlled by `visibleHeaders`.
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
     if (!tasks.length) return []
 
@@ -1586,23 +1596,59 @@ export default function DepartmentTasksManager({
       if (visibleHeaders.has('applicant_name')) {
         rows.push({ key: 'applicant_name', label: 'Applicant Name', type: 'basic', getValue: (task: any) => task.applicant_name || 'N/A' })
       }
-      if (visibleHeaders.has('current_immigration_status')) {
-        rows.push({
-          key: 'current_immigration_status',
-          label: 'Current Immigration Status',
-          type: 'immigration_status',
-          getValue: (task: any) => task // Pass the whole task for complex rendering
-        })
+       
+      // NEW: Immigration Status Breakdown
+      if (visibleHeaders.has('immigration_document_type')) {
+          rows.push({
+              key: 'immigration_document_type',
+              label: 'Immigration Doc Type',
+              type: 'immigration_doc_type',
+              getValue: (task: any) => getEnhancedImmigrationStatus(task).documentType
+          });
       }
-      // NEW: Add current stage status row
-      if (visibleHeaders.has('current_stage_status')) {
-        rows.push({
-          key: 'current_stage_status',
-          label: 'Current Stage Status',
-          type: 'current_stage_status',
-          getValue: (task: any) => task // Pass the whole task for complex rendering
-        })
+      if (visibleHeaders.has('immigration_expiry_date')) {
+          rows.push({
+              key: 'immigration_expiry_date',
+              label: 'Immigration Expiry Date',
+              type: 'immigration_expiry_date',
+              getValue: (task: any) => getEnhancedImmigrationStatus(task).date
+          });
       }
+      if (visibleHeaders.has('immigration_status')) {
+          rows.push({
+              key: 'immigration_status',
+              label: 'Immigration Status',
+              type: 'immigration_status',
+              getValue: (task: any) => getEnhancedImmigrationStatus(task) // pass whole object
+          });
+      }
+
+      // NEW: Current Stage Status Breakdown
+      if (visibleHeaders.has('current_stage_name')) {
+          rows.push({
+              key: 'current_stage_name',
+              label: 'Current Stage Name',
+              type: 'current_stage_name',
+              getValue: (task: any) => getCurrentStageStatus(task).stageName
+          });
+      }
+      if (visibleHeaders.has('current_stage_status_value')) {
+          rows.push({
+              key: 'current_stage_status_value',
+              label: 'Current Stage Status',
+              type: 'current_stage_status_value',
+              getValue: (task: any) => getCurrentStageStatus(task).stageStatus
+          });
+      }
+      if (visibleHeaders.has('current_stage_follow_up')) {
+          rows.push({
+              key: 'current_stage_follow_up',
+              label: 'Current Stage Follow-up',
+              type: 'current_stage_follow_up',
+              getValue: (task: any) => getCurrentStageStatus(task).stageFollowUp
+          });
+      }
+
       if (visibleHeaders.has('company_name')) {
         rows.push({ key: 'company_name', label: 'Company Name', type: 'basic', getValue: (task: any) => companies.get(task.company_id) || 'N/A' })
       }
@@ -1721,26 +1767,16 @@ export default function DepartmentTasksManager({
     }
 
     return rows
-  }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleHeaders, visibleStats, kycDocuments, allDocuments, visibleStageIds, getUserDisplayName, getDocumentForTaskStage])
+  }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleHeaders, visibleStats, kycDocuments, allDocuments, visibleStageIds, getUserDisplayName, getDocumentForTaskStage, getEnhancedImmigrationStatus, getCurrentStageStatus])
 
-  // Enhanced render cell content for transposed view
+  // MODIFIED: Enhanced render cell content for transposed view with new granular status types
   const renderCellContent = useCallback((row: any, task: any) => {
     const value = row.getValue ? row.getValue(task) : '';
-
-    if (row.type === 'immigration_status') {
-      return renderImmigrationStatusCell(task);
-    }
-
-    // NEW: Handle current stage status rendering
-    if (row.type === 'current_stage_status') {
-      return renderCurrentStageStatusCell(task);
-    }
 
     if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
       return <span className="text-sm text-gray-400 italic">N/A</span>;
     }
 
-    // Handle stage dates if this is a stage cell
     if (row.type === 'stage' && row.stage && task.stages?.[row.stage.id]) {
       const stageData = task.stages[row.stage.id];
       return (
@@ -1754,7 +1790,6 @@ export default function DepartmentTasksManager({
       );
     }
 
-    // Handle document field dates
     if (row.type === 'field') {
       const fieldValue = typeof value === 'object' ? value.value : value;
       const isOldDoc = typeof value === 'object' ? value.isOldDocument : false;
@@ -1781,6 +1816,58 @@ export default function DepartmentTasksManager({
       case 'badge': return <Badge variant={value === 'completed' ? 'default' : value === 'in_progress' ? 'secondary' : 'outline'} className="text-xs font-semibold">{value}</Badge>;
       case 'date': return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
       case 'stat': return <Badge variant="outline" className="text-xs font-semibold">{value}</Badge>;
+      
+      // NEW: Granular status renderers for transposed view
+      case 'immigration_doc_type':
+        return <span className="text-sm text-slate-800">{value || '-'}</span>;
+
+      case 'immigration_expiry_date':
+          return <span className="text-sm text-slate-600">{value ? format(value, 'dd MMM yyyy') : '-'}</span>;
+      
+      case 'immigration_status': {
+        const statusInfo = value; // value is the whole object from getEnhancedImmigrationStatus
+        if (!statusInfo || statusInfo.type === 'na' || statusInfo.daysRemaining === null) {
+            return <span className="text-sm text-slate-500">-</span>;
+        }
+        if (statusInfo.type === 'expired') {
+            const timeDiff = new Date().getTime() - statusInfo.date.getTime();
+            const daysOverdue = Math.ceil(timeDiff / (1000 * 3600 * 24));
+            return <span className="text-sm text-red-600 font-semibold">{daysOverdue} days overdue</span>;
+        }
+        const daysRemainingColor = statusInfo.daysRemaining <= 30 ? 'text-blue-600 font-semibold' : 'text-green-600';
+        return <span className={`text-sm ${daysRemainingColor}`}>{statusInfo.daysRemaining} days left</span>;
+      }
+      
+      case 'current_stage_name':
+          return <span className="text-sm font-medium text-slate-800">{value || 'N/A'}</span>;
+      
+      case 'current_stage_status_value': {
+          const getStatusBadgeColor = (status: string) => {
+              switch (status?.toLowerCase()) {
+                  case 'completed': return 'bg-green-100 text-green-800 border-green-300';
+                  case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+                  case 'in_progress': return 'bg-blue-100 text-blue-800 border-blue-300';
+                  case 'to enquire': return 'bg-purple-100 text-purple-800 border-purple-300';
+                  default: 
+                    if (status?.toLowerCase().startsWith('to ')) return 'bg-blue-100 text-blue-800 border-blue-300';
+                    return 'bg-slate-100 text-slate-600 border-slate-300';
+              }
+          };
+          return <Badge variant="outline" className={`whitespace-normal text-xs ${getStatusBadgeColor(value || '')}`}>{value || 'N/A'}</Badge>;
+      }
+      
+      case 'current_stage_follow_up': {
+          const getFollowUpBadgeColor = (followUp: string) => {
+              switch (followUp?.toLowerCase()) {
+                  case 'bcl': return 'bg-blue-100 text-blue-800 border-blue-300';
+                  case 'officer': return 'bg-green-100 text-green-800 border-green-300';
+                  case 'client': return 'bg-purple-100 text-purple-800 border-purple-300';
+                  default: return 'bg-slate-100 text-slate-600 border-slate-300';
+              }
+          };
+          return value ? <Badge variant="outline" className={`whitespace-normal text-xs ${getFollowUpBadgeColor(value)}`}>Follow-up: {value}</Badge> : <span className="text-sm text-slate-500">-</span>;
+      }
+
       case 'stage':
         return (
           <EditableStageCell
@@ -1805,7 +1892,6 @@ export default function DepartmentTasksManager({
             >
               {docValue.status}
             </Badge>
-            {/* UPDATED: Only show Eye button for LINKED documents */}
             {docValue.hasDocument && !docValue.hasIndicator && !docValue.isOldDocument && (
               <Button
                 variant="ghost"
@@ -1844,7 +1930,7 @@ export default function DepartmentTasksManager({
       )
       default: return <span className="text-sm text-slate-800">{value}</span>
     }
-  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, renderImmigrationStatusCell, renderCurrentStageStatusCell, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading])
+  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading])
 
   // State for enhanced table rendering
   const [tableRows, setTableRows] = useState([]);
@@ -2248,6 +2334,7 @@ export default function DepartmentTasksManager({
     )
   }, [stages, dataLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, isDocumentApplicableToTask, visibleStageIds, sortConfig, enhancedHandleStageStatusSave, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getDocumentForTaskStage, renderImmigrationStatusCell, renderCurrentStageStatusCell, getSortedTasks])
 
+  // MODIFIED: Renders the transposed table with a simplified header and granular data rows in the body.
   const renderEnhancedTransposedTable = useCallback((tasks: any[], tableType: string) => {
     if (!tasks.length) {
       return (
@@ -2277,141 +2364,53 @@ export default function DepartmentTasksManager({
         <div className="border-2 border-slate-300 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 200px)' }}>
           <Table className="min-w-full border-separate border-spacing-0">
             <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
-              {/* Row 1: Task IDs */}
               <TableRow className="border-b-2 border-slate-400">
-                <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-20" rowSpan={7}>
+                <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-20">
                   Order
                 </TableHead>
-                <TableHead className="sticky left-20 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-[300px]" rowSpan={7}>
+                <TableHead className="sticky left-20 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-[300px]">
                   Fields
                 </TableHead>
                 {headerStructure.map((item, index) => (
-                  <TableHead key={`header-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm py-2 border-r border-slate-400 border-b ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
+                  <TableHead key={`header-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm py-2 border-r border-slate-400 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
                     {item.type === 'principal' ? (
-                      <div className="font-bold">{`Task ${item.task.id}`}</div>
-                    ) : (
-                      <div className="font-bold text-xs">{`Dep ${item.index + 1}`}</div>
-                    )}
-                  </TableHead>
-                ))}
-              </TableRow>
-
-              {/* Row 2: Names */}
-              <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
-                {headerStructure.map((item, index) => (
-                  <TableHead key={`name-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
-                    {item.type === 'principal' ? (
-                      <div className="flex items-center justify-center gap-1">
-                        <span className="font-bold">{item.task.applicant_name || 'N/A'}</span>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-5 w-5 p-0 text-white hover:bg-blue-600"
-                          onClick={() => {
-                            setLinkingTask(item.task);
-                            setIsLinkDialogOpen(true);
-                          }}
-                          title="Link Source Document"
-                        >
-                          <LinkIcon className="h-3 w-3" />
-                        </Button>
-                        {item.task.dependnats_members && Array.isArray(item.task.dependnats_members) && item.task.dependnats_members.length > 0 && (
+                      <div className="flex flex-col items-center justify-center gap-1">
+                        <span className="font-bold truncate max-w-[180px]" title={item.task.applicant_name}>{item.task.applicant_name || 'N/A'}</span>
+                        <div className="flex items-center gap-1">
                           <Button
                             variant="ghost"
                             size="icon"
                             className="h-5 w-5 p-0 text-white hover:bg-blue-600"
-                            onClick={() => toggleDependantsExpansion(item.task.id.toString())}
+                            onClick={() => {
+                              setLinkingTask(item.task);
+                              setIsLinkDialogOpen(true);
+                            }}
+                            title="Link Source Document"
                           >
-                            {expandedDependants.has(item.task.id.toString()) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                            <LinkIcon className="h-3 w-3" />
                           </Button>
-                        )}
+                          {item.task.dependnats_members && Array.isArray(item.task.dependnats_members) && item.task.dependnats_members.length > 0 && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 p-0 text-white hover:bg-blue-600"
+                              onClick={() => toggleDependantsExpansion(item.task.id.toString())}
+                            >
+                              {expandedDependants.has(item.task.id.toString()) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     ) : (
                       <div className="flex flex-col items-center gap-1">
-                        <span className="font-bold text-xs">{item.dependant.name || `Dependant ${item.index + 1}`}</span>
+                        <span className="font-bold text-xs truncate max-w-[180px]" title={item.dependant.name}>{item.dependant.name || `Dependant ${item.index + 1}`}</span>
                         <span className="text-xs opacity-80">{item.dependant.relationship || 'Dependant'}</span>
                       </div>
                     )}
                   </TableHead>
                 ))}
               </TableRow>
-
-              {/* Row 3: Current Immigration Status */}
-              <TableRow className="border-b-2 border-slate-400 bg-slate-50 text-slate-700">
-                {headerStructure.map((item, index) => {
-                  let statusComponent = <span className="text-xs text-gray-400">-</span>;
-                  if (item.type === 'principal') {
-                    statusComponent = renderImmigrationStatusCell(item.task);
-                  }
-
-                  return (
-                    <TableHead key={`status-${index}`} className={`font-medium min-w-[200px] text-center text-xs border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? '' : 'bg-orange-50'}`}>
-                      {statusComponent}
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
-
-              {/* NEW: Row 4: Current Stage Status */}
-              <TableRow className="border-b-2 border-slate-400 bg-slate-50 text-slate-700">
-                {headerStructure.map((item, index) => {
-                  let stageStatusComponent = <span className="text-xs text-gray-400">-</span>;
-                  if (item.type === 'principal') {
-                    stageStatusComponent = renderCurrentStageStatusCell(item.task);
-                  }
-
-                  return (
-                    <TableHead key={`stage-status-${index}`} className={`font-medium min-w-[200px] text-center text-xs border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? '' : 'bg-orange-50'}`}>
-                      {stageStatusComponent}
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
-
-              {/* Row 5: Company Names */}
-              <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
-                {headerStructure.map((item, index) => (
-                  <TableHead key={`company-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
-                    {item.type === 'principal' ? (
-                      companies.get(item.task.company_id) || 'No Company'
-                    ) : ''}
-                  </TableHead>
-                ))}
-              </TableRow>
-
-              {/* Row 6: Job Level */}
-              <TableRow className="border-b-2 border-slate-400 bg-blue-500 text-white">
-                {headerStructure.map((item, index) => (
-                  <TableHead key={`job-${index}`} className={`font-semibold text-white min-w-[200px] text-center text-sm border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? 'bg-blue-500' : 'bg-orange-500'}`}>
-                    {item.type === 'principal' ? (
-                      getTaskHierarchy(item.task)?.subclass?.name || getTaskHierarchy(item.task)?.class?.name || getTaskHierarchy(item.task)?.subdepartment?.name || 'N/A'
-                    ) : ''}
-                  </TableHead>
-                ))}
-              </TableRow>
-
-              {/* Row 7: Current Stage (Updated to show determined stage name only) */}
-              <TableRow className="border-b-2 border-slate-400 bg-slate-100 text-slate-700">
-                {headerStructure.map((item, index) => {
-                  let currentStageInfo = null;
-                  if (item.type === 'principal') {
-                    const currentStage = determineCurrentStage(item.task, stages);
-                    currentStageInfo = currentStage ? currentStage.name : 'No Stage';
-                  }
-
-                  return (
-                    <TableHead key={`current-stage-${index}`} className={`font-medium min-w-[200px] text-center text-xs border-r border-slate-400 border-b py-2 ${item.type === 'principal' ? '' : 'bg-orange-50'}`}>
-                      {item.type === 'principal' ? (
-                        <Badge variant="outline" className="text-xs">
-                          {currentStageInfo}
-                        </Badge>
-                      ) : ''}
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
             </TableHeader>
-
             <TableBody className="divide-y divide-slate-200">
               {loading ? (
                 <TableRow>
@@ -2458,7 +2457,7 @@ export default function DepartmentTasksManager({
                   return (
                     <TableRow key={row.key} className={`${rowBg} ${hoverBg} group border-b border-slate-200`}>
                       <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center w-20`}>
-                        {row.stageOrder || (row.type === 'basic' || row.type === 'badge' || row.type === 'date' || row.type === 'stat' ? (index + 1) : '')}
+                        {row.stageOrder || (row.type !== 'stage' && row.type !== 'document' && row.type !== 'field' && row.type !== 'actions' ? (index + 1) : '')}
                       </TableCell>
                       <TableCell className={`sticky left-20 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 min-w-[400px]`}>
                         <div className="flex items-center gap-2 justify-between">
@@ -2500,7 +2499,7 @@ export default function DepartmentTasksManager({
         </div>
       </div>
     )
-  }, [loading, error, tableRows, renderCellContent, expandedSections, expandedStages, expandedDocuments, expandedDependants, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies, toggleDependantsExpansion, getTaskHierarchy, getImmigrationStatus, renderCurrentStageStatusCell, determineCurrentStage])
+  }, [loading, error, tableRows, renderCellContent, expandedSections, expandedStages, expandedDocuments, expandedDependants, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies, toggleDependantsExpansion, getTaskHierarchy])
 
   const defaultSubdepartments = getDefaultSubdepartments()
 

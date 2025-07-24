@@ -18,9 +18,9 @@ interface EditableStageCellProps {
   task: any
   value?: string | null
   onSave?: (
-    stageId: string, 
-    taskId: string, 
-    value: string, 
+    stageId: string,
+    taskId: string,
+    value: string,
     updatedExtractedDetails?: Record<string, any>
   ) => Promise<void> | void
   onDocumentUpload?: (task: any, stage: any) => void
@@ -41,40 +41,18 @@ const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolea
   }
 }
 
-// UPDATED: Helper function to get LINKED document for a stage
+// Helper function to get LINKED document for a stage
 const getLinkedDocumentForStage = (task: any, stage: any, allDocuments: any[]): any | null => {
-  console.log('🔍 getLinkedDocumentForStage called for:', {
-    taskId: task.id,
-    stageId: stage.id,
-    stageName: stage.name,
-    sourceDocumentId: task.source_document_id
-  });
-
-  // Check for a specifically linked source document for this stage
   const linkedDocumentData = task.source_document_id?.[stage.id];
-  console.log('🔗 Linked document data for stage:', linkedDocumentData);
 
   if (linkedDocumentData) {
-    // Handle both old format (string ID) and new format (object with id and document_id)
-    const documentId = typeof linkedDocumentData === 'string' 
-      ? linkedDocumentData 
+    const documentId = typeof linkedDocumentData === 'string'
+      ? linkedDocumentData
       : linkedDocumentData.id;
-
-    console.log('📄 Looking for document with ID:', documentId);
-
     // Find the document instance from allDocuments by its unique ID
     const linkedDoc = allDocuments.find(doc => doc.id === documentId);
-    console.log('📄 Found linked document:', linkedDoc ? {
-      id: linkedDoc.id,
-      document_id: linkedDoc.document_id,
-      file_path: linkedDoc.file_path,
-      created_at: linkedDoc.created_at
-    } : null);
-
     return linkedDoc || null;
   }
-
-  console.log('❌ No linked document found for this stage');
   return null;
 };
 
@@ -125,11 +103,11 @@ export default function EditableStageCell({
     if (!data || typeof data !== 'object') return data;
 
     const result = { ...data };
-    
+
     // Process each field
     fields.forEach(field => {
       const fieldId = field.id || field.fieldName;
-      
+
       // Handle array fields
       if (field.isArray && Array.isArray(result[fieldId])) {
         // Process each item in the array
@@ -140,13 +118,13 @@ export default function EditableStageCell({
           }
           return item;
         });
-      } 
+      }
       // Handle nested objects
       else if (typeof result[fieldId] === 'object' && result[fieldId] !== null) {
         result[fieldId] = processExtractedData(result[fieldId], field.fields || []);
       }
     });
-    
+
     return result;
   };
 
@@ -155,15 +133,9 @@ export default function EditableStageCell({
     if (!isPreviewOpen) return;
 
     const buildPreviewDocument = async () => {
-      console.log('--- Building preview document ---');
-      console.log('Task:', { id: task.id, name: task.name });
-      console.log('Stage:', { id: stage.id, name: stage.name });
-
-      // UPDATED: Get LINKED document only
       const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
 
       if (!linkedDoc) {
-        console.log('No linked document found for preview');
         setIsPreviewOpen(false);
         toast({
           title: 'No Linked Document',
@@ -175,7 +147,6 @@ export default function EditableStageCell({
 
       // Check if document has indicator - if so, don't show preview
       if (linkedDoc.indicator === true) {
-        console.log('Document has indicator, skipping preview');
         toast({
           title: 'Preview not available',
           description: 'Document preview is not available for this document.',
@@ -190,7 +161,6 @@ export default function EditableStageCell({
         isDocumentOlderThanTask(linkedDoc.created_at, task.created_at);
 
       if (isOldDoc) {
-        console.log('Document is older than task creation, skipping preview');
         toast({
           title: 'Preview not available',
           description: 'Document is older than task creation - preview disabled.',
@@ -203,7 +173,6 @@ export default function EditableStageCell({
       // Get the KYC document data using the document_id (which should match kycId)
       const kycId = linkedDoc.document_id;
       if (!kycId) {
-        console.log('No KYC ID found in document');
         return null;
       }
 
@@ -232,8 +201,6 @@ export default function EditableStageCell({
 
       // Get KYC fields from the KYC document data (not from stage documents)
       const kycFields = kycData.fields || [];
-
-      console.log('KYC Fields from KYC document:', kycFields);
 
       // Transform KYC fields to the expected format
       const transformKycFields = (fields: any[]): any[] => {
@@ -278,11 +245,10 @@ export default function EditableStageCell({
 
       // Prepare extracted data
       const rawExtractedData = linkedDoc.extracted_details || {};
-      console.log('Raw extracted data from document:', rawExtractedData);
 
       // Process the extracted data to handle arrays and nested fields
       const processedExtractedData = processExtractedData(rawExtractedData, fields);
-      
+
       // Ensure all fields have values, using empty strings for missing ones
       const extractedData = { ...processedExtractedData };
       fields.forEach((field: any) => {
@@ -290,8 +256,6 @@ export default function EditableStageCell({
           extractedData[field.id] = field.isArray ? [] : '';
         }
       });
-
-      console.log('Processed extracted data:', extractedData);
 
       const previewData = {
         documentId: linkedDoc.id,
@@ -324,62 +288,33 @@ export default function EditableStageCell({
 
   // UPDATED: Initialize documents using LINKED documents only
   useEffect(() => {
-    console.log('🔄 Initializing EditableStageCell for:', {
-      taskId: task.id,
-      stageId: stage.id,
-      stageName: stage.name,
-      sourceDocumentId: task.source_document_id
-    });
-
-    // Get LINKED document for this stage
     const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
 
     if (linkedDoc) {
-      console.log('📄 Found linked document:', {
-        id: linkedDoc.id,
-        document_id: linkedDoc.document_id,
-        file_path: linkedDoc.file_path,
-        indicator: linkedDoc.indicator
-      });
-
-      // Check if document is older than task creation
       const isOldDoc = task.created_at &&
         isDocumentOlderThanTask(linkedDoc.created_at, task.created_at);
 
       setIsOldDocument(isOldDoc);
-
-      // Only set hasLinkedDocument to true if document doesn't have indicator AND is not old
       const hasValidDocument = !linkedDoc.indicator && !isOldDoc;
       setHasLinkedDocument(hasValidDocument);
 
-      console.log('📊 Document validation:', {
-        hasIndicator: linkedDoc.indicator,
-        isOldDoc,
-        hasValidDocument
-      });
-
-      // Extract date from linked document only if valid
       if (hasValidDocument) {
         const dateFields = [
-          'application_date', 'date', 'upload_date', 'created_date', 
+          'application_date', 'date', 'upload_date', 'created_date',
           'date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
           'Expiry_Date', 'Date_of_Issue'
         ];
-        
+
         if (linkedDoc.extracted_details) {
           const foundDate = findDateInObject(linkedDoc.extracted_details, dateFields);
           if (foundDate) {
-            console.log('📅 Found date in linked document:', foundDate);
             setStageDate(foundDate);
             return;
           }
         }
       }
-      
-      // Clear stage date if no valid date found or document is invalid
       setStageDate('');
     } else {
-      console.log('❌ No linked document found for this stage');
       setHasLinkedDocument(false);
       setIsOldDocument(false);
       setStageDate('');
@@ -393,7 +328,6 @@ export default function EditableStageCell({
     // First try direct fields
     for (const field of dateFields) {
       if (obj[field]) {
-        console.log('Found date in field:', field, obj[field]);
         return obj[field];
       }
     }
@@ -486,14 +420,14 @@ export default function EditableStageCell({
   // Function to update a date in a nested object/array structure
   const updateDateInNestedObject = (obj: any, path: string[], value: string): any => {
     if (!obj || !path.length) return obj;
-    
+
     const [current, ...rest] = path;
-    
+
     // If we're at the target path, update the value
     if (rest.length === 0) {
       return { ...obj, [current]: value };
     }
-    
+
     // Handle arrays
     if (Array.isArray(obj[current])) {
       // For array fields, we'll update the first item by default
@@ -504,15 +438,15 @@ export default function EditableStageCell({
       }
       return { ...obj, [current]: updatedArray };
     }
-    
+
     // Handle nested objects
     if (obj[current] && typeof obj[current] === 'object') {
-      return { 
-        ...obj, 
-        [current]: updateDateInNestedObject(obj[current], rest, value) 
+      return {
+        ...obj,
+        [current]: updateDateInNestedObject(obj[current], rest, value)
       };
     }
-    
+
     return obj;
   };
 
@@ -544,35 +478,35 @@ export default function EditableStageCell({
       }
 
       const formattedDate = format(dateObj, 'dd/MM/yyyy');
-      
+
       // UPDATED: Find the LINKED document to update
       const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
-      
+
       let updatedExtractedDetails = {};
-      
+
       if (linkedDoc) {
         const currentDetails = linkedDoc.extracted_details || {};
-        
+
         // Try to find where the date was originally stored
         const dateFields = [
-          'application_date', 'date', 'upload_date', 'created_date', 
+          'application_date', 'date', 'upload_date', 'created_date',
           'date_generated', 'invoice_date_and_time', 'With_Effect_From',
           'Expiry_Date', 'Date_of_Issue'
         ];
-        
+
         // Find the field that contains the date
         let dateFieldPath: string[] = [];
-        
+
         const findDateField = (obj: any, path: string[] = []): boolean => {
           for (const key in obj) {
             const currentPath = [...path, key];
             const value = obj[key];
-            
+
             if (dateFields.includes(key) && value) {
               dateFieldPath = currentPath;
               return true;
             }
-            
+
             if (value && typeof value === 'object' && !Array.isArray(value)) {
               if (findDateField(value, currentPath)) {
                 return true;
@@ -586,14 +520,14 @@ export default function EditableStageCell({
           }
           return false;
         };
-        
+
         findDateField(currentDetails);
-        
+
         // Update the date in the appropriate location
         if (dateFieldPath.length > 0) {
           updatedExtractedDetails = updateDateInNestedObject(
-            currentDetails, 
-            dateFieldPath, 
+            currentDetails,
+            dateFieldPath,
             formattedDate
           );
         } else {
@@ -608,25 +542,9 @@ export default function EditableStageCell({
           });
         }
       }
-
-      console.log('About to save stage:', {
-        stageId: stage.id,
-        stageName: stage.name,
-        taskId: task.id,
-        formattedDate,
-        editValue,
-        updatedExtractedDetails
-      });
-
       setIsLoading(true);
-      
-      // Call the parent's onSave with both the formatted date and the updated extracted details
-      // The parent component can decide how to handle the update
+
       await onSave(stage.id, task.id, formattedDate, updatedExtractedDetails);
-
-      // The parent component handles refreshing the task data
-      console.log('Stage update successful, parent will handle data refresh');
-
       setIsEditing(false);
 
       toast({
@@ -692,14 +610,12 @@ export default function EditableStageCell({
 
   // UPDATED: Only handle view for LINKED documents
   const handleViewDocument = useCallback((e?: React.MouseEvent) => {
-    console.log('--- handleViewDocument called ---');
     e?.stopPropagation();
 
     // UPDATED: Get LINKED document only
     const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
 
     if (!linkedDoc) {
-      console.log('No linked document found');
       toast({
         title: 'No Linked Document',
         description: 'No document has been linked for this stage yet. Please use the Link button to link a document first.',
@@ -710,7 +626,6 @@ export default function EditableStageCell({
 
     // Check if document has indicator
     if (linkedDoc.indicator === true) {
-      console.log('Document has indicator, cannot preview');
       toast({
         title: 'Preview not available',
         description: 'Document preview is not available for this document.',
@@ -724,7 +639,6 @@ export default function EditableStageCell({
       isDocumentOlderThanTask(linkedDoc.created_at, task.created_at);
 
     if (isOldDoc) {
-      console.log('Document is older than task creation, cannot preview');
       toast({
         title: 'Preview not available',
         description: 'Document is older than task creation - preview disabled.',
@@ -732,17 +646,10 @@ export default function EditableStageCell({
       });
       return;
     }
-
-    console.log('Opening preview dialog for linked document');
     setIsPreviewOpen(true);
-
-    // Update stage date with extracted date if available (only if not old)
-    console.log('Document details:', linkedDoc);
-
     const dateFields = ['application_date', 'date', 'upload_date', 'created_date'];
     for (const field of dateFields) {
       if (linkedDoc.extracted_details && linkedDoc.extracted_details[field]) {
-        console.log(`Found date field '${field}':`, linkedDoc.extracted_details[field]);
         setStageDate(linkedDoc.extracted_details[field]);
         break;
       }
@@ -916,12 +823,8 @@ export default function EditableStageCell({
                   file={previewDocument.file}
                   type={previewDocument.type}
                   onDataChange={(fieldName, value) => {
-                    // Handle data changes if needed
-                    console.log(`Field ${fieldName} changed to:`, value);
                   }}
                   onSave={() => {
-                    console.log("Saving document data...");
-                    // Add save logic here
                     setIsPreviewOpen(false);
                     toast({ title: "Success", description: "Document details saved." });
                   }}

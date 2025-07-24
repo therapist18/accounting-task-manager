@@ -7,24 +7,8 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import {
-  Pencil,
-  Info,
-  Minus,
-  Plus,
-  Clock,
-  FileText,
-  ChevronLeft,
-  ChevronRight,
-  FileSpreadsheet,
-  ChevronDown,
-  ChevronUp,
-  Star,
-  RotateCcw,
-  RotateCw,
-} from "lucide-react"
+import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { AddStageDialog } from "./components/add-stage-dialog"
 import { EditStageDialog } from "./components/edit-stage-dialog"
@@ -34,6 +18,7 @@ import type { Department, Stage, DepartmentOption } from "./stagesdb"
 import ColumnVisibilityControl, { type ColumnVisibilityOption } from "../main-shared-components/column-visibility"
 import EntityVisibilityControl, { type EntityVisibilityOption } from "../main-shared-components/entity-visibility"
 import * as XLSX from "xlsx"
+import { toast } from "@/hooks/use-toast"
 
 // Simple UUID generator for client-side use
 const generateId = () => {
@@ -85,32 +70,6 @@ const minutesToTimeString = (minutes: number | null): string => {
   if (mins > 0) parts.push(`${mins}m`)
   return parts.join(" ") || "0m"
 }
-
-const timeStringToMinutes = (timeString: string): number => {
-  let totalMinutes = 0
-  const parts = timeString.trim().split(/\s+/)
-  for (const part of parts) {
-    const value = Number.parseInt(part)
-    if (part.endsWith("d")) {
-      totalMinutes += value * 60 * 24
-    } else if (part.endsWith("h")) {
-      totalMinutes += value * 60
-    } else if (part.endsWith("m")) {
-      totalMinutes += value
-    }
-  }
-  return totalMinutes
-}
-
-const getTimeFromMinutes = (minutes: number | null) => {
-  if (minutes === null) return { days: 0, hours: 0, minutes: 0 }
-  const days = Math.floor(minutes / (24 * 60))
-  const remainingMinutes = minutes % (24 * 60)
-  const hours = Math.floor(remainingMinutes / 60)
-  const mins = remainingMinutes % 60
-  return { days, hours, minutes: mins }
-}
-
 // Utility function to sort items by order field
 const sortByOrder = <T extends { order?: number; order_num?: number }>(items: T[]): T[] => {
   return [...items].sort((a, b) => (a.order || a.order_num || 0) - (b.order || b.order_num || 0))
@@ -122,13 +81,7 @@ const filterByDefaultDisplay = <T extends { default_display?: boolean }>(items: 
   return items.filter((item) => item.default_display !== false)
 }
 
-// Debug logging utility
-const debugLog = (message: string, data?: any) => {
-  console.log(`[Stages] ${message}`, data || '');
-};
-
 export default function Stages() {
-  debugLog('Component mounted');
   const [departments, setDepartments] = useState<Department[]>([])
   const [activeTab, setActiveTab] = useState<string>("")
   const [loading, setLoading] = useState(true)
@@ -138,18 +91,13 @@ export default function Stages() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false)
-  const [isTransposed, setIsTransposed] = useState(false) // New state for view toggle
-  
-  // Debug effect to log when isTransposed changes
-  useEffect(() => {
-    debugLog('isTransposed changed', { isTransposed });
-  }, [isTransposed]);
-  const { toast } = useToast()
-
-  // State for KYC documents
+  const [isTransposed, setIsTransposed] = useState(false)
   const [allKycDocuments, setAllKycDocuments] = useState<Map<string, any>>(new Map())
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map())
   const [kycDocumentsLoading, setKycDocumentsLoading] = useState(false)
+  const [columnVisibility, setColumnVisibility] = useState({ index: true, entity: true, stageName: true, duration: true, followUp: true, controls: true })
+  const [entityVisibility, setEntityVisibility] = useState<Record<string, boolean>>({})
+
   // Enhanced function to get KYC fields for a document
   const getKycFields = useCallback(
     (doc: any) => {
@@ -169,45 +117,45 @@ export default function Stages() {
     },
     [kycDocuments],
   )
-    // Enhanced function to get document information from KYC
-    const getDocumentInfo = useCallback(
-      (doc: any) => {
-        if (!doc.kycId) {
-          return {
-            displayName: doc.name || "Unknown Document",
-            documentType: doc.documentType || "document",
-            category: doc.category || "",
-            subcategory: doc.subcategory || "",
-            isKycSynced: false,
-            kycDoc: null,
-          }
-        }
-  
-        const kycDoc = allKycDocuments.get(doc.kycId)
-        if (!kycDoc) {
-          console.warn(`KYC document not found for kycId: ${doc.kycId}`)
-          return {
-            displayName: doc.name || "Unknown Document",
-            documentType: doc.documentType || "document",
-            category: doc.category || "",
-            subcategory: doc.subcategory || "",
-            isKycSynced: false,
-            kycDoc: null,
-          }
-        }
-  
+  // Enhanced function to get document information from KYC
+  const getDocumentInfo = useCallback(
+    (doc: any) => {
+      if (!doc.kycId) {
         return {
-          displayName: kycDoc.display_name || kycDoc.name || doc.name || "Unknown Document",
-          documentType: kycDoc.document_type || doc.documentType || "document",
-          category: kycDoc.category || doc.category || "",
-          subcategory: kycDoc.subcategory || doc.subcategory || "",
-          isKycSynced: true,
-          kycDoc: kycDoc,
+          displayName: doc.name || "Unknown Document",
+          documentType: doc.documentType || "document",
+          category: doc.category || "",
+          subcategory: doc.subcategory || "",
+          isKycSynced: false,
+          kycDoc: null,
         }
-      },
-      [allKycDocuments],
-    )
-    
+      }
+
+      const kycDoc = allKycDocuments.get(doc.kycId)
+      if (!kycDoc) {
+        console.warn(`KYC document not found for kycId: ${doc.kycId}`)
+        return {
+          displayName: doc.name || "Unknown Document",
+          documentType: doc.documentType || "document",
+          category: doc.category || "",
+          subcategory: doc.subcategory || "",
+          isKycSynced: false,
+          kycDoc: null,
+        }
+      }
+
+      return {
+        displayName: kycDoc.display_name || kycDoc.name || doc.name || "Unknown Document",
+        documentType: kycDoc.document_type || doc.documentType || "document",
+        category: kycDoc.category || doc.category || "",
+        subcategory: kycDoc.subcategory || doc.subcategory || "",
+        isKycSynced: true,
+        kycDoc: kycDoc,
+      }
+    },
+    [allKycDocuments],
+  )
+
   // Enhanced document display component using KYC data exclusively
   const DocumentDisplay = useCallback(
     ({ doc, stage }: { doc: any; stage: any }) => {
@@ -444,19 +392,6 @@ export default function Stages() {
     },
     [getKycFields, getDocumentInfo],
   )
-
-  // Column visibility state
-  const [columnVisibility, setColumnVisibility] = useState({
-    index: true,
-    entity: true,
-    stageName: true,
-    duration: true,
-    followUp: true,
-    controls: true,
-  })
-
-  // Entity visibility state
-  const [entityVisibility, setEntityVisibility] = useState<Record<string, boolean>>({})
 
   // Memoized column visibility options
   const columnVisibilityOptions: ColumnVisibilityOption[] = useMemo(
@@ -829,7 +764,6 @@ export default function Stages() {
   }, [expandedRows, departments, activeTab, showDefaultDisplayOnly, entityVisibility, isTransposed])
 
   useEffect(() => {
-    debugLog('Fetching data...');
     const fetchData = async () => {
       try {
         setLoading(true)
@@ -876,7 +810,6 @@ export default function Stages() {
         }
       } catch (err) {
         console.error("Error fetching data:", err);
-        debugLog('Error fetching data', err);
         setError("Failed to load data. Please try again.");
       } finally {
         setLoading(false)
@@ -898,19 +831,6 @@ export default function Stages() {
   const handleAllocationChangeInternal = async (subdeptId: number, stageId: string, shouldAllocate: boolean) => {
     return handleAllocationChange(subdeptId, stageId, shouldAllocate)
   }
-
-  // Debug logging for allocation changes
-  const logAllocationChange = (subdeptId: number, stageId: string, shouldAllocate: boolean, classIndex?: number | null, subclassIndex?: number | null) => {
-    debugLog('Allocation change', {
-      subdeptId,
-      stageId,
-      shouldAllocate,
-      classIndex,
-      subclassIndex,
-      timestamp: new Date().toISOString()
-    });
-  };
-
 
   const handleAllocationChange = async (
     subdeptId: number,
@@ -1738,7 +1658,6 @@ export default function Stages() {
     setKycDocuments(filteredDocuments)
   }
 
-
   const currentDept = getCurrentDepartment()
 
   const handleExportToExcel = () => {
@@ -2460,7 +2379,7 @@ export default function Stages() {
                               </PopoverContent>
                             </Popover>
                           )}
-                           {/* END: FIX */}
+                          {/* END: FIX */}
                         </div>
                       </div>
                     </div>
