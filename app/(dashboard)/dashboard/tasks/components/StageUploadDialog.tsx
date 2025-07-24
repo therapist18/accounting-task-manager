@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Send, FileText, RotateCw, Trash2, MessageSquare, Upload, Star, AlertTriangle } from "lucide-react"
+import { Loader2, Send, FileText, RotateCw, Trash2, MessageSquare, Upload, Star, AlertTriangle, Eye, Check } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -14,6 +14,8 @@ import dynamic from 'next/dynamic'
 import { toast } from "@/hooks/use-toast"
 import { performExtraction } from "@/lib/extractionUtils"
 import { supabase } from "@/lib/supabase/client"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { format, parseISO } from "date-fns"
 
 const ExtractionPreview = dynamic(
   () => import('@/components/ExtractionPreview').then(mod => mod.default || mod),
@@ -74,6 +76,36 @@ const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolea
     return false
   }
 }
+
+// Process extracted data same as LinkSourceDocumentDialog
+const processExtractedData = (data: any, fields: any[]): any => {
+  if (!data || typeof data !== 'object') return data;
+
+  const result = { ...data };
+  
+  // Process each field
+  fields.forEach(field => {
+    const fieldId = field.id || field.fieldName;
+    
+    // Handle array fields
+    if (field.isArray && Array.isArray(result[fieldId])) {
+      // Process each item in the array
+      result[fieldId] = result[fieldId].map((item: any) => {
+        if (field.arrayConfig?.fields) {
+          // Recursively process nested fields
+          return processExtractedData(item, field.arrayConfig.fields);
+        }
+        return item;
+      });
+    } 
+    // Handle nested objects
+    else if (typeof result[fieldId] === 'object' && result[fieldId] !== null) {
+      result[fieldId] = processExtractedData(result[fieldId], field.fields || []);
+    }
+  });
+  
+  return result;
+};
 
 // Separate component for Fuzzy Match Confirmation Dialog
 const FuzzyMatchConfirmationDialog = ({ 
@@ -166,6 +198,12 @@ export function StageUploadDialog({
   const [confirmationDialogOpen, setConfirmationDialogOpen] = useState(false)
   const [fuzzyMatchResults, setFuzzyMatchResults] = useState<any[]>([])
   const [pendingSubmission, setPendingSubmission] = useState<any>(null)
+  // NEW: State for handling existing document selection
+  const [selectedExistingDocs, setSelectedExistingDocs] = useState<Record<string, string>>({})
+  const [previewDocument, setPreviewDocument] = useState<any | null>(null)
+  const [isPreviewDialogOpen, setIsPreviewDialogOpen] = useState(false)
+  const [useExistingDoc, setUseExistingDoc] = useState<Record<string, boolean>>({})
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   // All useRef hooks
   const documentFieldsCache = useRef(new Map())
@@ -201,6 +239,11 @@ export function StageUploadDialog({
       setConfirmationDialogOpen(false)
       setFuzzyMatchResults([])
       setPendingSubmission(null)
+      setSelectedExistingDocs({})
+      setPreviewDocument(null)
+      setIsPreviewDialogOpen(false)
+      setUseExistingDoc({})
+      setPreviewLoading(false)
       documentFieldsCache.current.clear()
     }
   }, [open])
@@ -741,6 +784,49 @@ export function StageUploadDialog({
     }
   }, [onStageCompleted])
 
+  // NEW: Function to update source_document_id in tm_tasks
+  const updateSourceDocumentId = useCallback(async (taskId: string, stageId: string, documentId: string, documentKycId: string) => {
+    try {
+      console.log('Updating source document ID:', { taskId, stageId, documentId, documentKycId })
+
+      // Get current task data
+      const { data: currentTask, error: fetchError } = await supabase
+        .from('tm_tasks')
+        .select('source_document_id')
+        .eq('id', taskId)
+        .single()
+
+      if (fetchError) throw fetchError
+
+      // Update the source_document_id object
+      const updatedSourceDocumentId = {
+        ...currentTask.source_document_id,
+        [stageId]: {
+          id: documentId,
+          document_id: documentKycId
+        }
+      }
+
+      // Update task with new source document ID
+      const { error: updateError } = await supabase
+        .from('tm_tasks')
+        .update({ 
+          source_document_id: updatedSourceDocumentId,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', taskId)
+
+      if (updateError) throw updateError
+
+      console.log('Source document ID updated successfully')
+      return updatedSourceDocumentId
+
+    } catch (error) {
+      console.error('Error updating source document ID:', error)
+      throw error
+    }
+  }, [])
+
   const submitDocumentsToDatabase = useCallback(async (documents: any[], registryIndividual: any, docId: string) => {
     try {
       console.log('=== Starting document submission ===')
@@ -829,6 +915,21 @@ export function StageUploadDialog({
   
         submittedDocIds.push(insertedDoc.id)
         console.log(`Successfully submitted document with ID: ${insertedDoc.id}`)
+        
+        // NEW: Update source_document_id for the most recent document
+        if (index === documents.length - 1) { // Only for the last (most recent) document
+          try {
+            await updateSourceDocumentId(
+              selectedStageTask.task.id.toString(),
+              selectedStageTask.stage.id,
+              insertedDoc.id,
+              documentKycId
+            )
+          } catch (sourceDocError) {
+            console.error('Error updating source document ID:', sourceDocError)
+            // Don't throw here - document submission was successful
+          }
+        }
       }
 
       // NEW: Update stage completion after successful document submission
@@ -856,7 +957,213 @@ export function StageUploadDialog({
       console.error('=== Document submission failed ===', error)
       throw error
     }
-  }, [selectedStageTask, existingDocuments, fetchExistingDocuments, uploadFileToStorage, updateStageCompletion])
+  }, [selectedStageTask, existingDocuments, fetchExistingDocuments, uploadFileToStorage, updateStageCompletion, updateSourceDocumentId])
+
+  // NEW: Function to handle using existing document
+  const handleUseExistingDocument = useCallback(async (docId: string, existingDocId: string) => {
+    try {
+      setUploading(true)
+      
+      const documentConfig = selectedStageTask?.stage?.documents?.find(d => d.id === docId)
+      const documentKycId = documentConfig?.kycId
+      
+      if (!documentKycId) {
+        throw new Error('Document configuration not found')
+      }
+
+      // Update source_document_id to point to the selected existing document
+      await updateSourceDocumentId(
+        selectedStageTask.task.id.toString(),
+        selectedStageTask.stage.id,
+        existingDocId,
+        documentKycId
+      )
+
+      // Update stage completion
+      await updateStageCompletion(
+        selectedStageTask.task.id.toString(), 
+        selectedStageTask.stage.id, 
+        { documentsCount: 1, usingExisting: true }
+      )
+
+      toast({
+        title: 'Success',
+        description: 'Existing document linked successfully. Stage marked as completed.'
+      })
+
+      // Refresh the task data
+      if (selectedStageTask?.task?.id) {
+        onTaskAction?.({
+          type: 'refresh',
+          taskId: selectedStageTask.task.id,
+          timestamp: Date.now()
+        })
+        
+        if (onTaskAction) {
+          onTaskAction({ type: 'refresh-data' })
+        }
+      }
+
+      // Close the dialog
+      onOpenChange(false)
+      
+    } catch (error) {
+      console.error('Error using existing document:', error)
+      toast({
+        title: 'Error',
+        description: `Failed to use existing document: ${error.message}`,
+        variant: 'destructive'
+      })
+    } finally {
+      setUploading(false)
+    }
+  }, [selectedStageTask, updateSourceDocumentId, updateStageCompletion, onTaskAction, onOpenChange])
+
+  // NEW: Handle preview of existing documents (same as LinkSourceDocumentDialog)
+  const handlePreviewExistingDocument = useCallback(async (document: any, docId: string) => {
+    console.log('--- handlePreviewExistingDocument called ---')
+    console.log('Document:', document)
+
+    try {
+      setPreviewLoading(true)
+
+      // Get the KYC document data using the document_id (which should match kycId)
+      const kycId = document.document_id
+      if (!kycId) {
+        console.log('No KYC ID found in document')
+        toast({
+          title: 'Error',
+          description: 'No KYC document ID found',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      // Fetch KYC document data
+      const kycData = await fetchKycDocument(kycId)
+      if (!kycData) {
+        console.log('No KYC data found')
+        toast({
+          title: 'Error',
+          description: 'Could not load document configuration',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      console.log('KYC Data:', kycData)
+      console.log('Raw document data:', document)
+
+      // Use KYC document display_name or name
+      const documentName = kycData.display_name || kycData.name || 'Document'
+
+      // Format the file path and URL - same as LinkSourceDocumentDialog
+      const bucketName = 'kyc-documents'
+      const filePath = document.file_path?.startsWith(bucketName)
+        ? document.file_path
+        : `${bucketName}/${document.file_path}`
+
+      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`
+      const fileName = document.file_path?.split('/').pop() || documentName
+      const fileType = fileName.split('.').pop()?.toLowerCase() || 'pdf'
+
+      // Get KYC fields from the KYC document data
+      const kycFields = kycData.fields || []
+
+      console.log('KYC Fields from KYC document:', kycFields)
+
+      // Transform KYC fields to the expected format - same as LinkSourceDocumentDialog
+      const transformKycFields = (fields: any[]): any[] => {
+        if (!Array.isArray(fields)) return []
+
+        return fields.map((field: any) => {
+          const isArray = field.type === 'array' || field.isArray === true
+
+          const transformedField: any = {
+            id: field.id || field.fieldName || '',
+            fieldName: field.name || field.fieldName || '',
+            description: field.description || '',
+            isRequired: field.isRequired !== false,
+            fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
+            parentField: field.parentField,
+            isArray: isArray,
+            fields: field.fields ? transformKycFields(field.fields) : undefined,
+          }
+
+          if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
+            transformedField.arrayConfig = {
+              maxItems: field.arrayConfig.maxItems,
+              fields: transformKycFields(field.arrayConfig.fields)
+            }
+          }
+
+          return transformedField
+        })
+      }
+
+      // Map KYC fields to the expected format
+      const fields = transformKycFields(kycFields).map((field: any) => ({
+        id: field.id || field.fieldName,
+        name: field.fieldName,
+        type: field.fieldType,
+        required: field.isRequired,
+        description: field.description,
+        isArray: field.isArray,
+        arrayConfig: field.arrayConfig,
+        fields: field.fields || []
+      }))
+
+      // Prepare extracted data
+      const rawExtractedData = document.extracted_details || {}
+      console.log('Raw extracted data from document:', rawExtractedData)
+
+      // Process the extracted data to handle arrays and nested fields
+      const processedExtractedData = processExtractedData(rawExtractedData, fields)
+      
+      // Ensure all fields have values, using empty strings for missing ones
+      const extractedData = { ...processedExtractedData }
+      fields.forEach((field: any) => {
+        if (extractedData[field.id] === undefined) {
+          extractedData[field.id] = field.isArray ? [] : ''
+        }
+      })
+
+      console.log('Processed extracted data:', extractedData)
+
+      const previewData = {
+        documentId: document.id,
+        documentName: documentName,
+        fileUrl,
+        fileName,
+        extractedData,
+        fields,
+        type: kycData.document_type || 'document',
+        file: {
+          name: fileName,
+          type: fileType,
+          url: fileUrl
+        },
+        isExisting: true,
+        docConfigId: docId
+      }
+
+      console.log('Final preview data being passed to ExtractionPreview:', previewData)
+      console.log('File URL for preview:', fileUrl) // Log the file URL for debugging
+      
+      setPreviewDocument(previewData)
+      setIsPreviewDialogOpen(true)
+
+    } catch (error) {
+      console.error('Error in handlePreviewExistingDocument:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to load document preview',
+        variant: 'destructive',
+      })
+    } finally {
+      setPreviewLoading(false)
+    }
+  }, [fetchKycDocument])
   
   const convertMessageToPDF = useCallback(async (message: string, documentName: string): Promise<Blob> => {
     try {
@@ -1414,6 +1721,7 @@ export function StageUploadDialog({
     }
   }, [selectedStageTask, uploadedDocs, getFieldsForDocument])
 
+  // NEW: Updated renderExistingDocumentStatus to show selectable previews
   const renderExistingDocumentStatus = useCallback((doc: any) => {
     const existingDocs = existingDocuments[doc.id] || []
     
@@ -1427,58 +1735,137 @@ export function StageUploadDialog({
     const hasIndicator = mostRecentDoc.indicator === true
 
     return (
-      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-        <div className="flex items-start gap-2">
+      <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="flex items-start gap-3 mb-3">
           <div className="flex-1">
-            <h4 className="text-sm font-medium text-blue-900 mb-1">
+            <h4 className="text-sm font-medium text-blue-900 mb-2">
               Existing Documents ({existingDocs.length})
             </h4>
-            <div className="space-y-1">
-              {existingDocs.slice(0, 3).map((existingDoc, index) => {
-                const docIsOld = selectedStageTask?.task?.created_at && 
-                  isDocumentOlderThanTask(existingDoc.created_at, selectedStageTask.task.created_at)
-                const docHasIndicator = existingDoc.indicator === true
-                
-                return (
-                  <div key={existingDoc.id} className="flex items-center gap-2 text-xs">
-                    <span className="text-blue-700">
-                      {existingDoc.file_path?.split('/').pop() || getDocumentDisplayName(doc)}
-                    </span>
-                    {docIsOld && (
-                      <div className="flex items-center gap-1 text-orange-600">
-                        <AlertTriangle className="h-3 w-3" />
-                        <span>Old</span>
-                      </div>
-                    )}
-                    {docHasIndicator && (
-                      <Badge variant="outline" className="text-xs px-1">
-                        No Preview
-                      </Badge>
-                    )}
-                    {!docIsOld && !docHasIndicator && (
-                      <Badge variant="default" className="text-xs px-1 bg-green-100 text-green-800">
-                        Active
-                      </Badge>
-                    )}
-                  </div>
-                )
-              })}
-              {existingDocs.length > 3 && (
-                <p className="text-xs text-blue-600">
-                  +{existingDocs.length - 3} more documents
-                </p>
+            
+            {/* NEW: Document selection interface */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 mb-2">
+                <input
+                  type="checkbox"
+                  id={`use-existing-${doc.id}`}
+                  checked={useExistingDoc[doc.id] || false}
+                  onChange={(e) => setUseExistingDoc(prev => ({
+                    ...prev,
+                    [doc.id]: e.target.checked
+                  }))}
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <Label 
+                  htmlFor={`use-existing-${doc.id}`}
+                  className="text-sm font-medium text-blue-800 cursor-pointer"
+                >
+                  Use existing document instead of uploading new
+                </Label>
+              </div>
+
+              {useExistingDoc[doc.id] && (
+                <div className="ml-6 space-y-2">
+                  <RadioGroup
+                    value={selectedExistingDocs[doc.id] || ''}
+                    onValueChange={(docId) => {
+                      setSelectedExistingDocs(prev => ({
+                        ...prev,
+                        [doc.id]: docId
+                      }))
+                    }}
+                  >
+                    {existingDocs.slice(0, 5).map((existingDoc, index) => {
+                      const docIsOld = selectedStageTask?.task?.created_at && 
+                        isDocumentOlderThanTask(existingDoc.created_at, selectedStageTask.task.created_at)
+                      const docHasIndicator = existingDoc.indicator === true
+                      const fileName = existingDoc.file_path?.split('/').pop() || getDocumentDisplayName(doc)
+                      
+                      return (
+                        <div key={existingDoc.id} className="flex items-center gap-3 p-2 border rounded hover:bg-blue-50">
+                          <RadioGroupItem value={existingDoc.id} id={existingDoc.id} />
+                          <div className="flex-1">
+                            <Label htmlFor={existingDoc.id} className="text-sm cursor-pointer">
+                              {fileName}
+                            </Label>
+                            <div className="text-xs text-gray-600 flex items-center gap-2">
+                              <span>Uploaded: {format(parseISO(existingDoc.created_at), 'dd MMM yyyy, HH:mm')}</span>
+                              {docIsOld && (
+                                <div className="flex items-center gap-1 text-orange-600">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  <span>Old</span>
+                                </div>
+                              )}
+                              {docHasIndicator && (
+                                <Badge variant="outline" className="text-xs px-1">
+                                  No Preview
+                                </Badge>
+                              )}
+                              {!docIsOld && !docHasIndicator && (
+                                <Badge variant="default" className="text-xs px-1 bg-green-100 text-green-800">
+                                  Active
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-green-600 hover:bg-green-100 hover:text-green-800"
+                            onClick={() => handlePreviewExistingDocument(existingDoc, doc.id)}
+                            title="Preview Document Extraction"
+                            disabled={previewLoading}
+                          >
+                            {previewLoading ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
+                      )
+                    })}
+                  </RadioGroup>
+                  
+                  {existingDocs.length > 5 && (
+                    <p className="text-xs text-blue-600 ml-6">
+                      +{existingDocs.length - 5} more documents available
+                    </p>
+                  )}
+
+                  {selectedExistingDocs[doc.id] && (
+                    <Button
+                      onClick={() => handleUseExistingDocument(doc.id, selectedExistingDocs[doc.id])}
+                      disabled={uploading}
+                      className="ml-6 mt-2"
+                      size="sm"
+                    >
+                      {uploading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Linking...
+                        </>
+                      ) : (
+                        <>
+                          <Check className="mr-2 h-4 w-4" />
+                          Use Selected Document
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
               )}
             </div>
           </div>
-          {isOldDocument && (
+          
+          {(isOldDocument || hasIndicator) && (
             <div className="flex items-center gap-1 text-orange-600">
               <AlertTriangle className="h-4 w-4" />
-              <span className="text-xs">Latest document is old</span>
+              <span className="text-xs">Attention needed</span>
             </div>
           )}
         </div>
         
-        {(isOldDocument || hasIndicator) && (
+        {(isOldDocument || hasIndicator) && !useExistingDoc[doc.id] && (
           <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-xs">
             {isOldDocument && (
               <p className="text-orange-700 mb-1">
@@ -1494,7 +1881,7 @@ export function StageUploadDialog({
         )}
       </div>
     )
-  }, [existingDocuments, selectedStageTask, getDocumentDisplayName])
+  }, [existingDocuments, selectedStageTask, getDocumentDisplayName, useExistingDoc, selectedExistingDocs, uploading, handlePreviewExistingDocument, handleUseExistingDocument])
 
   const renderInputSection = useCallback((doc: any) => {
     const documentName = getDocumentDisplayName(doc)
@@ -1503,6 +1890,7 @@ export function StageUploadDialog({
     const documentType = doc.documentType || 'both';
     const existingDocs = existingDocuments[doc.id] || []
     const hasExistingDocs = existingDocs.length > 0
+    const isUsingExisting = useExistingDoc[doc.id]
 
     return (
       <div className="space-y-4 p-4 rounded-lg border">
@@ -1525,109 +1913,125 @@ export function StageUploadDialog({
           </div>
         )}
 
-        {(inputType === 'file' || inputType === 'both') && (
-          <div className="space-y-2">
-            <Label htmlFor={`file-${doc.id}`} className="font-medium flex items-center gap-2">
-              <Upload className="h-4 w-4" />
-              {inputType === 'both' ? 'Upload File' : doc.description || `Upload ${documentName}`}
-              {hasExistingDocs && (
-                <Badge variant="secondary" className="text-xs">
-                  Will replace existing
-                </Badge>
-              )}
-            </Label>
-            <Input
-              id={`file-${doc.id}`}
-              type="file"
-              accept={documentType === 'both' ? "application/pdf,image/*" :
-                documentType === 'upload' ? "application/pdf,image/*" :
-                  documentType === 'extraction' ? "application/pdf" : "application/pdf,image/*"}
-              onChange={(e) => handleFileChange(e, doc.id)}
-              className="cursor-pointer"
-              disabled={uploading}
-            />
-            <p className="text-sm text-muted-foreground">
-              {doc.isRequired ? "Required" : "Optional"} •
-              {documentType === 'both' ? "Accepts PDF and image files" :
-                documentType === 'upload' ? "Upload document only (PDF/Images)" :
-                  documentType === 'extraction' ? "PDF only (data extraction required)" :
-                    "Accepts PDF and image files"}
-              {/* {hasExistingDocs && " • New upload will replace existing documents"} */}
-            </p>
-
-            {uploadProgress[doc.id] > 0 && uploadProgress[doc.id] < 100 && (
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${uploadProgress[doc.id]}%` }}
+        {/* Only show upload section if not using existing document */}
+        {!isUsingExisting && (
+          <>
+            {(inputType === 'file' || inputType === 'both') && (
+              <div className="space-y-2">
+                <Label htmlFor={`file-${doc.id}`} className="font-medium flex items-center gap-2">
+                  <Upload className="h-4 w-4" />
+                  {inputType === 'both' ? 'Upload File' : doc.description || `Upload ${documentName}`}
+                  {hasExistingDocs && (
+                    <Badge variant="secondary" className="text-xs">
+                      Will replace existing
+                    </Badge>
+                  )}
+                </Label>
+                <Input
+                  id={`file-${doc.id}`}
+                  type="file"
+                  accept={documentType === 'both' ? "application/pdf,image/*" :
+                    documentType === 'upload' ? "application/pdf,image/*" :
+                      documentType === 'extraction' ? "application/pdf" : "application/pdf,image/*"}
+                  onChange={(e) => handleFileChange(e, doc.id)}
+                  className="cursor-pointer"
+                  disabled={uploading}
                 />
+                <p className="text-sm text-muted-foreground">
+                  {doc.isRequired ? "Required" : "Optional"} •
+                  {documentType === 'both' ? "Accepts PDF and image files" :
+                    documentType === 'upload' ? "Upload document only (PDF/Images)" :
+                      documentType === 'extraction' ? "PDF only (data extraction required)" :
+                        "Accepts PDF and image files"}
+                </p>
+
+                {uploadProgress[doc.id] > 0 && uploadProgress[doc.id] < 100 && (
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${uploadProgress[doc.id]}%` }}
+                    />
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
 
-        {inputType === 'both' && (
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-background px-2 text-muted-foreground">Or</span>
-            </div>
-          </div>
-        )}
-
-        {(inputType === 'message' || inputType === 'both') && (
-          <div className="space-y-2">
-            <Label className="font-medium flex items-center gap-2">
-              <MessageSquare className="h-4 w-4" />
-              {inputType === 'both' ? 'Submit Message/Text' : doc.description || `Enter ${documentName}`}
-              {hasExistingDocs && (
-                <Badge variant="secondary" className="text-xs">
-                  Will replace existing
-                </Badge>
-              )}
-            </Label>
-            <div className="relative">
-              <Textarea
-                placeholder={`${inputType === 'both' ? 'Or type' : 'Type'} message content for ${doc.name}...`}
-                className="min-h-[100px] resize-none"
-                value={messageTexts[doc.id] || ''}
-                onChange={(e) => setMessageTexts(prev => ({ ...prev, [doc.id]: e.target.value }))}
-                disabled={uploading || documentType === 'upload'}
-              />
-              {documentType === 'upload' && (
-                <div className="absolute inset-0 bg-gray-50 bg-opacity-50 flex items-center justify-center rounded-md">
-                  <p className="text-sm text-muted-foreground">
-                    Message input not available for upload-only documents
-                  </p>
+            {inputType === 'both' && (
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
                 </div>
-              )}
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">Or</span>
+                </div>
+              </div>
+            )}
+
+            {(inputType === 'message' || inputType === 'both') && (
+              <div className="space-y-2">
+                <Label className="font-medium flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4" />
+                  {inputType === 'both' ? 'Submit Message/Text' : doc.description || `Enter ${documentName}`}
+                  {hasExistingDocs && (
+                    <Badge variant="secondary" className="text-xs">
+                      Will replace existing
+                    </Badge>
+                  )}
+                </Label>
+                <div className="relative">
+                  <Textarea
+                    placeholder={`${inputType === 'both' ? 'Or type' : 'Type'} message content for ${doc.name}...`}
+                    className="min-h-[100px] resize-none"
+                    value={messageTexts[doc.id] || ''}
+                    onChange={(e) => setMessageTexts(prev => ({ ...prev, [doc.id]: e.target.value }))}
+                    disabled={uploading || documentType === 'upload'}
+                  />
+                  {documentType === 'upload' && (
+                    <div className="absolute inset-0 bg-gray-50 bg-opacity-50 flex items-center justify-center rounded-md">
+                      <p className="text-sm text-muted-foreground">
+                        Message input not available for upload-only documents
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <Button
+                  className="w-full"
+                  onClick={() => handleMessageSubmit(messageTexts[doc.id] || '', doc.id)}
+                  disabled={!messageTexts[doc.id]?.trim() || uploading || documentType === 'upload'}
+                  variant={inputType === 'message' ? 'default' : 'outline'}
+                  title={documentType === 'upload' ? 'Message submission not available for upload-only documents' : ''}
+                >
+                  {uploading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="mr-2 h-4 w-4" />
+                  )}
+                  Submit {inputType === 'message' ? 'Message' : 'Text'}
+                </Button>
+                <p className="text-sm text-muted-foreground">
+                  {doc.isRequired ? "Required" : "Optional"} • Message will be converted to PDF
+                  {hasExistingDocs && " • New submission will replace existing documents"}
+                </p>
+              </div>
+            )}
+          </>
+        )}
+
+        {isUsingExisting && selectedExistingDocs[doc.id] && (
+          <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+            <div className="flex items-center gap-2 text-green-800 mb-2">
+              <Check className="h-5 w-5" />
+              <span className="font-medium">Using existing document</span>
             </div>
-            <Button
-              className="w-full"
-              onClick={() => handleMessageSubmit(messageTexts[doc.id] || '', doc.id)}
-              disabled={!messageTexts[doc.id]?.trim() || uploading || documentType === 'upload'}
-              variant={inputType === 'message' ? 'default' : 'outline'}
-              title={documentType === 'upload' ? 'Message submission not available for upload-only documents' : ''}
-            >
-              {uploading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="mr-2 h-4 w-4" />
-              )}
-              Submit {inputType === 'message' ? 'Message' : 'Text'}
-            </Button>
-            <p className="text-sm text-muted-foreground">
-              {doc.isRequired ? "Required" : "Optional"} • Message will be converted to PDF
-              {hasExistingDocs && " • New submission will replace existing documents"}
+            <p className="text-sm text-green-700">
+              Selected document will be linked to this stage when you save.
             </p>
           </div>
         )}
       </div>
     )
   }, [getDocumentDisplayName, getDocumentInputType, existingDocuments, renderExistingDocumentStatus, 
-      uploadProgress, uploading, messageTexts, handleFileChange, handleMessageSubmit])
+      uploadProgress, uploading, messageTexts, handleFileChange, handleMessageSubmit, useExistingDoc, selectedExistingDocs])
 
   const handleConfirmMatch = useCallback(async (selectedMatch: any) => {
     try {
@@ -1711,6 +2115,21 @@ export function StageUploadDialog({
   // FIXED: Move the render logic for document content outside of JSX and into a function
   const renderDocumentContent = useCallback((doc: any) => {
     const docsForId = uploadedDocs[doc.id] || []
+    const isUsingExisting = useExistingDoc[doc.id]
+    
+    if (isUsingExisting && selectedExistingDocs[doc.id]) {
+      return (
+        <div className="border rounded-lg p-8 text-center bg-green-50">
+          <div className="flex flex-col items-center">
+            <Check className="h-12 w-12 mx-auto mb-4 text-green-600" />
+            <p className="text-green-800 mb-2 font-medium">Existing document selected</p>
+            <p className="text-sm text-green-700">
+              This stage will use the selected existing document when saved.
+            </p>
+          </div>
+        </div>
+      )
+    }
     
     if (docsForId.length === 0) {
       return (
@@ -1733,7 +2152,7 @@ export function StageUploadDialog({
                   {existingDocuments[doc.id].length} existing document(s) found
                 </p>
                 <p className="text-blue-600 text-xs">
-                  Upload a new file to replace existing documents
+                  Upload a new file or select an existing document above
                 </p>
               </div>
             )}
@@ -1801,7 +2220,7 @@ export function StageUploadDialog({
       </div>
     )
   }, [uploadedDocs, existingDocuments, getDocumentInputType, getDocumentDisplayName, 
-      handleReExtraction, stableCallbacks, getStableFieldPromise])
+      handleReExtraction, stableCallbacks, getStableFieldPromise, useExistingDoc, selectedExistingDocs])
 
   useEffect(() => {
     if (applicableDocuments.length > 0 && !activeDocumentTab) {
@@ -1826,7 +2245,7 @@ export function StageUploadDialog({
               Upload Documents for {stage?.name} Stage
             </DialogTitle>
             <DialogDescription>
-              Complete this stage by uploading required documents or submitting messages as specified. The stage will be marked as completed upon successful submission.
+              Complete this stage by uploading required documents, submitting messages, or selecting existing documents. The stage will be marked as completed upon successful submission.
               {selectedStageTask?.stage?.documents && applicableDocuments.length !== selectedStageTask.stage.documents.length && (
                 <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded">
                   <p className="text-sm text-blue-700">
@@ -1853,6 +2272,7 @@ export function StageUploadDialog({
                 const mostRecentDoc = existingDocs[0]
                 const isOldDocument = mostRecentDoc && selectedStageTask?.task?.created_at && 
                   isDocumentOlderThanTask(mostRecentDoc.created_at, selectedStageTask.task.created_at)
+                const isUsingExisting = useExistingDoc[doc.id] && selectedExistingDocs[doc.id]
 
                return (
                  <TabsTrigger
@@ -1878,7 +2298,11 @@ export function StageUploadDialog({
                      <div className="w-2 h-2 bg-green-500 rounded-full" title="Has new uploads"></div>
                    )}
 
-                   {hasExistingDocs && !hasUploads && (
+                   {isUsingExisting && (
+                     <div className="w-2 h-2 bg-purple-500 rounded-full" title="Using existing document"></div>
+                   )}
+
+                   {hasExistingDocs && !hasUploads && !isUsingExisting && (
                      <>
                        {isOldDocument ? (
                          <div className="w-2 h-2 bg-orange-500 rounded-full" title="Has old documents"></div>
@@ -1913,7 +2337,10 @@ export function StageUploadDialog({
          <div className="flex justify-end pt-4 border-t mt-4">
            <Button 
              onClick={handleSaveAllDocuments}
-             disabled={Object.values(uploadedDocs).every(docs => docs.length === 0) || uploading}
+             disabled={(
+               Object.values(uploadedDocs).every(docs => docs.length === 0) && 
+               !Object.values(useExistingDoc).some(Boolean)
+             ) || uploading}
              className="w-full sm:w-auto"
            >
              {uploading ? (
@@ -1938,6 +2365,41 @@ export function StageUploadDialog({
        onConfirmMatch={handleConfirmMatch}
        onCreateNew={handleCreateNew}
      />
+
+     {/* Preview Dialog for existing documents */}
+     <Dialog open={isPreviewDialogOpen} onOpenChange={setIsPreviewDialogOpen}>
+       <DialogContent className="max-w-[1800px] max-h-[95vh] overflow-y-auto">
+         <DialogHeader>
+           <DialogTitle>Document Preview</DialogTitle>
+           <DialogDescription>
+             Preview of {previewDocument?.documentName || 'document'}
+           </DialogDescription>
+         </DialogHeader>
+         
+         {previewDocument && (
+           <ExtractionPreview
+             documentName={previewDocument.documentName}
+             extractedData={previewDocument.extractedData}
+             fieldsPromise={getStableFieldPromise(previewDocument.docConfigId)}
+             onDataChange={(data) => {
+               // Update the preview document's extracted data
+               setPreviewDocument(prev => prev && {
+                 ...prev,
+                 extractedData: data
+               })
+             }}
+             fileUrl={previewDocument.fileUrl}
+             fileName={previewDocument.fileName}
+             expanded={true}
+             showSaveButton={false}
+             type={previewDocument.type}
+             file={previewDocument.file}
+             documentId={previewDocument.docConfigId}
+             documentIndex={0}
+           />
+         )}
+       </DialogContent>
+     </Dialog>
    </>
  )
 }

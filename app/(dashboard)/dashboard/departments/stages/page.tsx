@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw } from "lucide-react"
+import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2 } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { supabase } from "@/lib/supabase/client"
 import { AddStageDialog } from "./components/add-stage-dialog"
@@ -1539,6 +1539,10 @@ export default function Stages() {
   }
 
   const handleDeleteStage = async (stageId: string) => {
+    if (!window.confirm("Are you sure you want to delete this stage? All associated document configurations will also be removed. This action cannot be undone.")) {
+      return
+    }
+
     try {
       const currentDept = getCurrentDepartment()
       if (!currentDept) return
@@ -1570,7 +1574,7 @@ export default function Stages() {
 
       toast({
         title: "Success",
-        description: "Stage and associated documents deleted successfully",
+        description: `Stage "${stageToDelete.name}" and associated documents deleted successfully.`,
       })
     } catch (err) {
       console.error("Error deleting stage:", err)
@@ -2020,13 +2024,27 @@ export default function Stages() {
                       Duration
                     </TableHead>
                     <TableHead
-                      className="sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white align-middle"
+                      className={cn(
+                        "sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white align-middle",
+                        columnVisibility.index && columnVisibility.entity
+                          ? "left-100"
+                          : columnVisibility.index || columnVisibility.entity
+                            ? "left-164"
+                            : "left-0",
+                      )}
                       rowSpan={totalHeaderRows}
                     >
                       Follow-up
                     </TableHead>
                     <TableHead
-                      className="sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white align-middle"
+                      className={cn(
+                        "sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white align-middle",
+                        columnVisibility.index && columnVisibility.entity
+                          ? "left-120"
+                          : columnVisibility.index || columnVisibility.entity
+                            ? "left-164"
+                            : "left-0",
+                      )}
                       rowSpan={totalHeaderRows}
                     >
                       Actions
@@ -2085,7 +2103,7 @@ export default function Stages() {
                         Applicable
                       </TableHead>
                       <TableHead className="border-r border-slate-300 bg-slate-500 text-center text-xs font-medium text-white w-16 p-1">
-                        Display
+                        Default Display
                       </TableHead>
                     </React.Fragment>
                   ))}
@@ -2184,20 +2202,6 @@ export default function Stages() {
                   )}
                   {columnVisibility.stageName && (
                     <>
-                      <TableCell
-                        className={cn(
-                          "sticky bg-slate-100 border-r border-slate-300 z-10",
-                          columnVisibility.index && columnVisibility.entity
-                            ? "left-80"
-                            : columnVisibility.index || columnVisibility.entity
-                              ? "left-64"
-                              : "left-0",
-                        )}
-                      >
-                        <div className="font-medium text-sm text-center"> 
-                          {minutesToTimeString(stage.estimated_time) || "-"}
-                        </div>
-                      </TableCell>
                       <TableCell className="sticky bg-slate-100 border-r-2 border-slate-300 z-10">
                         <div className="space-y-1">
                           <div className="flex items-center gap-1 justify-center">
@@ -2230,30 +2234,21 @@ export default function Stages() {
                             >
                               <Pencil className="h-3 w-3 text-slate-600" />
                             </Button>
-                            {stage.status && (
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-5 w-5 hover:bg-slate-300/50 relative"
-                                  >
-                                    <Info className="h-3 w-3 text-blue-600" />
-                                  </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-64 p-4" side="bottom" align="start">
-                                  <div className="space-y-2">
-                                    <h4 className="font-medium">Stage Status</h4>
-                                    <p className="text-sm text-muted-foreground">{stage.status}</p>
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
-                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 hover:bg-red-200"
+                              onClick={() => handleDeleteStage(stage.id)}
+                              title={`Delete stage "${stage.name}"`}
+                            >
+                              <Trash2 className="h-3 w-3 text-red-600" />
+                            </Button>
                           </div>
                         </div>
                       </TableCell>
                     </>
                   )}
+                  <TableCell className="sticky bg-slate-100 border-r-2 border-slate-300 z-10" rowSpan={2}> </TableCell>
                   {leafEntities.map((entity, entityIndex) => {
                     const allocation = getStageAllocation(stage, entity)
                     const columnClass = entityIndex % 2 === 0 ? "bg-white" : "bg-gray-50/80"
@@ -2376,7 +2371,7 @@ export default function Stages() {
                 {columnVisibility.index && (
                   <TableHead
                     className="sticky left-0 bg-blue-700 border-r-2 border-blue-500 font-bold w-16 z-40 text-center text-white"
-                    rowSpan={headerRowCount}
+                    rowSpan={4}
                   >
                     #
                   </TableHead>
@@ -2387,7 +2382,7 @@ export default function Stages() {
                       "sticky bg-blue-700 border-r-2 border-blue-500 font-bold w-64 z-40 text-white",
                       columnVisibility.index ? "left-16" : "left-0",
                     )}
-                    rowSpan={headerRowCount}
+                    rowSpan={4}
                   >
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4" />
@@ -2562,6 +2557,15 @@ export default function Stages() {
                           >
                             <Pencil className="h-3 w-3 text-white" />
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 hover:bg-red-500/50"
+                            onClick={() => handleDeleteStage(stage.id)}
+                            title={`Delete stage "${stage.name}"`}
+                          >
+                            <Trash2 className="h-3 w-3 text-white" />
+                          </Button>
                         </div>
                       </div>
                     </div>
@@ -2652,6 +2656,9 @@ export default function Stages() {
                 </TableRow>
               )}
               {/* Applicable/Display Headers Row */}
+              <TableRow>
+                <TableHead className="sticky left-0 bg-blue-700 border-r-2 border-blue-500 font-bold w-16 z-40 text-center text-white" rowSpan={2} colSpan={2}></TableHead>
+              </TableRow>
               {columnVisibility.controls && (
                 <TableRow className="border-b-0">
                   {columnVisibility.stageName && (
@@ -2670,7 +2677,7 @@ export default function Stages() {
                     <TableHead key={`controls-${stage.id}`} className="border-r border-slate-300 bg-slate-500">
                       <div className="grid grid-cols-2 gap-1 p-1">
                         <div className="text-center text-xs font-medium text-white">Applicable</div>
-                        <div className="text-center text-xs font-medium text-white">Display</div>
+                        <div className="text-center text-xs font-medium text-white">Default Display</div>
                       </div>
                     </TableHead>
                   ))}

@@ -11,7 +11,29 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardDescription, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ChevronDown, ChevronUp, Plus, Trash2, Layers, UserIcon, ChevronsUpDown, FolderPlus, Edit, Building, Workflow, Loader2, Shield, X } from "lucide-react"
+import { ChevronDown, ChevronUp, Plus, Trash2, Layers, UserIcon, ChevronsUpDown, FolderPlus, Edit, Building, Workflow, Loader2, Shield, X, BoxSelect, Users, CheckSquare, Square } from "lucide-react"
+
+// Note: The following types are assumed to have been updated in the database definitions.
+// Officers are now managed at subdepartment level only
+interface OfficerHistory {
+  id: string;
+  start_date: string;
+  end_date?: string;
+}
+
+interface EnhancedSubdepartmentForm extends SubdepartmentForm {
+  officer_history?: OfficerHistory[];
+  officers?: Array<{
+    id: string;
+    start_date: string;
+    end_date?: string;
+  }>;
+}
+
+interface EnhancedDepartmentForm extends DepartmentForm {
+  subdepartments: EnhancedSubdepartmentForm[];
+}
+
 import { Department, Subdepartment, Class, SubClass, Requirement, SubdepartmentForm, ClassForm, SubClassForm, RequirementForm, User, DepartmentForm } from "../database"
 import { updateNestedState } from "../page"
 
@@ -30,6 +52,145 @@ const generateHierarchicalIndex = (
   if (reqIndex !== undefined) index += `.${reqIndex + 1}`;
   return index;
 };
+
+// MultiSelect Component for selecting multiple users
+function MultiSelect({ 
+  users, 
+  selectedIds, 
+  onSelectionChange, 
+  placeholder = "Select users...",
+  role,
+  disabled = false 
+}: {
+  users: User[];
+  selectedIds: string[];
+  onSelectionChange: (ids: string[]) => void;
+  placeholder?: string;
+  role: 'officer' | 'assistant';
+  disabled?: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  
+  const roleConfig = {
+    officer: {
+      icon: Shield,
+      color: 'text-purple-600',
+      bgColor: 'bg-purple-100',
+      label: 'Officer'
+    },
+    assistant: {
+      icon: Users,
+      color: 'text-green-600', 
+      bgColor: 'bg-green-100',
+      label: 'Assistant'
+    }
+  };
+
+  const config = roleConfig[role];
+  const Icon = config.icon;
+
+  const toggleUser = (userId: string) => {
+    if (selectedIds.includes(userId)) {
+      onSelectionChange(selectedIds.filter(id => id !== userId));
+    } else {
+      onSelectionChange([...selectedIds, userId]);
+    }
+  };
+
+  const selectedUsers = users.filter(user => selectedIds.includes(user.id));
+  const availableUsers = users.filter(user => !selectedIds.includes(user.id));
+
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setIsOpen(!isOpen)}
+          disabled={disabled}
+          className="w-full justify-between h-10"
+        >
+          <div className="flex items-center gap-2">
+            <Icon className={`h-4 w-4 ${config.color}`} />
+            <span className="text-sm">
+              {selectedIds.length > 0 
+                ? `${selectedIds.length} ${config.label}${selectedIds.length > 1 ? 's' : ''} selected`
+                : placeholder
+              }
+            </span>
+          </div>
+          <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        </Button>
+
+        {isOpen && (
+          <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border rounded-md shadow-lg max-h-64 overflow-y-auto">
+            <div className="p-2">
+              <div className="text-xs font-medium text-gray-500 mb-2">Available {config.label}s</div>
+              {availableUsers.length > 0 ? (
+                <div className="space-y-1">
+                  {availableUsers.map((user) => (
+                    <div
+                      key={user.id}
+                      className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
+                      onClick={() => toggleUser(user.id)}
+                    >
+                      <Square className="h-4 w-4 text-gray-400" />
+                      <Icon className={`h-4 w-4 ${config.color}`} />
+                      <div className="flex-1">
+                        <div className="font-medium text-sm">{user.name}</div>
+                        <div className="text-xs text-gray-500">{user.email}</div>
+                      </div>
+                      <Badge variant="outline" className="text-xs">
+                        {user.role === 'task_manager' ? 'Manager' : 
+                         user.role === 'task_assistant' ? 'Assistant' :
+                         user.role === 'officer' ? 'Officer' :
+                         user.role === 'admin' ? 'Admin' : 'User'}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-4 text-gray-500 text-sm">
+                  No available {config.label}s found
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Selected Users Display */}
+      {selectedUsers.length > 0 && (
+        <div className="space-y-2 max-h-32 overflow-y-auto">
+          <div className="text-xs font-medium text-gray-500">Selected {config.label}s</div>
+          <div className="space-y-1">
+            {selectedUsers.map((user) => (
+              <div key={user.id} className={`flex items-center justify-between p-2 rounded border ${config.bgColor}`}>
+                <div className="flex items-center gap-2">
+                  <CheckSquare className={`h-4 w-4 ${config.color}`} />
+                  <Icon className={`h-4 w-4 ${config.color}`} />
+                  <div>
+                    <div className="font-medium text-sm">{user.name}</div>
+                    <div className="text-xs text-gray-500">{user.email}</div>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => toggleUser(user.id)}
+                  className="h-6 w-6 text-red-500 hover:bg-red-50"
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Requirement Component
 function RequirementComponent({
@@ -226,7 +387,202 @@ function ClassComponent({
   );
 }
 
-// Updated DepartmentDialog with officer management
+// Enhanced Role Management Component
+function RoleManagementSection({ 
+  subdept, 
+  subdeptIndex, 
+  users, 
+  officers, 
+  onSubdepartmentChange,
+  updateFormState 
+}: {
+  subdept: EnhancedSubdepartmentForm;
+  subdeptIndex: number;
+  users: User[];
+  officers: User[];
+  onSubdepartmentChange: (index: number, field: string, value: any) => void;
+  updateFormState: (path: string[], value: any) => void;
+}) {
+  
+  // Handle officer selection change
+  const handleOfficerSelectionChange = (selectedIds: string[]) => {
+    const currentOfficers = subdept.officers || [];
+    const currentOfficerIds = currentOfficers.map(o => o.id);
+    
+    // Find newly added officers
+    const newOfficerIds = selectedIds.filter(id => !currentOfficerIds.includes(id));
+    
+    // Find removed officers  
+    const removedOfficerIds = currentOfficerIds.filter(id => !selectedIds.includes(id));
+    
+    // Create new officers array
+    let updatedOfficers = [...currentOfficers];
+    
+    // End assignments for removed officers
+    updatedOfficers = updatedOfficers.map(officer => 
+      removedOfficerIds.includes(officer.id) 
+        ? { ...officer, end_date: new Date().toISOString() }
+        : officer
+    );
+    
+    // Add new officers
+    newOfficerIds.forEach(officerId => {
+      updatedOfficers.push({
+        id: officerId,
+        start_date: new Date().toISOString()
+      });
+    });
+    
+    updateFormState(['subdepartments', subdeptIndex, 'officers'], updatedOfficers);
+    
+    // Update officer history
+    const currentHistory = subdept.officer_history || [];
+    let updatedHistory = [...currentHistory];
+    
+    // End history for removed officers
+    updatedHistory = updatedHistory.map(historyItem => 
+      removedOfficerIds.includes(historyItem.id) && !historyItem.end_date
+        ? { ...historyItem, end_date: new Date().toISOString() }
+        : historyItem
+    );
+    
+    // Add new officers to history
+    newOfficerIds.forEach(officerId => {
+      updatedHistory.push({
+        id: officerId,
+        start_date: new Date().toISOString()
+      });
+    });
+    
+    updateFormState(['subdepartments', subdeptIndex, 'officer_history'], updatedHistory);
+  };
+  
+  // Handle assistant selection change
+  const handleAssistantSelectionChange = (selectedIds: string[]) => {
+    onSubdepartmentChange(subdeptIndex, 'taskAssistantIds', selectedIds);
+  };
+  
+  // Get current active officers
+  const getCurrentOfficerIds = () => {
+    return (subdept.officers || [])
+      .filter(officer => !officer.end_date)
+      .map(officer => officer.id);
+  };
+  
+  return (
+    <div className="space-y-6 p-6 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-blue-600 rounded-lg">
+          <UserIcon className="h-6 w-6 text-white" />
+        </div>
+        <div>
+          <h4 className="text-lg font-bold text-gray-900">Role Management</h4>
+          <p className="text-sm text-gray-600">Assign officers, managers, and assistants to this subdepartment</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Officers Section */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Shield className="h-5 w-5 text-purple-600" />
+            <Label className="text-sm font-semibold text-purple-900">Officers</Label>
+            <Badge variant="outline" className="ml-auto">
+              {getCurrentOfficerIds().length} active
+            </Badge>
+          </div>
+          <MultiSelect
+            users={officers}
+            selectedIds={getCurrentOfficerIds()}
+            onSelectionChange={handleOfficerSelectionChange}
+            placeholder="Select officers..."
+            role="officer"
+          />
+        </div>
+
+        {/* Task Manager Section */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <UserIcon className="h-5 w-5 text-blue-600" />
+            <Label className="text-sm font-semibold text-blue-900">Task Manager</Label>
+            <Badge variant="outline" className="ml-auto">
+              {subdept.taskManagerId ? '1 assigned' : 'None'}
+            </Badge>
+          </div>
+          <Select 
+            value={subdept.taskManagerId || ''} 
+            onValueChange={(value) => onSubdepartmentChange(subdeptIndex, 'taskManagerId', value)}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select task manager" />
+              <BoxSelect className="h-4 w-4 text-blue-600" />
+            </SelectTrigger>
+            <SelectContent className="bg-white border rounded-md shadow-sm">
+              <SelectItem value="">
+                <div className="flex items-center gap-2 p-2">
+                  <UserIcon className="h-4 w-4 text-gray-400" />
+                  <span className="text-gray-500">None</span>
+                </div>
+              </SelectItem>
+              {users.filter(user => user.role === 'task_manager' || user.role === 'admin' || user.role === 'user').map((user) => (
+                <SelectItem key={user.id} value={user.id}>
+                  <div className="flex items-center gap-2 p-2">
+                    <UserIcon className="h-4 w-4 text-blue-600" />
+                    <div>
+                      <span className="font-medium">{user.name}</span>
+                      <Badge variant="outline" className="ml-2 text-xs">
+                        {user.role === 'task_manager' ? 'Manager' : user.role === 'admin' ? 'Admin' : 'User'}
+                      </Badge>
+                    </div>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Task Assistants Section */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Users className="h-5 w-5 text-green-600" />
+            <Label className="text-sm font-semibold text-green-900">Task Assistants</Label>
+            <Badge variant="outline" className="ml-auto">
+              {subdept.taskAssistantIds?.filter(id => id).length || 0} assigned
+            </Badge>
+          </div>
+          <MultiSelect
+            users={users.filter(user => user.role === 'task_assistant' || user.role === 'admin' || user.role === 'user')}
+            selectedIds={subdept.taskAssistantIds?.filter(id => id) || []}
+            onSelectionChange={handleAssistantSelectionChange}
+            placeholder="Select assistants..."
+            role="assistant"
+          />
+        </div>
+      </div>
+
+      {/* Role Assignment Summary */}
+      <div className="mt-6 p-4 bg-white rounded-lg border border-gray-200">
+        <h5 className="text-sm font-semibold text-gray-900 mb-3">Assignment Summary</h5>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+          <div className="flex items-center gap-2">
+            <Shield className="h-4 w-4 text-purple-600" />
+            <span>Officers: <strong>{getCurrentOfficerIds().length}</strong></span>
+          </div>
+          <div className="flex items-center gap-2">
+            <UserIcon className="h-4 w-4 text-blue-600" />
+            <span>Manager: <strong>{subdept.taskManagerId ? '1' : '0'}</strong></span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-green-600" />
+            <span>Assistants: <strong>{subdept.taskAssistantIds?.filter(id => id).length || 0}</strong></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Updated DepartmentDialog with officer management at subdepartment level
 interface DepartmentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -234,7 +590,7 @@ interface DepartmentDialogProps {
   departmentForm: DepartmentForm
   setDepartmentForm: React.Dispatch<React.SetStateAction<DepartmentForm>>
   users: User[]
-  officerIds: string[] // Array of officer IDs
+  officers: User[] // Array of potential officers (Users with 'officer' role)
   editingDepartmentId?: string | null
   editingSubdepartmentId?: string | null
   isSaving: boolean
@@ -252,10 +608,7 @@ export default function DepartmentDialog({
   editingSubdepartmentId,
   isSaving
 }: DepartmentDialogProps) {
-  const [newOfficer, setNewOfficer] = React.useState<{ id: string; start_date: string; end_date?: string }>({ 
-    id: '', 
-    start_date: new Date().toISOString().split('T')[0] 
-  });
+  
   const updateFormState = (path: string[], value: any) => 
     setDepartmentForm(prevState => updateNestedState(prevState, path, value));
 
@@ -309,27 +662,9 @@ export default function DepartmentDialog({
   const handleSubdepartmentChange = (subdeptIndex: number, field: string, value: any) =>
     updateFormState(['subdepartments', subdeptIndex, field], value);
 
-  const handleAddTaskAssistant = (subdeptIndex: number) =>
-    updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'],
-      [...departmentForm.subdepartments[subdeptIndex].taskAssistantIds, '']
-    );
-
-  const handleRemoveTaskAssistant = (subdeptIndex: number, assistantIndex: number) =>
-    updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'],
-      departmentForm.subdepartments[subdeptIndex].taskAssistantIds.filter((_, i) => i !== assistantIndex)
-    );
-
-  const handleTaskAssistantChange = (subdeptIndex: number, assistantIndex: number, userId: string) => {
-    const currentIds = [...departmentForm.subdepartments[subdeptIndex].taskAssistantIds];
-    currentIds[assistantIndex] = userId;
-    updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'], currentIds);
-  };
-
-  const getUserName = (userId: string) => users.find(u => u.id === userId)?.name || 'Unassigned';
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl h-[calc(100vh-10rem)]">
+      <DialogContent className="max-w-7xl h-[calc(100vh-8rem)]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {isCreatingNewDepartment && <FolderPlus className="h-5 w-5 text-blue-600" />}
@@ -341,7 +676,7 @@ export default function DepartmentDialog({
           <DialogDescription>{getDialogDescription()}</DialogDescription>
         </DialogHeader>
         
-        <div className="space-y-6 overflow-y-auto">
+        <div className="space-y-6 overflow-y-auto p-1">
           {/* Department Section - shown when creating new dept or editing existing dept */}
           {(isCreatingNewDepartment || isEditingDepartment) && (
             <div className="space-y-4 p-4 bg-blue-50 rounded-lg border">
@@ -361,119 +696,6 @@ export default function DepartmentDialog({
                     className="font-medium"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Department Officers</Label>
-                  <div className="flex gap-2">
-                    <Select
-                      value={newOfficer.id}
-                      onValueChange={(value) => {
-                        const officer = officers.find(o => o.id === value);
-                        if (officer) {
-                          setNewOfficer(prev => ({
-                            ...prev,
-                            id: value,
-                            start_date: new Date().toISOString().split('T')[0]
-                          }));
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="Select officer" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {officers
-                          .filter(officer => !departmentForm.officers?.some(o => o.id === officer.id))
-                          .map((officer) => (
-                            <SelectItem key={officer.id} value={officer.id}>
-                              <div className="flex items-center gap-2">
-                                <Shield className="h-4 w-4 text-purple-600" />
-                                {officer.name}
-                              </div>
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      type="button"
-                      onClick={() => {
-                        if (newOfficer.id) {
-                          updateFormState(
-                            ['officers'],
-                            [...(departmentForm.officers || []), { ...newOfficer }]
-                          );
-                          setNewOfficer({ id: '', start_date: new Date().toISOString().split('T')[0] });
-                        }
-                      }}
-                      disabled={!newOfficer.id}
-                    >
-                      Add
-                    </Button>
-                  </div>
-                  
-                  <div className="space-y-2 mt-2">
-                    {departmentForm.officers?.map((officer, index) => {
-                      const officerData = officers.find(o => o.id === officer.id);
-                      return officerData ? (
-                        <div key={`${officer.id}-${index}`} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center p-2 bg-gray-50 rounded-md">
-                          <div className="flex items-center gap-2">
-                            <Shield className="h-4 w-4 text-purple-600 flex-shrink-0" />
-                            <span className="truncate">{officerData.name}</span>
-                          </div>
-                          <div>
-                            <Label className="text-xs text-gray-500">Start Date</Label>
-                            <Input
-                              type="date"
-                              value={officer.start_date || ''}
-                              onChange={(e) => {
-                                const updatedOfficers = [...(departmentForm.officers || [])];
-                                updatedOfficers[index] = {
-                                  ...updatedOfficers[index],
-                                  start_date: e.target.value
-                                };
-                                updateFormState(['officers'], updatedOfficers);
-                              }}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-xs text-gray-500">End Date (Optional)</Label>
-                            <Input
-                              type="date"
-                              value={officer.end_date || ''}
-                              onChange={(e) => {
-                                const updatedOfficers = [...(departmentForm.officers || [])];
-                                updatedOfficers[index] = {
-                                  ...updatedOfficers[index],
-                                  end_date: e.target.value || undefined
-                                };
-                                updateFormState(['officers'], updatedOfficers);
-                              }}
-                              min={officer.start_date}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                          <div className="flex justify-end">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-red-500 hover:bg-red-50"
-                              onClick={() => {
-                                const updatedOfficers = [...(departmentForm.officers || [])];
-                                updatedOfficers.splice(index, 1);
-                                updateFormState(['officers'], updatedOfficers);
-                              }}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      ) : null;
-                    })}
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="department-description">Department Description</Label>
                   <Textarea
@@ -484,16 +706,16 @@ export default function DepartmentDialog({
                     className="min-h-[80px]"
                   />
                 </div>
-                <div className="flex items-center space-x-2 pt-6">
-                  <Checkbox
-                    checked={departmentForm.default_display}
-                    onCheckedChange={(checked) => updateFormState(['default_display'], Boolean(checked))}
-                    id="dept-default-display"
-                  />
-                  <Label htmlFor="dept-default-display" className="text-sm text-gray-700">
-                    Default Display
-                  </Label>
-                </div>
+              </div>
+              <div className="flex items-center space-x-2 pt-2">
+                <Checkbox
+                  checked={departmentForm.default_display}
+                  onCheckedChange={(checked) => updateFormState(['default_display'], Boolean(checked))}
+                  id="dept-default-display"
+                />
+                <Label htmlFor="dept-default-display" className="text-sm text-gray-700">
+                  Default Display
+                </Label>
               </div>
             </div>
           )}
@@ -516,6 +738,7 @@ export default function DepartmentDialog({
                       classes: [],
                       taskManagerId: '',
                       taskAssistantIds: [],
+                      officers: [],
                       default_display: true
                     }])}
                   >
@@ -524,132 +747,65 @@ export default function DepartmentDialog({
                 )}
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {departmentForm.subdepartments.map((subdept, subdeptIndex) => (
-                  <Card key={subdeptIndex} className="bg-gray-50">
+                  <Card key={subdeptIndex} className="bg-gray-50/30 border-gray-200">
                     <CardHeader className="pb-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-4">
+                      <div className="space-y-4">
+                        {/* Basic Subdepartment Info */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <Label htmlFor={`subdept-name-${subdeptIndex}`}>
-                              Subdepartment Name *
-                            </Label>
+                            <Label htmlFor={`subdept-name-${subdeptIndex}`}>Subdepartment Name *</Label>
                             <div className="flex items-center space-x-2">
-                              <Badge variant="outline" className="font-mono bg-gray-200 text-gray-700">
-                                {subdeptIndex + 1}
-                              </Badge>
-                              <Input
-                                id={`subdept-name-${subdeptIndex}`}
-                                placeholder="Enter subdepartment name"
-                                value={subdept.name}
-                                onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)}
+                              <Badge variant="outline" className="font-mono bg-gray-200 text-gray-700">{subdeptIndex + 1}</Badge>
+                              <Input 
+                                id={`subdept-name-${subdeptIndex}`} 
+                                placeholder="Enter subdepartment name" 
+                                value={subdept.name} 
+                                onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)} 
                                 className="flex-1 font-medium"
                               />
                             </div>
                           </div>
                           <div>
                             <Label htmlFor={`subdept-desc-${subdeptIndex}`}>Description</Label>
-                            <Textarea
-                              id={`subdept-desc-${subdeptIndex}`}
-                              placeholder="Enter subdepartment description"
-                              value={subdept.description}
-                              onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)}
+                            <Textarea 
+                              id={`subdept-desc-${subdeptIndex}`} 
+                              placeholder="Enter subdepartment description" 
+                              value={subdept.description} 
+                              onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)} 
                               className="min-h-[60px]"
                             />
                           </div>
-                          <div className="flex items-center space-x-2">
-                            <Checkbox
-                              checked={subdept.default_display}
-                              onCheckedChange={(checked) => handleSubdepartmentChange(subdeptIndex, 'default_display', Boolean(checked))}
-                              id={`subdept-default-display-${subdeptIndex}`}
-                            />
-                            <Label htmlFor={`subdept-default-display-${subdeptIndex}`} className="text-sm text-gray-700">
-                              Default Display
-                            </Label>
-                          </div>
                         </div>
-
-                        <div className="space-y-4">
-                          <div>
-                            <Label>Task Manager</Label>
-                            <Select
-                              value={subdept.taskManagerId || ''}
-                              onValueChange={(value) => handleSubdepartmentChange(subdeptIndex, 'taskManagerId', value)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select task manager" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">None</SelectItem>
-                                {users.filter(user => user.role === 'task_manager' || user.role === 'admin' || user.role === 'user').map((user) => (
-                                  <SelectItem key={user.id} value={user.id}>
-                                    <div className="flex items-center gap-2">
-                                      <UserIcon className="h-4 w-4 text-blue-600" />
-                                      {user.name}
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div>
-                            <Label>Task Assistants</Label>
-                            <div className="space-y-2 max-h-32 overflow-y-auto">
-                              {subdept.taskAssistantIds.map((userId, assistantIndex) => (
-                                <div key={assistantIndex} className="flex items-center space-x-2">
-                                  <Select
-                                    value={userId}
-                                    onValueChange={(value) => handleTaskAssistantChange(subdeptIndex, assistantIndex, value)}
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Select assistant" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="none">None</SelectItem>
-                                      {users.filter(user => user.role === 'task_assistant' || user.role === 'admin' || user.role === 'user').map((user) => (
-                                        <SelectItem key={user.id} value={user.id}>
-                                          <div className="flex items-center gap-2">
-                                            <UserIcon className="h-4 w-4 text-green-600" />
-                                            {user.name}
-                                          </div>
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => handleRemoveTaskAssistant(subdeptIndex, assistantIndex)}
-                                    className="text-red-500 hover:text-red-700 hover:bg-red-50 h-8 w-8 flex-shrink-0"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              ))}
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleAddTaskAssistant(subdeptIndex)}
-                                className="w-full"
-                              >
-                                <Plus className="h-4 w-4 mr-1" /> Add Assistant
-                              </Button>
-                            </div>
-                          </div>
+                        
+                        <div className="flex items-center space-x-2">
+                          <Checkbox 
+                            checked={subdept.default_display} 
+                            onCheckedChange={(checked) => handleSubdepartmentChange(subdeptIndex, 'default_display', Boolean(checked))} 
+                            id={`subdept-default-display-${subdeptIndex}`}
+                          />
+                          <Label htmlFor={`subdept-default-display-${subdeptIndex}`} className="text-sm text-gray-700">Default Display</Label>
                         </div>
                       </div>
                     </CardHeader>
 
-                    <CardContent>
+                    <CardContent className="space-y-6">
+                      {/* Enhanced Role Management Section */}
+                      <RoleManagementSection
+                        subdept={subdept}
+                        subdeptIndex={subdeptIndex}
+                        users={users}
+                        officers={officers}
+                        onSubdepartmentChange={handleSubdepartmentChange}
+                        updateFormState={updateFormState}
+                      />
+
+                      {/* Classes Section */}
                       <div className="space-y-4">
                         <div className="flex items-center justify-between">
                           <Label className="font-semibold text-gray-700">Classes</Label>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleAddClass(subdeptIndex)}
-                          >
+                          <Button variant="outline" size="sm" onClick={() => handleAddClass(subdeptIndex)}>
                             <Plus className="h-4 w-4 mr-1" /> Add Class
                           </Button>
                         </div>
@@ -657,12 +813,12 @@ export default function DepartmentDialog({
                         <div className="space-y-4">
                           {subdept.classes && subdept.classes.length > 0 ? (
                             subdept.classes.map((cls, clsIndex) => (
-                              <ClassComponent
-                                key={cls.id}
-                                classItem={cls}
-                                onUpdate={updateFormState}
-                                onRemove={() => handleRemoveClass(subdeptIndex, clsIndex)}
-                                path={['subdepartments', subdeptIndex, 'classes', clsIndex.toString()]} 
+                              <ClassComponent 
+                                key={cls.id} 
+                                classItem={cls} 
+                                onUpdate={updateFormState} 
+                                onRemove={() => handleRemoveClass(subdeptIndex, clsIndex)} 
+                                path={['subdepartments', subdeptIndex.toString(), 'classes', clsIndex.toString()]} 
                                 index={`${subdeptIndex + 1}.${clsIndex + 1}`}
                               />
                             ))
@@ -693,6 +849,7 @@ export default function DepartmentDialog({
                   classes: [],
                   taskManagerId: '',
                   taskAssistantIds: [],
+                  officers: [],
                   default_display: true
                 }])}
               >

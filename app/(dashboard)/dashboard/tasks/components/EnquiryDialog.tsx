@@ -128,6 +128,9 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         subdepartment_id: '',
         class_id: '',
         subclass_id: '',
+        department_name: '',
+        subdepartment_name: '',
+        class_name: '',
 
         // Principal member (for dependants)
         principal_member_id: '',
@@ -135,6 +138,81 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         // Enquiry date
         enquiry_date: new Date().toISOString().split('T')[0]
     })
+    const handleChange = useCallback((field: keyof FormData, value: any) => {
+        setFormData(prev => {
+            if (field === 'department_id') {
+                return {
+                    ...prev,
+                    department_id: value,
+                    subdepartment_id: '',
+                    class_id: '',
+                    subclass_id: '',
+                };
+            }
+            if (field === 'subdepartment_id') {
+                return { ...prev, subdepartment_id: value, class_id: '', subclass_id: '' };
+            }
+            if (field === 'class_id') {
+                return { ...prev, class_id: value, subclass_id: '' };
+            }
+            return { ...prev, [field]: value };
+        });
+    }, []);
+    // Function to update form data with department/subdepartment/class IDs and names
+    const updateTaskFields = useCallback(async (taskData: any) => {
+        if (!taskData) return;
+
+        // Update IDs first
+        setFormData(prev => ({
+            ...prev,
+            department_id: taskData.department_id?.toString() || '',
+            subdepartment_id: taskData.subdepartment_id?.toString() || '',
+            class_id: taskData.class_id?.toString() || '',
+            subclass_id: taskData.subclass_id?.toString() || '',
+            job_description: taskData.job_description || ''
+        }));
+
+        // Fetch department, subdepartment, and class names
+        try {
+            // Fetch department and subdepartment details
+            const { data: deptData } = await supabase
+                .from('tm_departments')
+                .select('id, name, tm_subdepartments(id, name, classes(id, name))')
+                .eq('id', taskData.department_id)
+                .single();
+
+            if (deptData) {
+                // Update form data with names
+                const subdept = deptData.tm_subdepartments.find(s => s.id === taskData.subdepartment_id);
+                const cls = subdept?.classes?.find(c => c.id.toString() === taskData.class_id);
+
+                setFormData(prev => ({
+                    ...prev,
+                    department_name: deptData.name,
+                    subdepartment_name: subdept?.name || '',
+                    class_name: cls?.name || ''
+                }));
+            }
+
+            // Update selections
+            if (taskData.department_id) {
+                handleChange('department_id', taskData.department_id);
+            }
+            if (taskData.subdepartment_id) {
+                handleChange('subdepartment_id', taskData.subdepartment_id);
+            }
+            if (taskData.class_id) {
+                handleChange('class_id', taskData.class_id);
+            }
+        } catch (error) {
+            console.error('Error fetching department details:', error);
+            toast({
+                title: "Error",
+                description: "Failed to load department details",
+                variant: "destructive"
+            });
+        }
+    }, [handleChange])
 
     // Load departments on mount
     useEffect(() => {
@@ -640,6 +718,9 @@ const dependantsToSave = includeDependants
             const { data: fullTask, error: fetchError } = await supabase.from('tm_tasks').select(`*,department:department_id(name),subdepartment:subdepartment_id(name),individual:individual_id(full_name)`).eq('id', data.id).single();
             if (fetchError) console.error('Error fetching task details:', fetchError);
 
+            // Update form fields with task data
+            updateTaskFields(fullTask || data);
+
             onEnquiryCreated(fullTask || data);
             resetForm();
             onOpenChange(false);
@@ -687,27 +768,6 @@ const dependantsToSave = includeDependants
         setCompanies([])
         setUnderstudies([])
     }
-
-    const handleChange = useCallback((field: keyof FormData, value: any) => {
-        setFormData(prev => {
-            if (field === 'department_id') {
-                return {
-                    ...prev,
-                    department_id: value,
-                    subdepartment_id: '',
-                    class_id: '',
-                    subclass_id: '',
-                };
-            }
-            if (field === 'subdepartment_id') {
-                return { ...prev, subdepartment_id: value, class_id: '', subclass_id: '' };
-            }
-            if (field === 'class_id') {
-                return { ...prev, class_id: value, subclass_id: '' };
-            }
-            return { ...prev, [field]: value };
-        });
-    }, []);
 
     const handleFormChange = (field: string, value: any) => {
         setFormData(prev => ({
