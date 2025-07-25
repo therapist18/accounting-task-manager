@@ -111,6 +111,12 @@ export default function DepartmentTasksManager({
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
   const [tmUsers, setTmUsers] = useState<Map<number, any>>(new Map())
+  
+  // Officer/Manager tab state
+  const [activeOfficerTab, setActiveOfficerTab] = useState<string | null>(null)
+  const [activeManagerTab, setActiveManagerTab] = useState<string | null>(null)
+  const [officerTabs, setOfficerTabs] = useState<Array<{id: string, name: string}>>([])
+  const [managerTabs, setManagerTabs] = useState<Array<{id: string, name: string}>>([])
 
   // State for LinkSourceDocumentDialog
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
@@ -685,14 +691,29 @@ export default function DepartmentTasksManager({
       (!status || task.status === status)
     )
 
+    // Apply subdepartment filter
     if (activeSubdepartmentTab) {
       filteredTasks = filteredTasks.filter(task =>
         task.subdepartment?.id?.toString() === activeSubdepartmentTab
       )
     }
 
+    // Apply officer filter if an officer tab is active
+    if (activeOfficerTab) {
+      filteredTasks = filteredTasks.filter(task =>
+        task.officer_id?.toString() === activeOfficerTab
+      )
+    }
+
+    // Apply manager filter if a manager tab is active
+    if (activeManagerTab) {
+      filteredTasks = filteredTasks.filter(task =>
+        task.task_manager_id?.toString() === activeManagerTab
+      )
+    }
+
     return filteredTasks
-  }, [tasks, departments, activeDepartmentTab, activeSubdepartmentTab])
+  }, [tasks, departments, activeDepartmentTab, activeSubdepartmentTab, activeOfficerTab, activeManagerTab])
 
   const getWIPTasksByFollowUp = useCallback((followUpFilter: string) => {
     const wipTasks = getFilteredTasks('in_progress')
@@ -754,6 +775,72 @@ export default function DepartmentTasksManager({
   const enquiryTasks = useMemo(() => filterTasksBySearch(getFilteredTasks('enquiry')), [getFilteredTasks, filterTasksBySearch])
   const wipTasks = useMemo(() => filterTasksBySearch(getWIPTasksByFollowUp(activeFollowUpFilter)), [getWIPTasksByFollowUp, activeFollowUpFilter, filterTasksBySearch])
   const completedTasks = useMemo(() => filterTasksBySearch(getFilteredTasks('completed')), [getFilteredTasks, filterTasksBySearch])
+
+  // Update officer and manager tabs when tasks or active department changes
+  useEffect(() => {
+    if (!tasks.length || !activeDepartmentTab) {
+      setOfficerTabs([]);
+      setManagerTabs([]);
+      return;
+    }
+
+    // Get tasks for current department
+    const deptTasks = tasks.filter(task => 
+      task.department?.id?.toString() === activeDepartmentTab
+    );
+
+    // Get unique officers with their names
+    const officersMap = new Map<string, string>();
+    const managersMap = new Map<string, string>();
+
+    deptTasks.forEach(task => {
+      if (task.officer_id) {
+        const officer = tmUsers.get(task.officer_id);
+        if (officer && !officersMap.has(task.officer_id.toString())) {
+          officersMap.set(
+            task.officer_id.toString(), 
+            officer.display_name || `Officer ${task.officer_id}`
+          );
+        }
+      }
+
+      if (task.task_manager_id) {
+        const manager = tmUsers.get(task.task_manager_id);
+        if (manager && !managersMap.has(task.task_manager_id.toString())) {
+          managersMap.set(
+            task.task_manager_id.toString(),
+            manager.display_name || `Manager ${task.task_manager_id}`
+          );
+        }
+      }
+    });
+
+    // Convert maps to sorted arrays
+    const sortedOfficers = Array.from(officersMap.entries())
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([id, name]) => ({ id, name }));
+
+    const sortedManagers = Array.from(managersMap.entries())
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([id, name]) => ({ id, name }));
+
+    setOfficerTabs(sortedOfficers);
+    setManagerTabs(sortedManagers);
+
+    // Reset active tabs if they're no longer valid
+    if (activeOfficerTab && !officersMap.has(activeOfficerTab)) {
+      setActiveOfficerTab(null);
+    }
+    if (activeManagerTab && !managersMap.has(activeManagerTab)) {
+      setActiveManagerTab(null);
+    }
+  }, [tasks, activeDepartmentTab, tmUsers, activeOfficerTab, activeManagerTab]);
+
+  // Reset officer/manager filters when department or subdepartment changes
+  useEffect(() => {
+    setActiveOfficerTab(null);
+    setActiveManagerTab(null);
+  }, [activeDepartmentTab, activeSubdepartmentTab]);
 
   // Task action handlers
   const handleStageDocumentUpload = useCallback((task: any, stage: any) => {
@@ -1094,6 +1181,59 @@ export default function DepartmentTasksManager({
     }
 
     return dates;
+  };
+
+  // Render officer/manager tabs based on active sub-tab
+  const renderUserTabs = () => {
+    if (activeSubTab === 'officers' && officerTabs.length > 0) {
+      return (
+        <div className="flex space-x-2 mb-4 overflow-x-auto pb-2">
+          <Button
+            variant={!activeOfficerTab ? "default" : "outline"}
+            onClick={() => setActiveOfficerTab(null)}
+            className="whitespace-nowrap"
+          >
+            All Officers
+          </Button>
+          {officerTabs.map((officer) => (
+            <Button
+              key={`officer-${officer.id}`}
+              variant={activeOfficerTab === officer.id ? "default" : "outline"}
+              onClick={() => setActiveOfficerTab(officer.id)}
+              className="whitespace-nowrap"
+            >
+              {officer.name}
+            </Button>
+          ))}
+        </div>
+      );
+    }
+
+    if (activeSubTab === 'managers' && managerTabs.length > 0) {
+      return (
+        <div className="flex space-x-2 mb-4 overflow-x-auto pb-2">
+          <Button
+            variant={!activeManagerTab ? "default" : "outline"}
+            onClick={() => setActiveManagerTab(null)}
+            className="whitespace-nowrap"
+          >
+            All Managers
+          </Button>
+          {managerTabs.map((manager) => (
+            <Button
+              key={`manager-${manager.id}`}
+              variant={activeManagerTab === manager.id ? "default" : "outline"}
+              onClick={() => setActiveManagerTab(manager.id)}
+              className="whitespace-nowrap"
+            >
+              {manager.name}
+            </Button>
+          ))}
+        </div>
+      );
+    }
+
+    return null;
   };
 
   // Render functions for immigration status
@@ -2352,15 +2492,22 @@ export default function DepartmentTasksManager({
                         </div>
 
                         {isWipTab && (
-                          <div className="mt-4">
+                          <div className="space-y-4">
                             <Tabs value={activeFollowUpFilter} onValueChange={setActiveFollowUpFilter}>
                               <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
                                 <TabsTrigger value="all" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">All <Badge variant="outline">{wipTasks.length}</Badge></TabsTrigger>
                                 <TabsTrigger value="bcl" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">BCL <Badge variant="outline">{getWIPTasksByFollowUp('bcl').length}</Badge></TabsTrigger>
-                                <TabsTrigger value="officer" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Officer <Badge variant="outline">{getWIPTasksByFollowUp('officer').length}</Badge></TabsTrigger>
+                                <TabsTrigger value="officer" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Officers <Badge variant="outline">{getWIPTasksByFollowUp('officer').length}</Badge></TabsTrigger>
                                 <TabsTrigger value="client" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Client <Badge variant="outline">{getWIPTasksByFollowUp('client').length}</Badge></TabsTrigger>
                               </TabsList>
                             </Tabs>
+                            
+                            {/* Officer/Manager Tabs */}
+                            {(activeFollowUpFilter === 'bcl' || activeFollowUpFilter === 'officer') && (
+                              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                {renderUserTabs()}
+                              </div>
+                            )}
                           </div>
                         )}
                       </CardHeader>

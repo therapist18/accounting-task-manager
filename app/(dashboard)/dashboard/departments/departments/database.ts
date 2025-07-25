@@ -659,8 +659,7 @@ export async function saveOrderAndDefaultDisplay(departments: Department[]): Pro
     const deptUpdates = departments.map((dept, index) => ({
       id: dept.id,
       order: index + 1,
-      default_display: dept.default_display || false,
-      officers_history: dept.officers_history || []
+      default_display: dept.default_display || false
     }))
 
     // Prepare subdepartment updates with order and default_display
