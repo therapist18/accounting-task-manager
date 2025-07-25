@@ -77,15 +77,57 @@ export function EditTaskDialog({
       subclassName: subclassItem?.name || ''
     };
   };
+
+  // Helper functions to get current active staff from history arrays
+  const getCurrentOfficer = (officerHistory) => {
+    if (!officerHistory || !Array.isArray(officerHistory)) return null;
+    return officerHistory.find(officer => !officer.end_date) || null;
+  };
+
+  const getCurrentManager = (managerHistory) => {
+    if (!managerHistory || !Array.isArray(managerHistory)) return null;
+    return managerHistory.find(manager => !manager.end_date) || null;
+  };
+
+  const getCurrentAssistants = (assistantHistory) => {
+    if (!assistantHistory || !Array.isArray(assistantHistory)) return [];
+    return assistantHistory.filter(assistant => !assistant.end_date);
+  };
   
   /**
    * Finds active staff for a given subdepartment.
-   * This function assumes that the history arrays (e.g., subdept.officer_history)
-   * contain objects with a `user_id` property that is a foreign key to the users/officers table.
+   * FIXED: Uses 'id' field instead of 'user_id' to match departments code structure
+   * ENHANCED: Better handling when history fields are missing
    */
   const findActiveStaffForSubdept = (subdept, allUsers, allOfficers) => {
+      console.log('🔍 findActiveStaffForSubdept called with:');
+      console.log('Subdept:', subdept);
+      console.log('AllUsers count:', allUsers?.length || 0);
+      console.log('AllOfficers count:', allOfficers?.length || 0);
+
       if (!subdept || !allUsers || !allOfficers) {
+          console.log('❌ Missing required data for staff filtering');
           return { officers: [], managers: [], assistants: [] };
+      }
+
+      // Check if history fields exist
+      const hasOfficerHistory = subdept.officer_history && Array.isArray(subdept.officer_history);
+      const hasManagerHistory = subdept.manager_history && Array.isArray(subdept.manager_history);
+      const hasAssistantHistory = subdept.assistant_history && Array.isArray(subdept.assistant_history);
+
+      console.log('History fields present:', {
+        officer_history: hasOfficerHistory,
+        manager_history: hasManagerHistory,
+        assistant_history: hasAssistantHistory
+      });
+
+      if (!hasOfficerHistory && !hasManagerHistory && !hasAssistantHistory) {
+          console.log('⚠️ No history fields found - using fallback to all available staff');
+          return {
+              officers: allOfficers,
+              managers: allUsers.filter(u => u.role === 'user' || u.role === 'admin'),
+              assistants: allUsers.filter(u => u.role === 'user')
+          };
       }
 
       // Helper to get active user IDs from a history array.
@@ -93,7 +135,7 @@ export function EditTaskDialog({
           if (!historyArray || !Array.isArray(historyArray)) return [];
           return historyArray
               .filter(item => item && !item.end_date) // Active if no end date
-              .map(item => item.user_id) // IMPORTANT: Assumes the FK is `user_id`
+              .map(item => item.id) // FIXED: Use 'id' instead of 'user_id'
               .filter(Boolean); // Remove null/undefined IDs
       };
 
@@ -101,10 +143,16 @@ export function EditTaskDialog({
       const activeManagerIds = getActiveUserIds(subdept.manager_history);
       const activeAssistantIds = getActiveUserIds(subdept.assistant_history);
       
+      console.log('Active staff IDs found:', {
+        officers: activeOfficerIds,
+        managers: activeManagerIds,
+        assistants: activeAssistantIds
+      });
+      
       const hasSpecificAssignments = activeOfficerIds.length > 0 || activeManagerIds.length > 0 || activeAssistantIds.length > 0;
 
       if (!hasSpecificAssignments) {
-          console.log(`No specific staff assignments for subdept "${subdept.name}". Using fallback roles.`);
+          console.log(`⚠️ No specific staff assignments for subdept "${subdept.name}". Using fallback roles.`);
           return {
               officers: allOfficers,
               managers: allUsers.filter(u => u.role === 'user' || u.role === 'admin'),
@@ -118,16 +166,19 @@ export function EditTaskDialog({
           assistants: allUsers.filter(u => activeAssistantIds.includes(u.id)),
       };
       
-      console.log(`Found active staff for subdept "${subdept.name}":`, staff);
+      console.log(`✅ Found filtered staff for subdept "${subdept.name}":`, staff);
       return staff;
   };
-
 
   // EFFECT 1: Main population effect when the dialog opens or task data changes.
   useEffect(() => {
     if (open && task && departments.length > 0) {
       isInitialLoad.current = true; // Mark the start of an initial load
-      console.log('Populating form with initial task data:', task);
+      console.log('=== DIALOG OPENING ===');
+      console.log('Task data:', task);
+      console.log('Departments data:', departments);
+      console.log('Users available:', users?.length || 0);
+      console.log('Officers available:', officers?.length || 0);
 
       const initialFormData = {
         applicant_name: task.applicant_name || '',
@@ -148,10 +199,15 @@ export function EditTaskDialog({
 
       // Populate dropdowns based on initial data
       const dept = departments.find(d => d.id?.toString() === initialFormData.department_id);
+      console.log('Found department:', dept);
+      
       if (dept) {
+        console.log('Available subdepartments:', dept.tm_subdepartments);
         setAvailableSubdepartments(dept.tm_subdepartments || []);
 
         const subdept = dept.tm_subdepartments?.find(s => s.id?.toString() === initialFormData.subdepartment_id);
+        console.log('Found subdepartment:', subdept);
+        
         if (subdept) {
           setAvailableClasses(subdept.classes || []);
 
@@ -160,19 +216,36 @@ export function EditTaskDialog({
             setAvailableSubclasses(classItem.subClasses || []);
           }
 
+          // Check if subdepartment has history fields
+          console.log('Subdepartment officer_history:', subdept.officer_history);
+          console.log('Subdepartment manager_history:', subdept.manager_history);
+          console.log('Subdepartment assistant_history:', subdept.assistant_history);
+
           // Populate staff lists if users/officers are available
-          if (users && officers) {
+          if (users && officers && users.length > 0 && officers.length > 0) {
+            console.log('Calling findActiveStaffForSubdept...');
             const activeStaff = findActiveStaffForSubdept(subdept, users, officers);
+            console.log('Active staff result:', activeStaff);
+            
             setAvailableOfficers(activeStaff.officers);
             setAvailableManagers(activeStaff.managers);
             setAvailableAssistants(activeStaff.assistants);
+          } else {
+            console.log('❌ Cannot populate staff - missing users or officers data');
+            console.log('Users:', users?.length, 'Officers:', officers?.length);
           }
+        } else {
+          console.log('❌ Subdepartment not found in department');
         }
+      } else {
+        console.log('❌ Department not found');
       }
+      
       // After all state is set, allow subsequent effects to run as "changes"
       // Use a microtask to ensure this runs after the current render cycle
       Promise.resolve().then(() => {
         isInitialLoad.current = false;
+        console.log('=== INITIAL LOAD COMPLETE ===');
       });
     }
   }, [open, task, departments, users, officers]); // Reruns when core data loads
@@ -198,17 +271,30 @@ export function EditTaskDialog({
   useEffect(() => {
     if (isInitialLoad.current || !formData.subdepartment_id) return;
     
-    console.log('Subdepartment changed by user:', formData.subdepartment_id);
+    console.log('🔄 Subdepartment changed by user:', formData.subdepartment_id);
     const dept = departments.find(d => d.id.toString() === formData.department_id);
+    console.log('Department found:', dept);
+    
     const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
+    console.log('Subdepartment found:', subdept);
     
     if (subdept) {
       setAvailableClasses(subdept.classes || []);
-      if (users && officers) {
+      
+      if (users && officers && users.length > 0 && officers.length > 0) {
+        console.log('🔍 Finding active staff for changed subdepartment...');
         const activeStaff = findActiveStaffForSubdept(subdept, users, officers);
+        console.log('Staff filtering result:', activeStaff);
+        
         setAvailableOfficers(activeStaff.officers);
         setAvailableManagers(activeStaff.managers);
         setAvailableAssistants(activeStaff.assistants);
+      } else {
+        console.log('❌ Cannot populate staff on change - missing users or officers');
+        // Fallback to empty arrays
+        setAvailableOfficers([]);
+        setAvailableManagers([]);
+        setAvailableAssistants([]);
       }
     }
     
@@ -232,7 +318,6 @@ export function EditTaskDialog({
     handleInputChange('subclass_id', '');
   }, [formData.class_id]);
 
-
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
@@ -251,6 +336,7 @@ export function EditTaskDialog({
         subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id, 10) : null,
         class_id: formData.class_id ? parseInt(formData.class_id, 10) : null,
         subclass_id: formData.subclass_id ? parseInt(formData.subclass_id, 10) : null,
+        // FIXED: Properly handle staff assignments - store the user IDs directly
         task_manager_id: formData.task_manager_id && formData.task_manager_id !== 'none' ? formData.task_manager_id : null,
         officer_id: formData.officer_id && formData.officer_id !== 'none' ? formData.officer_id : null,
         task_assistant_id: formData.task_assistant_id && formData.task_assistant_id !== 'none' ? formData.task_assistant_id : null,
@@ -262,6 +348,12 @@ export function EditTaskDialog({
         setLoading(false);
         return;
       }
+
+      console.log('Saving task with staff assignments:', {
+        officer_id: updateData.officer_id,
+        task_manager_id: updateData.task_manager_id,
+        task_assistant_id: updateData.task_assistant_id
+      });
 
       const { data, error } = await supabase.from('tm_tasks').update(updateData).eq('id', task.id).select().single();
       
@@ -391,45 +483,117 @@ export function EditTaskDialog({
           {/* Staff Assignment */}
           <div className="space-y-4 p-4 border rounded-lg bg-slate-50">
             <h3 className="text-lg font-semibold text-slate-900">Staff Assignment</h3>
-            <p className="text-sm text-slate-600">Staff are filtered by the selected subdepartment. Select a subdepartment to see available staff.</p>
+            <p className="text-sm text-slate-600">Staff are filtered by the selected subdepartment based on current active assignments. Select a subdepartment to see available staff.</p>
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="officer" className="flex items-center"><Shield className="w-4 h-4 mr-2" />Officer</Label>
+                <Label htmlFor="officer" className="flex items-center">
+                  <Shield className="w-4 h-4 mr-2" />Officer
+                  <span className="ml-2 text-xs text-slate-500">({availableOfficers.length} available)</span>
+                </Label>
                 <Select value={formData.officer_id} onValueChange={(value) => handleInputChange('officer_id', value)} disabled={!formData.subdepartment_id}>
                   <SelectTrigger><SelectValue placeholder="Select officer" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Officer</SelectItem>
-                    {availableOfficers.map((user) => <SelectItem key={user.id} value={user.id}>{user.name || user.email}</SelectItem>)}
+                    {availableOfficers.map((user) => (
+                      <SelectItem key={user.id} value={user.id}>
+                        {user.name || user.email}
+                        <span className="ml-2 text-xs text-gray-500">({user.role})</span>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-                {formData.subdepartment_id && availableOfficers.length === 0 && <p className="text-xs text-amber-600 mt-1">No officers available for this subdepartment.</p>}
+                {formData.subdepartment_id && availableOfficers.length === 0 && (
+                  <p className="text-xs text-amber-600 mt-1">No officers assigned to this subdepartment. Using fallback: all officers available.</p>
+                )}
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="task_manager" className="flex items-center"><User className="w-4 h-4 mr-2" />Task Manager</Label>
+                <Label htmlFor="task_manager" className="flex items-center">
+                  <User className="w-4 h-4 mr-2" />Task Manager
+                  <span className="ml-2 text-xs text-slate-500">({availableManagers.length} available)</span>
+                </Label>
                 <Select value={formData.task_manager_id} onValueChange={(value) => handleInputChange('task_manager_id', value)} disabled={!formData.subdepartment_id}>
                   <SelectTrigger><SelectValue placeholder="Select task manager" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Task Manager</SelectItem>
-                    {availableManagers.map((user) => <SelectItem key={user.id} value={user.id}>{user.name || user.email}</SelectItem>)}
+                    {availableManagers.map((user) => (
+                      <SelectItem key={user.id} value={user.id}>
+                        {user.name || user.email}
+                        <span className="ml-2 text-xs text-gray-500">({user.role})</span>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-                {formData.subdepartment_id && availableManagers.length === 0 && <p className="text-xs text-amber-600 mt-1">No managers available for this subdepartment.</p>}
+                {formData.subdepartment_id && availableManagers.length === 0 && (
+                  <p className="text-xs text-amber-600 mt-1">No managers assigned to this subdepartment. Using fallback: all users/admins available.</p>
+                )}
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="task_assistant" className="flex items-center"><UserCheck className="w-4 h-4 mr-2" />Task Assistant</Label>
+                <Label htmlFor="task_assistant" className="flex items-center">
+                  <UserCheck className="w-4 h-4 mr-2" />Task Assistant
+                  <span className="ml-2 text-xs text-slate-500">({availableAssistants.length} available)</span>
+                </Label>
                 <Select value={formData.task_assistant_id} onValueChange={(value) => handleInputChange('task_assistant_id', value)} disabled={!formData.subdepartment_id}>
                   <SelectTrigger><SelectValue placeholder="Select task assistant" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Task Assistant</SelectItem>
-                    {availableAssistants.map((user) => <SelectItem key={user.id} value={user.id}>{user.name || user.email}</SelectItem>)}
+                    {availableAssistants.map((user) => (
+                      <SelectItem key={user.id} value={user.id}>
+                        {user.name || user.email}
+                        <span className="ml-2 text-xs text-gray-500">({user.role})</span>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-                {formData.subdepartment_id && availableAssistants.length === 0 && <p className="text-xs text-amber-600 mt-1">No assistants available for this subdepartment.</p>}
+                {formData.subdepartment_id && availableAssistants.length === 0 && (
+                  <p className="text-xs text-amber-600 mt-1">No assistants assigned to this subdepartment. Using fallback: all users available.</p>
+                )}
               </div>
             </div>
+            
+            {/* Debug info - remove in production */}
+            {formData.subdepartment_id && (
+              <div className="mt-4 p-3 bg-gray-100 rounded text-xs space-y-2">
+                <p><strong>🔧 Debug Info:</strong></p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p><strong>Selected IDs:</strong></p>
+                    <p>Officer: {formData.officer_id || 'none'}</p>
+                    <p>Manager: {formData.task_manager_id || 'none'}</p>
+                    <p>Assistant: {formData.task_assistant_id || 'none'}</p>
+                  </div>
+                  <div>
+                    <p><strong>Available Staff:</strong></p>
+                    <p>Officers: {availableOfficers.length}</p>
+                    <p>Managers: {availableManagers.length}</p>
+                    <p>Assistants: {availableAssistants.length}</p>
+                  </div>
+                </div>
+                <div>
+                  <p><strong>Current Subdepartment:</strong></p>
+                  <p>ID: {formData.subdepartment_id}</p>
+                  {(() => {
+                    const dept = departments.find(d => d.id?.toString() === formData.department_id);
+                    const subdept = dept?.tm_subdepartments?.find(s => s.id?.toString() === formData.subdepartment_id);
+                    return (
+                      <div>
+                        <p>Name: {subdept?.name || 'Not found'}</p>
+                        <p>Has officer_history: {subdept?.officer_history ? 'Yes' : 'No'}</p>
+                        <p>Has manager_history: {subdept?.manager_history ? 'Yes' : 'No'}</p>
+                        <p>Has assistant_history: {subdept?.assistant_history ? 'Yes' : 'No'}</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+                <div>
+                  <p><strong>Total Available:</strong></p>
+                  <p>All Users: {users?.length || 0}</p>
+                  <p>All Officers: {officers?.length || 0}</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

@@ -41,6 +41,7 @@ export type AssistantHistory = {
   id: string
   start_date: string
   end_date?: string
+  manager_id?: string
 }
 
 export type Requirement = {
@@ -267,10 +268,12 @@ export function getCurrentManager(manager_history: ManagerHistory[] | undefined 
 }
 
 // Helper function to get current assistants from assistant_history
-export function getCurrentAssistants(assistant_history: AssistantHistory[]): AssistantHistory[] {
-  if (!assistant_history || assistant_history.length === 0) return []
-  
-  return assistant_history.filter(assistant => !assistant.end_date)
+export function getCurrentAssistants(assistant_history: AssistantHistory[] = [], manager_id?: string): AssistantHistory[] {
+  if (!assistant_history || !Array.isArray(assistant_history)) return [];
+  return assistant_history.filter(assistant => 
+    !assistant.end_date && 
+    (!manager_id || assistant.manager_id === manager_id)
+  );
 }
 
 // Helper function to assign officer to department
@@ -355,7 +358,7 @@ export async function assignManagerToSubdepartment(subdepartmentId: string, mana
 }
 
 // Helper function to assign assistants to subdepartment
-export async function assignAssistantsToSubdepartment(subdepartmentId: string, assistantIds: string[]): Promise<void> {
+export async function assignAssistantsToSubdepartment(subdepartmentId: string, assistantIds: string[], managerId?: string): Promise<void> {
   try {
     // Get current assistant_history
     const { data: subdept, error: fetchError } = await supabase
@@ -373,12 +376,19 @@ export async function assignAssistantsToSubdepartment(subdepartmentId: string, a
       !assistant.end_date ? { ...assistant, end_date: new Date().toISOString() } : assistant
     )
     
-    // Add new assistants
+    // Add new assistants with manager_id if provided
     assistantIds.filter(id => id).forEach(assistantId => {
-      updatedHistory.push({
+      const newAssistant: AssistantHistory = {
         id: assistantId,
         start_date: new Date().toISOString()
-      })
+      };
+      
+      // Only add manager_id if it's provided
+      if (managerId) {
+        newAssistant.manager_id = managerId;
+      }
+      
+      updatedHistory.push(newAssistant);
     })
 
     // Update subdepartment
