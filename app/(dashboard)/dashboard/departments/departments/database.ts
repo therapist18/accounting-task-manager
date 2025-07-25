@@ -184,6 +184,7 @@ export type SubdepartmentForm = {
   classes: ClassForm[]
   taskManagerId: string
   taskAssistantIds: string[]
+  officerId?: string  // This field is crucial
   default_display?: boolean
   stages: {
     [key: string]: {
@@ -199,7 +200,7 @@ export type DepartmentForm = {
   description: string
   default_display: boolean
   subdepartments: SubdepartmentForm[]
-  officerIds: string[] // Array of officer IDs for the department
+  officerId: string // This should be required
 }
 
 export async function fetchUsers(): Promise<User[]> {
@@ -652,7 +653,6 @@ export async function fetchDepartments(): Promise<Department[]> {
   }
 }
 
-// Enhanced save order function that also saves default display settings
 export async function saveOrderAndDefaultDisplay(departments: Department[]): Promise<void> {
   try {
     // Prepare department updates with order and default_display
@@ -669,6 +669,7 @@ export async function saveOrderAndDefaultDisplay(departments: Department[]): Pro
         id: subdept.id,
         order: index + 1,
         default_display: subdept.default_display || false,
+        officer_history: subdept.officer_history || [], // ⭐ FIXED: Include officer_history
         manager_history: subdept.manager_history || [],
         assistant_history: subdept.assistant_history || [],
         // Update classes JSON with default_display
@@ -704,7 +705,6 @@ export async function saveOrderAndDefaultDisplay(departments: Department[]): Pro
     throw error
   }
 }
-
 export async function fetchDepartmentById(id: string): Promise<Department> {
   try {
     const departments = await fetchDepartments()

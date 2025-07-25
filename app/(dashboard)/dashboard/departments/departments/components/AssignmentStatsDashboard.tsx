@@ -56,27 +56,104 @@ interface AssignmentStatistics {
 }
 
 // Utility functions
-function getCurrentOfficer(officers_history: OfficerHistory[]): OfficerHistory | null {
-  if (!officers_history || officers_history.length === 0) return null
-  const currentOfficer = officers_history.find(officer => !officer.end_date)
-  if (currentOfficer) return currentOfficer
-  return officers_history.reduce((latest, officer) => 
-    new Date(officer.start_date) > new Date(latest.start_date) ? officer : latest
-  )
+function getCurrentOfficer(officers_history: OfficerHistory[] | null | undefined): OfficerHistory | null {
+  try {
+    // Handle null, undefined, or non-array input
+    if (!officers_history || !Array.isArray(officers_history) || officers_history.length === 0) {
+      return null;
+    }
+
+    // Ensure all items in the array are valid
+    const validHistory = officers_history.filter(
+      (officer): officer is OfficerHistory => 
+        officer && 
+        typeof officer === 'object' && 
+        'id' in officer && 
+        'start_date' in officer
+    );
+
+    if (validHistory.length === 0) return null;
+
+    // Find current officer (no end date)
+    const currentOfficer = validHistory.find(officer => !officer.end_date);
+    if (currentOfficer) return currentOfficer;
+
+    // If no current officer, find the most recent one
+    return validHistory.reduce((latest, officer) => {
+      try {
+        const officerDate = new Date(officer.start_date);
+        const latestDate = new Date(latest.start_date);
+        return officerDate > latestDate ? officer : latest;
+      } catch (error) {
+        console.error('Error comparing dates:', error);
+        return latest; // In case of date parsing error, keep the current latest
+      }
+    });
+  } catch (error) {
+    console.error('Error in getCurrentOfficer:', error);
+    return null;
+  }
 }
 
-function getCurrentManager(manager_history: ManagerHistory[]): ManagerHistory | null {
-  if (!manager_history || manager_history.length === 0) return null
-  const currentManager = manager_history.find(manager => !manager.end_date)
-  if (currentManager) return currentManager
-  return manager_history.reduce((latest, manager) => 
-    new Date(manager.start_date) > new Date(latest.start_date) ? manager : latest
-  )
+function getCurrentManager(manager_history: ManagerHistory[] | null | undefined): ManagerHistory | null {
+  try {
+    // Handle null, undefined, or non-array input
+    if (!manager_history || !Array.isArray(manager_history) || manager_history.length === 0) {
+      return null;
+    }
+
+    // Ensure all items in the array are valid
+    const validHistory = manager_history.filter(
+      (manager): manager is ManagerHistory => 
+        manager && 
+        typeof manager === 'object' && 
+        'id' in manager && 
+        'start_date' in manager
+    );
+
+    if (validHistory.length === 0) return null;
+
+    // Find current manager (no end date)
+    const currentManager = validHistory.find(manager => !manager.end_date);
+    if (currentManager) return currentManager;
+
+    // If no current manager, find the most recent one
+    return validHistory.reduce((latest, manager) => {
+      try {
+        const managerDate = new Date(manager.start_date);
+        const latestDate = new Date(latest.start_date);
+        return managerDate > latestDate ? manager : latest;
+      } catch (error) {
+        console.error('Error comparing dates:', error);
+        return latest; // In case of date parsing error, keep the current latest
+      }
+    });
+  } catch (error) {
+    console.error('Error in getCurrentManager:', error);
+    return null;
+  }
 }
 
-function getCurrentAssistants(assistant_history: AssistantHistory[]): AssistantHistory[] {
-  if (!assistant_history || assistant_history.length === 0) return []
-  return assistant_history.filter(assistant => !assistant.end_date)
+function getCurrentAssistants(assistant_history: AssistantHistory[] | null | undefined): AssistantHistory[] {
+  try {
+    // Handle null, undefined, or non-array input
+    if (!assistant_history || !Array.isArray(assistant_history) || assistant_history.length === 0) {
+      return [];
+    }
+
+    // Ensure all items in the array are valid and filter out ended assignments
+    return assistant_history.filter(
+      (assistant): assistant is AssistantHistory => 
+        assistant && 
+        typeof assistant === 'object' && 
+        'id' in assistant && 
+        'start_date' in assistant &&
+        !assistant.end_date
+    );
+  } catch (error) {
+    console.error('Error in getCurrentAssistants:', error);
+    return [];
+  }
 }
 
 function getUserWorkload(userId: string, departments: Department[]): {

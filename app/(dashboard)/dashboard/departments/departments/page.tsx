@@ -37,7 +37,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { FolderPlus, Plus, Settings, Users, Clock, AlertTriangle, X, Edit, Loader2, UserPlus, UserCheck, UserX, ChevronDown, Check, Eye, EyeOff, ChevronRight, ChevronUp, Trash2, FileText, Layers, Target, UserIcon, Minus, Search, Workflow, Building, FolderOpen, History, Shield, BarChart3 } from "lucide-react"
+import { Loader2, Building, FolderPlus, Edit, Trash2, ChevronDown, ChevronUp, Plus, Minus, Search, BarChart3, Workflow, Layers, Target, User as UserIcon, Shield, Users, History } from "lucide-react"
+import { DepartmentStats } from "./components/DepartmentStats"
 import supabase from "@/lib/supabase/client"
 import { toast } from "sonner"
 import DepartmentDialog from "./components/DepartmentDialog"
@@ -450,12 +451,9 @@ export default function Departments() {
   const [users, setUsers] = useState<User[]>([])
   const [officers, setOfficers] = useState<User[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
-
-  // State for managing expanded/collapsed state
   const [expanded, setExpanded] = useState<{ [key: string]: boolean }>({});
   const [expandedClasses, setExpandedClasses] = useState<{ [key: string]: boolean }>({});
   const [expandedSubClasses, setExpandedSubClasses] = useState<{ [key: string]: boolean }>({});
-
   const [isOrderChanged, setIsOrderChanged] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
   const [departmentForm, setDepartmentForm] = useState<DepartmentForm>({
@@ -463,26 +461,19 @@ export default function Departments() {
     description: '',
     default_display: true,
     subdepartments: [],
-    officerId: ''
+    officerId: '' // Make sure this is here
   })
-
-  // Expand/collapse all departments and their children
+  
   const toggleAllDepartments = (expand: boolean) => {
     const updates = {};
     filteredDepartments.forEach((dept) => {
       updates[dept.id] = expand;
-
-      // Also expand/collapse all subdepartments
       (dept.tm_subdepartments || []).forEach((subdept) => {
         const subdeptKey = `subdept-${subdept.id}`;
         updates[subdeptKey] = expand;
-
-        // Also expand/collapse all classes in subdepartments
         (subdept.classes || []).forEach((cls, clsIndex) => {
           const classId = `class-${subdept.id}-${cls.id || clsIndex}`;
           setExpandedClasses(prev => ({ ...prev, [classId]: expand }));
-
-          // Also expand/collapse all subclasses
           (cls.subClasses || []).forEach((subClass, subClassIndex) => {
             const subClassId = `subclass-${subClass.id || subClassIndex}`;
             setExpandedSubClasses(prev => ({ ...prev, [subClassId]: expand }));
@@ -493,7 +484,6 @@ export default function Departments() {
     setExpanded(updates);
   };
 
-  // Data fetching logic
   const fetchData = async () => {
     try {
       setLoading(true)
@@ -549,6 +539,13 @@ export default function Departments() {
   const handleSaveOrder = async () => {
     setSavingOrder(true);
     try {
+      // Remove officers_history from each department before saving
+      departments.forEach(dept => {
+        if ('officers_history' in dept) {
+          delete dept.officers_history;
+        }
+      });
+      
       await saveOrderAndDefaultDisplay(departments);
       toast.success("Order and display settings saved successfully!");
       setIsOrderChanged(false);
@@ -772,20 +769,163 @@ export default function Departments() {
     if (updateError) throw updateError;
   };
 
-  const createNewSubdepartment = async () => {
-    console.log('Creating new subdepartment under department ID:', editingDepartmentId);
-
+  const updateExistingSubdepartment = async () => {
+    console.log('Updating existing subdepartment with ID:', editingSubdepartmentId);
+  
     if (departmentForm.subdepartments.length === 0) {
       throw new Error('No subdepartment data provided');
     }
-
+  
     const subdept = departmentForm.subdepartments[0];
-
+  
+    console.log('Subdepartment form data:', subdept); // ⭐ DEBUG LOG
+    console.log('Officer ID from form:', subdept.officerId); // ⭐ DEBUG LOG
+  
     // Validate subdepartment name
     if (!subdept.name.trim()) {
       throw new Error('Subdepartment name is required');
     }
-
+  
+    // Get current subdepartment to find its department_id and existing history
+    const { data: currentSubdept } = await supabase
+      .from('tm_subdepartments')
+      .select('department_id, officer_history, manager_history, assistant_history')
+      .eq('id', editingSubdepartmentId)
+      .single();
+  
+    if (!currentSubdept) {
+      throw new Error('Subdepartment not found');
+    }
+  
+    console.log('Current subdepartment from DB:', currentSubdept); // ⭐ DEBUG LOG
+  
+    // Check if another subdepartment with this name exists in the same department (excluding current)
+    const { data: existingSubdept } = await supabase
+      .from('tm_subdepartments')
+      .select('id, name')
+      .ilike('name', subdept.name.trim())
+      .eq('department_id', currentSubdept.department_id)
+      .neq('id', editingSubdepartmentId)
+      .limit(1);
+  
+    if (existingSubdept && existingSubdept.length > 0) {
+      throw new Error('Another subdepartment with this name already exists in this department');
+    }
+  
+    // Handle officer history updates ⭐ FIXED
+    let officer_history = currentSubdept?.officer_history || [];
+    const currentOfficer = getCurrentOfficer(officer_history);
+    
+    console.log('Current officer from history:', currentOfficer); // ⭐ DEBUG LOG
+    console.log('New officer ID:', subdept.officerId); // ⭐ DEBUG LOG
+    
+    if (subdept.officerId !== currentOfficer?.id) {
+      console.log('Officer assignment changed, updating history'); // ⭐ DEBUG LOG
+      
+      // End current officer assignment
+      officer_history = officer_history.map(officer => 
+        !officer.end_date ? { ...officer, end_date: new Date().toISOString() } : officer
+      );
+  
+      // Add new officer if selected
+      if (subdept.officerId && subdept.officerId !== '') {
+        officer_history.push({
+          id: subdept.officerId,
+          start_date: new Date().toISOString()
+        });
+        console.log('Added new officer to history:', subdept.officerId); // ⭐ DEBUG LOG
+      }
+    } else {
+      console.log('Officer assignment unchanged'); // ⭐ DEBUG LOG
+    }
+  
+    // Handle manager history updates
+    let manager_history = currentSubdept?.manager_history || [];
+    const currentManager = getCurrentManager(manager_history);
+    if (subdept.taskManagerId !== currentManager?.id) {
+      // End current manager assignment
+      manager_history = manager_history.map(manager => 
+        !manager.end_date ? { ...manager, end_date: new Date().toISOString() } : manager
+      );
+  
+      // Add new manager if selected
+      if (subdept.taskManagerId && subdept.taskManagerId !== '') {
+        manager_history.push({
+          id: subdept.taskManagerId,
+          start_date: new Date().toISOString()
+        });
+      }
+    }
+  
+    // Handle assistant history updates
+    let assistant_history = currentSubdept?.assistant_history || [];
+    const currentAssistants = getCurrentAssistants(assistant_history);
+    const newAssistantIds = subdept.taskAssistantIds.filter(id => id !== '');
+    const currentAssistantIds = currentAssistants.map(a => a.id);
+  
+    // Check if assistant assignments changed
+    const assistantsChanged = JSON.stringify(newAssistantIds.sort()) !== JSON.stringify(currentAssistantIds.sort());
+    
+    if (assistantsChanged) {
+      // End current assistant assignments
+      assistant_history = assistant_history.map(assistant => 
+        !assistant.end_date ? { ...assistant, end_date: new Date().toISOString() } : assistant
+      );
+  
+      // Add new assistants
+      newAssistantIds.forEach(assistantId => {
+        assistant_history.push({
+          id: assistantId,
+          start_date: new Date().toISOString()
+        });
+      });
+    }
+  
+    console.log('Final officer_history to save:', officer_history); // ⭐ DEBUG LOG
+  
+    // Update the subdepartment
+    const { error: updateError } = await supabase
+      .from('tm_subdepartments')
+      .update({
+        name: subdept.name.trim(),
+        description: subdept.description,
+        default_display: subdept.default_display,
+        officer_history, // ⭐ FIXED: Make sure this is included
+        manager_history,
+        assistant_history,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', editingSubdepartmentId);
+  
+    if (updateError) {
+      console.error('Database update error:', updateError); // ⭐ DEBUG LOG
+      throw updateError;
+    }
+  
+    console.log('Subdepartment updated successfully'); // ⭐ DEBUG LOG
+  
+    // Handle classes and requirements updates
+    if (subdept.classes && subdept.classes.length > 0) {
+      await updateClassRequirements(editingSubdepartmentId, subdept.classes);
+    }
+  };
+  
+  const createNewSubdepartment = async () => {
+    console.log('Creating new subdepartment under department ID:', editingDepartmentId);
+  
+    if (departmentForm.subdepartments.length === 0) {
+      throw new Error('No subdepartment data provided');
+    }
+  
+    const subdept = departmentForm.subdepartments[0];
+  
+    console.log('Creating subdepartment with officer:', subdept.officerId); // ⭐ DEBUG LOG
+  
+    // Validate subdepartment name
+    if (!subdept.name.trim()) {
+      throw new Error('Subdepartment name is required');
+    }
+  
     // Check if subdepartment with this name already exists in this department
     const { data: existingSubdept } = await supabase
       .from('tm_subdepartments')
@@ -793,11 +933,11 @@ export default function Departments() {
       .ilike('name', subdept.name.trim())
       .eq('department_id', editingDepartmentId)
       .limit(1);
-
+  
     if (existingSubdept && existingSubdept.length > 0) {
       throw new Error('A subdepartment with this name already exists in this department');
     }
-
+  
     // Get the next order number for this department
     const { data: maxOrder } = await supabase
       .from('tm_subdepartments')
@@ -805,27 +945,29 @@ export default function Departments() {
       .eq('department_id', editingDepartmentId)
       .order('order', { ascending: false })
       .limit(1);
-
+  
     const nextOrder = (maxOrder?.[0]?.order || 0) + 1;
-
-    // Prepare officer_history, manager_history, and assistant_history
-    const officer_history = subdept.officerId ? [{
+  
+    // Prepare officer_history, manager_history, and assistant_history ⭐ FIXED
+    const officer_history = (subdept.officerId && subdept.officerId !== '') ? [{
       id: subdept.officerId,
       start_date: new Date().toISOString()
     }] : []
-
-    const manager_history = subdept.taskManagerId ? [{
+  
+    const manager_history = (subdept.taskManagerId && subdept.taskManagerId !== '') ? [{
       id: subdept.taskManagerId,
       start_date: new Date().toISOString()
     }] : []
-
+  
     const assistant_history = subdept.taskAssistantIds
       .filter(id => id !== '')
       .map(id => ({
         id,
         start_date: new Date().toISOString()
       }))
-
+  
+    console.log('Officer history to create:', officer_history); // ⭐ DEBUG LOG
+  
     // Create the subdepartment
     const { data: newSubdept, error: createError } = await supabase
       .from('tm_subdepartments')
@@ -835,138 +977,23 @@ export default function Departments() {
         department_id: editingDepartmentId,
         default_display: subdept.default_display,
         order: nextOrder,
-        officer_history,
+        officer_history, // ⭐ FIXED: Make sure this is included
         manager_history,
         assistant_history
       })
       .select()
       .single();
-
-    if (createError) throw createError;
-
+  
+    if (createError) {
+      console.error('Database create error:', createError); // ⭐ DEBUG LOG
+      throw createError;
+    }
+  
+    console.log('Subdepartment created successfully with ID:', newSubdept.id); // ⭐ DEBUG LOG
+  
     // Handle classes and requirements if any
     if (subdept.classes && subdept.classes.length > 0) {
       await saveClassRequirements(newSubdept.id, subdept.classes);
-    }
-  };
-
-  const updateExistingSubdepartment = async () => {
-    console.log('Updating existing subdepartment with ID:', editingSubdepartmentId);
-
-    if (departmentForm.subdepartments.length === 0) {
-      throw new Error('No subdepartment data provided');
-    }
-
-    const subdept = departmentForm.subdepartments[0];
-
-    // Validate subdepartment name
-    if (!subdept.name.trim()) {
-      throw new Error('Subdepartment name is required');
-    }
-
-    // Get current subdepartment to find its department_id and existing history
-    const { data: currentSubdept } = await supabase
-      .from('tm_subdepartments')
-      .select('department_id, officer_history, manager_history, assistant_history')
-      .eq('id', editingSubdepartmentId)
-      .single();
-
-    if (!currentSubdept) {
-      throw new Error('Subdepartment not found');
-    }
-
-    // Check if another subdepartment with this name exists in the same department (excluding current)
-    const { data: existingSubdept } = await supabase
-      .from('tm_subdepartments')
-      .select('id, name')
-      .ilike('name', subdept.name.trim())
-      .eq('department_id', currentSubdept.department_id)
-      .neq('id', editingSubdepartmentId)
-      .limit(1);
-
-    if (existingSubdept && existingSubdept.length > 0) {
-      throw new Error('Another subdepartment with this name already exists in this department');
-    }
-
-    // Handle officer history updates
-    let officer_history = currentSubdept?.officer_history || [];
-    const currentOfficer = getCurrentOfficer(officer_history);
-    if (subdept.officerId !== currentOfficer?.id) {
-      // End current officer assignment
-      officer_history = officer_history.map(officer => 
-        !officer.end_date ? { ...officer, end_date: new Date().toISOString() } : officer
-      );
-
-      // Add new officer if selected
-      if (subdept.officerId) {
-        officer_history.push({
-          id: subdept.officerId,
-          start_date: new Date().toISOString()
-        });
-      }
-    }
-
-    // Handle manager history updates
-    let manager_history = currentSubdept?.manager_history || [];
-    const currentManager = getCurrentManager(manager_history);
-    if (subdept.taskManagerId !== currentManager?.id) {
-      // End current manager assignment
-      manager_history = manager_history.map(manager => 
-        !manager.end_date ? { ...manager, end_date: new Date().toISOString() } : manager
-      );
-
-      // Add new manager if selected
-      if (subdept.taskManagerId) {
-        manager_history.push({
-          id: subdept.taskManagerId,
-          start_date: new Date().toISOString()
-        });
-      }
-    }
-
-    // Handle assistant history updates
-    let assistant_history = currentSubdept?.assistant_history || [];
-    const currentAssistants = getCurrentAssistants(assistant_history);
-    const newAssistantIds = subdept.taskAssistantIds.filter(id => id !== '');
-    const currentAssistantIds = currentAssistants.map(a => a.id);
-
-    // Check if assistant assignments changed
-    const assistantsChanged = JSON.stringify(newAssistantIds.sort()) !== JSON.stringify(currentAssistantIds.sort());
-    
-    if (assistantsChanged) {
-      // End current assistant assignments
-      assistant_history = assistant_history.map(assistant => 
-        !assistant.end_date ? { ...assistant, end_date: new Date().toISOString() } : assistant
-      );
-
-      // Add new assistants
-      newAssistantIds.forEach(assistantId => {
-        assistant_history.push({
-          id: assistantId,
-          start_date: new Date().toISOString()
-        });
-      });
-    }
-
-    // Update the subdepartment
-    const { error: updateError } = await supabase
-      .from('tm_subdepartments')
-      .update({
-        name: subdept.name.trim(),
-        description: subdept.description,
-        default_display: subdept.default_display,
-        officer_history,
-        manager_history,
-        assistant_history,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', editingSubdepartmentId);
-
-    if (updateError) throw updateError;
-
-    // Handle classes and requirements updates
-    if (subdept.classes && subdept.classes.length > 0) {
-      await updateClassRequirements(editingSubdepartmentId, subdept.classes);
     }
   };
 
@@ -1042,7 +1069,7 @@ export default function Departments() {
       description: '',
       default_display: true,
       subdepartments: [],
-      officerId: ''
+      officerId: '' // Initialize with empty officer
     });
     setIsAddDepartmentOpen(true);
   };
@@ -1080,7 +1107,7 @@ export default function Departments() {
         taskManagerId: '',
         taskAssistantIds: [],
         default_display: true,
-        officerId: '', //FIX: Initialize officerId for new subdepartment
+        officerId: '', // ⭐ FIXED: Initialize officerId for new subdepartment
       }],
       officerId: ''
     });
@@ -1091,17 +1118,19 @@ export default function Departments() {
     console.log('Editing subdepartment:', subdept.id);
     setEditingDepartmentId(null);
     setEditingSubdepartmentId(subdept.id);
-
+  
     // Find the department name for this subdepartment
     const dept = departments.find(d =>
       d.tm_subdepartments?.some(s => s.id === subdept.id)
     );
-
+  
     // Get current manager, assistants, and officer
     const currentManager = getCurrentManager(subdept.manager_history || []);
     const currentAssistants = getCurrentAssistants(subdept.assistant_history || []);
-    const currentOfficer = getCurrentOfficer(subdept.officer_history || []); //FIX: Get current officer for the subdepartment
-
+    const currentOfficer = getCurrentOfficer(subdept.officer_history || []); // ⭐ FIXED: Get current officer
+  
+    console.log('Current officer for subdepartment:', currentOfficer); // ⭐ DEBUG LOG
+  
     setDepartmentForm({
       name: dept?.name || '',
       description: dept?.description || '',
@@ -1113,14 +1142,13 @@ export default function Departments() {
         taskManagerId: currentManager?.id || '',
         taskAssistantIds: currentAssistants.map(a => a.id),
         default_display: subdept.default_display || true,
-        officerId: currentOfficer?.id || '', //FIX: Set officerId in form state
+        officerId: currentOfficer?.id || '', // ⭐ FIXED: Set officerId in form state
       }],
       officerId: '' // Department officer is not being edited here
     });
     setIsAddDepartmentOpen(true);
   };
-
-  // Clear state when dialog closes
+ 
   useEffect(() => {
     if (!isAddDepartmentOpen) {
       setDepartmentForm({
@@ -1128,7 +1156,7 @@ export default function Departments() {
         description: '',
         default_display: true,
         subdepartments: [],
-        officerId: ''
+        officerId: '' // Make sure to reset this
       });
       setEditingDepartmentId(null);
       setEditingSubdepartmentId(null);
@@ -1284,20 +1312,29 @@ export default function Departments() {
                         <div className="flex items-center gap-2">
                           {currentOfficer ? (
                             <UserDetailsPopover userId={currentOfficer.id} users={users} role="officer">
-                              {getUserName(currentOfficer.id)}
+                              <div className="flex items-center gap-2">
+                                <Shield className="h-4 w-4 text-blue-600" />
+                                <span>{getUserName(currentOfficer.id)}</span>
+                              </div>
                             </UserDetailsPopover>
                           ) : (
                             <span className="text-gray-400">None</span>
                           )}
                           {hasOfficerHistory && (
                             <OfficerHistoryPopover officers_history={dept.officers_history || []} users={users}>
-                              <div />
+                              <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-500 hover:text-blue-600">
+                                <History className="h-3.5 w-3.5" />
+                              </Button>
                             </OfficerHistoryPopover>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="border-r"></TableCell>
-                      <TableCell className="border-r"></TableCell>
+                      <TableCell className="border-r">
+                        <div className="text-gray-400 text-sm">View in stats</div>
+                      </TableCell>
+                      <TableCell className="border-r">
+                        <div className="text-gray-400 text-sm">View in stats</div>
+                      </TableCell>
                       <TableCell className="text-base text-gray-800 border-r">
                         {(dept.tm_subdepartments || []).length} Sub Dept
                       </TableCell>
@@ -1311,6 +1348,11 @@ export default function Departments() {
                       </TableCell>
                       <TableCell className="text-right border-r">
                         <div className="flex items-center justify-end gap-2">
+                          <DepartmentStats 
+                            department={dept} 
+                            subdepartments={dept.tm_subdepartments || []} 
+                            users={users} 
+                          />
                           <Button
                             variant="ghost"
                             size="icon"
@@ -1319,14 +1361,21 @@ export default function Departments() {
                               handleEditDepartment(dept);
                             }}
                             className="h-6 w-6 text-gray-500 hover:text-blue-600"
+                            title="Edit department"
                           >
                             <Edit className="h-3.5 w-3.5" />
                           </Button>
-                          <OrderButtons onReorder={handleDepartmentReorder} index={deptIndex} listLength={filteredDepartments.length} disabled={savingOrder} />
+                          <OrderButtons 
+                            onReorder={handleDepartmentReorder} 
+                            index={deptIndex} 
+                            listLength={filteredDepartments.length} 
+                            disabled={savingOrder} 
+                          />
                           <Button
                             size="sm"
                             className="bg-blue-600 hover:bg-blue-700 text-white"
                             onClick={() => handleAddSubdepartment(dept.id, dept.name)}
+                            title="Add subdepartment"
                           >
                             <Plus className="h-4 w-4 mr-1" /> Add Sub
                           </Button>
@@ -1380,14 +1429,19 @@ export default function Departments() {
                               <div className="flex items-center gap-2">
                                 {currentOfficerSub ? (
                                   <UserDetailsPopover userId={currentOfficerSub.id} users={users} role="officer">
-                                    {getUserName(currentOfficerSub.id)}
+                                    <div className="flex items-center gap-2">
+                                      <Shield className="h-4 w-4 text-blue-600" />
+                                      <span>{getUserName(currentOfficerSub.id)}</span>
+                                    </div>
                                   </UserDetailsPopover>
                                 ) : (
                                   <span className="text-gray-400">None</span>
                                 )}
                                 {hasOfficerHistorySub && (
                                   <OfficerHistoryPopover officers_history={subdept.officer_history || []} users={users}>
-                                    <div />
+                                    <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-500 hover:text-blue-600">
+                                      <History className="h-3.5 w-3.5" />
+                                    </Button>
                                   </OfficerHistoryPopover>
                                 )}
                               </div>
@@ -1396,14 +1450,19 @@ export default function Departments() {
                               <div className="flex items-center gap-2">
                                 {currentManager ? (
                                   <UserDetailsPopover userId={currentManager.id} users={users} role="manager">
-                                    {getUserName(currentManager.id)}
+                                    <div className="flex items-center gap-2">
+                                      <UserIcon className="h-4 w-4 text-green-600" />
+                                      <span>{getUserName(currentManager.id)}</span>
+                                    </div>
                                   </UserDetailsPopover>
                                 ) : (
                                   <span className="text-gray-400">None</span>
                                 )}
                                 {hasManagerHistory && (
                                   <ManagerHistoryPopover manager_history={subdept.manager_history || []} users={users}>
-                                    <div />
+                                    <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-500 hover:text-blue-600">
+                                      <History className="h-3.5 w-3.5" />
+                                    </Button>
                                   </ManagerHistoryPopover>
                                 )}
                               </div>
@@ -1414,7 +1473,10 @@ export default function Departments() {
                                   <div className="flex flex-col space-y-1">
                                     {currentAssistants.map((assistant, i) => (
                                       <UserDetailsPopover key={i} userId={assistant.id} users={users} role="assistant">
-                                        {getUserName(assistant.id)}
+                                        <div className="flex items-center gap-2">
+                                          <Users className="h-4 w-4 text-amber-600" />
+                                          <span>{getUserName(assistant.id)}</span>
+                                        </div>
                                       </UserDetailsPopover>
                                     ))}
                                   </div>
@@ -1423,7 +1485,9 @@ export default function Departments() {
                                 )}
                                 {hasAssistantHistory && (
                                   <AssistantHistoryPopover assistant_history={subdept.assistant_history || []} users={users}>
-                                    <div />
+                                    <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-500 hover:text-blue-600">
+                                      <History className="h-3.5 w-3.5" />
+                                    </Button>
                                   </AssistantHistoryPopover>
                                 )}
                               </div>

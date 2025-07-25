@@ -11,21 +11,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardDescription, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ChevronDown, ChevronUp, Plus, Trash2, Layers, UserIcon, ChevronsUpDown, FolderPlus, Edit, Building, Workflow, Loader2, Shield, X, BoxSelect } from "lucide-react"
-// Note: The following types are assumed to have been updated in the database definitions.
-// DepartmentForm would no longer have an `officers` property.
-// SubdepartmentForm would now have an `officers` property and officer_history.
-interface EnhancedSubdepartmentForm extends SubdepartmentForm {
-  officer_history?: Array<{
-    id: string;
-    start_date: string;
-    end_date?: string;
-  }>;
-}
-
-interface EnhancedDepartmentForm extends DepartmentForm {
-  subdepartments: EnhancedSubdepartmentForm[];
-}
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs" // ⭐ NEW: Import Tabs
+import { ChevronDown, ChevronUp, Plus, Trash2, Layers, UserIcon, ChevronsUpDown, FolderPlus, Edit, Building, Workflow, Loader2, Shield, X, BoxSelect, Calendar, Users, FileText } from "lucide-react"
 
 import { Department, Subdepartment, Class, SubClass, Requirement, SubdepartmentForm, ClassForm, SubClassForm, RequirementForm, User, DepartmentForm } from "../database"
 import { updateNestedState } from "../page"
@@ -241,7 +228,7 @@ function ClassComponent({
   );
 }
 
-// Updated DepartmentDialog with officer management at subdepartment level
+// Updated DepartmentDialog with multi-officer management at subdepartment level only
 interface DepartmentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -249,7 +236,7 @@ interface DepartmentDialogProps {
   departmentForm: DepartmentForm
   setDepartmentForm: React.Dispatch<React.SetStateAction<DepartmentForm>>
   users: User[]
-  officers: User[] // Array of potential officers (Users with 'officer' role)
+  officers: User[]
   editingDepartmentId?: string | null
   editingSubdepartmentId?: string | null
   isSaving: boolean
@@ -267,20 +254,14 @@ export default function DepartmentDialog({
   editingSubdepartmentId,
   isSaving
 }: DepartmentDialogProps) {
-  const [newOfficer, setNewOfficer] = React.useState<{ id: string; start_date: string; end_date?: string }>({ 
-    id: '', 
-    start_date: new Date().toISOString().split('T')[0] 
-  });
   const updateFormState = (path: string[], value: any) => 
     setDepartmentForm(prevState => updateNestedState(prevState, path, value));
 
-  // Determine the current mode
   const isCreatingNewDepartment = !editingDepartmentId && !editingSubdepartmentId;
   const isEditingDepartment = editingDepartmentId && !editingSubdepartmentId && departmentForm.subdepartments.length === 0;
   const isCreatingSubdepartment = editingDepartmentId && !editingSubdepartmentId && departmentForm.subdepartments.length > 0;
   const isEditingSubdepartment = editingSubdepartmentId;
 
-  // Get dialog title and description based on mode
   const getDialogTitle = () => {
     if (isCreatingNewDepartment) return 'Add New Department';
     if (isEditingDepartment) return 'Edit Department';
@@ -308,91 +289,61 @@ export default function DepartmentDialog({
       requirements: [],
       subClasses: []
     };
-    updateFormState(
-      ['subdepartments', subdeptIndex, 'classes'],
-      [...departmentForm.subdepartments[subdeptIndex].classes, newClass]
-    );
+    updateFormState(['subdepartments', subdeptIndex, 'classes'], [...departmentForm.subdepartments[subdeptIndex].classes, newClass]);
   };
 
   const handleRemoveClass = (subdeptIndex: number, classIndex: number) => {
-    updateFormState(
-      ['subdepartments', subdeptIndex, 'classes'],
-      departmentForm.subdepartments[subdeptIndex].classes.filter((_, i) => i !== classIndex)
-    );
-  };
-
-  const handleSubdepartmentChange = (subdeptIndex: number, field: string, value: any) =>
-    updateFormState(['subdepartments', subdeptIndex, field], value);
-
-  const handleAddTaskAssistant = (subdeptIndex: number) =>
-    updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'],
-      [...departmentForm.subdepartments[subdeptIndex].taskAssistantIds, '']
-    );
-
-  const handleRemoveTaskAssistant = (subdeptIndex: number, assistantIndex: number) =>
-    updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'],
-      departmentForm.subdepartments[subdeptIndex].taskAssistantIds.filter((_, i) => i !== assistantIndex)
-    );
-
-  const handleTaskAssistantChange = (subdeptIndex: number, assistantIndex: number, userId: string) => {
-    const currentIds = [...departmentForm.subdepartments[subdeptIndex].taskAssistantIds];
-    currentIds[assistantIndex] = userId;
-    updateFormState(['subdepartments', subdeptIndex, 'taskAssistantIds'], currentIds);
+    updateFormState(['subdepartments', subdeptIndex, 'classes'], departmentForm.subdepartments[subdeptIndex].classes.filter((_, i) => i !== classIndex));
   };
   
-  const handleAddOfficer = (subdeptIndex: number) => {
-    if (newOfficer.id) {
-        const currentOfficers = departmentForm.subdepartments[subdeptIndex].officers || [];
-        const currentHistory = departmentForm.subdepartments[subdeptIndex].officer_history || [];
-        
-        // Add to current officers
-        updateFormState(
-            ['subdepartments', subdeptIndex, 'officers'],
-            [...currentOfficers, { ...newOfficer }]
-        );
-        
-        // Add to officer history
-        updateFormState(
-            ['subdepartments', subdeptIndex, 'officer_history'],
-            [...currentHistory, { 
-                id: newOfficer.id, 
-                start_date: new Date().toISOString(),
-                end_date: undefined
-            }]
-        );
-        
-        setNewOfficer({ id: '', start_date: new Date().toISOString().split('T')[0] });
-    }
+  const handleSubdepartmentChange = (subdeptIndex: number, field: string, value: any) => updateFormState(['subdepartments', subdeptIndex, field], value);
+
+  // ⭐ START: New and updated role management functions
+  const createNewAssignment = (id: string) => ({
+    id,
+    start_date: new Date().toISOString().split('T')[0],
+    end_date: ''
+  });
+
+  const handleAddRoleAssignment = (subdeptIndex: number, role: 'officers' | 'taskManagers' | 'taskAssistants', userId: string) => {
+    if (!userId || userId === 'none') return;
+    const currentAssignments = departmentForm.subdepartments[subdeptIndex][role] || [];
+    if (currentAssignments.some(a => a.id === userId)) return;
+    updateFormState(['subdepartments', subdeptIndex, role], [...currentAssignments, createNewAssignment(userId)]);
   };
 
-  const handleRemoveOfficer = (subdeptIndex: number, officerIndex: number) => {
-    const currentOfficers = departmentForm.subdepartments[subdeptIndex].officers || [];
-    const currentHistory = departmentForm.subdepartments[subdeptIndex].officer_history || [];
-    const officerToRemove = currentOfficers[officerIndex];
-
-    // Remove from current officers
-    updateFormState(
-        ['subdepartments', subdeptIndex, 'officers'],
-        currentOfficers.filter((_, i) => i !== officerIndex)
-    );
-
-    // Update officer history with end date
-    const updatedHistory = currentHistory.map((historyItem, index) => {
-      if (index === officerIndex && !historyItem.end_date) {
-        return {
-          ...historyItem,
-          end_date: new Date().toISOString()
-        };
-      }
-      return historyItem;
-    });
-
-    updateFormState(
-        ['subdepartments', subdeptIndex, 'officer_history'],
-        updatedHistory
-    );
+  const handleRemoveRoleAssignment = (subdeptIndex: number, role: 'officers' | 'taskManagers' | 'taskAssistants', assignmentIndex: number) => {
+    const currentAssignments = departmentForm.subdepartments[subdeptIndex][role] || [];
+    updateFormState(['subdepartments', subdeptIndex, role], currentAssignments.filter((_, index) => index !== assignmentIndex));
   };
 
+  const handleAssignmentChange = (subdeptIndex: number, role: 'taskAssistants', assignmentIndex: number, field: 'id' | 'start_date' | 'end_date', value: string) => {
+    const currentAssignments = [...(departmentForm.subdepartments[subdeptIndex][role] || [])];
+    currentAssignments[assignmentIndex] = { ...currentAssignments[assignmentIndex], [field]: value };
+    updateFormState(['subdepartments', subdeptIndex, role], currentAssignments);
+  };
+  
+  const handleAssignmentDateChange = (subdeptIndex: number, role: 'officers' | 'taskManagers', assignmentIndex: number, field: 'start_date' | 'end_date', value: string) => {
+    const currentAssignments = [...(departmentForm.subdepartments[subdeptIndex][role] || [])];
+    currentAssignments[assignmentIndex] = { ...currentAssignments[assignmentIndex], [field]: value };
+    updateFormState(['subdepartments', subdeptIndex, role], currentAssignments);
+  };
+
+  const getAvailableUsersForRole = (subdeptIndex: number, role: 'officers' | 'taskManagers' | 'taskAssistants') => {
+    const assignedIds = departmentForm.subdepartments[subdeptIndex][role]?.map(a => a.id) || [];
+    const sourceList = role === 'officers' ? officers : users;
+    return sourceList.filter(user => !assignedIds.includes(user.id));
+  };
+
+  const handleAddBlankTaskAssistant = (subdeptIndex: number) => {
+    const currentAssistants = departmentForm.subdepartments[subdeptIndex].taskAssistants || [];
+    updateFormState(['subdepartments', subdeptIndex, 'taskAssistants'], [...currentAssistants, {
+        id: '',
+        start_date: new Date().toISOString().split('T')[0],
+        end_date: ''
+    }]);
+  };
+  // ⭐ END: New and updated role management functions
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -409,71 +360,32 @@ export default function DepartmentDialog({
         </DialogHeader>
         
         <div className="space-y-6 overflow-y-auto p-1">
-          {/* Department Section - shown when creating new dept or editing existing dept */}
           {(isCreatingNewDepartment || isEditingDepartment) && (
             <div className="space-y-4 p-4 bg-blue-50 rounded-lg border">
-              <h3 className="text-lg font-semibold text-blue-800 flex items-center gap-2">
-                <Building className="h-5 w-5" />
-                Department Details
-              </h3>
+              <h3 className="text-lg font-semibold text-blue-800 flex items-center gap-2"><Building className="h-5 w-5" />Department Details</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="department-name">Department Name *</Label>
-                  <Input
-                    id="department-name"
-                    placeholder="Enter department name"
-                    value={departmentForm.name}
-                    onChange={(e) => updateFormState(['name'], e.target.value)}
-                    disabled={isEditingDepartment && editingDepartmentId !== null}
-                    className="font-medium"
-                  />
+                  <Input id="department-name" placeholder="Enter department name" value={departmentForm.name} onChange={(e) => updateFormState(['name'], e.target.value)} disabled={isEditingDepartment && editingDepartmentId !== null} className="font-medium" />
                 </div>
-                 <div>
+                <div>
                   <Label htmlFor="department-description">Department Description</Label>
-                  <Textarea
-                    id="department-description"
-                    placeholder="Enter department description"
-                    value={departmentForm.description}
-                    onChange={(e) => updateFormState(['description'], e.target.value)}
-                    className="min-h-[80px]"
-                  />
+                  <Textarea id="department-description" placeholder="Enter department description" value={departmentForm.description} onChange={(e) => updateFormState(['description'], e.target.value)} className="min-h-[80px]" />
                 </div>
               </div>
               <div className="flex items-center space-x-2 pt-2">
-                <Checkbox
-                  checked={departmentForm.default_display}
-                  onCheckedChange={(checked) => updateFormState(['default_display'], Boolean(checked))}
-                  id="dept-default-display"
-                />
-                <Label htmlFor="dept-default-display" className="text-sm text-gray-700">
-                  Default Display
-                </Label>
+                <Checkbox checked={departmentForm.default_display} onCheckedChange={(checked) => updateFormState(['default_display'], Boolean(checked))} id="dept-default-display" />
+                <Label htmlFor="dept-default-display" className="text-sm text-gray-700">Default Display</Label>
               </div>
             </div>
           )}
 
-          {/* Subdepartments Section */}
           {departmentForm.subdepartments.length > 0 && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold flex items-center gap-2">
-                  <Workflow className="h-5 w-5 text-blue-600" />
-                  {isCreatingSubdepartment || isEditingSubdepartment ? 'Subdepartment Details' : 'Subdepartments'}
-                </h3>
+                <h3 className="text-lg font-semibold flex items-center gap-2"><Workflow className="h-5 w-5 text-blue-600" />{isCreatingSubdepartment || isEditingSubdepartment ? 'Subdepartment Details' : 'Subdepartments'}</h3>
                 {isCreatingNewDepartment && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => updateFormState(['subdepartments'], [...departmentForm.subdepartments, {
-                      name: '',
-                      description: '',
-                      classes: [],
-                      taskManagerId: '',
-                      taskAssistantIds: [],
-                      officers: [],
-                      default_display: true
-                    }])}
-                  >
+                  <Button variant="outline" size="sm" onClick={() => updateFormState(['subdepartments'], [...departmentForm.subdepartments, { name: '', description: '', classes: [], officers: [], taskManagers: [], taskAssistants: [], default_display: true }])}>
                     <Plus className="h-4 w-4 mr-1" /> Add Subdepartment
                   </Button>
                 )}
@@ -481,253 +393,148 @@ export default function DepartmentDialog({
 
               <div className="space-y-4">
                 {departmentForm.subdepartments.map((subdept, subdeptIndex) => (
-                  <Card key={subdeptIndex} className="bg-gray-50">
-                    <CardHeader className="pb-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
-                        {/* --- LEFT COLUMN --- */}
-                        <div className="space-y-4">
-                          <div>
-                            <Label htmlFor={`subdept-name-${subdeptIndex}`}>Subdepartment Name *</Label>
+                  <Card key={subdeptIndex} className="bg-gray-50 overflow-hidden">
+                    <Tabs defaultValue="details" className="w-full">
+                      <CardHeader className="bg-white border-b">
+                         <div className="flex items-center space-x-2">
+                            <Badge variant="outline" className="font-mono bg-gray-200 text-gray-700">{subdeptIndex + 1}</Badge>
+                             <Input placeholder="Enter subdepartment name" value={subdept.name} onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)} className="flex-1 font-semibold text-lg" />
+                         </div>
+                        <TabsList className="grid w-full grid-cols-3 mt-2">
+                           <TabsTrigger value="details"><FileText className="h-4 w-4 mr-2"/>Details</TabsTrigger>
+                           <TabsTrigger value="roles"><Users className="h-4 w-4 mr-2"/>Role Assignments</TabsTrigger>
+                           <TabsTrigger value="classes"><Layers className="h-4 w-4 mr-2"/>Classes</TabsTrigger>
+                        </TabsList>
+                      </CardHeader>
+                      <CardContent className="p-0">
+                        <TabsContent value="details" className="p-6 space-y-4">
+                            <h4 className="text-lg font-semibold text-gray-800 flex items-center gap-2">Basic Information</h4>
+                            <div>
+                                <Label htmlFor={`subdept-desc-${subdeptIndex}`}>Description</Label>
+                                <Textarea id={`subdept-desc-${subdeptIndex}`} placeholder="Enter subdepartment description" value={subdept.description} onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)} className="min-h-[100px]" />
+                            </div>
                             <div className="flex items-center space-x-2">
-                              <Badge variant="outline" className="font-mono bg-gray-200 text-gray-700">{subdeptIndex + 1}</Badge>
-                              <Input id={`subdept-name-${subdeptIndex}`} placeholder="Enter subdepartment name" value={subdept.name} onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)} className="flex-1 font-medium"/>
+                                <Checkbox checked={subdept.default_display} onCheckedChange={(checked) => handleSubdepartmentChange(subdeptIndex, 'default_display', Boolean(checked))} id={`subdept-default-display-${subdeptIndex}`} />
+                                <Label htmlFor={`subdept-default-display-${subdeptIndex}`} className="text-sm text-gray-700">Default Display</Label>
                             </div>
-                          </div>
-                          <div>
-                            <Label htmlFor={`subdept-desc-${subdeptIndex}`}>Description</Label>
-                            <Textarea id={`subdept-desc-${subdeptIndex}`} placeholder="Enter subdepartment description" value={subdept.description} onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)} className="min-h-[60px]"/>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Checkbox checked={subdept.default_display} onCheckedChange={(checked) => handleSubdepartmentChange(subdeptIndex, 'default_display', Boolean(checked))} id={`subdept-default-display-${subdeptIndex}`}/>
-                            <Label htmlFor={`subdept-default-display-${subdeptIndex}`} className="text-sm text-gray-700">Default Display</Label>
-                          </div>
-                        </div>
-                        {/* --- RIGHT COLUMN --- */}
-                        <div className="space-y-6">
-                          {/* Role Management Section */}
-                          <div className="space-y-4 border-l-4 border-blue-600 pl-4 bg-blue-50/10 rounded-r-lg">
-                            <h4 className="text-lg font-semibold flex items-center gap-2">
-                              <UserIcon className="h-5 w-5 text-blue-600" />
-                              Role Management
-                            </h4>
+                        </TabsContent>
 
-                            {/* Task Manager */}
-                            <div className="space-y-2">
-                              <Label className="text-sm font-medium">Task Manager *</Label>
-                              <Select value={subdept.taskManagerId || ''} onValueChange={(value) => handleSubdepartmentChange(subdeptIndex, 'taskManagerId', value)}>
-                                <SelectTrigger className="w-full">
-                                  <SelectValue placeholder="Select task manager" />
-                                  <BoxSelect className="h-4 w-4 text-blue-600" />
-                                </SelectTrigger>
-                                <SelectContent className="bg-white border rounded-md shadow-sm">
-                                  <SelectItem value="none">
-                                    <div className="flex items-center gap-2 p-2">
-                                      <UserIcon className="h-4 w-4 text-gray-400" />
-                                      <span className="text-gray-500">None</span>
+                        <TabsContent value="roles" className="p-6 space-y-6">
+                            {[{
+                                title: "Officer", role: 'officers', icon: Shield, color: 'purple', source: officers, filter: (user) => true, badge: (user) => null
+                            }, {
+                                title: "Task Managers", role: 'taskManagers', icon: UserIcon, color: 'blue', source: users, filter: (user) => ['task_manager', 'admin', 'user'].includes(user.role), badge: (user) => user.role === 'task_manager' ? 'Manager' : user.role === 'admin' ? 'Admin' : 'User'
+                            }].map(roleConfig => (
+                                <div key={roleConfig.role} className={`space-y-4 p-4 border-l-4 border-${roleConfig.color}-500 bg-${roleConfig.color}-50/30 rounded-r-lg`}>
+                                    <div className="flex items-center justify-between">
+                                        <Label className={`text-sm font-medium text-${roleConfig.color}-700 flex items-center gap-2`}><roleConfig.icon className="h-4 w-4"/>{roleConfig.title}</Label>
+                                        <Select onValueChange={(value) => handleAddRoleAssignment(subdeptIndex, roleConfig.role, value)}>
+                                            <SelectTrigger className="w-48"><SelectValue placeholder={`Add ${roleConfig.title.slice(0, -1)}...`} /></SelectTrigger>
+                                            <SelectContent>
+                                                {getAvailableUsersForRole(subdeptIndex, roleConfig.role).filter(roleConfig.filter).map((user) => (
+                                                    <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
+                                                ))}
+                                                {getAvailableUsersForRole(subdeptIndex, roleConfig.role).filter(roleConfig.filter).length === 0 && (<SelectItem value="none" disabled>All eligible users assigned</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
                                     </div>
-                                  </SelectItem>
-                                  {users.filter(user => user.role === 'task_manager' || user.role === 'admin' || user.role === 'user').map((user) => (
-                                    <SelectItem key={user.id} value={user.id}>
-                                      <div className="flex items-center gap-2 p-2">
-                                        <UserIcon className="h-4 w-4 text-blue-600" />
-                                        <span className="font-medium">{user.name}</span>
-                                        <Badge variant="outline" className="ml-auto text-xs">
-                                          {user.role === 'task_manager' ? 'Manager' : user.role === 'admin' ? 'Admin' : 'User'}
-                                        </Badge>
-                                      </div>
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-
-                            {/* Officers */}
-                            <div className="space-y-3">
-                              <div className="flex justify-between items-center">
-                                <Label className="text-sm font-medium">Officers *</Label>
-                                <div className="flex items-center gap-2">
-                                  <Select value={newOfficer.id} onValueChange={(value) => setNewOfficer(prev => ({ ...prev, id: value }))}>
-                                    <SelectTrigger className="w-full">
-                                      <SelectValue placeholder="Select officer" />
-                                      <BoxSelect className="h-4 w-4 text-purple-600" />
-                                    </SelectTrigger>
-                                    <SelectContent className="bg-white border rounded-md shadow-sm">
-                                      {officers.filter(officer => !subdept.officers?.some(o => o.id === officer.id)).map((officer) => (
-                                        <SelectItem key={officer.id} value={officer.id}>
-                                          <div className="flex items-center gap-2 p-2">
-                                            <Shield className="h-4 w-4 text-purple-600" />
-                                            <span className="font-medium">{officer.name}</span>
-                                            <Badge variant="outline" className="ml-auto text-xs">Officer</Badge>
-                                          </div>
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                  <Button 
-                                    type="button" 
-                                    onClick={() => handleAddOfficer(subdeptIndex)} 
-                                    disabled={!newOfficer.id}
-                                    className="h-8 px-3 bg-purple-600 text-white hover:bg-purple-700 disabled:bg-purple-300 disabled:text-gray-500"
-                                  >
-                                    Add
-                                  </Button>
+                                    <div className="space-y-3 max-h-64 overflow-y-auto border rounded-md bg-white p-2">
+                                        {(subdept[roleConfig.role] || []).map((assignment, index) => {
+                                            const userData = roleConfig.source.find(u => u.id === assignment.id);
+                                            return userData ? (
+                                                <div key={`${assignment.id}-${index}`} className="p-3 border-b last:border-b-0 hover:bg-gray-50 rounded-md">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <div className="flex items-center gap-3">
+                                                            <roleConfig.icon className={`h-5 w-5 text-${roleConfig.color}-600 flex-shrink-0`} />
+                                                            <div>
+                                                                <p className="font-medium text-gray-900">{userData.name}</p>
+                                                                <p className="text-sm text-gray-500">{userData.email}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <Badge variant={assignment.end_date ? "secondary" : "default"} className={assignment.end_date ? "bg-gray-500" : "bg-green-500"}>{assignment.end_date ? 'Past' : 'Active'}</Badge>
+                                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:bg-red-50" onClick={() => handleRemoveRoleAssignment(subdeptIndex, roleConfig.role, index)}><X className="h-4 w-4" /></Button>
+                                                        </div>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+                                                        <div>
+                                                            <Label className="text-xs font-medium text-gray-600 flex items-center gap-1"><Calendar className="h-3 w-3"/>Start Date *</Label>
+                                                            <Input type="date" value={assignment.start_date || ''} onChange={(e) => handleAssignmentDateChange(subdeptIndex, roleConfig.role, index, 'start_date', e.target.value)} className="text-sm mt-1" required/>
+                                                        </div>
+                                                        <div>
+                                                            <Label className="text-xs font-medium text-gray-600 flex items-center gap-1"><Calendar className="h-3 w-3"/>End Date (Optional)</Label>
+                                                            <Input type="date" value={assignment.end_date || ''} onChange={(e) => handleAssignmentDateChange(subdeptIndex, roleConfig.role, index, 'end_date', e.target.value)} className="text-sm mt-1" min={assignment.start_date} />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ) : null;
+                                        })}
+                                        {(subdept[roleConfig.role] || []).length === 0 && (<div className="p-6 text-center text-gray-500"><p className="text-sm">No users assigned to this role</p></div>)}
+                                    </div>
                                 </div>
-                              </div>
-                              <div className="space-y-2 mt-2 max-h-32 overflow-y-auto border rounded-md">
-                                {subdept.officers?.map((officer, officerIndex) => {
-                                  const officerData = officers.find(o => o.id === officer.id);
-                                  return officerData ? (
-                                    <div key={`${officer.id}-${officerIndex}`} className="grid grid-cols-12 gap-2 items-center p-3 border-b last:border-b-0 hover:bg-gray-50">
-                                      <div className="flex items-center gap-2 col-span-3">
-                                        <Shield className="h-4 w-4 text-purple-600 flex-shrink-0" />
-                                        <span className="font-medium truncate">{officerData.name}</span>
-                                      </div>
-                                      <div className="col-span-3">
-                                        <Label className="text-xs text-gray-500">Start Date</Label>
-                                        <Input 
-                                          type="date" 
-                                          value={officer.start_date || ''} 
-                                          onChange={(e) => updateFormState(['subdepartments', subdeptIndex, 'officers', officerIndex, 'start_date'], e.target.value)} 
-                                          className="h-8 text-sm border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                        />
-                                      </div>
-                                      <div className="col-span-3">
-                                        <Label className="text-xs text-gray-500">End Date (Opt.)</Label>
-                                        <Input 
-                                          type="date" 
-                                          value={officer.end_date || ''} 
-                                          onChange={(e) => updateFormState(['subdepartments', subdeptIndex, 'officers', officerIndex, 'end_date'], e.target.value || undefined)} 
-                                          min={officer.start_date} 
-                                          className="h-8 text-sm border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                        />
-                                      </div>
-                                      <div className="flex justify-end col-span-3">
-                                        <Button 
-                                          type="button" 
-                                          variant="ghost" 
-                                          size="icon" 
-                                          className="h-8 w-8 text-red-500 hover:bg-red-50 hover:text-red-700"
-                                          onClick={() => handleRemoveOfficer(subdeptIndex, officerIndex)}
-                                        >
-                                          <X className="h-4 w-4" />
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  ) : null;
-                                })}
-                                {subdept.officers?.length === 0 && (
-                                  <div className="p-3 text-center text-gray-500">
-                                    No officers assigned yet
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Task Assistants */}
-                            <div className="space-y-3">
-                              <Label className="text-sm font-medium">Task Assistants *</Label>
-                              <div className="space-y-2 max-h-32 overflow-y-auto border rounded-md">
-                                {subdept.taskAssistantIds.map((userId, assistantIndex) => (
-                                  <div key={assistantIndex} className="flex items-center space-x-2 p-3 border-b last:border-b-0 hover:bg-gray-50">
-                                    <Select 
-                                      value={userId} 
-                                      onValueChange={(value) => handleTaskAssistantChange(subdeptIndex, assistantIndex, value)}
-                                    >
-                                      <SelectTrigger className="w-full">
-                                        <SelectValue placeholder="Select assistant" />
-                                        <BoxSelect className="h-4 w-4 text-green-600" />
-                                      </SelectTrigger>
-                                      <SelectContent className="bg-white border rounded-md shadow-sm">
-                                        <SelectItem value="none">
-                                          <div className="flex items-center gap-2 p-2">
-                                            <UserIcon className="h-4 w-4 text-gray-400" />
-                                            <span className="text-gray-500">None</span>
-                                          </div>
-                                        </SelectItem>
-                                        {users.filter(user => user.role === 'task_assistant' || user.role === 'admin' || user.role === 'user').map((user) => (
-                                          <SelectItem key={user.id} value={user.id}>
-                                            <div className="flex items-center gap-2 p-2">
-                                              <UserIcon className="h-4 w-4 text-green-600" />
-                                              <span className="font-medium">{user.name}</span>
-                                              <Badge variant="outline" className="ml-auto text-xs">
-                                                {user.role === 'task_assistant' ? 'Assistant' : user.role === 'admin' ? 'Admin' : 'User'}
-                                              </Badge>
+                            ))}
+                            {/* Task Assistants - special handling due to dynamic addition */}
+                            <div className={`space-y-4 p-4 border-l-4 border-green-500 bg-green-50/30 rounded-r-lg`}>
+                                <Label className="text-sm font-medium text-green-700 flex items-center gap-2"><UserIcon className="h-4 w-4"/>Task Assistants</Label>
+                                <div className="space-y-3 max-h-64 overflow-y-auto border rounded-md bg-white p-2">
+                                    {(subdept.taskAssistants || []).map((assistant, index) => (
+                                         <div key={index} className="p-3 border-b last:border-b-0 hover:bg-gray-50 rounded-md">
+                                            <div className="flex items-end justify-between mb-2 gap-2">
+                                                <div className="flex-grow">
+                                                    <Label className="text-xs font-medium text-gray-600">Assistant *</Label>
+                                                    <Select value={assistant.id} onValueChange={(value) => handleAssignmentChange(subdeptIndex, 'taskAssistants', index, 'id', value)}>
+                                                        <SelectTrigger><SelectValue placeholder="Select assistant" /></SelectTrigger>
+                                                        <SelectContent>
+                                                            {users.filter(u => ['task_assistant', 'admin', 'user'].includes(u.role)).map((user) => (<SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:bg-red-50 flex-shrink-0" onClick={() => handleRemoveRoleAssignment(subdeptIndex, 'taskAssistants', index)}><Trash2 className="h-4 w-4" /></Button>
                                             </div>
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                    <Button 
-                                      variant="ghost" 
-                                      size="icon" 
-                                      onClick={() => handleRemoveTaskAssistant(subdeptIndex, assistantIndex)} 
-                                      className="text-red-500 hover:text-red-700 hover:bg-red-50 h-8 w-8 flex-shrink-0"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                ))}
-                                {subdept.taskAssistantIds.length === 0 && (
-                                  <div className="p-3 text-center text-gray-500">
-                                    No assistants assigned yet
-                                  </div>
-                                )}
-                              </div>
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                onClick={() => handleAddTaskAssistant(subdeptIndex)} 
-                                className="w-full text-green-600 hover:text-green-700 border-green-600 hover:bg-green-50"
-                              >
-                                <Plus className="h-4 w-4 mr-1" /> Add Assistant
-                              </Button>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+                                                <div>
+                                                    <Label className="text-xs font-medium text-gray-600 flex items-center gap-1"><Calendar className="h-3 w-3"/>Start Date *</Label>
+                                                    <Input type="date" value={assistant.start_date || ''} onChange={(e) => handleAssignmentChange(subdeptIndex, 'taskAssistants', index, 'start_date', e.target.value)} className="text-sm mt-1" required/>
+                                                </div>
+                                                <div>
+                                                    <Label className="text-xs font-medium text-gray-600 flex items-center gap-1"><Calendar className="h-3 w-3"/>End Date (Optional)</Label>
+                                                    <Input type="date" value={assistant.end_date || ''} onChange={(e) => handleAssignmentChange(subdeptIndex, 'taskAssistants', index, 'end_date', e.target.value)} className="text-sm mt-1" min={assistant.start_date} />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {(subdept.taskAssistants || []).length === 0 && (<div className="p-6 text-center text-gray-500"><p className="text-sm">No assistants assigned</p></div>)}
+                                </div>
+                                <Button variant="outline" size="sm" onClick={() => handleAddBlankTaskAssistant(subdeptIndex)} className="w-full"><Plus className="h-4 w-4 mr-1"/>Add Assistant</Button>
                             </div>
-                          </div>
-                        </div>
-                      </div>
-                    </CardHeader>
+                        </TabsContent>
 
-                    <CardContent>
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <Label className="font-semibold text-gray-700">Classes</Label>
-                          <Button variant="outline" size="sm" onClick={() => handleAddClass(subdeptIndex)}><Plus className="h-4 w-4 mr-1" /> Add Class</Button>
-                        </div>
-                        
-                        <div className="space-y-4">
-                          {subdept.classes && subdept.classes.length > 0 ? (
-                            subdept.classes.map((cls, clsIndex) => (
-                              <ClassComponent key={cls.id} classItem={cls} onUpdate={updateFormState} onRemove={() => handleRemoveClass(subdeptIndex, clsIndex)} path={['subdepartments', subdeptIndex.toString(), 'classes', clsIndex.toString()]} index={`${subdeptIndex + 1}.${clsIndex + 1}`}/>
-                            ))
-                          ) : (
-                            <div className="text-center py-6 text-gray-500 border-2 border-dashed rounded-lg">No classes added yet. Click "Add Class" to get started.</div>
-                          )}
-                        </div>
-                      </div>
-                    </CardContent>
+                        <TabsContent value="classes" className="p-6 space-y-4">
+                           <div className="flex items-center justify-between">
+                               <h4 className="font-semibold text-gray-800">Classes</h4>
+                               <Button variant="outline" size="sm" onClick={() => handleAddClass(subdeptIndex)}><Plus className="h-4 w-4 mr-1"/>Add Class</Button>
+                           </div>
+                           <div className="space-y-4">
+                               {subdept.classes && subdept.classes.length > 0 ? (
+                                   subdept.classes.map((cls, clsIndex) => (
+                                       <ClassComponent key={cls.id} classItem={cls} onUpdate={updateFormState} onRemove={() => handleRemoveClass(subdeptIndex, clsIndex)} path={['subdepartments', subdeptIndex.toString(), 'classes', clsIndex.toString()]} index={`${subdeptIndex + 1}.${clsIndex + 1}`} />
+                                   ))
+                               ) : (<div className="text-center py-6 text-gray-500 border-2 border-dashed rounded-lg">No classes added yet.</div>)}
+                           </div>
+                        </TabsContent>
+                      </CardContent>
+                    </Tabs>
                   </Card>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Add first subdepartment section for new departments */}
           {isCreatingNewDepartment && departmentForm.subdepartments.length === 0 && (
             <div className="text-center py-8 border-2 border-dashed rounded-lg bg-gray-50">
               <Workflow className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-600 mb-4">This department doesn't have any subdepartments yet.</p>
-              <Button
-                variant="outline"
-                onClick={() => updateFormState(['subdepartments'], [{
-                  name: '',
-                  description: '',
-                  classes: [],
-                  taskManagerId: '',
-                  taskAssistantIds: [],
-                  officers: [],
-                  default_display: true
-                }])}
-              >
+              <Button variant="outline" onClick={() => updateFormState(['subdepartments'], [{ name: '', description: '', classes: [], officers: [], taskManagers: [], taskAssistants: [], default_display: true }])}>
                 <Plus className="h-4 w-4 mr-1" /> Add First Subdepartment
               </Button>
             </div>
@@ -735,9 +542,7 @@ export default function DepartmentDialog({
         </div>
 
         <div className="flex justify-end gap-2 mt-6 pt-6 border-t">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
-            Cancel
-          </Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>Cancel</Button>
           <Button onClick={onSave} disabled={isSaving}>
             {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {isCreatingNewDepartment || isCreatingSubdepartment ? 'Create' : 'Update'}

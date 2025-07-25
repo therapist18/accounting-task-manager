@@ -39,18 +39,18 @@ import { DocumentStageCell } from './components/DocumentStageCell';
 const ENHANCED_TABLE_HEADERS = [
   { id: 'id', label: 'Task ID', default: true, width: 'w-20' },
   { id: 'applicant_name', label: 'Applicant Name', default: true, width: 'w-48' },
-  { id: 'immigration_document_type', label: 'Immigration Doc Type', default: true, width: 'w-48' },
-  { id: 'immigration_expiry_date', label: 'Immigration Expiry Date', default: true, width: 'w-40' },
-  { id: 'immigration_status', label: 'Immigration Status', default: true, width: 'w-48' },
-  { id: 'current_stage_name', label: 'Current Stage Name', default: true, width: 'w-48' },
+  { id: 'immigration_document_type', label: 'Current Immigration Doc Type', default: true, width: 'w-48' },
+  { id: 'immigration_expiry_date', label: 'Current Immigration Expiry Date', default: false, width: 'w-40' },
+  { id: 'immigration_status', label: 'Current Immigration Status', default: true, width: 'w-48' },
+  { id: 'current_stage_name', label: 'Current Stage Name', default: false, width: 'w-48' },
   { id: 'current_stage_status_value', label: 'Current Stage Status', default: true, width: 'w-48' },
-  { id: 'current_stage_follow_up', label: 'Current Stage Follow-up', default: true, width: 'w-40' },
+  { id: 'current_stage_follow_up', label: 'Current Stage Follow-up', default: false, width: 'w-40' },
   { id: 'company_name', label: 'Company Name', default: true, width: 'w-48' },
   { id: 'job_level', label: 'Job Level', default: true, width: 'w-32' },
   { id: 'renewal_new', label: 'Renewal/New', default: false, width: 'w-28' },
   { id: 'case_status', label: 'Case Status', default: false, width: 'w-28' },
   { id: 'nationality', label: 'Nationality', default: false, width: 'w-32' },
-  { id: 'age', label: 'Age', default: false, width: 'w-20' },
+  { id: 'age', label: 'Age', default: true, width: 'w-20' },
   { id: 'task_manager', label: 'Task Manager', default: false, width: 'w-32' },
   { id: 'officer', label: 'Officer', default: false, width: 'w-32' },
   { id: 'task_assistant', label: 'Task Assistant', default: false, width: 'w-32' },
@@ -1103,26 +1103,26 @@ export default function DepartmentTasksManager({
 
     const getColor = (type: string) => {
       switch (type) {
-        case 'active': return 'text-green-800';
-        case 'expiring_soon': return 'text-blue-800';
-        case 'expired': return 'text-red-800';
-        default: return 'text-slate-600';
+        case 'active': return 'bg-green-800 text-white';
+        case 'expiring_soon': return 'bg-blue-800 text-white';
+        case 'expired': return 'bg-red-800 text-white';
+        default: return 'bg-slate-600 text-white';
       }
     };
 
     return (
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <span
+          <Badge
             className={`whitespace-normal text-sm ${getColor(statusInfo.type)}`}
           >
             {statusInfo.status}
-          </span>
+          </Badge>
           {statusInfo.type !== 'na' && (
             <Button
               variant="ghost"
               size="icon"
-              className="h-5 w-5 p-0 text-slate-500 hover:text-slate-800"
+              className="h-5 w-5 p-0 text-white hover:text-white"
               onClick={() => toggleImmigrationStatusExpansion(task.id.toString())}
             >
               {isExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
@@ -1169,21 +1169,21 @@ export default function DepartmentTasksManager({
 
     const getStatusColor = (status: string) => {
       switch (status.toLowerCase()) {
-        case 'completed': return 'text-green-800';
-        case 'pending': return 'text-yellow-800';
-        case 'in_progress': return 'text-blue-800';
-        case 'to enquire': return 'text-purple-800';
-        case 'to raise bill': return 'text-orange-800';
-        case 'to approve': return 'text-indigo-800';
-        case 'to submit': return 'text-cyan-800';
-        case 'to review': return 'text-amber-800';
-        case 'to process': return 'text-emerald-800';
-        case 'n/a': return 'text-slate-600';
+        case 'completed': return 'text-white';
+        case 'pending': return 'text-white';
+        case 'in_progress': return 'text-white';
+        case 'to enquire': return 'text-white';
+        case 'to raise bill': return 'text-white';
+        case 'to approve': return 'text-white';
+        case 'to submit': return 'text-white';
+        case 'to review': return 'text-white';
+        case 'to process': return 'text-white';
+        case 'n/a': return 'text-white';
         default:
           if (status.toLowerCase().startsWith('to ')) {
-            return 'text-blue-800';
+            return 'text-white';
           }
-          return 'text-slate-600';
+          return 'text-white';
       }
     };
 
@@ -1248,13 +1248,13 @@ export default function DepartmentTasksManager({
     switch (headerId) {
       case 'id': return task.id;
       case 'applicant_name': return (
-        <div className="flex items-center justify-between gap-1 w-full">
-          <div className="flex-grow text-left">
+        <div className="flex items-center justify-between gap-1 w-[300px]">
+          <div className="flex-grow">
             <div className="font-medium truncate" title={task.applicant_name}>{task.applicant_name || 'N/A'}</div>
-            <div className="text-sm text-slate-500">ID: {task.id}</div>
+            {/* <div className="text-sm">ID: {task.id}</div> */}
           </div>
           <Button
-            variant="ghost" size="icon" className="h-8 w-8 text-blue-500 hover:bg-blue-100 flex-shrink-0"
+            variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-blue-100 flex-shrink-0"
             title="Link source documents"
             onClick={() => { setLinkingTask(task); setIsLinkDialogOpen(true); }}
           ><LinkIcon className="h-4 w-4" /></Button>
@@ -1273,10 +1273,10 @@ export default function DepartmentTasksManager({
         if (!statusInfo.stageFollowUp) return '-';
         const getFollowUpTextColor = (followUp) => {
           switch (followUp?.toLowerCase()) {
-            case 'bcl': return 'text-blue-800';
-            case 'officer': return 'text-green-800';
-            case 'client': return 'text-purple-800';
-            default: return 'text-slate-600';
+            case 'bcl': return 'text-white';
+            case 'officer': return 'text-white';
+            case 'client': return 'text-white';
+            default: return 'text-white';
           }
         };
         return <span className={`whitespace-nowrap text-sm ${getFollowUpTextColor(statusInfo.stageFollowUp)}`}>{statusInfo.stageFollowUp}</span>;
@@ -1294,7 +1294,7 @@ export default function DepartmentTasksManager({
     }
   }, [companies, getTaskHierarchy, getUserDisplayName, getEnhancedImmigrationStatus, getCurrentStageStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, setLinkingTask, setIsLinkDialogOpen]);
 
-  // Generate table rows for transposed view
+  // Generate table rows for transposed view (Body only: Stats, Stages, Actions)
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
     if (!tasks.length) return []
 
@@ -1344,22 +1344,6 @@ export default function DepartmentTasksManager({
           }
         })
       }
-    }
-
-    // Case Details Section - only visible headers
-    rows.push({ key: 'section_header_case_details', type: 'section_header', label: 'Case Details', id: 'case_details', icon: Users });
-
-    if (expandedSections.has('case_details')) {
-      ENHANCED_TABLE_HEADERS.forEach(header => {
-        if (visibleHeaders.has(header.id)) {
-          rows.push({
-            key: header.id,
-            label: header.label,
-            type: 'basic',
-            getValue: (task: any) => getCellContent(task, header.id)
-          });
-        }
-      });
     }
 
     // Stages Section
@@ -1446,7 +1430,7 @@ export default function DepartmentTasksManager({
     }
 
     return rows
-  }, [departments, stages, companies, getTaskHierarchy, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleHeaders, visibleStats, kycDocuments, allDocuments, visibleStageIds, getUserDisplayName, getDocumentForTaskStage, getEnhancedImmigrationStatus, getCurrentStageStatus, getCellContent])
+  }, [stages, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage])
 
   // Render cell content for transposed view
   const renderCellContent = useCallback((row: any, task: any) => {
@@ -1454,12 +1438,6 @@ export default function DepartmentTasksManager({
 
     if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
       return <span className="text-sm text-gray-400 italic">N/A</span>;
-    }
-
-    // Handle different cell types
-    if (row.type === 'basic') {
-      // For basic types, the value is already processed by getCellContent
-      return React.isValidElement(value) ? value : <span className="text-sm font-medium text-slate-800">{value}</span>;
     }
 
     if (row.type === 'stage' && row.stage && task.stages?.[row.stage.id]) {
@@ -1562,7 +1540,7 @@ export default function DepartmentTasksManager({
       )
       default: return <span className="text-sm text-slate-800">{value}</span>
     }
-  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading])
+  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getKycFields])
 
   // State for enhanced table rendering
   const [tableRows, setTableRows] = useState([]);
@@ -1794,14 +1772,17 @@ export default function DepartmentTasksManager({
       }
     })
 
-    const totalColumns = headerStructure.length
+    const totalColumns = headerStructure.length;
+    const visibleCaseDetailHeaders = ENHANCED_TABLE_HEADERS.filter(header =>
+      visibleHeaders.has(header.id)
+    );
 
     return (
       <div className="space-y-4">
         <div className="border-2 border-slate-300 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 200px)' }}>
           <Table className="min-w-full border-separate border-spacing-0">
             <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
-              <TableRow className="border-b-2 border-slate-400">
+              {/* <TableRow className="border-b-2 border-slate-400">
                 <TableHead className="sticky left-0 z-30 bg-blue-600 font-bold text-white text-sm py-3 border-r-2 border-slate-400 w-20">
                   Order
                 </TableHead>
@@ -1846,7 +1827,52 @@ export default function DepartmentTasksManager({
                     )}
                   </TableHead>
                 ))}
-              </TableRow>
+              </TableRow> */}
+              {/* Case Details Section Header */}
+              {/* <TableRow className="bg-blue-200 border-y-2 border-slate-400 hover:bg-blue-200 border-b">
+                <TableCell className="py-0 px-0" colSpan={2}>
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <Users className="h-5 w-5 text-slate-600" />
+                      <span className="font-bold text-slate-700 text-lg">Case Details</span>
+                    </div>
+                    <div className="py-0 px-0 text-right">
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleSectionExpansion('case_details')}>
+                        {expandedSections.has('case_details') ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell colSpan={totalColumns} className="py-0 px-0"></TableCell>
+              </TableRow> */}
+
+              {/* Case Details Rows */}
+              {expandedSections.has('case_details') && visibleCaseDetailHeaders.map((header, index) => (
+                <TableRow key={header.id} className="bg-blue-600 text-white group border-b border-slate-200">
+                  <TableCell className="sticky left-0 z-10 bg-blue-600 text-white group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm p-2 text-center w-20">
+                    {index + 1}
+                  </TableCell>
+                  <TableCell className="sticky left-8 z-10 bg-blue-600 text-white group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm p-2 min-w-[400px]">
+                    {header.label}
+                  </TableCell>
+                  {headerStructure.map((item, colIndex) => (
+                    <TableCell key={`${header.id}-${colIndex}`} className={`text-center text-sm py-1 px-2 align-middle bg-blue-500 text-white border border-gray-100 w-[200px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}>
+                      {item.type === 'principal'
+                        ? getCellContent(item.task, header.id)
+                        : (() => {
+                          switch (header.id) {
+                            case 'applicant_name': return item.dependant.name || 'N/A';
+                            case 'nationality': return item.dependant.nationality || 'N/A';
+                            case 'age': return item.dependant.age?.toString() || 'N/A';
+                            case 'case_status': return <span className="text-sm">{item.dependant.relationship || 'Dependant'}</span>;
+                            default: return <span className="text-sm text-gray-400">-</span>;
+                          }
+                        })()
+                      }
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
             </TableHeader>
             <TableBody className="divide-y divide-slate-200">
               {loading ? (
@@ -1896,7 +1922,7 @@ export default function DepartmentTasksManager({
                       <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center w-20`}>
                         {row.stageOrder || (row.type !== 'stage' && row.type !== 'document' && row.type !== 'field' && row.type !== 'actions' ? (index + 1) : '')}
                       </TableCell>
-                      <TableCell className={`sticky left-20 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 min-w-[400px]`}>
+                      <TableCell className={`sticky left-8 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 min-w-[400px]`}>
                         <div className="flex items-center gap-2 justify-between">
                           <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }}>
                             <span className={row.type === 'stage' ? 'font-semibold' : ''}>{row.label}</span>
@@ -1918,12 +1944,7 @@ export default function DepartmentTasksManager({
                           {item.type === 'principal' ? (
                             renderCellContent(row, item.task)
                           ) : (
-                            // Render dependant data
-                            row.key === 'applicant_name' && item.dependant.name ? item.dependant.name :
-                              row.key === 'nationality' && item.dependant.nationality ? item.dependant.nationality :
-                                row.key === 'age' && item.dependant.age ? item.dependant.age.toString() :
-                                  row.key === 'case_status' ? <span className="text-sm">{item.dependant.relationship || 'Dependant'}</span> :
-                                    <span className="text-sm text-gray-400">-</span>
+                            <span className="text-sm text-gray-400">-</span>
                           )}
                         </TableCell>
                       ))}
@@ -1936,7 +1957,7 @@ export default function DepartmentTasksManager({
         </div>
       </div>
     )
-  }, [loading, error, tableRows, renderCellContent, expandedSections, expandedStages, expandedDocuments, expandedDependants, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, companies, toggleDependantsExpansion, getTaskHierarchy])
+  }, [loading, error, tableRows, renderCellContent, expandedSections, expandedStages, expandedDocuments, expandedDependants, toggleSectionExpansion, toggleStageExpansion, toggleDocumentExpansion, toggleDependantsExpansion, getCellContent, visibleHeaders, setLinkingTask, setIsLinkDialogOpen])
 
   const defaultSubdepartments = getDefaultSubdepartments()
 
