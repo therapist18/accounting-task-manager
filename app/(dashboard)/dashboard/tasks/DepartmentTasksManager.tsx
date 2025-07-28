@@ -111,19 +111,14 @@ export default function DepartmentTasksManager({
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
   const [tmUsers, setTmUsers] = useState<Map<number, any>>(new Map())
-  
-  // Enhanced staff filtering state
   const [activeOfficerTab, setActiveOfficerTab] = useState<string | null>(null)
   const [activeManagerTab, setActiveManagerTab] = useState<string | null>(null)
   const [activeAssistantTab, setActiveAssistantTab] = useState<string | null>(null)
-  const [subdepartmentOfficers, setSubdepartmentOfficers] = useState<Array<{id: string, name: string}>>([])
-  const [subdepartmentManagers, setSubdepartmentManagers] = useState<Array<{id: string, name: string}>>([])
-  const [subdepartmentAssistants, setSubdepartmentAssistants] = useState<Array<{id: string, name: string}>>([])
-
-  // State for LinkSourceDocumentDialog
+  const [subdepartmentOfficers, setSubdepartmentOfficers] = useState<Array<{ id: string, name: string }>>([])
+  const [subdepartmentManagers, setSubdepartmentManagers] = useState<Array<{ id: string, name: string }>>([])
+  const [subdepartmentAssistants, setSubdepartmentAssistants] = useState<Array<{ id: string, name: string }>>([])
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [linkingTask, setLinkingTask] = useState<UtilTask | null>(null);
-
   const [dataLoading, setDataLoading] = useState({
     departments: true,
     companies: true,
@@ -134,7 +129,13 @@ export default function DepartmentTasksManager({
     users: true
   })
 
-  // Helper function to get current active staff from history arrays
+  // FIXED: Updated getStaffName function to use proper name field
+  const getStaffName = useCallback((userId) => {
+    if (!userId) return '';
+    const user = tmUsers.get(parseInt(userId.toString()));
+    return user?.name || `User ${userId}`;
+  }, [tmUsers]);
+
   const getCurrentOfficer = useCallback((officerHistory) => {
     if (!officerHistory || !Array.isArray(officerHistory)) return null;
     return officerHistory.find(officer => !officer.end_date) || null;
@@ -150,7 +151,6 @@ export default function DepartmentTasksManager({
     return assistantHistory.filter(assistant => !assistant.end_date);
   }, []);
 
-  // Helper function to get document for task stage (ONLY returns linked documents)
   const getDocumentForTaskStage = useCallback((
     task: UtilTask,
     stage: { id: string; documents?: { kycId: string }[] },
@@ -165,7 +165,6 @@ export default function DepartmentTasksManager({
     return undefined;
   }, [allDocuments]);
 
-  // Enhanced function to get active staff from subdepartment
   const getActiveStaffFromSubdepartment = useCallback((subdepartmentId: string) => {
     if (!subdepartmentId || !departments.length) {
       return { officers: [], managers: [], assistants: [] };
@@ -177,46 +176,54 @@ export default function DepartmentTasksManager({
     const subdepartment = department.tm_subdepartments?.find(s => s.id.toString() === subdepartmentId);
     if (!subdepartment) return { officers: [], managers: [], assistants: [] };
 
-    // Get active staff from history
-    const activeOfficers = subdepartment.officer_history 
+    const activeOfficers = subdepartment.officer_history
       ? subdepartment.officer_history.filter(h => !h.end_date)
       : [];
-    const activeManagers = subdepartment.manager_history 
+    const activeManagers = subdepartment.manager_history
       ? subdepartment.manager_history.filter(h => !h.end_date)
       : [];
-    const activeAssistantsHistory = subdepartment.assistant_history 
+    const activeAssistantsHistory = subdepartment.assistant_history
       ? subdepartment.assistant_history.filter(h => !h.end_date)
       : [];
 
-    // Map to user objects with display names
+    // FIXED: Map to user objects with proper names
     const officers = activeOfficers.map(oh => {
-      const user = tmUsers.get(oh.id);
+      const user = tmUsers.get(parseInt(oh.id.toString()));
+      const displayName = user?.name || `Officer ${oh.id}`;
       return {
-        id: oh.id,
-        name: user?.display_name || user?.name || `Officer ${oh.id}`
+        id: oh.id.toString(),
+        name: displayName,
+        email: user?.email || '',
+        display_name: displayName
       };
-    }).filter(o => o.name);
+    }).filter(o => o.name !== `Officer ${o.id}`); // Filter out users not found in tmUsers
 
     const managers = activeManagers.map(mh => {
-      const user = tmUsers.get(mh.id);
+      const user = tmUsers.get(parseInt(mh.id.toString()));
+      const displayName = user?.name || `Manager ${mh.id}`;
       return {
-        id: mh.id,
-        name: user?.display_name || user?.name || `Manager ${mh.id}`
+        id: mh.id.toString(),
+        name: displayName,
+        email: user?.email || '',
+        display_name: displayName
       };
-    }).filter(m => m.name);
+    }).filter(m => m.name !== `Manager ${m.id}`); // Filter out users not found in tmUsers
 
     const assistants = activeAssistantsHistory.map(ah => {
-      const user = tmUsers.get(ah.id);
+      const user = tmUsers.get(parseInt(ah.id.toString()));
+      const displayName = user?.name || `Assistant ${ah.id}`;
       return {
-        id: ah.id,
-        name: user?.display_name || user?.name || `Assistant ${ah.id}`
+        id: ah.id.toString(),
+        name: displayName,
+        email: user?.email || '',
+        display_name: displayName
       };
-    }).filter(a => a.name);
+    }).filter(a => a.name !== `Assistant ${a.id}`); // Filter out users not found in tmUsers
 
     return { officers, managers, assistants };
   }, [departments, activeDepartmentTab, tmUsers]);
 
-  // Fetch tm_users data
+  // FIXED: Fetch tm_users data properly
   const fetchTmUsers = useCallback(async () => {
     try {
       const { data, error } = await supabase.from('tm_users').select('*')
@@ -224,8 +231,7 @@ export default function DepartmentTasksManager({
 
       const usersMap = new Map()
       data?.forEach(user => {
-        const displayName = user.full_name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email
-        usersMap.set(user.id, { ...user, display_name: displayName })
+        usersMap.set(user.id, user)
       })
       setTmUsers(usersMap)
       return usersMap
@@ -613,7 +619,7 @@ export default function DepartmentTasksManager({
   const getUserDisplayName = useCallback((userId: number | null | undefined) => {
     if (!userId) return 'N/A'
     const user = tmUsers.get(userId)
-    return user?.display_name || 'Unknown User'
+    return user?.name || 'Unknown User'
   }, [tmUsers])
 
   const getDefaultSubdepartments = useCallback(() => {
@@ -635,15 +641,10 @@ export default function DepartmentTasksManager({
 
   // Toggle functions
   const toggleImmigrationStatusExpansion = useCallback((taskId: string) => {
-    setExpandedImmigrationStatus(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(taskId)) {
-        newSet.delete(taskId)
-      } else {
-        newSet.add(taskId)
-      }
-      return newSet
-    })
+    setExpandedImmigrationStatus(prev => ({
+      ...prev,
+      [taskId]: !prev[taskId]
+    }))
   }, [])
 
   const toggleSectionExpansion = useCallback((sectionId: string) => {
@@ -748,7 +749,7 @@ export default function DepartmentTasksManager({
     })
   }
 
-  // Enhanced task filtering logic with staff-based filtering
+  // FIXED: Enhanced task filtering logic with proper staff-based filtering
   const getFilteredTasks = useCallback((status?: string) => {
     if (!departments.length || !activeDepartmentTab || !tasks.length) return []
     const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
@@ -772,27 +773,68 @@ export default function DepartmentTasksManager({
       if (activeFollowUpFilter === 'bcl') {
         // BCL filter - filter by manager or assistant
         if (activeManagerTab) {
-          filteredTasks = filteredTasks.filter(task =>
-            task.task_manager_id?.toString() === activeManagerTab
-          )
-        }
-        if (activeAssistantTab) {
+          filteredTasks = filteredTasks.filter(task => {
+            const isManagerMatch = task.task_manager_id?.toString() === activeManagerTab;
+
+            if (activeAssistantTab === 'no-assistant') {
+              // Show only tasks assigned to manager but no assistant
+              return isManagerMatch && !task.task_assistant_id;
+            } else if (activeAssistantTab) {
+              // Show tasks assigned to both manager and specific assistant
+              const isAssistantMatch = task.task_assistant_id?.toString() === activeAssistantTab;
+              return isManagerMatch && isAssistantMatch;
+            } else {
+              // Show all tasks for this manager (with or without assistants)
+              return isManagerMatch;
+            }
+          });
+        } else if (activeAssistantTab && activeAssistantTab !== 'no-assistant') {
+          // If assistant is selected but no manager, show tasks assigned to this assistant
           filteredTasks = filteredTasks.filter(task =>
             task.task_assistant_id?.toString() === activeAssistantTab
-          )
+          );
         }
       } else if (activeFollowUpFilter === 'officer') {
         // Officer filter
         if (activeOfficerTab) {
           filteredTasks = filteredTasks.filter(task =>
             task.officer_id?.toString() === activeOfficerTab
-          )
+          );
         }
       }
     }
 
     return filteredTasks
   }, [tasks, departments, activeDepartmentTab, activeSubdepartmentTab, activeSubTab, activeFollowUpFilter, activeManagerTab, activeAssistantTab, activeOfficerTab])
+
+  // FIXED: Add helper functions to calculate task counts for each staff member
+  const getTaskCountForManager = useCallback((managerId: string) => {
+    const managerTasks = getFilteredTasks('in_progress').filter(task =>
+      task.task_manager_id?.toString() === managerId
+    );
+    return managerTasks.length;
+  }, [getFilteredTasks]);
+
+  const getTaskCountForAssistant = useCallback((assistantId: string) => {
+    const assistantTasks = getFilteredTasks('in_progress').filter(task =>
+      task.task_assistant_id?.toString() === assistantId
+    );
+    return assistantTasks.length;
+  }, [getFilteredTasks]);
+
+  const getTaskCountForManagerWithoutAssistant = useCallback((managerId: string) => {
+    const managerOnlyTasks = getFilteredTasks('in_progress').filter(task =>
+      task.task_manager_id?.toString() === managerId && !task.task_assistant_id
+    );
+    return managerOnlyTasks.length;
+  }, [getFilteredTasks]);
+
+  const getTaskCountForOfficer = useCallback((officerId: string) => {
+    const officerTasks = getFilteredTasks('in_progress').filter(task =>
+      task.officer_id?.toString() === officerId
+    );
+    return officerTasks.length;
+  }, [getFilteredTasks]);
 
   const getWIPTasksByFollowUp = useCallback((followUpFilter: string) => {
     const wipTasks = getFilteredTasks('in_progress')
@@ -867,7 +909,7 @@ export default function DepartmentTasksManager({
       setSubdepartmentManagers([]);
       setSubdepartmentAssistants([]);
     }
-    
+
     // Reset active staff filters when subdepartment changes
     setActiveOfficerTab(null);
     setActiveManagerTab(null);
@@ -1222,7 +1264,7 @@ export default function DepartmentTasksManager({
     return dates;
   };
 
-  // Enhanced render staff tabs function
+  // FIXED: Enhanced staff tabs with task counts
   const renderStaffTabs = () => {
     if (activeFollowUpFilter === 'bcl' && activeSubdepartmentTab) {
       return (
@@ -1245,20 +1287,65 @@ export default function DepartmentTasksManager({
                     key={`manager-${manager.id}`}
                     variant={activeManagerTab === manager.id ? "default" : "outline"}
                     onClick={() => setActiveManagerTab(manager.id)}
-                    className="whitespace-nowrap text-sm"
+                    className="whitespace-nowrap text-sm flex items-center gap-2"
                     size="sm"
                   >
                     {manager.name}
+                    <Badge variant="secondary" className="text-xs">
+                      {getTaskCountForManager(manager.id)}
+                    </Badge>
                   </Button>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Assistant Tabs - Show when a manager is selected or when no managers exist */}
-          {subdepartmentAssistants.length > 0 && (activeManagerTab || subdepartmentManagers.length === 0) && (
+          {/* Assistant Tabs - Show when a manager is selected */}
+          {activeManagerTab && (
             <div>
               <Label className="text-sm font-medium text-gray-700 mb-2 block">Task Assistants</Label>
+              <div className="flex space-x-2 overflow-x-auto pb-2">
+                <Button
+                  variant={!activeAssistantTab ? "default" : "outline"}
+                  onClick={() => setActiveAssistantTab(null)}
+                  className="whitespace-nowrap text-sm"
+                  size="sm"
+                >
+                  All Tasks (Manager + Assistants)
+                </Button>
+                <Button
+                  variant={activeAssistantTab === 'no-assistant' ? "default" : "outline"}
+                  onClick={() => setActiveAssistantTab('no-assistant')}
+                  className="whitespace-nowrap text-sm flex items-center gap-2"
+                  size="sm"
+                >
+                  No Assistant (Manager Only)
+                  <Badge variant="secondary" className="text-xs">
+                    {getTaskCountForManagerWithoutAssistant(activeManagerTab)}
+                  </Badge>
+                </Button>
+                {subdepartmentAssistants.map((assistant) => (
+                  <Button
+                    key={`assistant-${assistant.id}`}
+                    variant={activeAssistantTab === assistant.id ? "default" : "outline"}
+                    onClick={() => setActiveAssistantTab(assistant.id)}
+                    className="whitespace-nowrap text-sm flex items-center gap-2"
+                    size="sm"
+                  >
+                    {assistant.name}
+                    <Badge variant="secondary" className="text-xs">
+                      {getTaskCountForAssistant(assistant.id)}
+                    </Badge>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Show assistant tabs without manager selection for overview */}
+          {!activeManagerTab && subdepartmentAssistants.length > 0 && (
+            <div>
+              <Label className="text-sm font-medium text-gray-700 mb-2 block">Task Assistants (All Managers)</Label>
               <div className="flex space-x-2 overflow-x-auto pb-2">
                 <Button
                   variant={!activeAssistantTab ? "default" : "outline"}
@@ -1273,10 +1360,13 @@ export default function DepartmentTasksManager({
                     key={`assistant-${assistant.id}`}
                     variant={activeAssistantTab === assistant.id ? "default" : "outline"}
                     onClick={() => setActiveAssistantTab(assistant.id)}
-                    className="whitespace-nowrap text-sm"
+                    className="whitespace-nowrap text-sm flex items-center gap-2"
                     size="sm"
                   >
                     {assistant.name}
+                    <Badge variant="secondary" className="text-xs">
+                      {getTaskCountForAssistant(assistant.id)}
+                    </Badge>
                   </Button>
                 ))}
               </div>
@@ -1314,10 +1404,13 @@ export default function DepartmentTasksManager({
                     key={`officer-${officer.id}`}
                     variant={activeOfficerTab === officer.id ? "default" : "outline"}
                     onClick={() => setActiveOfficerTab(officer.id)}
-                    className="whitespace-nowrap text-sm"
+                    className="whitespace-nowrap text-sm flex items-center gap-2"
                     size="sm"
                   >
                     {officer.name}
+                    <Badge variant="secondary" className="text-xs">
+                      {getTaskCountForOfficer(officer.id)}
+                    </Badge>
                   </Button>
                 ))}
               </div>
@@ -1481,7 +1574,7 @@ export default function DepartmentTasksManager({
     return sortTasks(tasksToRender, sortConfig)
   }, [sortConfig, companies])
 
-  // Helper function to get cell content for both table views
+  // FIXED: Helper function to get cell content for both table views
   const getCellContent = useCallback((task: any, headerId: string) => {
     switch (headerId) {
       case 'id': return task.id;
@@ -1524,12 +1617,30 @@ export default function DepartmentTasksManager({
       case 'case_status': return <span className="text-sm font-semibold">{task.status || 'pending'}</span>;
       case 'nationality': return task.nationality || 'N/A';
       case 'age': return task.age?.toString() || 'N/A';
-      case 'task_manager': return getUserDisplayName(task.task_manager_id);
-      case 'officer': return getUserDisplayName(task.officer_id);
-      case 'task_assistant': return getUserDisplayName(task.task_assistant_id);
+      case 'task_manager':
+        return task.task_manager_id ? (
+          <div className="flex flex-col">
+            <span className="font-medium">{getStaffName(task.task_manager_id)}</span>
+            <span className="text-xs text-muted-foreground">ID: {task.task_manager_id}</span>
+          </div>
+        ) : 'N/A';
+      case 'officer':
+        return task.officer_id ? (
+          <div className="flex flex-col">
+            <span className="font-medium">{getStaffName(task.officer_id)}</span>
+            <span className="text-xs text-muted-foreground">ID: {task.officer_id}</span>
+          </div>
+        ) : 'N/A';
+      case 'task_assistant':
+        return task.task_assistant_id ? (
+          <div className="flex flex-col">
+            <span className="font-medium">{getStaffName(task.task_assistant_id)}</span>
+            <span className="text-xs text-muted-foreground">ID: {task.task_assistant_id}</span>
+          </div>
+        ) : 'N/A';
       default: return task[headerId] || 'N/A';
     }
-  }, [companies, getTaskHierarchy, getUserDisplayName, getEnhancedImmigrationStatus, getCurrentStageStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, setLinkingTask, setIsLinkDialogOpen]);
+  }, [companies, getTaskHierarchy, getUserDisplayName, getEnhancedImmigrationStatus, getCurrentStageStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, setLinkingTask, setIsLinkDialogOpen, getStaffName]);
 
   // Generate table rows for transposed view (Body only: Stats, Stages, Actions)
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
@@ -2236,7 +2347,6 @@ export default function DepartmentTasksManager({
     performInitialLoad();
   }, [fetchTmUsers]); // fetchTmUsers is memoized and stable, so this effect still runs only once.
 
-
   // Load tasks and stages when department or subdepartment changes
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {
@@ -2534,7 +2644,7 @@ export default function DepartmentTasksManager({
                                 <TabsTrigger value="client" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Client <Badge variant="outline">{getWIPTasksByFollowUp('client').length}</Badge></TabsTrigger>
                               </TabsList>
                             </Tabs>
-                            
+
                             {/* Enhanced Staff Tabs */}
                             {(activeFollowUpFilter === 'bcl' || activeFollowUpFilter === 'officer') && activeSubdepartmentTab && (
                               <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">

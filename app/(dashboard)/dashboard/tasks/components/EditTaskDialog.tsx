@@ -330,8 +330,6 @@ export function EditTaskDialog({
         job_description: formData.job_description.trim(),
         status: formData.status,
         renewal_status: formData.renewal_status || null,
-        nationality: formData.nationality.trim() || null,
-        age: formData.age ? parseInt(formData.age, 10) : null,
         department_id: formData.department_id ? parseInt(formData.department_id, 10) : null,
         subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id, 10) : null,
         class_id: formData.class_id ? parseInt(formData.class_id, 10) : null,
@@ -421,9 +419,8 @@ export function EditTaskDialog({
                 <Select value={formData.renewal_status} onValueChange={(value) => handleInputChange('renewal_status', value)}>
                   <SelectTrigger><SelectValue placeholder="Select renewal status" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="first_time">First Time</SelectItem>
+                    <SelectItem value="new">New</SelectItem>
                     <SelectItem value="renewal">Renewal</SelectItem>
-                    <SelectItem value="extension">Extension</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -552,48 +549,6 @@ export function EditTaskDialog({
                 )}
               </div>
             </div>
-            
-            {/* Debug info - remove in production */}
-            {formData.subdepartment_id && (
-              <div className="mt-4 p-3 bg-gray-100 rounded text-xs space-y-2">
-                <p><strong>🔧 Debug Info:</strong></p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p><strong>Selected IDs:</strong></p>
-                    <p>Officer: {formData.officer_id || 'none'}</p>
-                    <p>Manager: {formData.task_manager_id || 'none'}</p>
-                    <p>Assistant: {formData.task_assistant_id || 'none'}</p>
-                  </div>
-                  <div>
-                    <p><strong>Available Staff:</strong></p>
-                    <p>Officers: {availableOfficers.length}</p>
-                    <p>Managers: {availableManagers.length}</p>
-                    <p>Assistants: {availableAssistants.length}</p>
-                  </div>
-                </div>
-                <div>
-                  <p><strong>Current Subdepartment:</strong></p>
-                  <p>ID: {formData.subdepartment_id}</p>
-                  {(() => {
-                    const dept = departments.find(d => d.id?.toString() === formData.department_id);
-                    const subdept = dept?.tm_subdepartments?.find(s => s.id?.toString() === formData.subdepartment_id);
-                    return (
-                      <div>
-                        <p>Name: {subdept?.name || 'Not found'}</p>
-                        <p>Has officer_history: {subdept?.officer_history ? 'Yes' : 'No'}</p>
-                        <p>Has manager_history: {subdept?.manager_history ? 'Yes' : 'No'}</p>
-                        <p>Has assistant_history: {subdept?.assistant_history ? 'Yes' : 'No'}</p>
-                      </div>
-                    );
-                  })()}
-                </div>
-                <div>
-                  <p><strong>Total Available:</strong></p>
-                  <p>All Users: {users?.length || 0}</p>
-                  <p>All Officers: {officers?.length || 0}</p>
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
