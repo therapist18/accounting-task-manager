@@ -777,19 +777,18 @@ export default function Departments() {
     }
   
     const subdept = departmentForm.subdepartments[0];
-  
-    console.log('Subdepartment form data:', subdept); // ⭐ DEBUG LOG
-    console.log('Officer ID from form:', subdept.officerId); // ⭐ DEBUG LOG
+    
+    console.log('Subdepartment form data:', subdept);
   
     // Validate subdepartment name
     if (!subdept.name.trim()) {
       throw new Error('Subdepartment name is required');
     }
   
-    // Get current subdepartment to find its department_id and existing history
+    // Get current subdepartment to find its department_id
     const { data: currentSubdept } = await supabase
       .from('tm_subdepartments')
-      .select('department_id, officer_history, manager_history, assistant_history')
+      .select('department_id')
       .eq('id', editingSubdepartmentId)
       .single();
   
@@ -797,7 +796,7 @@ export default function Departments() {
       throw new Error('Subdepartment not found');
     }
   
-    console.log('Current subdepartment from DB:', currentSubdept); // ⭐ DEBUG LOG
+    console.log('Current subdepartment from DB:', currentSubdept);
   
     // Check if another subdepartment with this name exists in the same department (excluding current)
     const { data: existingSubdept } = await supabase
@@ -812,85 +811,25 @@ export default function Departments() {
       throw new Error('Another subdepartment with this name already exists in this department');
     }
   
-    // Handle officer history updates ⭐ FIXED
-    let officer_history = currentSubdept?.officer_history || [];
-    const currentOfficer = getCurrentOfficer(officer_history);
-    
-    console.log('Current officer from history:', currentOfficer); // ⭐ DEBUG LOG
-    console.log('New officer ID:', subdept.officerId); // ⭐ DEBUG LOG
-    
-    if (subdept.officerId !== currentOfficer?.id) {
-      console.log('Officer assignment changed, updating history'); // ⭐ DEBUG LOG
-      
-      // End current officer assignment
-      officer_history = officer_history.map(officer => 
-        !officer.end_date ? { ...officer, end_date: new Date().toISOString() } : officer
-      );
+    // ⭐ FIXED: Use the history arrays directly from the form
+    const officer_history = subdept.officer_history || [];
+    const manager_history = subdept.manager_history || [];
+    const assistant_history = subdept.assistant_history || [];
   
-      // Add new officer if selected
-      if (subdept.officerId && subdept.officerId !== '') {
-        officer_history.push({
-          id: subdept.officerId,
-          start_date: new Date().toISOString()
-        });
-        console.log('Added new officer to history:', subdept.officerId); // ⭐ DEBUG LOG
-      }
-    } else {
-      console.log('Officer assignment unchanged'); // ⭐ DEBUG LOG
-    }
+    console.log('History data to save:', {
+      officer_history,
+      manager_history,
+      assistant_history
+    });
   
-    // Handle manager history updates
-    let manager_history = currentSubdept?.manager_history || [];
-    const currentManager = getCurrentManager(manager_history);
-    if (subdept.taskManagerId !== currentManager?.id) {
-      // End current manager assignment
-      manager_history = manager_history.map(manager => 
-        !manager.end_date ? { ...manager, end_date: new Date().toISOString() } : manager
-      );
-  
-      // Add new manager if selected
-      if (subdept.taskManagerId && subdept.taskManagerId !== '') {
-        manager_history.push({
-          id: subdept.taskManagerId,
-          start_date: new Date().toISOString()
-        });
-      }
-    }
-  
-    // Handle assistant history updates
-    let assistant_history = currentSubdept?.assistant_history || [];
-    const currentAssistants = getCurrentAssistants(assistant_history);
-    const newAssistantIds = subdept.taskAssistantIds.filter(id => id !== '');
-    const currentAssistantIds = currentAssistants.map(a => a.id);
-  
-    // Check if assistant assignments changed
-    const assistantsChanged = JSON.stringify(newAssistantIds.sort()) !== JSON.stringify(currentAssistantIds.sort());
-    
-    if (assistantsChanged) {
-      // End current assistant assignments
-      assistant_history = assistant_history.map(assistant => 
-        !assistant.end_date ? { ...assistant, end_date: new Date().toISOString() } : assistant
-      );
-  
-      // Add new assistants
-      newAssistantIds.forEach(assistantId => {
-        assistant_history.push({
-          id: assistantId,
-          start_date: new Date().toISOString()
-        });
-      });
-    }
-  
-    console.log('Final officer_history to save:', officer_history); // ⭐ DEBUG LOG
-  
-    // Update the subdepartment
+    // Update the subdepartment with the new history-based structure
     const { error: updateError } = await supabase
       .from('tm_subdepartments')
       .update({
         name: subdept.name.trim(),
         description: subdept.description,
         default_display: subdept.default_display,
-        officer_history, // ⭐ FIXED: Make sure this is included
+        officer_history,
         manager_history,
         assistant_history,
         updated_at: new Date().toISOString()
@@ -898,11 +837,11 @@ export default function Departments() {
       .eq('id', editingSubdepartmentId);
   
     if (updateError) {
-      console.error('Database update error:', updateError); // ⭐ DEBUG LOG
+      console.error('Database update error:', updateError);
       throw updateError;
     }
   
-    console.log('Subdepartment updated successfully'); // ⭐ DEBUG LOG
+    console.log('Subdepartment updated successfully');
   
     // Handle classes and requirements updates
     if (subdept.classes && subdept.classes.length > 0) {
@@ -919,7 +858,7 @@ export default function Departments() {
   
     const subdept = departmentForm.subdepartments[0];
   
-    console.log('Creating subdepartment with officer:', subdept.officerId); // ⭐ DEBUG LOG
+    console.log('Creating subdepartment with data:', subdept);
   
     // Validate subdepartment name
     if (!subdept.name.trim()) {
@@ -948,25 +887,16 @@ export default function Departments() {
   
     const nextOrder = (maxOrder?.[0]?.order || 0) + 1;
   
-    // Prepare officer_history, manager_history, and assistant_history ⭐ FIXED
-    const officer_history = (subdept.officerId && subdept.officerId !== '') ? [{
-      id: subdept.officerId,
-      start_date: new Date().toISOString()
-    }] : []
+    // ⭐ FIXED: Use the history arrays directly from the form
+    const officer_history = subdept.officer_history || [];
+    const manager_history = subdept.manager_history || [];
+    const assistant_history = subdept.assistant_history || [];
   
-    const manager_history = (subdept.taskManagerId && subdept.taskManagerId !== '') ? [{
-      id: subdept.taskManagerId,
-      start_date: new Date().toISOString()
-    }] : []
-  
-    const assistant_history = subdept.taskAssistantIds
-      .filter(id => id !== '')
-      .map(id => ({
-        id,
-        start_date: new Date().toISOString()
-      }))
-  
-    console.log('Officer history to create:', officer_history); // ⭐ DEBUG LOG
+    console.log('History data to create:', {
+      officer_history,
+      manager_history,
+      assistant_history
+    });
   
     // Create the subdepartment
     const { data: newSubdept, error: createError } = await supabase
@@ -977,7 +907,7 @@ export default function Departments() {
         department_id: editingDepartmentId,
         default_display: subdept.default_display,
         order: nextOrder,
-        officer_history, // ⭐ FIXED: Make sure this is included
+        officer_history,
         manager_history,
         assistant_history
       })
@@ -985,11 +915,11 @@ export default function Departments() {
       .single();
   
     if (createError) {
-      console.error('Database create error:', createError); // ⭐ DEBUG LOG
+      console.error('Database create error:', createError);
       throw createError;
     }
   
-    console.log('Subdepartment created successfully with ID:', newSubdept.id); // ⭐ DEBUG LOG
+    console.log('Subdepartment created successfully with ID:', newSubdept.id);
   
     // Handle classes and requirements if any
     if (subdept.classes && subdept.classes.length > 0) {
@@ -1000,10 +930,10 @@ export default function Departments() {
   const createSubdepartmentsForDepartment = async (departmentId, subdepartments) => {
     for (let i = 0; i < subdepartments.length; i++) {
       const subdept = subdepartments[i];
-
+  
       // Skip empty subdepartments
       if (!subdept.name.trim()) continue;
-
+  
       // Check for duplicates within the same department
       const { data: existingSubdept } = await supabase
         .from('tm_subdepartments')
@@ -1011,30 +941,17 @@ export default function Departments() {
         .ilike('name', subdept.name.trim())
         .eq('department_id', departmentId)
         .limit(1);
-
+  
       if (existingSubdept && existingSubdept.length > 0) {
         console.warn(`Skipping duplicate subdepartment: ${subdept.name}`);
         continue;
       }
-
-      // Prepare officer_history, manager_history, and assistant_history
-      const officer_history = subdept.officerId ? [{
-        id: subdept.officerId,
-        start_date: new Date().toISOString()
-      }] : []
-
-      const manager_history = subdept.taskManagerId ? [{
-        id: subdept.taskManagerId,
-        start_date: new Date().toISOString()
-      }] : []
-
-      const assistant_history = subdept.taskAssistantIds
-        .filter(id => id !== '')
-        .map(id => ({
-          id,
-          start_date: new Date().toISOString()
-        }))
-
+  
+      // ⭐ FIXED: Use the history arrays directly from the form
+      const officer_history = subdept.officer_history || [];
+      const manager_history = subdept.manager_history || [];
+      const assistant_history = subdept.assistant_history || [];
+  
       // Create the subdepartment
       const { data: newSubdept, error: subdeptError } = await supabase
         .from('tm_subdepartments')
@@ -1050,9 +967,9 @@ export default function Departments() {
         })
         .select()
         .single();
-
+  
       if (subdeptError) throw subdeptError;
-
+  
       // Handle classes and requirements
       if (subdept.classes && subdept.classes.length > 0) {
         await saveClassRequirements(newSubdept.id, subdept.classes);
@@ -1107,45 +1024,76 @@ export default function Departments() {
         taskManagerId: '',
         taskAssistantIds: [],
         default_display: true,
-        officerId: '', // ⭐ FIXED: Initialize officerId for new subdepartment
+        officerId: '', 
       }],
       officerId: ''
     });
     setIsAddDepartmentOpen(true);
   };
 
-  const handleEditSubdepartment = (subdept) => {
-    console.log('Editing subdepartment:', subdept.id);
-    setEditingDepartmentId(null);
-    setEditingSubdepartmentId(subdept.id);
-  
-    // Find the department name for this subdepartment
-    const dept = departments.find(d =>
-      d.tm_subdepartments?.some(s => s.id === subdept.id)
+  const handleEditSubdepartment = (subdept: Subdepartment) => {
+    // Find the department that contains this subdepartment
+    const department = departments.find(d => 
+      d.tm_subdepartments?.some(sd => sd.id === subdept.id)
     );
-  
-    // Get current manager, assistants, and officer
-    const currentManager = getCurrentManager(subdept.manager_history || []);
-    const currentAssistants = getCurrentAssistants(subdept.assistant_history || []);
-    const currentOfficer = getCurrentOfficer(subdept.officer_history || []); // ⭐ FIXED: Get current officer
-  
-    console.log('Current officer for subdepartment:', currentOfficer); // ⭐ DEBUG LOG
-  
+
+    if (!department) {
+      console.error('Department not found for subdepartment:', subdept.id);
+      return;
+    }
+
+    // Find the full subdepartment data including role assignments
+    const fullSubdept = department.tm_subdepartments?.find(sd => sd.id === subdept.id);
+    if (!fullSubdept) {
+      console.error('Subdepartment data not found:', subdept.id);
+      return;
+    }
+
+    // Get current role assignments
+    const currentManager = getCurrentManager(fullSubdept.manager_history || []);
+    const currentAssistants = getCurrentAssistants(fullSubdept.assistant_history || []);
+    const currentOfficer = getCurrentOfficer(fullSubdept.officer_history || []);
+
+    console.log('Editing subdepartment:', {
+      subdept: fullSubdept,
+      currentManager,
+      currentAssistants,
+      currentOfficer
+    });
+
+    // Initialize the form with all necessary data
     setDepartmentForm({
-      name: dept?.name || '',
-      description: dept?.description || '',
-      default_display: dept?.default_display || true,
+      name: department.name,
+      description: department.description || '',
+      default_display: department.default_display || true,
       subdepartments: [{
-        name: subdept.name,
-        description: subdept.description || '',
-        classes: subdept.classes || [],
+        ...fullSubdept, // Spread all subdepartment properties
+        id: fullSubdept.id,
+        name: fullSubdept.name,
+        description: fullSubdept.description || '',
+        classes: fullSubdept.classes || [],
+        default_display: fullSubdept.default_display || true,
+        
+        // Role assignments
+        officerId: currentOfficer?.id || '',
         taskManagerId: currentManager?.id || '',
         taskAssistantIds: currentAssistants.map(a => a.id),
-        default_display: subdept.default_display || true,
-        officerId: currentOfficer?.id || '', // ⭐ FIXED: Set officerId in form state
+        
+        // Role histories (ensure they're always arrays)
+        officer_history: fullSubdept.officer_history || [],
+        manager_history: fullSubdept.manager_history || [],
+        assistant_history: fullSubdept.assistant_history || [],
+        
+        // Role arrays (ensure they're always arrays)
+        officers: fullSubdept.officers || [],
+        taskManagers: fullSubdept.taskManagers || [],
+        taskAssistants: fullSubdept.taskAssistants || []
       }],
       officerId: '' // Department officer is not being edited here
     });
+
+    setEditingDepartmentId(department.id);
+    setEditingSubdepartmentId(fullSubdept.id);
     setIsAddDepartmentOpen(true);
   };
  

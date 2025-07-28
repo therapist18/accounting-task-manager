@@ -11,10 +11,10 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardDescription, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs" // ⭐ NEW: Import Tabs
-import { ChevronDown, ChevronUp, Plus, Trash2, Layers, User as UserIcon, ChevronsUpDown, FolderPlus, Edit, Building, Workflow, Loader2, Shield, X, BoxSelect, Calendar, Users, FileText } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ChevronDown, ChevronUp, Plus, Trash2, Layers, User as UserIcon, ChevronsUpDown, FolderPlus, Edit, Building, Workflow, Loader2, Shield, X, BoxSelect, Calendar, Users, FileText, History } from "lucide-react"
 
-import { Department, Subdepartment, Class, SubClass, Requirement, SubdepartmentForm, ClassForm, SubClassForm, RequirementForm, User, DepartmentForm } from "../database"
+import { Department, Subdepartment, Class, SubClass, Requirement, SubdepartmentForm, ClassForm, SubClassForm, RequirementForm, User as UserType, DepartmentForm } from "../database"
 import { updateNestedState } from "../page"
 
 // Helper function for hierarchical numbering
@@ -143,7 +143,7 @@ function SubClassComponent({
                   requirement={req}
                   onUpdate={onUpdate}
                   onRemove={() => removeRequirement(reqIndex)}
-                  path={[...path, 'requirements', reqIndex.toString()]} 
+                  path={[...path, 'requirements', reqIndex.toString()]}
                   index={`${index}.${reqIndex + 1}`}
                 />
               ))}
@@ -213,7 +213,7 @@ function ClassComponent({
               subClass={subClass}
               onUpdate={onUpdate}
               onRemove={() => removeSubClass(subClassIndex)}
-              path={[...path, 'subClasses', subClassIndex.toString()]} 
+              path={[...path, 'subClasses', subClassIndex.toString()]}
               index={`${index}.${subClassIndex + 1}`}
             />
           ))}
@@ -255,8 +255,60 @@ export default function DepartmentDialog({
   isSaving
 }: DepartmentDialogProps) {
   const [selectedManagerId, setSelectedManagerId] = useState<string>('');
-  const updateFormState = (path: string[], value: any) => 
-    setDepartmentForm(prevState => updateNestedState(prevState, path, value));
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  // Get current assignments from history (no end date or end date in future)
+  const getCurrentAssignments = (history: any[] = []) => {
+    const now = new Date();
+    return history.filter(item => {
+      const endDate = item.end_date ? new Date(item.end_date) : null;
+      return !endDate || endDate > now;
+    });
+  };
+
+  // Get user details by ID
+  const getUserDetails = (id: string) => {
+    return users.find(user => user.id === id);
+  };
+
+  // Format date for display
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return '';
+    return new Date(dateString).toLocaleDateString();
+  };
+
+  // Debug effect to log initial props and form changes
+  React.useEffect(() => {
+    console.log('DepartmentDialog mounted with props:', {
+      open,
+      departmentForm: {
+        ...departmentForm,
+        subdepartments: departmentForm.subdepartments?.map(sd => ({
+          name: sd.name,
+          officer_history: sd.officer_history,
+          manager_history: sd.manager_history,
+          assistant_history: sd.assistant_history,
+          officers: sd.officers,
+          taskManagers: sd.taskManagers,
+          taskAssistants: sd.taskAssistants
+        }))
+      },
+      users: users?.length || 0,
+      officers: officers?.length || 0,
+      editingDepartmentId,
+      editingSubdepartmentId,
+      isSaving
+    });
+  }, [open]); // Only run when the dialog opens
+
+  const updateFormState = (path: string[], value: any) => {
+    console.log('Updating form state:', { path, value });
+    setDepartmentForm(prevState => {
+      const newState = updateNestedState(prevState, path, value);
+      console.log('New form state:', newState);
+      return newState;
+    });
+  };
 
   const isCreatingNewDepartment = !editingDepartmentId && !editingSubdepartmentId;
   const isEditingDepartment = editingDepartmentId && !editingSubdepartmentId && departmentForm.subdepartments.length === 0;
@@ -296,7 +348,7 @@ export default function DepartmentDialog({
   const handleRemoveClass = (subdeptIndex: number, classIndex: number) => {
     updateFormState(['subdepartments', subdeptIndex, 'classes'], departmentForm.subdepartments[subdeptIndex].classes.filter((_, i) => i !== classIndex));
   };
-  
+
   const handleSubdepartmentChange = (subdeptIndex: number, field: string, value: any) => updateFormState(['subdepartments', subdeptIndex, field], value);
 
   // ⭐ START: New and updated role management functions
@@ -306,7 +358,7 @@ export default function DepartmentDialog({
       start_date: new Date().toISOString().split('T')[0],
       end_date: ''
     };
-    
+
     if (managerId) {
       return { ...assignment, manager_id: managerId };
     }
@@ -315,44 +367,70 @@ export default function DepartmentDialog({
 
   const handleAddRoleAssignment = (subdeptIndex: number, role: 'officers' | 'taskManagers' | 'taskAssistants', userId: string) => {
     if (!userId || userId === 'none') return;
-    const currentAssignments = departmentForm.subdepartments[subdeptIndex][role] || [];
-    if (currentAssignments.some(a => a.id === userId)) return;
-    updateFormState(['subdepartments', subdeptIndex, role], [...currentAssignments, createNewAssignment(userId)]);
+
+    // Determine the history field name
+    const historyField = role === 'officers' ? 'officer_history' :
+      role === 'taskManagers' ? 'manager_history' :
+        'assistant_history';
+
+    const currentHistory = departmentForm.subdepartments[subdeptIndex][historyField] || [];
+
+    // Check if user is already assigned (not ended)
+    const existingActive = currentHistory.find(item =>
+      item.id === userId && (!item.end_date || new Date(item.end_date) > new Date())
+    );
+
+    if (existingActive) return; // User already has active assignment
+
+    const newAssignment = createNewAssignment(userId);
+    updateFormState(['subdepartments', subdeptIndex, historyField], [...currentHistory, newAssignment]);
   };
 
   const handleRemoveRoleAssignment = (subdeptIndex: number, role: 'officers' | 'taskManagers' | 'taskAssistants', assignmentIndex: number) => {
-    const currentAssignments = departmentForm.subdepartments[subdeptIndex][role] || [];
-    updateFormState(['subdepartments', subdeptIndex, role], currentAssignments.filter((_, index) => index !== assignmentIndex));
+    const historyField = role === 'officers' ? 'officer_history' :
+      role === 'taskManagers' ? 'manager_history' :
+        'assistant_history';
+
+    const currentHistory = departmentForm.subdepartments[subdeptIndex][historyField] || [];
+    updateFormState(['subdepartments', subdeptIndex, historyField], currentHistory.filter((_, index) => index !== assignmentIndex));
   };
 
-  const handleAssignmentChange = (subdeptIndex: number, role: 'taskAssistants', assignmentIndex: number, field: 'id' | 'start_date' | 'end_date' | 'manager_id', value: string) => {
-    const currentAssignments = [...(departmentForm.subdepartments[subdeptIndex][role] || [])];
-    currentAssignments[assignmentIndex] = { ...currentAssignments[assignmentIndex], [field]: value };
-    updateFormState(['subdepartments', subdeptIndex, role], currentAssignments);
-  };
-  
   const handleAssignmentDateChange = (subdeptIndex: number, role: 'officers' | 'taskManagers', assignmentIndex: number, field: 'start_date' | 'end_date', value: string) => {
-    const currentAssignments = [...(departmentForm.subdepartments[subdeptIndex][role] || [])];
-    currentAssignments[assignmentIndex] = { ...currentAssignments[assignmentIndex], [field]: value };
-    updateFormState(['subdepartments', subdeptIndex, role], currentAssignments);
+    const historyField = role === 'officers' ? 'officer_history' : 'manager_history';
+    const currentHistory = [...(departmentForm.subdepartments[subdeptIndex][historyField] || [])];
+    currentHistory[assignmentIndex] = { ...currentHistory[assignmentIndex], [field]: value };
+    updateFormState(['subdepartments', subdeptIndex, historyField], currentHistory);
   };
 
   const getAvailableUsersForRole = (subdeptIndex: number, role: 'officers' | 'taskManagers' | 'taskAssistants') => {
-    const assignedIds = departmentForm.subdepartments[subdeptIndex][role]?.map(a => a.id) || [];
+    const historyField = role === 'officers' ? 'officer_history' :
+      role === 'taskManagers' ? 'manager_history' :
+        'assistant_history';
+
+    const currentHistory = departmentForm.subdepartments[subdeptIndex][historyField] || [];
+    const activeAssignments = getCurrentAssignments(currentHistory);
+    const assignedIds = activeAssignments.map(a => a.id);
+
     const sourceList = role === 'officers' ? officers : users;
     return sourceList.filter(user => !assignedIds.includes(user.id));
   };
 
   const handleAddBlankTaskAssistant = (subdeptIndex: number, managerId: string, userId: string) => {
     if (!managerId || !userId) return;
-    
-    const currentAssistants = departmentForm.subdepartments[subdeptIndex].taskAssistants || [];
-    updateFormState(
-      ['subdepartments', subdeptIndex, 'taskAssistants'], 
-      [...currentAssistants, createNewAssignment(userId, managerId)]
+
+    const currentHistory = departmentForm.subdepartments[subdeptIndex].assistant_history || [];
+
+    // Check if user already has active assignment with this manager
+    const existingActive = currentHistory.find(item =>
+      item.id === userId && item.manager_id === managerId &&
+      (!item.end_date || new Date(item.end_date) > new Date())
     );
+
+    if (existingActive) return;
+
+    const newAssignment = createNewAssignment(userId, managerId);
+    updateFormState(['subdepartments', subdeptIndex, 'assistant_history'], [...currentHistory, newAssignment]);
   };
-  // ⭐ END: New and updated role management functions
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -367,7 +445,7 @@ export default function DepartmentDialog({
           </DialogTitle>
           <DialogDescription>{getDialogDescription()}</DialogDescription>
         </DialogHeader>
-        
+
         <div className="space-y-6 overflow-y-auto p-1">
           {(isCreatingNewDepartment || isEditingDepartment) && (
             <div className="space-y-4 p-4 bg-blue-50 rounded-lg border">
@@ -405,269 +483,535 @@ export default function DepartmentDialog({
                   <Card key={subdeptIndex} className="bg-gray-50 overflow-hidden">
                     <Tabs defaultValue="details" className="w-full">
                       <CardHeader className="bg-white border-b">
-                         <div className="flex items-center space-x-2">
-                            <Badge variant="outline" className="font-mono bg-gray-200 text-gray-700">{subdeptIndex + 1}</Badge>
-                             <Input placeholder="Enter subdepartment name" value={subdept.name} onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)} className="flex-1 font-semibold text-lg" />
-                         </div>
+                        <div className="flex items-center space-x-2">
+                          <Badge variant="outline" className="font-mono bg-gray-200 text-gray-700">{subdeptIndex + 1}</Badge>
+                          <Input placeholder="Enter subdepartment name" value={subdept.name} onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'name', e.target.value)} className="flex-1 font-semibold text-lg" />
+                        </div>
                         <TabsList className="grid w-full grid-cols-3 mt-2">
-                           <TabsTrigger value="details"><FileText className="h-4 w-4 mr-2"/>Details</TabsTrigger>
-                           <TabsTrigger value="roles"><Users className="h-4 w-4 mr-2"/>Role Assignments</TabsTrigger>
-                           <TabsTrigger value="classes"><Layers className="h-4 w-4 mr-2"/>Classes</TabsTrigger>
+                          <TabsTrigger value="details"><FileText className="h-4 w-4 mr-2" />Details</TabsTrigger>
+                          <TabsTrigger value="roles"><Users className="h-4 w-4 mr-2" />Role Assignments</TabsTrigger>
+                          <TabsTrigger value="classes"><Layers className="h-4 w-4 mr-2" />Classes</TabsTrigger>
                         </TabsList>
                       </CardHeader>
                       <CardContent className="p-0">
                         <TabsContent value="details" className="p-6 space-y-4">
-                            <h4 className="text-lg font-semibold text-gray-800 flex items-center gap-2">Basic Information</h4>
-                            <div>
-                                <Label htmlFor={`subdept-desc-${subdeptIndex}`}>Description</Label>
-                                <Textarea id={`subdept-desc-${subdeptIndex}`} placeholder="Enter subdepartment description" value={subdept.description} onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)} className="min-h-[100px]" />
-                            </div>
-                            <div className="flex items-center space-x-2">
-                                <Checkbox checked={subdept.default_display} onCheckedChange={(checked) => handleSubdepartmentChange(subdeptIndex, 'default_display', Boolean(checked))} id={`subdept-default-display-${subdeptIndex}`} />
-                                <Label htmlFor={`subdept-default-display-${subdeptIndex}`} className="text-sm text-gray-700">Default Display</Label>
-                            </div>
+                          <h4 className="text-lg font-semibold text-gray-800 flex items-center gap-2">Basic Information</h4>
+                          <div>
+                            <Label htmlFor={`subdept-desc-${subdeptIndex}`}>Description</Label>
+                            <Textarea id={`subdept-desc-${subdeptIndex}`} placeholder="Enter subdepartment description" value={subdept.description} onChange={(e) => handleSubdepartmentChange(subdeptIndex, 'description', e.target.value)} className="min-h-[100px]" />
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Checkbox checked={subdept.default_display} onCheckedChange={(checked) => handleSubdepartmentChange(subdeptIndex, 'default_display', Boolean(checked))} id={`subdept-default-display-${subdeptIndex}`} />
+                            <Label htmlFor={`subdept-default-display-${subdeptIndex}`} className="text-sm text-gray-700">Default Display</Label>
+                          </div>
                         </TabsContent>
 
                         <TabsContent value="roles" className="p-6 space-y-6">
-                            {[{
-                                title: "Officer", role: 'officers', icon: Shield, color: 'purple', source: officers, filter: (user) => true, badge: (user) => null
-                            }, {
-                                title: "Task Managers", role: 'taskManagers', icon: UserIcon, color: 'blue', source: users, filter: (user) => ['task_manager', 'admin', 'user'].includes(user.role), badge: (user) => user.role === 'task_manager' ? 'Manager' : user.role === 'admin' ? 'Admin' : 'User'
-                            }].map(roleConfig => (
-                                <div key={roleConfig.role} className={`space-y-4 p-4 border-l-4 border-${roleConfig.color}-500 bg-${roleConfig.color}-50/30 rounded-r-lg`}>
-                                    <div className="flex items-center justify-between">
-                                        <Label className={`text-sm font-medium text-${roleConfig.color}-700 flex items-center gap-2`}><roleConfig.icon className="h-4 w-4"/>{roleConfig.title}</Label>
-                                        <Select onValueChange={(value) => handleAddRoleAssignment(subdeptIndex, roleConfig.role, value)}>
-                                            <SelectTrigger className="w-48"><SelectValue placeholder={`Add ${roleConfig.title.slice(0, -1)}...`} /></SelectTrigger>
-                                            <SelectContent>
-                                                {getAvailableUsersForRole(subdeptIndex, roleConfig.role).filter(roleConfig.filter).map((user) => (
-                                                    <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
-                                                ))}
-                                                {getAvailableUsersForRole(subdeptIndex, roleConfig.role).filter(roleConfig.filter).length === 0 && (<SelectItem value="none" disabled>All eligible users assigned</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="space-y-3 max-h-64 overflow-y-auto border rounded-md bg-white p-2">
-                                        {(subdept[roleConfig.role] || []).map((assignment, index) => {
-                                            const userData = roleConfig.source.find(u => u.id === assignment.id);
-                                            return userData ? (
-                                                <div key={`${assignment.id}-${index}`} className="p-3 border-b last:border-b-0 hover:bg-gray-50 rounded-md">
-                                                    <div className="flex items-center justify-between mb-2">
-                                                        <div className="flex items-center gap-3">
-                                                            <roleConfig.icon className={`h-5 w-5 text-${roleConfig.color}-600 flex-shrink-0`} />
-                                                            <div>
-                                                                <p className="font-medium text-gray-900">{userData.name}</p>
-                                                                <p className="text-sm text-gray-500">{userData.email}</p>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center gap-2">
-                                                            <Badge variant={assignment.end_date ? "secondary" : "default"} className={assignment.end_date ? "bg-gray-500" : "bg-green-500"}>{assignment.end_date ? 'Past' : 'Active'}</Badge>
-                                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:bg-red-50" onClick={() => handleRemoveRoleAssignment(subdeptIndex, roleConfig.role, index)}><X className="h-4 w-4" /></Button>
-                                                        </div>
-                                                    </div>
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
-                                                        <div>
-                                                            <Label className="text-xs font-medium text-gray-600 flex items-center gap-1"><Calendar className="h-3 w-3"/>Start Date *</Label>
-                                                            <Input type="date" value={assignment.start_date || ''} onChange={(e) => handleAssignmentDateChange(subdeptIndex, roleConfig.role, index, 'start_date', e.target.value)} className="text-sm mt-1" required/>
-                                                        </div>
-                                                        <div>
-                                                            <Label className="text-xs font-medium text-gray-600 flex items-center gap-1"><Calendar className="h-3 w-3"/>End Date (Optional)</Label>
-                                                            <Input type="date" value={assignment.end_date || ''} onChange={(e) => handleAssignmentDateChange(subdeptIndex, roleConfig.role, index, 'end_date', e.target.value)} className="text-sm mt-1" min={assignment.start_date} />
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ) : null;
-                                        })}
-                                        {(subdept[roleConfig.role] || []).length === 0 && (<div className="p-6 text-center text-gray-500"><p className="text-sm">No users assigned to this role</p></div>)}
-                                    </div>
-                                </div>
-                            ))}
-                            {/* Task Assistants - grouped by manager */}
-                            <div className={`space-y-4 p-4 border-l-4 border-green-500 bg-green-50/30 rounded-r-lg`}>
+                          {[{
+                            title: "Officers",
+                            role: 'officers',
+                            icon: Shield,
+                            color: 'purple',
+                            source: officers,
+                            filter: (user) => true,
+                            badge: (user) => null,
+                            historyField: 'officer_history'
+                          }, {
+                            title: "Task Managers",
+                            role: 'taskManagers',
+                            icon: UserIcon,
+                            color: 'blue',
+                            source: users,
+                            filter: (user) => ['task_manager', 'admin', 'user'].includes(user.role),
+                            badge: (user) => user.role === 'task_manager' ? 'Manager' : user.role === 'admin' ? 'Admin' : 'User',
+                            historyField: 'manager_history'
+                          }].map(roleConfig => {
+                            // Get the actual history data
+                            const historyData = subdept[roleConfig.historyField] || [];
+                            const currentAssignments = getCurrentAssignments(historyData);
+
+                            console.log(`${roleConfig.title} data:`, {
+                              historyField: roleConfig.historyField,
+                              historyData,
+                              currentAssignments
+                            });
+
+                            return (
+                              <div key={roleConfig.role} className={`space-y-4 p-4 border-l-4 border-${roleConfig.color}-500 bg-${roleConfig.color}-50/30 rounded-r-lg`}>
                                 <div className="flex items-center justify-between">
-                                    <Label className="text-sm font-medium text-green-700 flex items-center gap-2">
-                                        <UserIcon className="h-4 w-4"/>Task Assistants
-                                    </Label>
-                                    <Select 
-                                        onValueChange={(managerId) => {
-                                            setSelectedManagerId(managerId === 'none' ? '' : managerId);
-                                        }}
-                                        value={selectedManagerId}
-                                    >
-                                        <SelectTrigger className="w-48">
-                                            <SelectValue placeholder="Select Manager" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="none">Select Manager</SelectItem>
-                                            {subdept.taskManagers?.map((manager) => {
-                                                const managerUser = users.find(u => u.id === manager.id);
-                                                return managerUser ? (
-                                                    <SelectItem key={`select-manager-${manager.id}`} value={manager.id}>
-                                                        {managerUser.name}
-                                                    </SelectItem>
-                                                ) : null;
-                                            })}
-                                        </SelectContent>
-                                    </Select>
+                                  <Label className={`text-sm font-medium text-${roleConfig.color}-700 flex items-center gap-2`}>
+                                    <roleConfig.icon className="h-4 w-4" />
+                                    {roleConfig.title}
+                                  </Label>
+                                  <Select onValueChange={(value) => handleAddRoleAssignment(subdeptIndex, roleConfig.role, value)}>
+                                    <SelectTrigger className="w-48">
+                                      <SelectValue placeholder={`Add ${roleConfig.title.slice(0, -1)}...`} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {getAvailableUsersForRole(subdeptIndex, roleConfig.role).filter(roleConfig.filter).map((user) => (
+                                        <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
+                                      ))}
+                                      {getAvailableUsersForRole(subdeptIndex, roleConfig.role).filter(roleConfig.filter).length === 0 && (
+                                        <SelectItem value="none" disabled>All eligible users assigned</SelectItem>
+                                      )}
+                                    </SelectContent>
+                                  </Select>
                                 </div>
-                                
-                                {selectedManagerId && (
-                                    <div className="space-y-2">
-                                        <div className="flex items-center justify-between">
-                                            <Label className="text-sm font-medium text-green-700">Add Assistant</Label>
-                                            <Select 
-                                                onValueChange={(userId) => {
-                                                    if (userId && userId !== 'none') {
-                                                        handleAddBlankTaskAssistant(subdeptIndex, selectedManagerId, userId);
-                                                    }
-                                                }}
+
+                                {/* Current Assignments */}
+                                <div className="space-y-3 max-h-64 overflow-y-auto border rounded-md bg-white p-2">
+                                  {currentAssignments.map((assignment, index) => {
+                                    const userData = roleConfig.source.find(u => u.id === assignment.id);
+                                    console.log(`Assignment ${index}:`, assignment, 'User data:', userData);
+
+                                    return userData ? (
+                                      <div key={`${assignment.id}-${index}`} className="p-3 border-b last:border-b-0 hover:bg-gray-50 rounded-md">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <div className="flex items-center gap-3">
+                                            <roleConfig.icon className={`h-5 w-5 text-${roleConfig.color}-600 flex-shrink-0`} />
+                                            <div>
+                                              <p className="font-medium text-gray-900">{userData?.name || 'Unknown User'}</p>
+                                              <p className="text-sm text-gray-500">{userData?.email || 'No email'}</p>
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <Badge variant={assignment.end_date ? "secondary" : "default"}
+                                              className={assignment.end_date ? "bg-gray-500" : "bg-green-500"}>
+                                              {assignment.end_date ? 'Past' : 'Active'}
+                                            </Badge>
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className="h-8 w-8 text-red-500 hover:bg-red-50"
+                                              onClick={() => {
+                                                // Find the actual index in the history array
+                                                const actualIndex = historyData.findIndex(h =>
+                                                  h.id === assignment.id && h.start_date === assignment.start_date
+                                                );
+                                                if (actualIndex >= 0) {
+                                                  handleRemoveRoleAssignment(subdeptIndex, roleConfig.role, actualIndex);
+                                                }
+                                              }}
                                             >
-                                                <SelectTrigger className="w-48">
-                                                    <SelectValue placeholder="Select Assistant" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="none">Select Assistant</SelectItem>
-                                                    {getAvailableUsersForRole(subdeptIndex, 'taskAssistants')
-                                                        .filter(user => ['assistant', 'user'].includes(user.role))
-                                                        .map((user) => (
-                                                            <SelectItem key={`assistant-${user.id}`} value={user.id}>
-                                                                {user.name}
-                                                            </SelectItem>
-                                                        ))
-                                                    }
-                                                </SelectContent>
-                                            </Select>
+                                              <X className="h-4 w-4" />
+                                            </Button>
+                                          </div>
                                         </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+                                          <div>
+                                            <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                                              <Calendar className="h-3 w-3" />Start Date *
+                                            </Label>
+                                            <Input
+                                              type="date"
+                                              value={assignment.start_date ? new Date(assignment.start_date).toISOString().split('T')[0] : ''}
+                                              onChange={(e) => {
+                                                const actualIndex = historyData.findIndex(h =>
+                                                  h.id === assignment.id && h.start_date === assignment.start_date
+                                                );
+                                                if (actualIndex >= 0) {
+                                                  handleAssignmentDateChange(subdeptIndex, roleConfig.role, actualIndex, 'start_date', e.target.value);
+                                                }
+                                              }}
+                                              className="text-sm mt-1"
+                                              required
+                                            />
+                                          </div>
+                                          <div>
+                                            <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                                              <Calendar className="h-3 w-3" />End Date (Optional)
+                                            </Label>
+                                            <Input
+                                              type="date"
+                                              value={assignment.end_date ? new Date(assignment.end_date).toISOString().split('T')[0] : ''}
+                                              onChange={(e) => {
+                                                const actualIndex = historyData.findIndex(h =>
+                                                  h.id === assignment.id && h.start_date === assignment.start_date
+                                                );
+                                                if (actualIndex >= 0) {
+                                                  handleAssignmentDateChange(subdeptIndex, roleConfig.role, actualIndex, 'end_date', e.target.value);
+                                                }
+                                              }}
+                                              className="text-sm mt-1"
+                                              min={assignment.start_date}
+                                            />
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ) : null;
+                                  })}
+                                  {currentAssignments.length === 0 && (
+                                    <div className="p-6 text-center text-gray-500">
+                                      <p className="text-sm">No active assignments for this role</p>
                                     </div>
-                                )}
-                                
-                                <div className="space-y-4 max-h-64 overflow-y-auto border rounded-md bg-white p-2">
-                                    {subdept.taskManagers?.length > 0 ? (
-                                        subdept.taskManagers.map((manager) => {
-                                            const managerUser = users.find(u => u.id === manager.id);
-                                            const managerAssistants = (subdept.taskAssistants || []).filter(
-                                                a => a.manager_id === manager.id
-                                            );
-                                            
-                                            return (
-                                                <div key={`manager-assistants-${manager.id}`} className="mb-6">
-                                                    <div className="flex items-center gap-2 mb-2 p-2 bg-blue-50 rounded">
-                                                        <UserIcon className="h-4 w-4 text-blue-600" />
-                                                        <span className="font-medium text-sm text-blue-800">
-                                                            {managerUser?.name || 'Manager'}'s Assistants
-                                                        </span>
-                                                        <Badge variant="outline" className="ml-auto bg-blue-100 text-blue-700">
-                                                            {managerAssistants.length} assistant{managerAssistants.length !== 1 ? 's' : ''}
-                                                        </Badge>
-                                                    </div>
-                                                    
-                                                    {managerAssistants.length > 0 ? (
-                                                        <div className="space-y-2 ml-4">
-                                                            {managerAssistants.map((assistant, index) => {
-                                                                const assistantUser = users.find(u => u.id === assistant.id);
-                                                                const assistantIndex = subdept.taskAssistants.findIndex(a => a.id === assistant.id);
-                                                                
-                                                                return assistantUser && assistantIndex >= 0 ? (
-                                                                    <div key={assistant.id} className="p-2 border rounded hover:bg-gray-50">
-                                                                        <div className="flex items-center justify-between mb-1">
-                                                                            <div className="flex items-center gap-2">
-                                                                                <UserIcon className="h-4 w-4 text-gray-500" />
-                                                                                <span className="text-sm font-medium">{assistantUser.name}</span>
-                                                                            </div>
-                                                                            <Button 
-                                                                                variant="ghost" 
-                                                                                size="icon" 
-                                                                                className="h-6 w-6 text-red-500 hover:bg-red-50"
-                                                                                onClick={() => handleRemoveRoleAssignment(subdeptIndex, 'taskAssistants', assistantIndex)}
-                                                                            >
-                                                                                <X className="h-3.5 w-3.5" />
-                                                                            </Button>
-                                                                        </div>
-                                                                        <div className="grid grid-cols-2 gap-2 text-xs text-gray-500 mt-1">
-                                                                            <div>
-                                                                                <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                                                                                    <Calendar className="h-3 w-3"/>Start Date
-                                                                                </Label>
-                                                                                <Input 
-                                                                                    type="date" 
-                                                                                    value={assistant.start_date || ''} 
-                                                                                    onChange={(e) => handleAssignmentChange(subdeptIndex, 'taskAssistants', assistantIndex, 'start_date', e.target.value)}
-                                                                                    className="h-8 text-xs"
-                                                                                />
-                                                                            </div>
-                                                                            <div>
-                                                                                <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                                                                                    <Calendar className="h-3 w-3"/>End Date
-                                                                                </Label>
-                                                                                <Input 
-                                                                                    type="date" 
-                                                                                    value={assistant.end_date || ''} 
-                                                                                    onChange={(e) => handleAssignmentChange(subdeptIndex, 'taskAssistants', assistantIndex, 'end_date', e.target.value)}
-                                                                                    min={assistant.start_date}
-                                                                                    className="h-8 text-xs"
-                                                                                />
-                                                                            </div>
-                                                                            <div className="col-span-2">
-                                                                                <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                                                                                    <User className="h-3 w-3"/>Manager
-                                                                                </Label>
-                                                                                <Select 
-                                                                                    value={assistant.manager_id || ''} 
-                                                                                    onValueChange={(value) => handleAssignmentChange(subdeptIndex, 'taskAssistants', assistantIndex, 'manager_id', value)}
-                                                                                >
-                                                                                    <SelectTrigger className="h-8 text-xs">
-                                                                                        <SelectValue placeholder="Select Manager" />
-                                                                                    </SelectTrigger>
-                                                                                    <SelectContent>
-                                                                                        {subdept.taskManagers?.map((mgr) => {
-                                                                                            const mgrUser = users.find(u => u.id === mgr.id);
-                                                                                            return mgrUser ? (
-                                                                                                <SelectItem key={`mgr-${mgr.id}`} value={mgr.id}>
-                                                                                                    {mgrUser.name}
-                                                                                                </SelectItem>
-                                                                                            ) : null;
-                                                                                        })}
-                                                                                    </SelectContent>
-                                                                                </Select>
-                                                                            </div>
-                                                                            <div>
-                                                                                <span className="font-medium">Start:</span> {assistant.start_date || 'Not set'}
-                                                                            </div>
-                                                                            <div>
-                                                                                <span className="font-medium">End:</span> {assistant.end_date || 'Not set'}
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                ) : null;
-                                                            })}
-                                                        </div>
-                                                    ) : (
-                                                        <p className="text-xs text-gray-500 ml-4 mb-2">No assistants assigned to this manager</p>
-                                                    )}
-                                                </div>
-                                            );
-                                        })
-                                    ) : (
-                                        <div className="p-4 text-center text-gray-500">
-                                            <p className="text-sm">No managers assigned. Please add a manager first.</p>
-                                        </div>
-                                    )}
+                                  )}
                                 </div>
+
+                                {/* Full History - Show all assignments as editable cards */}
+                                {historyData.length > 0 && (
+                                  <div className="mt-4 border-t pt-4">
+                                    <div className="flex items-center justify-between mb-3">
+                                      <Label className="text-sm font-medium text-gray-700 flex items-center gap-1">
+                                        <History className="h-4 w-4" />
+                                        All Assignment History
+                                      </Label>
+                                      <Badge variant="outline" className="text-xs">
+                                        {historyData.length} total entries
+                                      </Badge>
+                                    </div>
+                                    <div className="space-y-3 max-h-80 overflow-y-auto border rounded-md p-3 bg-gray-50">
+                                      {historyData
+                                        ?.sort((a, b) => new Date(b.start_date) - new Date(a.start_date))
+                                        .map((history, historyIndex) => {
+                                          const historyUser = roleConfig.source.find(u => u.id === history.id);
+                                          const isCurrent = !history.end_date || new Date(history.end_date) > new Date();
+                                          const actualIndex = historyData.findIndex(h =>
+                                            h.id === history.id && h.start_date === history.start_date
+                                          );
+
+                                          return (
+                                            <div key={`history-${historyIndex}`}
+                                              className={`p-4 bg-white rounded-lg border-2 ${isCurrent ? 'border-green-200 bg-green-50/50' : 'border-gray-200'} hover:shadow-sm transition-all`}>
+                                              <div className="flex justify-between items-start mb-3">
+                                                <div className="flex items-center gap-3">
+                                                  <roleConfig.icon className={`h-5 w-5 text-${roleConfig.color}-600 flex-shrink-0`} />
+                                                  <div>
+                                                    <div className="font-medium text-gray-900 flex items-center gap-2">
+                                                      {historyUser?.name || 'Unknown User'}
+                                                      {isCurrent && (
+                                                        <Badge variant="outline" className="h-5 px-2 text-green-700 bg-green-100 text-xs border-green-300">
+                                                          Current
+                                                        </Badge>
+                                                      )}
+                                                    </div>
+                                                    {historyUser?.email && (
+                                                      <div className="text-sm text-gray-500">{historyUser.email}</div>
+                                                    )}
+                                                    {roleConfig.badge && roleConfig.badge(historyUser) && (
+                                                      <Badge variant="secondary" className="mt-1 text-xs">
+                                                        {roleConfig.badge(historyUser)}
+                                                      </Badge>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="icon"
+                                                  className="h-8 w-8 text-red-500 hover:bg-red-50"
+                                                  onClick={() => {
+                                                    const updatedHistory = historyData.filter((_, i) => i !== actualIndex);
+                                                    updateFormState(['subdepartments', subdeptIndex, roleConfig.historyField], updatedHistory);
+                                                  }}
+                                                >
+                                                  <X className="h-4 w-4" />
+                                                </Button>
+                                              </div>
+
+                                              {/* Editable date fields */}
+                                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                  <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                                                    <Calendar className="h-3 w-3" />Start Date *
+                                                  </Label>
+                                                  <Input
+                                                    type="date"
+                                                    value={history.start_date ? new Date(history.start_date).toISOString().split('T')[0] : ''}
+                                                    onChange={(e) => {
+                                                      const updatedHistory = [...historyData];
+                                                      updatedHistory[actualIndex] = { ...updatedHistory[actualIndex], start_date: e.target.value };
+                                                      updateFormState(['subdepartments', subdeptIndex, roleConfig.historyField], updatedHistory);
+                                                    }}
+                                                    className="text-sm mt-1"
+                                                    required
+                                                  />
+                                                </div>
+                                                <div>
+                                                  <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                                                    <Calendar className="h-3 w-3" />End Date (Optional)
+                                                  </Label>
+                                                  <Input
+                                                    type="date"
+                                                    value={history.end_date ? new Date(history.end_date).toISOString().split('T')[0] : ''}
+                                                    onChange={(e) => {
+                                                      const updatedHistory = [...historyData];
+                                                      updatedHistory[actualIndex] = { ...updatedHistory[actualIndex], end_date: e.target.value };
+                                                      updateFormState(['subdepartments', subdeptIndex, roleConfig.historyField], updatedHistory);
+                                                    }}
+                                                    className="text-sm mt-1"
+                                                    min={history.start_date}
+                                                  />
+                                                </div>
+                                              </div>
+
+                                                                                      </div>
+                                          );
+                                        })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+
+                          {/* Task Assistants section - Update similarly */}
+                          <div className="space-y-4 p-4 border-l-4 border-green-500 bg-green-50/30 rounded-r-lg">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <Users className="h-4 w-4" />
+                                <Label className="text-sm font-medium text-green-700">Task Assistants</Label>
+                                {subdept.assistant_history?.length > 0 && (
+                                  <Badge variant="outline" className="ml-2">
+                                    {subdept.assistant_history.length} history entries
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Select
+                                  onValueChange={(managerId) => {
+                                    setSelectedManagerId(managerId === 'none' ? '' : managerId);
+                                  }}
+                                  value={selectedManagerId}
+                                >
+                                  <SelectTrigger className="w-48">
+                                    <SelectValue placeholder="Select Manager" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="none">Select Manager</SelectItem>
+                                    {getCurrentAssignments(subdept.manager_history || []).map((manager) => {
+                                      const managerUser = users.find(u => u.id === manager.id);
+                                      return managerUser ? (
+                                        <SelectItem key={`select-manager-${manager.id}`} value={manager.id}>
+                                          {managerUser.name}
+                                        </SelectItem>
+                                      ) : null;
+                                    })}
+                                  </SelectContent>
+                                </Select>
+                                {selectedManagerId && (
+                                  <Select
+                                    onValueChange={(userId) => {
+                                      if (userId && userId !== 'none') {
+                                        handleAddBlankTaskAssistant(subdeptIndex, selectedManagerId, userId);
+                                        setSelectedManagerId(''); // Reset after adding
+                                      }
+                                    }}
+                                  >
+                                    <SelectTrigger className="w-48">
+                                      <SelectValue placeholder="Select Assistant" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="none">Select Assistant</SelectItem>
+                                      {getAvailableUsersForRole(subdeptIndex, 'taskAssistants')
+                                        .filter(user => ['assistant', 'user'].includes(user.role))
+                                        .map((user) => (
+                                          <SelectItem key={`assistant-${user.id}`} value={user.id}>
+                                            {user.name}
+                                          </SelectItem>
+                                        ))
+                                      }
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                              </div>
                             </div>
+
+                            {/* Current Active Assistants */}
+                            <div className="space-y-3 max-h-64 overflow-y-auto border rounded-md bg-white p-3">
+                              <div className="font-medium text-sm text-gray-700 mb-2 flex items-center gap-2">
+                                <Badge variant="outline" className="bg-green-100 text-green-700">Active Assignments</Badge>
+                              </div>
+                              {getCurrentAssignments(subdept.assistant_history || []).map((assistant, index) => {
+                                const assistantUser = users.find(u => u.id === assistant.id);
+                                const managerUser = users.find(u => u.id === assistant.manager_id);
+                                const actualIndex = subdept.assistant_history.findIndex(a =>
+                                  a.id === assistant.id && a.start_date === assistant.start_date && a.manager_id === assistant.manager_id
+                                );
+
+                                return assistantUser ? (
+                                  <div key={`active-assistant-${index}`} className="p-3 border-2 border-green-200 bg-green-50/50 rounded-lg hover:shadow-sm">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <div className="flex items-center gap-3">
+                                        <Users className="h-5 w-5 text-green-600 flex-shrink-0" />
+                                        <div>
+                                          <p className="font-medium text-gray-900">{assistantUser.name}</p>
+                                          <p className="text-sm text-gray-500">{assistantUser.email}</p>
+                                          <p className="text-xs text-green-600">Manager: {managerUser?.name || 'Unknown'}</p>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <Badge variant="default" className="bg-green-500">Active</Badge>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-8 w-8 text-red-500 hover:bg-red-50"
+                                          onClick={() => {
+                                            const updatedHistory = subdept.assistant_history.filter((_, i) => i !== actualIndex);
+                                            updateFormState(['subdepartments', subdeptIndex, 'assistant_history'], updatedHistory);
+                                          }}
+                                        >
+                                          <X className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+                                      <div>
+                                        <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                                          <Calendar className="h-3 w-3" />Start Date *
+                                        </Label>
+                                        <Input
+                                          type="date"
+                                          value={assistant.start_date ? new Date(assistant.start_date).toISOString().split('T')[0] : ''}
+                                          onChange={(e) => {
+                                            const updatedHistory = [...subdept.assistant_history];
+                                            updatedHistory[actualIndex] = { ...updatedHistory[actualIndex], start_date: e.target.value };
+                                            updateFormState(['subdepartments', subdeptIndex, 'assistant_history'], updatedHistory);
+                                          }}
+                                          className="text-sm mt-1"
+                                          required
+                                        />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                                          <Calendar className="h-3 w-3" />End Date (Optional)
+                                        </Label>
+                                        <Input
+                                          type="date"
+                                          value={assistant.end_date ? new Date(assistant.end_date).toISOString().split('T')[0] : ''}
+                                          onChange={(e) => {
+                                            const updatedHistory = [...subdept.assistant_history];
+                                            updatedHistory[actualIndex] = { ...updatedHistory[actualIndex], end_date: e.target.value };
+                                            updateFormState(['subdepartments', subdeptIndex, 'assistant_history'], updatedHistory);
+                                          }}
+                                          className="text-sm mt-1"
+                                          min={assistant.start_date}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : null;
+                              })}
+                              {getCurrentAssignments(subdept.assistant_history || []).length === 0 && (
+                                <div className="p-6 text-center text-gray-500">
+                                  <p className="text-sm">No active assistant assignments</p>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Full Assistant History */}
+                            {subdept.assistant_history?.length > 0 && (
+                              <div className="mt-4 border-t pt-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <Label className="text-sm font-medium text-gray-700 flex items-center gap-1">
+                                    <History className="h-4 w-4" />
+                                    All Assistant Assignment History
+                                  </Label>
+                                  <Badge variant="outline" className="text-xs">
+                                    {subdept.assistant_history?.length} total entries
+                                  </Badge>
+                                </div>
+                                <div className="space-y-3 max-h-80 overflow-y-auto border rounded-md p-3 bg-gray-50">
+                                  {subdept.assistant_history
+                                    ?.sort((a, b) => new Date(b.start_date) - new Date(a.start_date))
+                                    .map((history, historyIndex) => {
+                                      const historyUser = users.find(u => u.id === history.id);
+                                      const managerUser = users.find(u => u.id === history.manager_id);
+                                      const isCurrent = !history.end_date || new Date(history.end_date) > new Date();
+                                      const actualIndex = subdept.assistant_history.findIndex(h =>
+                                        h.id === history.id && h.start_date === history.start_date && h.manager_id === history.manager_id
+                                      );
+
+                                      return (
+                                        <div key={`assistant-history-${historyIndex}`}
+                                          className={`p-4 bg-white rounded-lg border-2 ${isCurrent ? 'border-green-200 bg-green-50/50' : 'border-gray-200'} hover:shadow-sm transition-all`}>
+                                          <div className="flex justify-between items-start mb-3">
+                                            <div className="flex items-center gap-3">
+                                              <Users className="h-5 w-5 text-green-600 flex-shrink-0" />
+                                              <div>
+                                                <div className="font-medium text-gray-900 flex items-center gap-2">
+                                                  {historyUser?.name || 'Unknown User'}
+                                                  {isCurrent && (
+                                                    <Badge variant="outline" className="h-5 px-2 text-green-700 bg-green-100 text-xs border-green-300">
+                                                      Current
+                                                    </Badge>
+                                                  )}
+                                                </div>
+                                                {historyUser?.email && (
+                                                  <div className="text-sm text-gray-500">{historyUser.email}</div>
+                                                )}
+                                                <div className="text-xs text-green-600 mt-1">
+                                                  Manager: {managerUser?.name || 'Unknown Manager'}
+                                                </div>
+                                              </div>
+                                            </div>
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className="h-8 w-8 text-red-500 hover:bg-red-50"
+                                              onClick={() => {
+                                                const updatedHistory = subdept.assistant_history.filter((_, i) => i !== actualIndex);
+                                                updateFormState(['subdepartments', subdeptIndex, 'assistant_history'], updatedHistory);
+                                              }}
+                                            >
+                                              <X className="h-4 w-4" />
+                                            </Button>
+                                          </div>
+
+                                          {/* Editable fields */}
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                              <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                                                <Calendar className="h-3 w-3" />Start Date *
+                                              </Label>
+                                              <Input
+                                                type="date"
+                                                value={history.start_date ? new Date(history.start_date).toISOString().split('T')[0] : ''}
+                                                onChange={(e) => {
+                                                  const updatedHistory = [...subdept.assistant_history];
+                                                  updatedHistory[actualIndex] = { ...updatedHistory[actualIndex], start_date: e.target.value };
+                                                  updateFormState(['subdepartments', subdeptIndex, 'assistant_history'], updatedHistory);
+                                                }}
+                                                className="text-sm mt-1"
+                                                required
+                                              />
+                                            </div>
+                                            <div>
+                                              <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                                                <Calendar className="h-3 w-3" />End Date (Optional)
+                                              </Label>
+                                              <Input
+                                                type="date"
+                                                value={history.end_date ? new Date(history.end_date).toISOString().split('T')[0] : ''}
+                                                onChange={(e) => {
+                                                  const updatedHistory = [...subdept.assistant_history];
+                                                  updatedHistory[actualIndex] = { ...updatedHistory[actualIndex], end_date: e.target.value };
+                                                  updateFormState(['subdepartments', subdeptIndex, 'assistant_history'], updatedHistory);
+                                                }}
+                                                className="text-sm mt-1"
+                                                min={history.start_date}
+                                              />
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </TabsContent>
 
                         <TabsContent value="classes" className="p-6 space-y-4">
-                           <div className="flex items-center justify-between">
-                               <h4 className="font-semibold text-gray-800">Classes</h4>
-                               <Button variant="outline" size="sm" onClick={() => handleAddClass(subdeptIndex)}><Plus className="h-4 w-4 mr-1"/>Add Class</Button>
-                           </div>
-                           <div className="space-y-4">
-                               {subdept.classes && subdept.classes.length > 0 ? (
-                                   subdept.classes.map((cls, clsIndex) => (
-                                       <ClassComponent key={cls.id} classItem={cls} onUpdate={updateFormState} onRemove={() => handleRemoveClass(subdeptIndex, clsIndex)} path={['subdepartments', subdeptIndex.toString(), 'classes', clsIndex.toString()]} index={`${subdeptIndex + 1}.${clsIndex + 1}`} />
-                                   ))
-                               ) : (<div className="text-center py-6 text-gray-500 border-2 border-dashed rounded-lg">No classes added yet.</div>)}
-                           </div>
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-semibold text-gray-800">Classes</h4>
+                            <Button variant="outline" size="sm" onClick={() => handleAddClass(subdeptIndex)}><Plus className="h-4 w-4 mr-1" />Add Class</Button>
+                          </div>
+                          <div className="space-y-4">
+                            {subdept.classes && subdept.classes.length > 0 ? (
+                              subdept.classes.map((cls, clsIndex) => (
+                                <ClassComponent key={cls.id} classItem={cls} onUpdate={updateFormState} onRemove={() => handleRemoveClass(subdeptIndex, clsIndex)} path={['subdepartments', subdeptIndex.toString(), 'classes', clsIndex.toString()]} index={`${subdeptIndex + 1}.${clsIndex + 1}`} />
+                              ))
+                            ) : (<div className="text-center py-6 text-gray-500 border-2 border-dashed rounded-lg">No classes added yet.</div>)}
+                          </div>
                         </TabsContent>
                       </CardContent>
                     </Tabs>
