@@ -3,23 +3,22 @@
 
 import React, { useState, useMemo, useCallback, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { TruncatedText } from "@/app/(dashboard)/dashboard/departments/documents+fields/types"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Eye, ChevronDown, Plus, Minus, Loader2, Settings, Search, Users, X, TableProperties, RotateCcw, Pencil, AlertTriangle, Send, DownloadCloud, ArrowUpDown, ArrowUp, ArrowDown, Link as LinkIcon, FileArchive } from "lucide-react"
+import { Eye, ChevronDown, Plus, Minus, Loader2, Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertTriangle, Send, DownloadCloud, ArrowUpDown, ArrowUp, ArrowDown, Link as LinkIcon } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { FileText, Edit, Trash2, Download, Building, Upload, Briefcase } from "lucide-react"
+import { FileText, Edit, Trash2, Download, Building, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
-import { format, parseISO, isAfter, isEqual, isValid, parse, startOfToday } from 'date-fns';
+import { format, isAfter, isEqual, isValid, parse, startOfToday } from 'date-fns';
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { EditTaskDialog } from "./components/EditTaskDialog"
 import { fetchDepartments } from "../departments/departments/database"
-import { DepartmentTasksManagerProps, Task } from "./components/types"
+import { DepartmentTasksManagerProps } from "./components/types"
 import { StageUploadDialog } from "./components/StageUploadDialog"
 import { Input } from "@/components/ui/input"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
@@ -29,11 +28,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchKycDocument, isDocumentOlderThanTask, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document } from "./utils/taskManagerData"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { DocumentFieldCell } from './components/DocumentFieldCell';
-import { DocumentStageCell } from './components/DocumentStageCell';
 
 // Enhanced table headers with granular breakdown
 const ENHANCED_TABLE_HEADERS = [
@@ -66,15 +62,11 @@ const STATS_HEADERS = [
 export default function DepartmentTasksManager({
   error,
   onTaskAction,
-  onStageDocumentUpload,
-  onShowUploadDialog,
-  applicantDocuments = {},
-  getTaskStageStatus,
   handleStageStatusSave,
   onTaskUpdate,
   getCurrentRequirements
 }: DepartmentTasksManagerProps) {
-  // State management
+  // State management (keeping all existing state)
   const [departments, setDepartments] = useState<Department[]>([])
   const [companies, setCompanies] = useState<Map<number, string>>(new Map())
   const [activeDepartmentTab, setActiveDepartmentTab] = useState<string>("")
@@ -87,7 +79,6 @@ export default function DepartmentTasksManager({
   const [tasks, setTasks] = useState<UtilTask[]>([])
   const [stages, setStages] = useState<any[]>([])
   const [allDocuments, setAllDocuments] = useState<Document[]>([])
-  const [tasksLoading, setTasksLoading] = useState(true)
   const [isEnquiryDialogOpen, setIsEnquiryDialogOpen] = useState(false)
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null)
   const [isStageUploadDialogOpen, setIsStageUploadDialogOpen] = useState(false)
@@ -129,7 +120,6 @@ export default function DepartmentTasksManager({
     users: true
   })
 
-  // FIXED: Updated getStaffName function to use proper name field
   const getStaffName = useCallback((userId) => {
     if (!userId) return '';
     const user = tmUsers.get(parseInt(userId.toString()));
@@ -810,25 +800,25 @@ export default function DepartmentTasksManager({
   // Get assistants linked to the currently selected manager
   const getAssistantsForManager = useCallback((managerId: string) => {
     if (!managerId) return [];
-    
+
     // Get all tasks for the current manager
-    const managerTasks = tasks.filter(task => 
+    const managerTasks = tasks.filter(task =>
       task.task_manager_id?.toString() === managerId &&
       task.task_assistant_id
     );
-    
+
     // Get unique assistant IDs
     const assistantIds = [...new Set(
       managerTasks.map(task => task.task_assistant_id?.toString())
     )].filter(Boolean);
-    
+
     // Map to assistant objects with task counts
     return assistantIds.map(assistantId => {
       const user = tmUsers.get(parseInt(assistantId || '0'));
       const taskCount = managerTasks.filter(
         task => task.task_assistant_id?.toString() === assistantId
       ).length;
-      
+
       return {
         id: assistantId,
         name: user?.name || `Assistant ${assistantId}`,
@@ -857,14 +847,6 @@ export default function DepartmentTasksManager({
       task.task_manager_id?.toString() === managerId && !task.task_assistant_id
     );
     return managerOnlyTasks.length;
-  }, [getFilteredTasks]);
-  
-  const getAssistantTaskCountForManager = useCallback((managerId: string, assistantId: string) => {
-    const tasks = getFilteredTasks('in_progress').filter(task =>
-      task.task_manager_id?.toString() === managerId &&
-      task.task_assistant_id?.toString() === assistantId
-    );
-    return tasks.length;
   }, [getFilteredTasks]);
 
   const getTaskCountForOfficer = useCallback((officerId: string) => {
@@ -942,7 +924,7 @@ export default function DepartmentTasksManager({
       setSubdepartmentOfficers(staffData.officers);
       setSubdepartmentManagers(staffData.managers);
       setSubdepartmentAssistants(staffData.assistants);
-      
+
       // If we have an active manager tab but no active assistant tab, and the manager has assistants,
       // auto-select the first assistant if there's only one
       if (activeManagerTab && !activeAssistantTab) {
@@ -957,20 +939,20 @@ export default function DepartmentTasksManager({
       setSubdepartmentAssistants([]);
     }
   }, [
-    activeSubdepartmentTab, 
-    activeManagerTab, 
-    activeAssistantTab, 
-    getActiveStaffFromSubdepartment, 
-    tmUsers, 
+    activeSubdepartmentTab,
+    activeManagerTab,
+    activeAssistantTab,
+    getActiveStaffFromSubdepartment,
+    tmUsers,
     getAssistantsForManager
   ]);
-  
+
   // Update assistant tabs when manager selection changes
   useEffect(() => {
     if (activeManagerTab) {
       const managerAssistants = getAssistantsForManager(activeManagerTab);
       setSubdepartmentAssistants(managerAssistants);
-      
+
       // Auto-select the first assistant if there's only one
       if (managerAssistants.length === 1) {
         setActiveAssistantTab(managerAssistants[0].id);
@@ -1602,7 +1584,6 @@ export default function DepartmentTasksManager({
     );
   }, [getCurrentStageStatus]);
 
-  // Sorting functionality
   const requestSort = (key: string) => {
     let direction: 'asc' | 'desc' = 'asc'
     if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
@@ -1647,7 +1628,6 @@ export default function DepartmentTasksManager({
     return sortTasks(tasksToRender, sortConfig)
   }, [sortConfig, companies])
 
-  // FIXED: Helper function to get cell content for both table views
   const getCellContent = useCallback((task: any, headerId: string) => {
     switch (headerId) {
       case 'id': return task.id;
@@ -1715,7 +1695,6 @@ export default function DepartmentTasksManager({
     }
   }, [companies, getTaskHierarchy, getUserDisplayName, getEnhancedImmigrationStatus, getCurrentStageStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, setLinkingTask, setIsLinkDialogOpen, getStaffName]);
 
-  // Generate table rows for transposed view (Body only: Stats, Stages, Actions)
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
     if (!tasks.length) return []
 
@@ -1853,7 +1832,6 @@ export default function DepartmentTasksManager({
     return rows
   }, [stages, isStageApplicableToTask, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage])
 
-  // Render cell content for transposed view
   const renderCellContent = useCallback((row: any, task: any) => {
     const value = row.getValue ? row.getValue(task) : '';
 
@@ -1963,11 +1941,9 @@ export default function DepartmentTasksManager({
     }
   }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getKycFields])
 
-  // State for enhanced table rendering
   const [tableRows, setTableRows] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Function to load rows for enhanced table
   const loadRows = useCallback(async (tasks: any[]) => {
     if (!tasks || tasks.length === 0) return;
     setLoading(true);
@@ -1986,7 +1962,6 @@ export default function DepartmentTasksManager({
     }
   }, [generateEnhancedTableRows, toast]);
 
-  // Standard table render function
   const renderStandardTable = useCallback((tasks: any[], tableType: string) => {
     const sortedTasks = getSortedTasks(tasks || []);
 
@@ -2116,22 +2091,49 @@ export default function DepartmentTasksManager({
                       </TableCell>
                     );
                   })}
-                  {/* STAGE CELLS */}
+                  {/* STAGE CELLS - ALWAYS USE EditableStageCell */}
                   {visibleStages.map(stage => {
                     if (!isStageApplicableToTask(stage, task)) {
                       return <TableCell key={`${stage.id}-na`} className="border border-gray-200 text-center text-slate-400 italic text-sm align-middle">N/A</TableCell>
                     }
+
+                    // ALWAYS use EditableStageCell - this ensures automation buttons appear
                     if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
-                      return <TableCell key={stage.id} className="border border-gray-200 p-1 align-middle"><EditableStageCell stage={stage} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={handleViewDocument} getKycFields={getKycFields} onSave={enhancedHandleStageStatusSave} /></TableCell>
+                      return (
+                        <TableCell key={stage.id} className="border border-gray-200 p-1 align-middle">
+                          <EditableStageCell
+                            stage={stage}
+                            task={task}
+                            value={task.stages?.[stage.id]}
+                            allDocuments={allDocuments}
+                            onDocumentUpload={handleStageDocumentUpload}
+                            onShowDocuments={handleViewDocument}
+                            getKycFields={getKycFields}
+                            onSave={enhancedHandleStageStatusSave}
+                          />
+                        </TableCell>
+                      )
                     }
+
                     return stage.documents.map(doc => {
                       const linkedDocumentForType = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
                       const isOldDoc = linkedDocumentForType && task.created_at && isDocumentOlderThanTask(linkedDocumentForType.created_at, task.created_at);
                       const hasIndicator = linkedDocumentForType?.indicator === true;
+
                       if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0 || hasIndicator || isOldDoc) {
                         return (
                           <TableCell key={`${doc.id}`} className="border border-gray-200 p-1 align-middle">
-                            <DocumentStageCell stage={{ ...stage, documents: [doc] }} task={task} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={handleViewDocument} getKycFields={getKycFields} allDocuments={allDocuments} isStageApplicableToTask={isStageApplicableToTask} isDocumentApplicableToTask={isDocumentApplicableToTask} kycDocuments={kycDocuments} linkedDocument={linkedDocumentForType} />
+                            {/* ALWAYS use EditableStageCell for consistency and automation buttons */}
+                            <EditableStageCell
+                              stage={{ ...stage, documents: [doc] }}
+                              task={task}
+                              value={task.stages?.[stage.id]}
+                              allDocuments={allDocuments}
+                              onDocumentUpload={handleStageDocumentUpload}
+                              onShowDocuments={handleViewDocument}
+                              getKycFields={getKycFields}
+                              onSave={enhancedHandleStageStatusSave}
+                            />
                           </TableCell>
                         )
                       } else {
@@ -2168,9 +2170,8 @@ export default function DepartmentTasksManager({
         </Table>
       </div>
     )
-  }, [stages, dataLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, isDocumentApplicableToTask, visibleStageIds, sortConfig, enhancedHandleStageStatusSave, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getDocumentForTaskStage, getSortedTasks, visibleHeaders, getCellContent]);
+  }, [stages, dataLoading, error, companies, isStageApplicableToTask, expandedStages, expandedDocuments, allDocuments, handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, toggleStageExpansion, toggleDocumentExpansion, getKycFields, kycDocuments, visibleStageIds, sortConfig, enhancedHandleStageStatusSave, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getDocumentForTaskStage, getSortedTasks, visibleHeaders, getCellContent]);
 
-  // Renders the transposed table with granular data rows
   const renderEnhancedTransposedTable = useCallback((tasks: any[], tableType: string) => {
     if (!tasks.length) {
       return (
@@ -2318,14 +2319,12 @@ export default function DepartmentTasksManager({
 
   const defaultSubdepartments = getDefaultSubdepartments()
 
-  // Effect to load rows when tasks or view settings change
   useEffect(() => {
     if (isTransposedView && tasks && tasks.length > 0) {
       loadRows(tasks);
     }
   }, [tasks, isTransposedView, loadRows]);
 
-  // Effect to initialize/reset visible stages when stages data changes
   useEffect(() => {
     if (stages && stages.length > 0) {
       setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
@@ -2334,7 +2333,6 @@ export default function DepartmentTasksManager({
     }
   }, [stages])
 
-  // Effect to fetch KYC data for expanded documents in standard view
   useEffect(() => {
     if (isTransposedView) return;
 
@@ -2359,8 +2357,6 @@ export default function DepartmentTasksManager({
     }
   }, [isTransposedView, stages, expandedStages, expandedDocuments, kycDocuments]);
 
-  // FIX: Replaced the original problematic initial data loading logic.
-  // This effect now runs only ONCE on mount to prevent the infinite loop.
   useEffect(() => {
     const performInitialLoad = async () => {
       try {
@@ -2418,16 +2414,14 @@ export default function DepartmentTasksManager({
     };
 
     performInitialLoad();
-  }, [fetchTmUsers]); // fetchTmUsers is memoized and stable, so this effect still runs only once.
+  }, [fetchTmUsers]);
 
-  // Load tasks and stages when department or subdepartment changes
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {
       loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
     }
   }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData])
 
-  // Update activeSubdepartmentTab when department changes
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {
       const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
@@ -2442,10 +2436,8 @@ export default function DepartmentTasksManager({
     }
   }, [activeDepartmentTab, departments])
 
-  // Check if any data is still loading
   const isAnyDataLoading = Object.values(dataLoading).some(loading => loading)
 
-  // Loading state for all initial data
   if (dataLoading.departments || isAnyDataLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-slate-50/30">
@@ -2614,8 +2606,8 @@ export default function DepartmentTasksManager({
                                           {activeFollowUpFilter === 'bcl' && (
                                             <>
                                               <TabsList className="mb-4">
-                                                <TabsTrigger 
-                                                  value="" 
+                                                <TabsTrigger
+                                                  value=""
                                                   onClick={() => setActiveManagerTab(null)}
                                                   className={!activeManagerTab ? 'bg-primary text-primary-foreground' : ''}
                                                 >
@@ -2625,8 +2617,8 @@ export default function DepartmentTasksManager({
                                                   const managerTasks = getTaskCountForManager(manager.id);
                                                   const hasTasks = managerTasks > 0;
                                                   return (
-                                                    <TabsTrigger 
-                                                      key={manager.id} 
+                                                    <TabsTrigger
+                                                      key={manager.id}
                                                       value={manager.id}
                                                       onClick={() => setActiveManagerTab(manager.id)}
                                                       className={`${activeManagerTab === manager.id ? 'bg-primary text-primary-foreground' : ''} ${!hasTasks ? 'opacity-50' : ''}`}
@@ -2640,14 +2632,14 @@ export default function DepartmentTasksManager({
 
                                               {activeManagerTab && (
                                                 <TabsList className="mb-4">
-                                                  <TabsTrigger 
-                                                    value="" 
+                                                  <TabsTrigger
+                                                    value=""
                                                     onClick={() => setActiveAssistantTab(null)}
                                                     className={!activeAssistantTab ? 'bg-primary text-primary-foreground' : ''}
                                                   >
                                                     All Assistants
                                                   </TabsTrigger>
-                                                  <TabsTrigger 
+                                                  <TabsTrigger
                                                     value="no-assistant"
                                                     onClick={() => setActiveAssistantTab('no-assistant')}
                                                     className={activeAssistantTab === 'no-assistant' ? 'bg-primary text-primary-foreground' : ''}
@@ -2655,8 +2647,8 @@ export default function DepartmentTasksManager({
                                                     No Assistant ({getTaskCountForManagerWithoutAssistant(activeManagerTab)})
                                                   </TabsTrigger>
                                                   {getAssistantsForManager(activeManagerTab).map(assistant => (
-                                                    <TabsTrigger 
-                                                      key={assistant.id} 
+                                                    <TabsTrigger
+                                                      key={assistant.id}
                                                       value={assistant.id}
                                                       onClick={() => setActiveAssistantTab(assistant.id)}
                                                       className={activeAssistantTab === assistant.id ? 'bg-primary text-primary-foreground' : ''}
