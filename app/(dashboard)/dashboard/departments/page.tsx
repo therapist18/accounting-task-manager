@@ -96,7 +96,6 @@ export default function DepartmentsPage() {
         <TabsTrigger value="stages">Stages</TabsTrigger>
         <TabsTrigger value="rates">Rates</TabsTrigger>
         <TabsTrigger value="requirements">GOVT Upload Req</TabsTrigger>
-        <TabsTrigger value="webdata">Web Data</TabsTrigger>  
         <TabsTrigger value="guidelines">Guidelines</TabsTrigger>
         <TabsTrigger value="job-specific-questions">Job Specific Questions</TabsTrigger>
         <TabsTrigger value="documents+fields">Documents + Fields</TabsTrigger>
@@ -110,9 +109,9 @@ export default function DepartmentsPage() {
       <TabsContent value="requirements" className="h-screen">
         <UploadRequirements departments={departments} />
       </TabsContent>  
-      <TabsContent value="webdata">
+      {/* <TabsContent value="webdata">
         <Webdata departments={departments} />
-      </TabsContent>
+      </TabsContent> */}
       <TabsContent value="rates" className="h-screen">
         <Rates departments={departments} />
       </TabsContent>

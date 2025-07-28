@@ -807,6 +807,36 @@ export default function DepartmentTasksManager({
     return filteredTasks
   }, [tasks, departments, activeDepartmentTab, activeSubdepartmentTab, activeSubTab, activeFollowUpFilter, activeManagerTab, activeAssistantTab, activeOfficerTab])
 
+  // Get assistants linked to the currently selected manager
+  const getAssistantsForManager = useCallback((managerId: string) => {
+    if (!managerId) return [];
+    
+    // Get all tasks for the current manager
+    const managerTasks = tasks.filter(task => 
+      task.task_manager_id?.toString() === managerId &&
+      task.task_assistant_id
+    );
+    
+    // Get unique assistant IDs
+    const assistantIds = [...new Set(
+      managerTasks.map(task => task.task_assistant_id?.toString())
+    )].filter(Boolean);
+    
+    // Map to assistant objects with task counts
+    return assistantIds.map(assistantId => {
+      const user = tmUsers.get(parseInt(assistantId || '0'));
+      const taskCount = managerTasks.filter(
+        task => task.task_assistant_id?.toString() === assistantId
+      ).length;
+      
+      return {
+        id: assistantId,
+        name: user?.name || `Assistant ${assistantId}`,
+        taskCount
+      };
+    });
+  }, [tasks, tmUsers]);
+
   // FIXED: Add helper functions to calculate task counts for each staff member
   const getTaskCountForManager = useCallback((managerId: string) => {
     const managerTasks = getFilteredTasks('in_progress').filter(task =>
@@ -827,6 +857,14 @@ export default function DepartmentTasksManager({
       task.task_manager_id?.toString() === managerId && !task.task_assistant_id
     );
     return managerOnlyTasks.length;
+  }, [getFilteredTasks]);
+  
+  const getAssistantTaskCountForManager = useCallback((managerId: string, assistantId: string) => {
+    const tasks = getFilteredTasks('in_progress').filter(task =>
+      task.task_manager_id?.toString() === managerId &&
+      task.task_assistant_id?.toString() === assistantId
+    );
+    return tasks.length;
   }, [getFilteredTasks]);
 
   const getTaskCountForOfficer = useCallback((officerId: string) => {
@@ -904,17 +942,52 @@ export default function DepartmentTasksManager({
       setSubdepartmentOfficers(staffData.officers);
       setSubdepartmentManagers(staffData.managers);
       setSubdepartmentAssistants(staffData.assistants);
+      
+      // If we have an active manager tab but no active assistant tab, and the manager has assistants,
+      // auto-select the first assistant if there's only one
+      if (activeManagerTab && !activeAssistantTab) {
+        const managerAssistants = getAssistantsForManager(activeManagerTab);
+        if (managerAssistants.length === 1) {
+          setActiveAssistantTab(managerAssistants[0].id);
+        }
+      }
     } else {
       setSubdepartmentOfficers([]);
       setSubdepartmentManagers([]);
       setSubdepartmentAssistants([]);
     }
-
-    // Reset active staff filters when subdepartment changes
-    setActiveOfficerTab(null);
-    setActiveManagerTab(null);
-    setActiveAssistantTab(null);
-  }, [activeSubdepartmentTab, getActiveStaffFromSubdepartment, tmUsers]);
+  }, [
+    activeSubdepartmentTab, 
+    activeManagerTab, 
+    activeAssistantTab, 
+    getActiveStaffFromSubdepartment, 
+    tmUsers, 
+    getAssistantsForManager
+  ]);
+  
+  // Update assistant tabs when manager selection changes
+  useEffect(() => {
+    if (activeManagerTab) {
+      const managerAssistants = getAssistantsForManager(activeManagerTab);
+      setSubdepartmentAssistants(managerAssistants);
+      
+      // Auto-select the first assistant if there's only one
+      if (managerAssistants.length === 1) {
+        setActiveAssistantTab(managerAssistants[0].id);
+      } else {
+        setActiveAssistantTab(null);
+      }
+    } else {
+      // Reset to all assistants when no manager is selected
+      if (activeSubdepartmentTab && tmUsers.size > 0) {
+        const staffData = getActiveStaffFromSubdepartment(activeSubdepartmentTab);
+        setSubdepartmentAssistants(staffData.assistants);
+      } else {
+        setSubdepartmentAssistants([]);
+      }
+      setActiveAssistantTab(null);
+    }
+  }, [activeManagerTab, activeSubdepartmentTab, getAssistantsForManager, getActiveStaffFromSubdepartment, tmUsers]);
 
   // Reset staff filters when follow-up filter changes
   useEffect(() => {
@@ -1621,21 +1694,21 @@ export default function DepartmentTasksManager({
         return task.task_manager_id ? (
           <div className="flex flex-col">
             <span className="font-medium">{getStaffName(task.task_manager_id)}</span>
-            <span className="text-xs text-muted-foreground">ID: {task.task_manager_id}</span>
+            {/* <span className="text-xs text-muted-foreground">ID: {task.task_manager_id}</span> */}
           </div>
         ) : 'N/A';
       case 'officer':
         return task.officer_id ? (
           <div className="flex flex-col">
             <span className="font-medium">{getStaffName(task.officer_id)}</span>
-            <span className="text-xs text-muted-foreground">ID: {task.officer_id}</span>
+            {/* <span className="text-xs text-muted-foreground">ID: {task.officer_id}</span> */}
           </div>
         ) : 'N/A';
       case 'task_assistant':
         return task.task_assistant_id ? (
           <div className="flex flex-col">
             <span className="font-medium">{getStaffName(task.task_assistant_id)}</span>
-            <span className="text-xs text-muted-foreground">ID: {task.task_assistant_id}</span>
+            {/* <span className="text-xs text-muted-foreground">ID: {task.task_assistant_id}</span> */}
           </div>
         ) : 'N/A';
       default: return task[headerId] || 'N/A';
@@ -2538,6 +2611,63 @@ export default function DepartmentTasksManager({
                                       <h5 className="text-sm font-medium text-slate-700">Statistics ({visibleStats.size})</h5>
                                       {STATS_HEADERS.map((stat) => (
                                         <div key={stat.id} className="flex items-center space-x-2">
+                                          {activeFollowUpFilter === 'bcl' && (
+                                            <>
+                                              <TabsList className="mb-4">
+                                                <TabsTrigger 
+                                                  value="" 
+                                                  onClick={() => setActiveManagerTab(null)}
+                                                  className={!activeManagerTab ? 'bg-primary text-primary-foreground' : ''}
+                                                >
+                                                  All Managers
+                                                </TabsTrigger>
+                                                {subdepartmentManagers.map(manager => {
+                                                  const managerTasks = getTaskCountForManager(manager.id);
+                                                  const hasTasks = managerTasks > 0;
+                                                  return (
+                                                    <TabsTrigger 
+                                                      key={manager.id} 
+                                                      value={manager.id}
+                                                      onClick={() => setActiveManagerTab(manager.id)}
+                                                      className={`${activeManagerTab === manager.id ? 'bg-primary text-primary-foreground' : ''} ${!hasTasks ? 'opacity-50' : ''}`}
+                                                      disabled={!hasTasks}
+                                                    >
+                                                      {manager.name} ({managerTasks})
+                                                    </TabsTrigger>
+                                                  );
+                                                })}
+                                              </TabsList>
+
+                                              {activeManagerTab && (
+                                                <TabsList className="mb-4">
+                                                  <TabsTrigger 
+                                                    value="" 
+                                                    onClick={() => setActiveAssistantTab(null)}
+                                                    className={!activeAssistantTab ? 'bg-primary text-primary-foreground' : ''}
+                                                  >
+                                                    All Assistants
+                                                  </TabsTrigger>
+                                                  <TabsTrigger 
+                                                    value="no-assistant"
+                                                    onClick={() => setActiveAssistantTab('no-assistant')}
+                                                    className={activeAssistantTab === 'no-assistant' ? 'bg-primary text-primary-foreground' : ''}
+                                                  >
+                                                    No Assistant ({getTaskCountForManagerWithoutAssistant(activeManagerTab)})
+                                                  </TabsTrigger>
+                                                  {getAssistantsForManager(activeManagerTab).map(assistant => (
+                                                    <TabsTrigger 
+                                                      key={assistant.id} 
+                                                      value={assistant.id}
+                                                      onClick={() => setActiveAssistantTab(assistant.id)}
+                                                      className={activeAssistantTab === assistant.id ? 'bg-primary text-primary-foreground' : ''}
+                                                    >
+                                                      {assistant.name} ({assistant.taskCount})
+                                                    </TabsTrigger>
+                                                  ))}
+                                                </TabsList>
+                                              )}
+                                            </>
+                                          )}
                                           <Checkbox
                                             id={stat.id}
                                             checked={visibleStats.has(stat.id)}

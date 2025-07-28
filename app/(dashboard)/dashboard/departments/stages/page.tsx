@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2 } from "lucide-react"
+import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2, Zap } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { supabase } from "@/lib/supabase/client"
 import { AddStageDialog } from "./components/add-stage-dialog"
@@ -2096,6 +2096,30 @@ export default function Stages() {
               <TableRow className="border-b-0">
                 <TableCell className="sticky bg-slate-100 border-r-2 border-slate-300 z-10" rowSpan={2} colSpan={2}></TableCell>
               </TableRow>
+              {/* Automation Name Row */}
+              <TableRow className="border-b-0">
+                {leafEntities.map((entity) => {
+                  const stage = currentDept.stages.find(s => s.id === entity.id);
+                  const automationName = stage?.web_automation?.automationName || '';
+                  
+                  return (
+                    <TableHead
+                      key={`automation-${entity.id}`}
+                      colSpan={2} // Span both Applicable and Display columns
+                      className="border-r border-blue-300 text-center text-xs font-medium text-blue-800 bg-blue-100 p-1"
+                    >
+                      {automationName ? (
+                        <div className="flex items-center justify-center gap-1">
+                          <Zap className="h-3 w-3 text-amber-500" />
+                          <span className="truncate max-w-[120px]" title={automationName}>
+                            {automationName}
+                          </span>
+                        </div>
+                      ) : '-'}
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
               {/* Applicable/Display Controls Header Row */}
               {columnVisibility.controls && (
                 <TableRow className="border-b-0">
@@ -2343,6 +2367,7 @@ export default function Stages() {
       1 +
       (columnVisibility.duration ? 1 : 0) +
       (columnVisibility.followUp ? 1 : 0) +
+      (columnVisibility.automation ? 1 : 0) +
       (columnVisibility.status ? 1 : 0) +
       (columnVisibility.controls ? 1 : 0)
 
@@ -2372,7 +2397,7 @@ export default function Stages() {
                 {columnVisibility.index && (
                   <TableHead
                     className="sticky left-0 bg-blue-700 border-r-2 border-blue-500 font-bold w-16 z-40 text-center text-white"
-                    rowSpan={4}
+                    rowSpan={headerRowCount}
                   >
                     #
                   </TableHead>
@@ -2383,7 +2408,7 @@ export default function Stages() {
                       "sticky bg-blue-700 border-r-2 border-blue-500 font-bold w-64 z-40 text-white",
                       columnVisibility.index ? "left-16" : "left-0",
                     )}
-                    rowSpan={4}
+                    rowSpan={headerRowCount}
                   >
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4" />
@@ -2416,6 +2441,14 @@ export default function Stages() {
                           {stage.order_num}. {stage.name}
                         </span>
                       </div>
+                      {/* {stage.web_automation?.automationName && (
+                        <div className="flex items-center gap-1 bg-blue-600/50 px-2 py-0.5 rounded-full text-xs">
+                          <Zap className="h-3 w-3 text-amber-300" />
+                          <span className="truncate max-w-[180px]" title={stage.web_automation?.automationName}>
+                            {stage.web_automation?.automationName}
+                          </span>
+                        </div>
+                      )} */}
                       <div className="flex items-center gap-2 text-xs">
                         {stage.documents && stage.documents.length > 0 && (
                           <Popover>
@@ -2619,14 +2652,92 @@ export default function Stages() {
                       Follow Up
                     </TableHead>
                   )}
-                  {currentDept.stages.map((stage, index) => (
+                  {currentDept.stages.map((stage) => (
                     <TableHead
                       key={`followup-${stage.id}`}
                       className="border-r border-blue-400 text-center bg-blue-600"
                     >
-                      <div className="font-bold text-sm text-white py-2">{stage.follow_up || "-"}</div>
+                      <div className="font-bold text-sm text-white py-2">
+                        {stage.follow_up || "-"}
+                      </div>
                     </TableHead>
                   ))}
+                </TableRow>
+              )}
+              {/* Automation Row */}
+              <TableRow className="border-b-0">
+                {columnVisibility.stageName && (
+                  <TableHead
+                    className={cn(
+                      "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
+                      columnVisibility.index && columnVisibility.entity
+                        ? "left-80"
+                        : columnVisibility.index || columnVisibility.entity
+                          ? "left-64"
+                          : "left-0",
+                    )}
+                  >
+                    Automation
+                  </TableHead>
+                )}
+                {currentDept.stages.map((stage) => {
+                  const automationName = stage.web_automation?.automationName;
+                  return (
+                    <TableHead
+                      key={`automation-${stage.id}`}
+                      className="border-r border-blue-400 text-center bg-blue-600"
+                    >
+                      {automationName ? (
+                        <div className="flex items-center justify-center gap-1 bg-blue-700/80 rounded-full px-2 py-1 mx-2">
+                          <Zap className="h-3 w-3 text-amber-300" />
+                          <span className="text-xs font-medium text-white truncate max-w-[120px]" title={automationName}>
+                            {automationName}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-gray-300">-</div>
+                      )}
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
+              {/* Automation Row */}
+              {columnVisibility.automation && (
+                <TableRow className="border-b-0">
+                  {columnVisibility.stageName && (
+                    <TableHead
+                      className={cn(
+                        "sticky bg-blue-600 border-r-2 border-blue-400 z-20 text-white",
+                        columnVisibility.index && columnVisibility.entity
+                          ? "left-80"
+                          : columnVisibility.index || columnVisibility.entity
+                            ? "left-64"
+                            : "left-0",
+                      )}
+                    >
+                      Automation
+                    </TableHead>
+                  )}
+                  {currentDept.stages.map((stage) => {
+                    const automationName = stage.web_automation?.automationName;
+                    return (
+                      <TableHead
+                        key={`automation-${stage.id}`}
+                        className="border-r border-blue-400 text-center bg-blue-600"
+                      >
+                        {automationName ? (
+                          <div className="flex items-center justify-center gap-1 bg-blue-700/80 rounded-full px-2 py-1 mx-2">
+                            <Zap className="h-3 w-3 text-amber-300" />
+                            <span className="text-xs font-medium text-white truncate max-w-[120px]" title={automationName}>
+                              {automationName}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="text-xs text-gray-300">-</div>
+                        )}
+                      </TableHead>
+                    );
+                  })}
                 </TableRow>
               )}
               {/* Status Row */}

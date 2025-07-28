@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, X, Clock, User, FileText, Info, Pencil, MessageSquare, Star, Trash2, Check } from "lucide-react"
+import { Plus, X, Clock, User, FileText, Info, Pencil, MessageSquare, Star, Trash2, Check, Zap, Webhook } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
@@ -109,6 +109,8 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
   const [loadingEntities, setLoadingEntities] = useState(false);
   const [kycDocuments, setKycDocuments] = useState<KYCDocument[]>([]);
   const [loadingKycDocs, setLoadingKycDocs] = useState(false);
+  const [automationTypes, setAutomationTypes] = useState<any[]>([]);
+  const [loadingAutomations, setLoadingAutomations] = useState(false);
 
   const getTargetDepartmentName = useCallback(() => {
     return departmentName || stage?.department || "Applications";
@@ -129,6 +131,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
       const targetDepartment = getTargetDepartmentName();
       fetchEntities();
       fetchKYCDocuments(targetDepartment);
+      fetchAutomationTypes();
     } else {
       setFormData(null);
     }
@@ -154,6 +157,29 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
       toast({ title: "Error", description: "Failed to load existing documents.", variant: "destructive" });
     } finally {
       setLoadingKycDocs(false);
+    }
+  };
+
+  const fetchAutomationTypes = async () => {
+    setLoadingAutomations(true);
+    try {
+      const { data, error } = await supabase
+        .from('tm_automations')
+        .select('id, name, description, webhook_url, webhook_type, is_active')
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) throw error;
+      setAutomationTypes(data || []);
+    } catch (error) {
+      console.error('Error fetching automation types:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load automation types',
+        variant: 'destructive'
+      });
+    } finally {
+      setLoadingAutomations(false);
     }
   };
 
@@ -197,9 +223,37 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
     const trimmedName = formData.name.trim();
     if (!trimmedName) return;
 
+    // Validate web form fields if enabled
+    if (formData.hasWebForm && !formData.webFormName?.trim()) {
+      toast({
+        title: 'Error',
+        description: 'Web form name is required when web form is enabled.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     setSaving(true);
     try {
       const targetDepartment = getTargetDepartmentName();
+      
+      // Prepare web automation data if enabled
+      let webAutomation = null;
+      if (formData.hasWebForm && formData.automationId) {
+        const selectedAutomation = automationTypes.find(a => a.id === formData.automationId);
+        if (selectedAutomation) {
+          webAutomation = {
+            automationId: selectedAutomation.id,
+            automationName: selectedAutomation.name,
+            webFormName: formData.webFormName?.trim(),
+            webhookUrl: selectedAutomation.webhook_url,
+            webhookType: selectedAutomation.webhook_type,
+            isActive: selectedAutomation.is_active,
+            description: selectedAutomation.description,
+            createdAt: new Date().toISOString()
+          };
+        }
+      }
       const docsWithKyc = await Promise.all(
         (formData.documents || []).map(async (doc) => {
           if (!doc.name?.trim()) return doc;
@@ -232,7 +286,11 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
         name: trimmedName,
         description: formData.description?.trim() || undefined,
         documents: docsWithKyc.map(({ extractionSpecs, ...doc }) => doc),
-        timeConfigs: formData.timeConfigs?.map(tc => ({ ...tc, applicationType: tc.applicationType || 'Default', days: tc.days || 0, hours: tc.hours || 0, minutes: tc.minutes || 0 })) || []
+        timeConfigs: formData.timeConfigs?.map(tc => ({ ...tc, applicationType: tc.applicationType || 'Default', days: tc.days || 0, hours: tc.hours || 0, minutes: tc.minutes || 0 })) || [],
+        // Include web automation data
+        web_automation: webAutomation,
+        // For backward compatibility
+        hasWebForm: formData.hasWebForm || false,
       };
 
       await onSave(updatedStage);
@@ -436,6 +494,84 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                       onChange={handleInputChange} placeholder="e.g., Review the submitted application form for completeness..." rows={3}
                     />
                   </FormField>
+                </SectionWrapper>
+
+                <SectionWrapper title="Automation" icon={<Zap />}>
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-3">
+                      <Checkbox
+                        id="hasAutomation"
+                        checked={formData.hasWebForm || false}
+                        onCheckedChange={(checked) => setFormData(prev => (prev ? { ...prev, hasWebForm: Boolean(checked) } : null))}
+                        className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                      />
+                      <div>
+                        <Label htmlFor="hasAutomation" className="font-medium flex items-center gap-2 text-gray-800">
+                          Enable Web Form Automation
+                        </Label>
+                        <p className="text-sm text-muted-foreground">
+                          Trigger automations when this stage is activated.
+                        </p>
+                      </div>
+                    </div>
+
+                    {formData.hasWebForm && (
+                      <div className="space-y-4 pl-8 border-l-2 border-blue-100">
+                        <FormField label="Web Form Name" required>
+                          <Input
+                            value={formData.webFormName || ''}
+                            onChange={(e) => setFormData(prev => (prev ? { ...prev, webFormName: e.target.value } : null))}
+                            placeholder="e.g., Application Review Form"
+                          />
+                        </FormField>
+
+                        <FormField label="Automation Type">
+                          <Select
+                            value={formData.automationId || ''}
+                            onValueChange={(value) => setFormData(prev => (prev ? { ...prev, automationId: value } : null))}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select an automation" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {loadingAutomations ? (
+                                <SelectItem value="loading" disabled>Loading automations...</SelectItem>
+                              ) : (
+                                <>
+                                  <SelectItem value="none">No automation</SelectItem>
+                                  {automationTypes.map((automation) => (
+                                    <SelectItem key={automation.id} value={automation.id}>
+                                      <div className="flex items-center gap-2">
+                                        <Webhook className="h-4 w-4 text-blue-500" />
+                                        <span>{automation.name}</span>
+                                        {automation.description && (
+                                          <span className="text-xs text-muted-foreground ml-2">
+                                            {automation.description}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </>
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </FormField>
+
+                        {formData.automationId && (
+                          <div className="p-3 bg-blue-50 rounded-md text-sm text-blue-700 flex items-start gap-2">
+                            <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                            <div>
+                              <p className="font-medium">Automation Details</p>
+                              <p className="text-xs mt-1">
+                                This automation will be triggered when this stage is activated. Make sure the selected automation is properly configured.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </SectionWrapper>
 
                 <SectionWrapper title="Timing & Follow-up" icon={<Clock />}>

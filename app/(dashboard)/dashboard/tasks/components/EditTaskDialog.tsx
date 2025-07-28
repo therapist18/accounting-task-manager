@@ -318,8 +318,80 @@ export function EditTaskDialog({
     handleInputChange('subclass_id', '');
   }, [formData.class_id]);
 
+  // EFFECT 5: Handle Manager changes - filter assistants
+  useEffect(() => {
+    if (isInitialLoad.current) return;
+    
+    const filterAssistants = async () => {
+      if (!formData.task_manager_id) {
+        // If no manager selected, show all available assistants
+        const dept = departments.find(d => d.id?.toString() === formData.department_id);
+        const subdept = dept?.tm_subdepartments?.find(s => s.id?.toString() === formData.subdepartment_id);
+        
+        if (subdept && users) {
+          const activeStaff = findActiveStaffForSubdept(subdept, users, officers);
+          setAvailableAssistants(activeStaff.assistants);
+        }
+        return;
+      }
+
+      try {
+        // Get all tasks where this manager is assigned
+        const { data: managerTasks, error } = await supabase
+          .from('tm_tasks')
+          .select('task_assistant_id')
+          .eq('task_manager_id', formData.task_manager_id)
+          .not('task_assistant_id', 'is', null);
+          
+        if (error) throw error;
+        
+        // Get unique assistant IDs
+        const assistantIds = [...new Set(
+          managerTasks.map(task => task.task_assistant_id?.toString())
+        )].filter(Boolean);
+        
+        // Filter available assistants to only those linked with the manager
+        const dept = departments.find(d => d.id?.toString() === formData.department_id);
+        const subdept = dept?.tm_subdepartments?.find(s => s.id?.toString() === formData.subdepartment_id);
+        
+        if (subdept && users) {
+          const activeStaff = findActiveStaffForSubdept(subdept, users, officers);
+          const linkedAssistants = activeStaff.assistants.filter(assistant => 
+            assistantIds.includes(assistant.id?.toString())
+          );
+          
+          setAvailableAssistants(linkedAssistants.length > 0 ? linkedAssistants : activeStaff.assistants);
+        }
+      } catch (error) {
+        console.error('Error fetching manager-assistant relationships:', error);
+        // Fallback to showing all assistants
+        const dept = departments.find(d => d.id?.toString() === formData.department_id);
+        const subdept = dept?.tm_subdepartments?.find(s => s.id?.toString() === formData.subdepartment_id);
+        
+        if (subdept && users) {
+          const activeStaff = findActiveStaffForSubdept(subdept, users, officers);
+          setAvailableAssistants(activeStaff.assistants);
+        }
+      }
+    };
+    
+    filterAssistants();
+  }, [formData.task_manager_id, formData.department_id, formData.subdepartment_id, departments, users, officers]);
+
   const handleInputChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }))
+    // If changing manager, reset assistant if needed
+    if (field === 'task_manager_id') {
+      setFormData(prev => ({ 
+        ...prev, 
+        [field]: value,
+        // Reset assistant if the new manager doesn't have this assistant assigned
+        ...(value && prev.task_assistant_id && {
+          task_assistant_id: ''
+        })
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, [field]: value }));
+    }
   }
 
   const handleSave = async () => {
@@ -334,7 +406,6 @@ export function EditTaskDialog({
         subdepartment_id: formData.subdepartment_id ? parseInt(formData.subdepartment_id, 10) : null,
         class_id: formData.class_id ? parseInt(formData.class_id, 10) : null,
         subclass_id: formData.subclass_id ? parseInt(formData.subclass_id, 10) : null,
-        // FIXED: Properly handle staff assignments - store the user IDs directly
         task_manager_id: formData.task_manager_id && formData.task_manager_id !== 'none' ? formData.task_manager_id : null,
         officer_id: formData.officer_id && formData.officer_id !== 'none' ? formData.officer_id : null,
         task_assistant_id: formData.task_assistant_id && formData.task_assistant_id !== 'none' ? formData.task_assistant_id : null,
@@ -530,10 +601,22 @@ export function EditTaskDialog({
               <div className="space-y-2">
                 <Label htmlFor="task_assistant" className="flex items-center">
                   <UserCheck className="w-4 h-4 mr-2" />Task Assistant
-                  <span className="ml-2 text-xs text-slate-500">({availableAssistants.length} available)</span>
+                  <span className="ml-2 text-xs text-slate-500">
+                    ({availableAssistants.length} available{formData.task_manager_id ? ' for selected manager' : ''})
+                  </span>
                 </Label>
-                <Select value={formData.task_assistant_id} onValueChange={(value) => handleInputChange('task_assistant_id', value)} disabled={!formData.subdepartment_id}>
-                  <SelectTrigger><SelectValue placeholder="Select task assistant" /></SelectTrigger>
+                <Select 
+                  value={formData.task_assistant_id} 
+                  onValueChange={(value) => handleInputChange('task_assistant_id', value)} 
+                  disabled={!formData.subdepartment_id || (formData.task_manager_id && availableAssistants.length === 0)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={
+                      formData.task_manager_id && availableAssistants.length === 0 
+                        ? "No assistants linked to this manager" 
+                        : "Select task assistant"
+                    } />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Task Assistant</SelectItem>
                     {availableAssistants.map((user) => (
@@ -544,9 +627,15 @@ export function EditTaskDialog({
                     ))}
                   </SelectContent>
                 </Select>
-                {formData.subdepartment_id && availableAssistants.length === 0 && (
-                  <p className="text-xs text-amber-600 mt-1">No assistants assigned to this subdepartment. Using fallback: all users available.</p>
-                )}
+                {formData.task_manager_id && availableAssistants.length === 0 ? (
+                  <p className="text-xs text-amber-600 mt-1">
+                    No assistants are currently linked to the selected manager.
+                  </p>
+                ) : formData.subdepartment_id && availableAssistants.length === 0 ? (
+                  <p className="text-xs text-amber-600 mt-1">
+                    No assistants assigned to this subdepartment.
+                  </p>
+                ) : null}
               </div>
             </div>
           </div>

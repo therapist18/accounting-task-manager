@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Plus, X, Clock, FileText, User, Info, MessageSquare, Trash2, Star, Check, Building2, FolderTree } from "lucide-react"
+import { Plus, X, Clock, FileText, User, Info, MessageSquare, Trash2, Star, Check, Building2, FolderTree, Zap, Webhook } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
@@ -94,8 +94,19 @@ interface AddStageDialogProps {
   departments: DepartmentOption[]
 }
 
+interface AutomationType {
+  id: string;
+  name: string;
+  description?: string;
+  webhook_url?: string;
+  webhook_type?: string;
+  is_active: boolean;
+}
+
 export function AddStageDialog({ open, onOpenChange, onAddStages, departments = [] }: AddStageDialogProps) {
   const [selectedDepartment, setSelectedDepartment] = useState<string>('')
+  const [automationTypes, setAutomationTypes] = useState<AutomationType[]>([])
+  const [loadingAutomations, setLoadingAutomations] = useState(false)
   const [newStages, setNewStages] = useState<NewStage[]>([{
     id: generateId(),
     name: '',
@@ -237,6 +248,35 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
     }
   }
 
+  const fetchAutomationTypes = async () => {
+    try {
+      setLoadingAutomations(true)
+      const { data, error } = await supabase
+        .from('tm_automations')
+        .select('id, name, description, webhook_url, webhook_type, is_active')
+        .eq('is_active', true)
+        .order('name')
+      if (error) throw error
+      setAutomationTypes(data || [])
+    } catch (error) {
+      console.error('Error fetching automation types:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to load automation types',
+        variant: 'destructive'
+      })
+    } finally {
+      setLoadingAutomations(false)
+    }
+  }
+
+  // Fetch data when the dialog opens
+  useEffect(() => {
+    if (open) {
+      fetchAutomationTypes()
+    }
+  }, [open])
+
   const addNewStageRow = () => {
     const newStage = {
       id: generateId(),
@@ -373,99 +413,129 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
   const handleSubmit = async () => {
     if (!selectedDepartment) {
       toast({
-        title: "Error",
-        description: "Please select a department",
-        variant: "destructive"
+        title: 'Error',
+        description: 'Please select a department',
+        variant: 'destructive',
       })
       return
     }
 
-    const invalidStages = newStages.filter(stage => !stage.name.trim())
-    if (invalidStages.length > 0) {
+    // Filter out any empty stages (no name)
+    const validStages = newStages.filter(stage => stage.name.trim() !== '')
+    
+    if (validStages.length === 0) {
       toast({
-        title: "Error",
-        description: "Please provide names for all stages",
-        variant: "destructive"
+        title: 'Error',
+        description: 'Please add at least one stage with a name',
+        variant: 'destructive',
       })
       return
     }
 
-    setSaving(true)
+    // Validate web form fields for all stages
+    for (const stage of validStages) {
+      if (stage.hasWebForm && !stage.webFormName?.trim()) {
+        toast({
+          title: 'Error',
+          description: `Web form name is required for stage "${stage.name}" when web form is enabled.`,
+          variant: 'destructive'
+        });
+        return;
+      }
+    }
+
+    setSaving(true);
     try {
-      const departmentName = departments.find(d => d.id === selectedDepartment)?.name || selectedDepartment
-
-      // First process KYC document creation with extractionSpecs
-      const stagesWithKycDocs = await Promise.all(
-        newStages.map(async (stage) => {
-          const processedDocs = await Promise.all(
-            stage.documents.map(async (doc) => {
-              if (doc.name.trim() && !doc.linkedKycDocument) {
-                try {
-                  const kycId = await createKYCDocument({
-                    name: doc.name,
-                    department: departmentName,
-                    category: 'application-docs',
-                    document_type: 'one_off',
-                    fields: doc.extractionSpecs || [],
-                    display_name: doc.name,
-                    metadata: doc.isSpecial ? {
-                      isSpecial: true,
-                      targetEntities: doc.targetEntities || []
-                    } : undefined
-                  })
-                  return { ...doc, kycId, linkedKycDocument: kycId }
-                } catch (error) {
-                  console.error('Error creating KYC document:', error)
-                  toast({
-                    title: "Warning",
-                    description: `Failed to create KYC document for "${doc.name}". Document will be saved without KYC integration.`,
-                    variant: "destructive"
-                  })
-                  return doc
-                }
-              }
-              return doc
-            })
-          )
-          return { ...stage, documents: processedDocs }
-        })
-      )
-
-      // Then prepare stages for tm_departments by removing extractionSpecs
-      const processedStages = stagesWithKycDocs.map(stage => ({
-        ...stage,
-        documents: stage.documents.map(({ extractionSpecs, ...doc }) => doc)
-      }))
-
-      await onAddStages(processedStages, selectedDepartment)
+      const departmentName = departments.find(d => d.id === selectedDepartment)?.name || selectedDepartment;
       
-      // Reset state on success
-      setNewStages([{
-        id: generateId(),
-        name: '',
-        description: '',
-        days: 0,
-        hours: 0,
-        minutes: 0,
-        followUp: 'none',
-        isSpecial: false,
-        timeConfigs: [{ applicationType: 'Default', days: 0, hours: 0, minutes: 0 }],
-        documents: []
-      }])
-      setSelectedDepartment('')
-      setActiveStageTab('')
-      setEntityOptions([])
-      setKycDocuments([])
-      onOpenChange(false); // Close dialog on success
+      // Process all stages with their documents and automations
+      const processedStages = await Promise.all(
+        validStages.map(async (stage) => {
+          // Process documents first
+          const processedDocs = await Promise.all(
+            (stage.documents || []).map(async (doc) => {
+              if (!doc.name?.trim()) return doc;
+              
+              const isLinked = !!doc.linkedKycDocument;
+              if (isLinked) return doc;
+
+              try {
+                const kycId = await createKYCDocument({
+                  name: doc.name,
+                  department: departmentName,
+                  category: 'application-docs',
+                  document_type: 'one_off',
+                  fields: doc.extractionSpecs || [],
+                  display_name: doc.name,
+                  metadata: doc.isSpecial ? {
+                    isSpecial: true,
+                    targetEntities: doc.targetEntities || []
+                  } : undefined
+                });
+                return { ...doc, kycId, linkedKycDocument: kycId };
+              } catch (error) {
+                console.error('Error creating KYC document:', error);
+                toast({
+                  title: "Warning",
+                  description: `Failed to create KYC document for "${doc.name}". Document will be saved without KYC integration.`,
+                  variant: "warning"
+                });
+                return doc;
+              }
+            })
+          );
+
+          // Prepare web automation data if enabled
+          let webAutomation = null;
+          if (stage.hasWebForm && stage.automationId) {
+            const selectedAutomation = automationTypes.find(a => a.id === stage.automationId);
+            if (selectedAutomation) {
+              webAutomation = {
+                automationId: selectedAutomation.id,
+                automationName: selectedAutomation.name,
+                webFormName: stage.webFormName?.trim(),
+                webhookUrl: selectedAutomation.webhook_url,
+                webhookType: selectedAutomation.webhook_type,
+                isActive: selectedAutomation.is_active,
+                description: selectedAutomation.description,
+                createdAt: new Date().toISOString()
+              };
+            }
+          }
+
+          // Return the processed stage with automation data
+          return {
+            ...stage,
+            documents: processedDocs.map(({ extractionSpecs, ...doc }) => doc), // Remove extractionSpecs from documents
+            web_automation: webAutomation,
+            hasWebForm: stage.hasWebForm || false,
+          };
+        })
+      );
+
+      // Call the onAddStages callback with the processed stages
+      await onAddStages(processedStages, selectedDepartment);
+      
+      // Reset form
+      setNewStages([{ 
+        id: generateId(), 
+        name: '', 
+        description: '', 
+        isSpecial: false, 
+        timeConfigs: [] 
+      }]);
+      setSelectedDepartment('');
+      onOpenChange(false);
+      
     } catch (error) {
-      console.error('Error adding stages:', error)
+      console.error('Error adding stages:', error);
       toast({
-        title: "Error",
-        description: "Failed to add stages. Please try again.",
-        variant: "destructive"
-      })
+        title: 'Error',
+        description: 'Failed to add stages. Please try again.',
+        variant: 'destructive'
+      });
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
   }
 
@@ -713,6 +783,86 @@ function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: P
             <SelectItem value="BCL">BCL</SelectItem>
           </SelectContent>
         </Select>
+      </div>
+
+      {/* Automation */}
+      <div className="space-y-4 pt-4 border-t">
+        <div className="flex items-center space-x-3">
+          <Checkbox
+            id={`hasWebForm-${stage.id}`}
+            checked={stage.hasWebForm || false}
+            onCheckedChange={(checked) => onUpdate({ hasWebForm: checked === true })}
+            className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+          />
+          <div>
+            <Label htmlFor={`hasWebForm-${stage.id}`} className="font-medium flex items-center gap-2 text-gray-800">
+              <Zap className="h-4 w-4 text-blue-600" />
+              Enable Web Form Automation
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              Trigger automations when this stage is activated.
+            </p>
+          </div>
+        </div>
+
+        {(stage.hasWebForm) && (
+          <div className="space-y-4 pl-8 border-l-2 border-blue-100">
+            <div className="space-y-2">
+              <Label className="text-xs font-medium text-gray-700">Web Form Name</Label>
+              <Input
+                value={stage.webFormName || ''}
+                onChange={(e) => onUpdate({ webFormName: e.target.value })}
+                placeholder="e.g., Application Review Form"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-medium text-gray-700">Automation Type</Label>
+              <Select
+                value={stage.automationId || ''}
+                onValueChange={(value) => onUpdate({ automationId: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select an automation" />
+                </SelectTrigger>
+                <SelectContent>
+                  {loadingAutomations ? (
+                    <SelectItem value="loading" disabled>Loading automations...</SelectItem>
+                  ) : (
+                    <>
+                      <SelectItem value="none">No automation</SelectItem>
+                      {automationTypes.map((automation) => (
+                        <SelectItem key={automation.id} value={automation.id}>
+                          <div className="flex items-center gap-2">
+                            <Webhook className="h-4 w-4 text-blue-500" />
+                            <span>{automation.name}</span>
+                            {automation.description && (
+                              <span className="text-xs text-muted-foreground ml-2">
+                                {automation.description}
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {(stage.automationId) && (
+              <div className="p-3 bg-blue-50 rounded-md text-sm text-blue-700 flex items-start gap-2">
+                <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="font-medium">Automation Details</p>
+                  <p className="text-xs mt-1">
+                    This automation will be triggered when this stage is activated. Make sure the selected automation is properly configured.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Special Time Requirements */}
