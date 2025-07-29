@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Eye, ChevronDown, Plus, Minus, Loader2, Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertTriangle, Send, DownloadCloud, ArrowUpDown, ArrowUp, ArrowDown, Link as LinkIcon } from "lucide-react"
+import { Eye, ChevronDown, Plus, Minus, Loader2, Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertTriangle, Send, DownloadCloud, ArrowUpDown, ArrowUp, ArrowDown, Link as LinkIcon, AlertCircle } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { FileText, Edit, Trash2, Download, Building, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -108,7 +108,16 @@ export default function DepartmentTasksManager({
   const [linkingTask, setLinkingTask] = useState<UtilTask | null>(null);
   const [dataLoading, setDataLoading] = useState({ departments: true, companies: true, documents: true, kycFields: true, tasks: true, stages: false, users: true })
   const [isClassSelectionOpen, setIsClassSelectionOpen] = useState(false);
-  const [selectedTaskForPush, setSelectedTaskForPush] = useState<{ task: UtilTask; targetDeptId: number; targetSubDeptId: number; targetSubDeptName: string; isApplicant: boolean } | null>(null);
+  const [selectedTaskForPush, setSelectedTaskForPush] = useState<{ 
+    task: UtilTask; 
+    targetDeptId: number; 
+    targetSubDeptId: number; 
+    targetSubDeptName: string; 
+    isApplicant: boolean;
+    applicantAge: number | null;
+    applicantClassId?: string;
+    dependantClasses?: Map<string, string>;
+  } | null>(null);
   const [availableClasses, setAvailableClasses] = useState<any[]>([]);
   const [tableRows, setTableRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -120,6 +129,12 @@ export default function DepartmentTasksManager({
 
     try {
       const birthDate = new Date(dateOfBirth);
+      // Check if the date is valid
+      if (isNaN(birthDate.getTime())) {
+        console.warn('Invalid date of birth:', dateOfBirth);
+        return null;
+      }
+      
       const today = new Date();
       let age = today.getFullYear() - birthDate.getFullYear();
       const monthDiff = today.getMonth() - birthDate.getMonth();
@@ -134,7 +149,7 @@ export default function DepartmentTasksManager({
       return null;
     }
   }, []);
-
+ 
   // Enhanced function to fetch all dependants and applicant data
   const fetchAllDependantsAndApplicants = useCallback(async (tasks: UtilTask[]) => {
     try {
@@ -153,6 +168,17 @@ export default function DepartmentTasksManager({
           task.dependant_member.forEach(dep => {
             if (dep?.id) {
               allIndividualIds.add(dep.id);
+              
+              // Log dependant information for debugging
+              if (dep.full_name) {
+                const age = calculateAge(dep.date_of_birth);
+                console.log(`Dependant: ${dep.full_name} (ID: ${dep.id}), Age: ${age}, DOB: ${dep.date_of_birth}`);
+                
+                // Don't assume age if DOB is missing or invalid
+                if (age === null) {
+                  console.warn(`Skipping age assumption for dependant: ${dep.full_name} (ID: ${dep.id}) - missing or invalid date of birth`);
+                }
+              }
             }
           });
         }
@@ -207,7 +233,6 @@ export default function DepartmentTasksManager({
     }
   }, [calculateAge]);
 
-  // Enhanced useEffect to handle both dependants and applicants
   useEffect(() => {
     const fetchAndMapIndividuals = async () => {
       if (!tasks.length) return;
@@ -221,11 +246,18 @@ export default function DepartmentTasksManager({
       tasks.forEach(task => {
         // Enhance task with applicant data
         const applicantData = applicantsMap.get(task.individual_id);
+        
+        // Debug logging
+        console.log(`Task ${task.id} - Applicant: ${task.applicant_name}`);
+        console.log(`DOB: ${task.date_of_birth}, Individual ID: ${task.individual_id}`);
+        console.log(`Applicant Data:`, applicantData);
+        console.log(`Calculated Age: ${applicantData?.age}`);
+        
         enhancedTasksMap.set(task.id.toString(), {
           ...task,
           applicant_data: applicantData,
           nationality: applicantData?.nationality || task.nationality,
-          age: applicantData?.age || task.age
+          age: applicantData?.age // This should be the calculated age or null
         });
 
         // Map dependants
@@ -1139,21 +1171,35 @@ export default function DepartmentTasksManager({
     if (targetSubDeptId === 6) { // Alien subdepartment
       const classes = getClassesForSubdepartment(targetDeptId, targetSubDeptId);
       if (classes.length > 0) {
+        // Use enhanced task data for applicant age
+        const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
+        let applicantAge = enhancedTask.age;
+        
+        // If age is not in enhanced data, calculate it from date_of_birth
+        if (applicantAge === undefined || applicantAge === null) {
+          applicantAge = calculateAge(task.date_of_birth);
+        }
+        
+        console.log(`Applicant: ${task.applicant_name}, DOB: ${task.date_of_birth}, Calculated Age: ${applicantAge}`);
+        
         setSelectedTaskForPush({
           task,
           targetDeptId,
           targetSubDeptId,
           targetSubDeptName,
-          isApplicant: true // Start with applicant
+          isApplicant: true,
+          applicantAge,
+          applicantClassId: undefined,
+          dependantClasses: new Map()
         });
         setAvailableClasses(classes);
         setIsClassSelectionOpen(true);
         return;
       }
     }
- 
+  
     await executePushCase(task, targetDeptId, targetSubDeptId, targetSubDeptName, null, null);
-  }, [getClassesForSubdepartment]);
+  }, [getClassesForSubdepartment, enhancedTasksData, calculateAge]);
  
   const executePushCase = useCallback(async (
     task: UtilTask,
@@ -1168,51 +1214,55 @@ export default function DepartmentTasksManager({
       title: "Pushing Case...",
       description: `Creating new task(s) in ${targetSubDeptName}.`
     });
- 
+  
     try {
       const tasksToCreate = [];
- 
-      // Clean task data - EXCLUDE problematic columns
-      const {
-        id,
-        created_at,
-        updated_at,
-        current_stage_id,
-        current_stage_started_at,
-        stages,
-        department, // EXCLUDE
-        dependant_member, // EXCLUDE  
-        dependnats_members, // EXCLUDE (typo in original)
-        ...cleanTaskData
-      } = task;
- 
-      // Create main task data
-      const mainTaskData = {
-        ...cleanTaskData,
+  
+      // Create base task data with only the necessary fields - NO ID
+      const baseTaskData = {
+        status: 'in_progress',
         department_id: targetDeptId,
         subdepartment_id: targetSubDeptId,
         class_id: applicantClassId,
         subclass_id: null,
-        status: 'in_progress',
         created_by: 'system',
         date_initiated: new Date().toISOString(),
         stages: {},
         current_stage_id: null,
         current_stage_started_at: null,
+        // Only include essential fields from original task
+        task_manager_id: task.task_manager_id || null,
+        task_assistant_id: task.task_assistant_id || null,
+        officer_id: task.officer_id || null,
+        account_used: task.account_used || null,
+        batch: task.batch || null,
+        applied_by: task.applied_by || null,
+        applicant_type: 'principal',
+        r_number: task.r_number || null,
+        principal_member_name: task.principal_member_name || null,
+        renewal_status: task.renewal_status || null,
+        selections: task.selections || null,
+        company_id: task.company_id || null,
+        principal_member: task.principal_member || null,
+        understudy: task.understudy || null,
+        references: task.references || [],
+        job_description: task.job_description || null,
+        document_id: null,
+        source_document_id: null
       };
- 
+  
       // Add main task
       tasksToCreate.push({
-        ...mainTaskData,
+        ...baseTaskData,
         applicant_name: task.applicant_name,
         individual_id: task.individual_id
       });
- 
+  
       // Handle dependants
       const { dependantsMap } = await fetchAllDependantsAndApplicants([task]);
       const dependants = [];
       let skippedMinors = 0;
- 
+  
       if (task.dependant_member && Array.isArray(task.dependant_member)) {
         task.dependant_member.forEach(dep => {
           if (dep?.id && dependantsMap.has(dep.id)) {
@@ -1224,7 +1274,7 @@ export default function DepartmentTasksManager({
           }
         });
       }
- 
+  
       if (dependants.length > 0) {
         for (const dependant of dependants) {
           // For Alien cases, only create tasks for adults (18+)
@@ -1236,45 +1286,49 @@ export default function DepartmentTasksManager({
               continue;
             }
           }
- 
+  
           // Create task for dependant
           tasksToCreate.push({
-            ...mainTaskData,
-            class_id: dependantClassId || applicantClassId, // Use dependant class if different
+            ...baseTaskData,
+            class_id: dependantClassId || applicantClassId,
             applicant_name: dependant.full_name,
-            individual_id: dependant.individual_id,
-            relationship: dependant.relationship
+            individual_id: dependant.individual_id
           });
         }
       }
- 
-      // Insert all tasks
+  
+      console.log('Tasks to create:', tasksToCreate);
+  
+      // Insert all tasks at once - Supabase will auto-generate IDs
       const { data: newTasks, error } = await supabase
         .from('tm_tasks')
         .insert(tasksToCreate)
         .select();
- 
-      if (error) throw error;
- 
+  
+      if (error) {
+        console.error('Supabase error:', error);
+        throw error;
+      }
+  
       const mainTask = newTasks[0];
       const dependantTasks = newTasks.slice(1);
- 
+  
       let successMessage = `Main case pushed to ${targetSubDeptName} successfully. New Task ID: ${mainTask.id}`;
- 
+  
       if (dependantTasks.length > 0) {
         successMessage += `\n${dependantTasks.length} dependant task(s) also created.`;
       }
- 
+  
       if (targetSubDeptId === 6 && skippedMinors > 0) {
         successMessage += `\nNote: ${skippedMinors} minor dependant(s) were skipped for Alien cases.`;
       }
- 
+  
       toast({
         title: "Success",
         description: successMessage,
         variant: "default"
       });
- 
+  
       await refreshAllData();
     } catch (error) {
       console.error(`Error pushing case to ${targetSubDeptName}:`, error);
@@ -1287,7 +1341,7 @@ export default function DepartmentTasksManager({
       setIsPushingCase(false);
     }
   }, [refreshAllData, fetchAllDependantsAndApplicants]);
- 
+  
   const handleDownloadZip = useCallback(async (task: UtilTask) => {
     setIsDownloading(true);
     toast({
@@ -3298,95 +3352,149 @@ const handleTaskAction = useCallback((action: { type: string; taskId?: string | 
          </DialogHeader>
 
          <div className="space-y-6">
-           {/* Applicant Class Selection */}
-           <div className="space-y-3">
-             <h4 className="font-medium text-sm">
-               Class for Applicant: {selectedTaskForPush?.task.applicant_name}
-             </h4>
-             <div className="grid gap-2">
-               {availableClasses.map((classItem) => (
-                 <Button
-                   key={`applicant-${classItem.id}`}
-                   variant="outline"
-                   className="w-full justify-start h-auto p-3 text-left"
-                   onClick={() => {
-                     setSelectedTaskForPush(prev => prev ? { ...prev, applicantClassId: classItem.id.toString() } : null);
-                   }}
-                 >
-                   <div className="flex items-center gap-3">
-                     <div className={`w-4 h-4 rounded-full border-2 ${
-                       selectedTaskForPush?.applicantClassId === classItem.id.toString() 
-                         ? 'bg-blue-500 border-blue-500' 
-                         : 'border-gray-300'
-                     }`}>
-                       {selectedTaskForPush?.applicantClassId === classItem.id.toString() && (
-                         <div className="w-2 h-2 bg-white rounded-full m-0.5" />
-                       )}
+         {(selectedTaskForPush?.applicantAge === null || selectedTaskForPush?.applicantAge === undefined) ? (
+  <div className="p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r">
+    <div className="flex">
+      <div className="flex-shrink-0">
+        <AlertCircle className="h-5 w-5 text-yellow-400" />
+      </div>
+      <div className="ml-3">
+        <p className="text-sm text-yellow-700">
+          Age verification required for applicant: <strong>{selectedTaskForPush?.task.applicant_name}</strong>
+          <br />
+          Please update the applicant's date of birth in the case details before selecting a class.
+          <br />
+          <span className="text-xs text-gray-600">
+            Current DOB: {selectedTaskForPush?.task.date_of_birth || 'Not specified'}
+          </span>
+        </p>
+      </div>
+    </div>
+  </div>
+) : (
+             <div className="space-y-3">
+               <h4 className="font-medium text-sm">
+                 Class for Applicant: {selectedTaskForPush?.task.applicant_name}
+                 <span className="text-muted-foreground font-normal"> (Age: {selectedTaskForPush?.applicantAge})</span>
+               </h4>
+               <div className="grid gap-2">
+                 {availableClasses.map((classItem) => (
+                   <Button
+                     key={`applicant-${classItem.id}`}
+                     variant="outline"
+                     className="w-full justify-start h-auto p-3 text-left"
+                     onClick={() => {
+                       setSelectedTaskForPush(prev => prev ? { ...prev, applicantClassId: classItem.id.toString() } : null);
+                     }}
+                   >
+                     <div className="flex items-center gap-3">
+                       <div className={`w-4 h-4 rounded-full border-2 ${
+                         selectedTaskForPush?.applicantClassId === classItem.id.toString() 
+                           ? 'bg-blue-500 border-blue-500' 
+                           : 'border-gray-300'
+                       }`}>
+                         {selectedTaskForPush?.applicantClassId === classItem.id.toString() && (
+                           <div className="w-2 h-2 bg-white rounded-full m-0.5" />
+                         )}
+                       </div>
+                       <div>
+                         <div className="font-semibold">{classItem.name}</div>
+                         {classItem.description && (
+                           <div className="text-sm text-muted-foreground">
+                             {classItem.description}
+                           </div>
+                         )}
+                       </div>
                      </div>
-                     <div>
-                       <div className="font-semibold">{classItem.name}</div>
-                       {classItem.description && (
-                         <div className="text-sm text-muted-foreground">
-                           {classItem.description}
-                         </div>
-                       )}
-                     </div>
-                   </div>
-                 </Button>
-               ))}
+                   </Button>
+                 ))}
+               </div>
              </div>
-           </div>
+           )}
 
            {/* Dependants Class Selection */}
            {(() => {
              const taskDeps = taskDependants.get(selectedTaskForPush?.task.id.toString() || '') || [];
-             const adultDependants = taskDeps.filter(dep => dep.age === null || dep.age >= 18);
+             // Only include dependants with known age >= 18
+             const adultDependants = taskDeps.filter(dep => dep.age !== null && dep.age >= 18);
+             const unknownAgeDependants = taskDeps.filter(dep => dep.age === null);
              
-             if (adultDependants.length > 0) {
-               return (
-                 <div className="space-y-3">
-                   <h4 className="font-medium text-sm">
-                     Class for Dependants ({adultDependants.length} adult dependants)
-                   </h4>
-                   <div className="text-xs text-gray-600 mb-2">
-                     {adultDependants.map(dep => dep.full_name).join(', ')}
-                   </div>
-                   <div className="grid gap-2">
-                     {availableClasses.map((classItem) => (
-                       <Button
-                         key={`dependant-${classItem.id}`}
-                         variant="outline"
-                         className="w-full justify-start h-auto p-3 text-left"
-                         onClick={() => {
-                           setSelectedTaskForPush(prev => prev ? { ...prev, dependantClassId: classItem.id.toString() } : null);
-                         }}
-                       >
-                         <div className="flex items-center gap-3">
-                           <div className={`w-4 h-4 rounded-full border-2 ${
-                             selectedTaskForPush?.dependantClassId === classItem.id.toString() 
-                               ? 'bg-orange-500 border-orange-500' 
-                               : 'border-gray-300'
-                           }`}>
-                             {selectedTaskForPush?.dependantClassId === classItem.id.toString() && (
-                               <div className="w-2 h-2 bg-white rounded-full m-0.5" />
-                             )}
-                           </div>
-                           <div>
-                             <div className="font-semibold">{classItem.name}</div>
-                             {classItem.description && (
-                               <div className="text-sm text-muted-foreground">
-                                 {classItem.description}
-                               </div>
-                             )}
-                           </div>
+             return (
+               <div className="space-y-6">
+                 {/* Known Adult Dependants */}
+                 {adultDependants.length > 0 && (
+                   <div className="space-y-3">
+                     <h4 className="font-medium text-sm border-b pb-1">
+                       Adult Dependants
+                     </h4>
+                     {adultDependants.map((dependant, index) => (
+                       <div key={`adult-${dependant.id}`} className="space-y-2">
+                         <div className="font-medium text-sm">
+                           {dependant.full_name} (Age: {dependant.age})
                          </div>
-                       </Button>
+                         <div className="grid gap-2 pl-4">
+                           {availableClasses.map((classItem) => (
+                             <Button
+                               key={`adult-${dependant.id}-${classItem.id}`}
+                               variant="outline"
+                               className="w-full justify-start h-auto p-3 text-left"
+                               onClick={() => {
+                                 setSelectedTaskForPush(prev => {
+                                   if (!prev) return null;
+                                   const updatedDependantClasses = new Map(prev.dependantClasses || new Map());
+                                   updatedDependantClasses.set(dependant.id, classItem.id.toString());
+                                   return { ...prev, dependantClasses: updatedDependantClasses };
+                                 });
+                               }}
+                             >
+                               <div className="flex items-center gap-3">
+                                 <div className={`w-4 h-4 rounded-full border-2 ${
+                                   selectedTaskForPush?.dependantClasses?.get(dependant.id) === classItem.id.toString()
+                                     ? 'bg-orange-500 border-orange-500' 
+                                     : 'border-gray-300'
+                                 }`}>
+                                   {selectedTaskForPush?.dependantClasses?.get(dependant.id) === classItem.id.toString() && (
+                                     <div className="w-2 h-2 bg-white rounded-full m-0.5" />
+                                   )}
+                                 </div>
+                                 <div>
+                                   <div className="font-semibold">{classItem.name}</div>
+                                   {classItem.description && (
+                                     <div className="text-sm text-muted-foreground">
+                                       {classItem.description}
+                                     </div>
+                                   )}
+                                 </div>
+                               </div>
+                             </Button>
+                           ))}
+                         </div>
+                       </div>
                      ))}
                    </div>
-                 </div>
-               );
-             }
-             return null;
+                 )}
+
+                 {/* Unknown Age Dependants */}
+                 {unknownAgeDependants.length > 0 && (
+                   <div className="space-y-3">
+                     <h4 className="font-medium text-sm text-amber-600 border-b border-amber-200 pb-1">
+                       Dependants with Unknown Age
+                     </h4>
+                     <div className="text-sm text-amber-700 bg-amber-50 p-3 rounded-md">
+                       <p className="font-medium mb-2">Age Verification Required</p>
+                       <p>Please verify the age for these dependants before proceeding:</p>
+                       <ul className="list-disc pl-5 mt-1 space-y-1">
+                         {unknownAgeDependants.map(dep => (
+                           <li key={`unknown-${dep.id}`}>
+                             {dep.full_name} (Age not specified)
+                           </li>
+                         ))}
+                       </ul>
+                     </div>
+                   </div>
+                 )}
+               </div>
+             );
            })()}
          </div>
 
@@ -3404,21 +3512,52 @@ const handleTaskAction = useCallback((action: { type: string; taskId?: string | 
              onClick={async () => {
                if (selectedTaskForPush) {
                  setIsClassSelectionOpen(false);
-                 await executePushCase(
-                   selectedTaskForPush.task,
-                   selectedTaskForPush.targetDeptId,
-                   selectedTaskForPush.targetSubDeptId,
-                   selectedTaskForPush.targetSubDeptName,
-                   selectedTaskForPush.applicantClassId || null,
-                   selectedTaskForPush.dependantClassId || selectedTaskForPush.applicantClassId || null
+                 const adultDependants = (taskDependants.get(selectedTaskForPush.task.id.toString()) || [])
+                   .filter(dep => dep.age !== null && dep.age >= 18);
+                 const anyAdultWithoutClass = adultDependants.some(dep => 
+                   !selectedTaskForPush?.dependantClasses?.has(dep.id)
                  );
+                 const unknownAgeDependants = (taskDependants.get(selectedTaskForPush.task.id.toString()) || [])
+                   .filter(dep => dep.age === null);
+                 const isPushDisabled = 
+                   selectedTaskForPush?.applicantAge === null ||
+                   !selectedTaskForPush?.applicantClassId || 
+                   anyAdultWithoutClass ||
+                   unknownAgeDependants.length > 0;
+                 if (!isPushDisabled) {
+                   await executePushCase(
+                     selectedTaskForPush.task,
+                     selectedTaskForPush.targetDeptId,
+                     selectedTaskForPush.targetSubDeptId,
+                     selectedTaskForPush.targetSubDeptName,
+                     selectedTaskForPush.applicantClassId || null,
+                     selectedTaskForPush.dependantClassId || selectedTaskForPush.applicantClassId || null
+                   );
+                 }
                  setSelectedTaskForPush(null);
                }
              }}
-             disabled={!selectedTaskForPush?.applicantClassId}
-           >
-             Push Case
-           </Button>
+             disabled={
+              !selectedTaskForPush ||
+              selectedTaskForPush.applicantAge === null ||
+              selectedTaskForPush.applicantAge === undefined ||
+              !selectedTaskForPush.applicantClassId || 
+              (() => {
+                const deps = taskDependants.get(selectedTaskForPush.task.id.toString()) || [];
+                // Check for any unknown age dependants
+                if (deps.some(dep => dep.age === null || dep.age === undefined)) return true;
+                
+                // Check for adult dependants without selected classes
+                const adultDeps = deps.filter(dep => dep.age !== null && dep.age !== undefined && dep.age >= 18);
+                if (adultDeps.length === 0) return false;
+                
+                return !selectedTaskForPush.dependantClasses || 
+                       adultDeps.some(dep => !selectedTaskForPush.dependantClasses?.has(dep.id));
+              })()
+            }
+          >
+            Push Case
+          </Button>
          </div>
        </DialogContent>
      </Dialog>
