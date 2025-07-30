@@ -1257,25 +1257,7 @@ export default function Departments() {
                         </Button>
                       </TableCell>
                       <TableCell className="border-r">
-                        <div className="flex items-center gap-2">
-                          {currentOfficer ? (
-                            <UserDetailsPopover userId={currentOfficer.id} users={users} role="officer">
-                              <div className="flex items-center gap-2">
-                                <Shield className="h-4 w-4 text-blue-600" />
-                                <span>{getUserName(currentOfficer.id)}</span>
-                              </div>
-                            </UserDetailsPopover>
-                          ) : (
-                            <span className="text-gray-400">None</span>
-                          )}
-                          {hasOfficerHistory && (
-                            <OfficerHistoryPopover officers_history={dept.officers_history || []} users={users}>
-                              <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-500 hover:text-blue-600">
-                                <History className="h-3.5 w-3.5" />
-                              </Button>
-                            </OfficerHistoryPopover>
-                          )}
-                        </div>
+                        <div className="text-gray-400 text-sm">View in stats</div>
                       </TableCell>
                       <TableCell className="border-r">
                         <div className="text-gray-400 text-sm">View in stats</div>

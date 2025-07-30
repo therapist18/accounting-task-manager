@@ -1214,86 +1214,183 @@ export default function DepartmentTasksManager({
       title: "Pushing Case...",
       description: `Creating new task(s) in ${targetSubDeptName}.`
     });
+    
+    const isReEntry = targetSubDeptId === 7; // 7: Re-Entry Pass
+    const isPrincipalMember = task.applicant_type === 'principal' || task.principal_member === true;
+    const isAlien = targetSubDeptId === 6; // 6: Alien
   
     try {
       const tasksToCreate = [];
+      const currentDate = new Date().toISOString();
+      
+      // For alien/re-entry, set up stages with current date
+      const stages = {};
+      if (isAlien || isReEntry) {
+        stages['1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'] = { date: currentDate, status: 'completed' }; // Enquiry
+        stages['a19b270e-6d1e-4e6d-b2bc-f21db72cde08'] = { date: currentDate, status: 'completed' }; // Confirmation
+        stages['9ccdbfa6-8d76-49db-b8d4-09742c734905'] = { date: currentDate, status: 'completed' }; // Submission
+      }
   
-      // Create base task data with only the necessary fields - NO ID
-      const baseTaskData = {
-        status: 'in_progress',
-        department_id: targetDeptId,
-        subdepartment_id: targetSubDeptId,
-        class_id: applicantClassId,
-        subclass_id: null,
-        created_by: 'system',
-        date_initiated: new Date().toISOString(),
-        stages: {},
-        current_stage_id: null,
-        current_stage_started_at: null,
-        // Only include essential fields from original task
-        task_manager_id: task.task_manager_id || null,
-        task_assistant_id: task.task_assistant_id || null,
-        officer_id: task.officer_id || null,
-        account_used: task.account_used || null,
-        batch: task.batch || null,
-        applied_by: task.applied_by || null,
-        applicant_type: 'principal',
-        r_number: task.r_number || null,
-        principal_member_name: task.principal_member_name || null,
-        renewal_status: task.renewal_status || null,
-        selections: task.selections || null,
-        company_id: task.company_id || null,
-        principal_member: task.principal_member || null,
-        understudy: task.understudy || null,
-        references: task.references || [],
-        job_description: task.job_description || null,
-        document_id: null,
-        source_document_id: null
-      };
-  
-      // Add main task
-      tasksToCreate.push({
-        ...baseTaskData,
-        applicant_name: task.applicant_name,
-        individual_id: task.individual_id
-      });
-  
-      // Handle dependants
+      // Handle dependants for re-entry
       const { dependantsMap } = await fetchAllDependantsAndApplicants([task]);
       const dependants = [];
       let skippedMinors = 0;
   
-      if (task.dependant_member && Array.isArray(task.dependant_member)) {
-        task.dependant_member.forEach(dep => {
-          if (dep?.id && dependantsMap.has(dep.id)) {
-            const dependantData = dependantsMap.get(dep.id);
-            dependants.push({
-              ...dependantData,
-              relationship: dep.relationship || 'Dependant'
+      // Only process dependants for re-entry
+      if (isReEntry) {
+        // Add main task (for re-entry, this will be a dependant task)
+        if (!isPrincipalMember) {
+          tasksToCreate.push({
+            status: 'in_progress',
+            department_id: targetDeptId,
+            subdepartment_id: targetSubDeptId,
+            class_id: applicantClassId ? Number(applicantClassId) : null,
+            subclass_id: null,
+            created_by: 'system',
+            date_initiated: currentDate,
+            stages: { ...stages },
+            current_stage_id: null,
+            current_stage_started_at: null,
+            task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null,
+            task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null,
+            officer_id: task.officer_id ? Number(task.officer_id) : null,
+            account_used: task.account_used ? String(task.account_used) : null,
+            batch: task.batch ? String(task.batch) : null,
+            applied_by: task.applied_by ? String(task.applied_by) : null,
+            applicant_type: 'dependant',
+            r_number: task.r_number ? String(task.r_number) : null,
+            principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null,
+            renewal_status: task.renewal_status ? String(task.renewal_status) : null,
+            selections: task.selections ? JSON.stringify(task.selections) : null,
+            company_id: task.company_id ? Number(task.company_id) : null,
+            principal_member: false,
+            understudy: task.understudy ? String(task.understudy) : null,
+            references: task.references ? JSON.stringify(task.references) : '[]',
+            job_description: task.job_description ? String(task.job_description) : null,
+            document_id: null,
+            source_document_id: null,
+            applicant_name: String(task.applicant_name || ''),
+            individual_id: String(task.individual_id || '')
+          });
+        }
+
+        // Process dependants for re-entry
+        if (task.dependant_member && Array.isArray(task.dependant_member)) {
+          task.dependant_member.forEach(dep => {
+            if (dep?.id && dependantsMap.has(dep.id)) {
+              const dependantData = dependantsMap.get(dep.id);
+              dependants.push({
+                ...dependantData,
+                relationship: dep.relationship || 'Dependant'
+              });
+            }
+          });
+
+          // Create tasks for dependants
+          for (const dependant of dependants) {
+            tasksToCreate.push({
+              status: 'in_progress',
+              department_id: Number(targetDeptId) || null,
+              subdepartment_id: Number(targetSubDeptId) || null,
+              class_id: dependantClassId || applicantClassId ? Number(dependantClassId || applicantClassId) : null,
+              subclass_id: null,
+              created_by: 'system',
+              date_initiated: currentDate,
+              stages: { ...stages },
+              current_stage_id: null,
+              current_stage_started_at: null,
+              task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null,
+              task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null,
+              officer_id: task.officer_id ? Number(task.officer_id) : null,
+              account_used: task.account_used ? String(task.account_used) : null,
+              batch: task.batch ? String(task.batch) : null,
+              applied_by: task.applied_by ? String(task.applied_by) : null,
+              applicant_type: 'dependant',
+              r_number: task.r_number ? String(task.r_number) : null,
+              principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null,
+              renewal_status: task.renewal_status ? String(task.renewal_status) : null,
+              selections: task.selections ? JSON.stringify(task.selections) : null,
+              company_id: task.company_id ? Number(task.company_id) : null,
+              principal_member: false,
+              understudy: task.understudy ? String(task.understudy) : null,
+              references: task.references ? JSON.stringify(task.references) : '[]',
+              job_description: task.job_description ? String(task.job_description) : null,
+              document_id: null,
+              source_document_id: null,
+              applicant_name: String(dependant.full_name || ''),
+              individual_id: String(dependant.individual_id || '')
             });
           }
-        });
-      }
-  
-      if (dependants.length > 0) {
-        for (const dependant of dependants) {
-          // For Alien cases, only create tasks for adults (18+)
-          if (targetSubDeptId === 6) { // Alien
-            const age = dependant.age;
-            if (age === null || age < 18) {
-              console.log(`Skipping minor dependant: ${dependant.full_name} (age: ${age})`);
-              skippedMinors++;
-              continue;
+        }
+      } else {
+        // For non-re-entry departments, process as before
+        const baseTaskData = {
+          status: 'in_progress',
+          department_id: Number(targetDeptId) || null,
+          subdepartment_id: Number(targetSubDeptId) || null,
+          class_id: applicantClassId ? Number(applicantClassId) : null,
+          subclass_id: null,
+          created_by: 'system',
+          date_initiated: currentDate,
+          stages: { ...stages },
+          current_stage_id: null,
+          current_stage_started_at: null,
+          task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null,
+          task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null,
+          officer_id: task.officer_id ? Number(task.officer_id) : null,
+          account_used: task.account_used ? String(task.account_used) : null,
+          batch: task.batch ? String(task.batch) : null,
+          applied_by: task.applied_by ? String(task.applied_by) : null,
+          applicant_type: isPrincipalMember ? 'principal' : 'dependant',
+          r_number: task.r_number ? String(task.r_number) : null,
+          principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null,
+          renewal_status: task.renewal_status ? String(task.renewal_status) : null,
+          selections: task.selections ? JSON.stringify(task.selections) : null,
+          company_id: task.company_id ? Number(task.company_id) : null,
+          principal_member: Boolean(isPrincipalMember),
+          understudy: task.understudy ? String(task.understudy) : null,
+          references: task.references ? JSON.stringify(task.references) : '[]',
+          job_description: task.job_description ? String(task.job_description) : null,
+          document_id: null,
+          source_document_id: null,
+          applicant_name: String(task.applicant_name || ''),
+          individual_id: String(task.individual_id || '')
+        };
+
+        tasksToCreate.push(baseTaskData);
+
+        // Process dependants for non-re-entry departments (Alien, etc.)
+        if (task.dependant_member && Array.isArray(task.dependant_member)) {
+          task.dependant_member.forEach(dep => {
+            if (dep?.id && dependantsMap.has(dep.id)) {
+              const dependantData = dependantsMap.get(dep.id);
+              dependants.push({
+                ...dependantData,
+                relationship: dep.relationship || 'Dependant'
+              });
             }
-          }
-  
-          // Create task for dependant
-          tasksToCreate.push({
-            ...baseTaskData,
-            class_id: dependantClassId || applicantClassId,
-            applicant_name: dependant.full_name,
-            individual_id: dependant.individual_id
           });
+
+          for (const dependant of dependants) {
+            // For Alien cases, only create tasks for adults (18+)
+            if (isAlien) {
+              const age = dependant.age;
+              if (age === null || age < 18) {
+                console.log(`Skipping minor dependant: ${dependant.full_name} (age: ${age})`);
+                skippedMinors++;
+                continue;
+              }
+            }
+
+            tasksToCreate.push({
+              ...baseTaskData,
+              class_id: dependantClassId || applicantClassId,
+              applicant_name: dependant.full_name,
+              individual_id: dependant.individual_id,
+              applicant_type: 'dependant',
+              principal_member: false
+            });
+          }
         }
       }
   
