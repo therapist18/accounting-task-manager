@@ -239,7 +239,12 @@ export default function JobFieldsPage() {
                         <Button variant="ghost" size="icon" onClick={() => openDialog("edit", field)}>
                           <Edit className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => openDialog("linkSources", field)}>
+                        <Button 
+                          variant={field.sources?.length ? "outline" : "ghost"} 
+                          size="icon" 
+                          onClick={() => openDialog("linkSources", field)}
+                          className={field.sources?.length ? "bg-green-100 hover:bg-green-200 text-green-700" : ""}
+                        >
                           <LinkIcon className="h-4 w-4" />
                         </Button>
                         <Button variant="ghost" size="icon" onClick={() => openDialog("delete", field)}>
