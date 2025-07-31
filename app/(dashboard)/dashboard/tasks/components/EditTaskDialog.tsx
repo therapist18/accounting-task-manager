@@ -94,11 +94,6 @@ export function EditTaskDialog({
     return assistantHistory.filter(assistant => !assistant.end_date);
   };
   
-  /**
-   * Finds active staff for a given subdepartment.
-   * FIXED: Uses 'id' field instead of 'user_id' to match departments code structure
-   * ENHANCED: Better handling when history fields are missing
-   */
   const findActiveStaffForSubdept = (subdept, allUsers, allOfficers) => {
       console.log('🔍 findActiveStaffForSubdept called with:');
       console.log('Subdept:', subdept);
