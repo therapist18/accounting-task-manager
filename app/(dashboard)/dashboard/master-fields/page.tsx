@@ -145,7 +145,7 @@ export default function JobFieldsPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950/90 text-slate-900 dark:text-slate-50 p-4 sm:p-6 lg:p-8">
-      <div className="max-w-7xl mx-auto space-y-8">
+      <div className="mx-auto space-y-8">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
@@ -209,16 +209,16 @@ export default function JobFieldsPage() {
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <Table>
-                <TableHeader className="bg-slate-50 dark:bg-slate-800/50">
+                <TableHeader className="bg-blue-500 dark:bg-blue-800">
                   <TableRow className="border-slate-200 dark:border-slate-800">
-                    <TableHead className="py-4 px-6 text-slate-600 dark:text-slate-400 border-r border-slate-200 dark:border-slate-700">#</TableHead>
-                    <TableHead className="py-4 px-6 text-slate-600 dark:text-slate-400">Field Key</TableHead>
-                    <TableHead className="py-4 px-6 text-slate-600 dark:text-slate-400">Label</TableHead>
-                    <TableHead className="py-4 px-6 text-slate-600 dark:text-slate-400">Type</TableHead>
-                    <TableHead className="py-4 px-6 text-slate-600 dark:text-slate-400">Required</TableHead>
-                    <TableHead className="py-4 px-6 text-slate-600 dark:text-slate-400">Sources</TableHead>
-                    <TableHead className="py-4 px-6 text-slate-600 dark:text-slate-400">Last Updated</TableHead>
-                    <TableHead className="py-4 px-6 text-right text-slate-600 dark:text-slate-400">Actions</TableHead>
+                    <TableHead className="py-4 px-6 text-white border-r">#</TableHead>
+                    <TableHead className="py-4 px-6 text-white border-r">Field Key</TableHead>
+                    <TableHead className="py-4 px-6 text-white border-r">Label</TableHead>
+                    <TableHead className="py-4 px-6 text-white border-r">Type</TableHead>
+                    <TableHead className="py-4 px-6 text-white border-r">Required</TableHead>
+                    <TableHead className="py-4 px-6 text-white border-r">Sources</TableHead>
+                    <TableHead className="py-4 px-6 text-white border-r">Last Updated</TableHead>
+                    <TableHead className="py-4 px-6 text-right text-white border-r">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -228,24 +228,24 @@ export default function JobFieldsPage() {
                         key={field.id}
                         className="border-b-slate-200 dark:border-b-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-800/50"
                       >
-                        <TableCell className="p-6 font-medium text-slate-500 dark:text-slate-400 border-r border-slate-200 dark:border-slate-700">
+                        <TableCell className="p-6 font-medium border-r">
                           {(currentPage - 1) * itemsPerPage + index + 1}
                         </TableCell>
-                        <TableCell className="p-6 font-mono text-sm text-blue-600 dark:text-blue-400">
+                        <TableCell className="p-6 font-mono text-sm border-r">
                           {field.field_key}
                         </TableCell>
-                        <TableCell className="p-6 font-medium text-slate-800 dark:text-slate-200">
+                        <TableCell className="p-6 font-medium border-r">
                           {field.label}
                         </TableCell>
-                        <TableCell className="p-6">
+                        <TableCell className="p-6 border-r">
                           <Badge
                             variant="secondary"
-                            className="capitalize bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300"
+                            className="capitalize bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 border-r"
                           >
                             {field.type}
                           </Badge>
                         </TableCell>
-                        <TableCell className="p-6">
+                        <TableCell className="p-6 border-r">
                           <Badge
                             variant={field.is_required ? "default" : "outline"}
                             className={
@@ -257,7 +257,7 @@ export default function JobFieldsPage() {
                             {field.is_required ? "Required" : "Optional"}
                           </Badge>
                         </TableCell>
-                        <TableCell className="p-6">
+                        <TableCell className="p-6 border-r">
                           <Badge
                             variant="outline"
                             className="border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400"
@@ -265,10 +265,10 @@ export default function JobFieldsPage() {
                             {field.sources?.length || 0} sources
                           </Badge>
                         </TableCell>
-                        <TableCell className="p-6 text-slate-500 dark:text-slate-400">
+                        <TableCell className="p-6 border-r">
                           {new Date(field.updated_at).toLocaleDateString()}
                         </TableCell>
-                        <TableCell className="p-6 text-right">
+                        <TableCell className="p-6 text-right border-r">
                           <div className="flex items-center justify-end space-x-1">
                             <Button
                               variant="ghost"

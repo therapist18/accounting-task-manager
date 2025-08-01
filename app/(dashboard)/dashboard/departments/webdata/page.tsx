@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
-import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff } from "lucide-react"
+import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, ChevronUp } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -153,37 +153,17 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
   }
 
   const openWebDataDialog = (context: EditingContext) => {
-    // Find the department and subdepartment
     const dept = departments.find(d => d.id === context.departmentId);
-
-    // Convert subdepartmentId to number for comparison if needed
-    const subdeptId = typeof context.subdepartmentId === 'string'
-      ? parseInt(context.subdepartmentId, 10)
-      : context.subdepartmentId;
-
-    const subdept = dept?.tm_subdepartments?.find(s =>
-      s.id === subdeptId || s.id.toString() === context.subdepartmentId.toString()
-    );
-
-    // Get class and subclass names if they exist
+    const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === context.subdepartmentId.toString());
     let className = '';
     let subclassName = '';
 
     if (context.classId && subdept) {
-      const classItem = subdept.classes?.find(c =>
-        c.id.toString() === context.classId?.toString() ||
-        c.id === context.classId
-      );
-
+      const classItem = subdept.classes?.find(c => c.id.toString() === context.classId?.toString());
       if (classItem) {
         className = classItem.name;
-
         if (context.subclassId) {
-          const subclassItem = classItem.subClasses?.find(sc =>
-            sc.id.toString() === context.subclassId?.toString() ||
-            sc.id === context.subclassId
-          );
-
+          const subclassItem = classItem.subClasses?.find(sc => sc.id.toString() === context.subclassId?.toString());
           if (subclassItem) {
             subclassName = subclassItem.name;
           }
@@ -191,8 +171,6 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       }
     }
 
-
-    // Create enhanced context with names
     const enhancedContext = {
       ...context,
       subdepartmentName: subdept?.name || '',
@@ -217,122 +195,81 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     }])
   }
 
-const handleAddWebData = async (webData: WebDataForm[]) => {
-  if (!addContext) return;
+  const handleAddWebData = async (webData: WebDataForm[]) => {
+    if (!addContext) return;
 
-  try {
-    setIsSubmitting(true);
+    try {
+      setIsSubmitting(true);
+      const currentWebData = getCurrentWebDataForContext(addContext) || [];
 
-    // Get current webData
-    const currentWebData = getCurrentWebDataForContext(addContext) || [];
+      const newWebDataWithIds = webData.map((req, index) => ({
+        id: generateWebDataId(index, currentWebData),
+        name: req.efnsDisplayName || req.name,
+        description: req.description,
+        type: req.type || 'standard',
+        isRequired: req.isRequired,
+        isVisible: true,
+        order: currentWebData.length + index,
+        variableName: req.variableName || '',
+        efnsDisplayName: req.efnsDisplayName || req.name,
+        fieldType: req.fieldType || 'text',
+        arrayItems: req.arrayItems || [],
+        masterFieldIds: req.masterFieldIds || []
+      }));
 
-    // Add new webData with generated IDs and required fields, including ONLY essential master field data
-    const newWebDataWithIds = webData.map((req, index) => ({
-      id: generateWebDataId(index, currentWebData),
-      name: req.efnsDisplayName || req.name,
-      description: req.description,
-      type: req.type || 'standard',
-      isRequired: req.isRequired,
-      isVisible: true,
-      order: currentWebData.length + index,
-      variableName: req.variableName || '',
-      efnsDisplayName: req.efnsDisplayName || req.name,
-      fieldType: req.fieldType || 'text',
-      arrayItems: req.arrayItems || [],
-      masterFieldIds: req.masterFieldIds || [] // This should contain just the ID strings
-    }));
+      const updatedWebData = [...currentWebData, ...newWebDataWithIds];
+      await saveWebDataForContext(addContext, updatedWebData);
+      await refreshDepartments();
+      setIsAddDialogOpen(false);
 
-    console.log('handleAddWebData - New webData with IDs:', newWebDataWithIds.map(w => ({
-      name: w.name,
-      masterFieldIds: w.masterFieldIds,
-    })));
+      toast({
+        title: "Success",
+        description: "WebData added successfully",
+        variant: "default"
+      });
 
-    // Combine with existing webData
-    const updatedWebData = [...currentWebData, ...newWebDataWithIds];
+    } catch (error) {
+      console.error('Error adding webData:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add webData. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-    // Save to database
-    await saveWebDataForContext(addContext, updatedWebData);
+  const refreshDepartments = async () => {
+    try {
+      const { data: departmentsData, error } = await supabase
+        .from('tm_departments')
+        .select('*, tm_subdepartments(*)')
+        .order('name')
 
-    // Refresh the data
-    await refreshDepartments();
+      if (error) throw error
 
-    // Close the dialog
-    setIsAddDialogOpen(false);
+      const { data: webData, error: reqError } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .order('id')
 
-    // Show success message
-    toast({
-      title: "Success",
-      description: "WebData added successfully",
-      variant: "default"
-    });
+      if (reqError) throw reqError
 
-  } catch (error) {
-    console.error('Error adding webData:', error);
-    toast({
-      title: "Error",
-      description: "Failed to add webData. Please try again.",
-      variant: "destructive"
-    });
-  } finally {
-    setIsSubmitting(false);
-  }
-};
-
-// Update the refreshDepartments function to properly handle master field data
-const refreshDepartments = async () => {
-  try {
-    const { data: departmentsData, error } = await supabase
-      .from('tm_departments')
-      .select('*, tm_subdepartments(*)')
-      .order('name')
-
-    if (error) throw error
-
-    const { data: webData, error: reqError } = await supabase
-      .from('tm_class_requirements')
-      .select('*')
-      .order('id')
-
-    if (reqError) throw reqError
-
-    // Process departments and preserve master field IDs but don't store full objects
-    const processedDepartments = departmentsData.map(dept => {
-      const subdepartments = (dept.tm_subdepartments || []).map(subdept => {
-        const classes = (subdept.classes || []).map(cls => {
-          const classId = `${subdept.id}_${cls.id}`
-          const classWebDataRecord = webData?.find(req =>
-            req.class_id === classId && req.type === 'class'
-          )
-
-          const classWebData = classWebDataRecord?.webData?.map((r: any, idx: number) => ({
-            id: r.id?.toString() || generateWebDataId(idx, classWebDataRecord.webData),
-            name: r.name || '',
-            description: r.description || '',
-            type: r.type || 'standard',
-            order: r.order || idx,
-            isVisible: r.isVisible !== false,
-            isRequired: r.isRequired !== false,
-            variableName: r.variableName || '',
-            efnsDisplayName: r.efnsDisplayName || r.name || '',
-            fieldType: r.fieldType || 'text',
-            arrayItems: r.arrayItems || [],
-            // Only store master field IDs, not the full objects (they'll be fetched when needed)
-            masterFieldIds: r.masterFieldIds || [],
-            kycDocumentId: r.kycDocumentId
-          })) || []
-
-          const subClasses = (cls.subClasses || []).map(subCls => {
-            const subClassId = `${classId}_${subCls.id}`
-            const subClassWebDataRecord = webData?.find(req =>
-              req.class_id === subClassId && req.type === 'subclass'
+      const processedDepartments = departmentsData.map(dept => {
+        const subdepartments = (dept.tm_subdepartments || []).map(subdept => {
+          const classes = (subdept.classes || []).map(cls => {
+            const classId = `${subdept.id}_${cls.id}`
+            const classWebDataRecord = webData?.find(req =>
+              req.class_id === classId && req.type === 'class'
             )
 
-            const subClassWebData = subClassWebDataRecord?.webData?.map((r: any, idx: number) => ({
-              id: r.id?.toString() || generateWebDataId(idx, subClassWebDataRecord.webData),
+            const classWebData = classWebDataRecord?.webData?.map((r: any, idx: number) => ({
+              id: r.id?.toString() || generateWebDataId(idx, classWebDataRecord.webData),
               name: r.name || '',
               description: r.description || '',
               type: r.type || 'standard',
-              order: r.order || idx,
+              order: r.order ?? idx,
               isVisible: r.isVisible !== false,
               isRequired: r.isRequired !== false,
               variableName: r.variableName || '',
@@ -343,168 +280,156 @@ const refreshDepartments = async () => {
               kycDocumentId: r.kycDocumentId
             })) || []
 
+            const subClasses = (cls.subClasses || []).map(subCls => {
+              const subClassId = `${classId}_${subCls.id}`
+              const subClassWebDataRecord = webData?.find(req =>
+                req.class_id === subClassId && req.type === 'subclass'
+              )
+
+              const subClassWebData = subClassWebDataRecord?.webData?.map((r: any, idx: number) => ({
+                id: r.id?.toString() || generateWebDataId(idx, subClassWebDataRecord.webData),
+                name: r.name || '',
+                description: r.description || '',
+                type: r.type || 'standard',
+                order: r.order ?? idx,
+                isVisible: r.isVisible !== false,
+                isRequired: r.isRequired !== false,
+                variableName: r.variableName || '',
+                efnsDisplayName: r.efnsDisplayName || r.name || '',
+                fieldType: r.fieldType || 'text',
+                arrayItems: r.arrayItems || [],
+                masterFieldIds: r.masterFieldIds || [],
+                kycDocumentId: r.kycDocumentId
+              })) || []
+
+              return {
+                ...subCls,
+                parentClassId: classId,
+                webData: subClassWebData
+              }
+            })
+
             return {
-              ...subCls,
-              parentClassId: classId,
-              webData: subClassWebData
+              ...cls,
+              webData: classWebData,
+              subClasses
             }
           })
 
+          const subdeptWebDataRecord = webData?.find(req =>
+            req.class_id === subdept.id.toString() && req.type === 'subdepartment'
+          )
+
+          const uploadWebData = subdeptWebDataRecord?.webData?.map((r: any, idx: number) => ({
+            id: r.id?.toString() || generateWebDataId(idx, subdeptWebDataRecord.webData),
+            name: r.name || '',
+            description: r.description || '',
+            type: r.type || 'standard',
+            order: r.order ?? idx,
+            isVisible: r.isVisible !== false,
+            isRequired: r.isRequired !== false,
+            variableName: r.variableName || '',
+            efnsDisplayName: r.efnsDisplayName || r.name || '',
+            fieldType: r.fieldType || 'text',
+            arrayItems: r.arrayItems || [],
+            masterFieldIds: r.masterFieldIds || [],
+            kycDocumentId: r.kycDocumentId
+          })) || []
+
           return {
-            ...cls,
-            webData: classWebData,
-            subClasses
+            ...subdept,
+            classes,
+            upload_webData: uploadWebData
           }
         })
 
-        const subdeptWebDataRecord = webData?.find(req =>
-          req.class_id === subdept.id.toString() && req.type === 'subdepartment'
-        )
-
-        const uploadWebData = subdeptWebDataRecord?.webData?.map((r: any, idx: number) => ({
-          id: r.id?.toString() || generateWebDataId(idx, subdeptWebDataRecord.webData),
-          name: r.name || '',
-          description: r.description || '',
-          type: r.type || 'standard',
-          order: r.order || idx,
-          isVisible: r.isVisible !== false,
-          isRequired: r.isRequired !== false,
-          variableName: r.variableName || '',
-          efnsDisplayName: r.efnsDisplayName || r.name || '',
-          fieldType: r.fieldType || 'text',
-          arrayItems: r.arrayItems || [],
-          masterFieldIds: r.masterFieldIds || [],
-          kycDocumentId: r.kycDocumentId
-        })) || []
-
         return {
-          ...subdept,
-          classes,
-          upload_webData: uploadWebData
+          ...dept,
+          tm_subdepartments: subdepartments,
+          subdepartments: subdepartments
         }
       })
 
-      return {
-        ...dept,
-        tm_subdepartments: subdepartments,
-        subdepartments: subdepartments
-      }
-    })
-
-    setDepartments(processedDepartments)
-  } catch (error) {
-    console.error('Error refreshing departments:', error)
-    toast({
-      title: "Error",
-      description: "Failed to refresh departments. Please try again.",
-      variant: "destructive"
-    })
+      setDepartments(processedDepartments)
+    } catch (error) {
+      console.error('Error refreshing departments:', error)
+      toast({
+        title: "Error",
+        description: "Failed to refresh departments. Please try again.",
+        variant: "destructive"
+      })
+    }
   }
-}
 
-// Update the saveWebDataForContext function to preserve all field data
-const saveWebDataForContext = async (context: EditingContext, webData: ApiWebData[]) => {
-  console.log('[saveWebDataForContext] Starting save with context:', JSON.stringify(context, null, 2));
-  console.log('[saveWebDataForContext] WebData to save:', JSON.stringify(webData, null, 2));
+  const saveWebDataForContext = async (context: EditingContext, webData: ApiWebData[]) => {
+    try {
+      let classId = '';
+      let webDataType = '';
 
-  try {
-    let classId = '';
-    let webDataType = '';
+      if (context.type === 'subdepartment') {
+        classId = context.subdepartmentId;
+        webDataType = 'subdepartment';
+      } else if (context.type === 'class') {
+        classId = `${context.subdepartmentId}_${context.classId}`;
+        webDataType = 'class';
+      } else if (context.type === 'subclass') {
+        classId = `${context.subdepartmentId}_${context.classId}_${context.subclassId}`;
+        webDataType = 'subclass';
+      }
 
-    if (context.type === 'subdepartment') {
-      classId = context.subdepartmentId;
-      webDataType = 'subdepartment';
-    } else if (context.type === 'class') {
-      classId = `${context.subdepartmentId}_${context.classId}`;
-      webDataType = 'class';
-    } else if (context.type === 'subclass') {
-      classId = `${context.subdepartmentId}_${context.classId}_${context.subclassId}`;
-      webDataType = 'subclass';
-    }
-
-    console.log(`[saveWebDataForContext] Generated classId: ${classId}, type: ${webDataType}`);
-
-    console.log('[saveWebDataForContext] Checking for existing record...');
-    const { data: existingRecord, error: fetchError } = await supabase
-      .from('tm_class_requirements')
-      .select('*')
-      .eq('class_id', classId)
-      .eq('type', webDataType)
-      .single();
-
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      console.error('[saveWebDataForContext] Error fetching existing record:', fetchError);
-      throw fetchError;
-    }
-
-    console.log('[saveWebDataForContext] Existing record:', existingRecord || 'No existing record found');
-
-    // Preserve all webData fields including master field data
-    const webDataToSave = webData.map(req => ({
-      id: req.id,
-      name: req.name,
-      description: req.description,
-      type: req.type,
-      order: req.order,
-      isVisible: req.isVisible,
-      isRequired: req.isRequired,
-      variableName: req.variableName,
-      efnsDisplayName: req.efnsDisplayName,
-      fieldType: req.fieldType,
-      arrayItems: req.arrayItems,// Preserve master field objects
-      masterFieldIds: req.masterFieldIds, // Preserve master field IDs
-      kycDocumentId: req.kycDocumentId
-    }));
-
-    console.log('[saveWebDataForContext] All processed webData:', JSON.stringify(webDataToSave, null, 2));
-
-    if (existingRecord) {
-      console.log('[saveWebDataForContext] Updating existing record...');
-      const { data: updatedRecord, error: updateError } = await supabase
+      const { data: existingRecord, error: fetchError } = await supabase
         .from('tm_class_requirements')
-        .update({
-          webData: webDataToSave,
-          updated_at: new Date().toISOString()
-        })
+        .select('*')
         .eq('class_id', classId)
         .eq('type', webDataType)
-        .select();
+        .single();
 
-      if (updateError) {
-        console.error('[saveWebDataForContext] Error updating webData:', updateError);
-        throw updateError;
-      }
-      console.log('[saveWebDataForContext] Update successful, response:', updatedRecord);
-    } else {
-      console.log('[saveWebDataForContext] Inserting new record...');
-      const { data: insertedRecord, error: insertError } = await supabase
-        .from('tm_class_requirements')
-        .insert({
-          class_id: classId,
-          type: webDataType,
-          webData: webDataToSave,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .select();
+      if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
 
-      if (insertError) {
-        console.error('[saveWebDataForContext] Error inserting webData:', insertError);
-        throw insertError;
+      const webDataToSave = webData.map(req => ({
+        id: req.id,
+        name: req.name,
+        description: req.description,
+        type: req.type,
+        order: req.order,
+        isVisible: req.isVisible,
+        isRequired: req.isRequired,
+        variableName: req.variableName,
+        efnsDisplayName: req.efnsDisplayName,
+        fieldType: req.fieldType,
+        arrayItems: req.arrayItems,
+        masterFieldIds: req.masterFieldIds,
+        kycDocumentId: req.kycDocumentId
+      }));
+
+      if (existingRecord) {
+        const { error: updateError } = await supabase
+          .from('tm_class_requirements')
+          .update({ webData: webDataToSave, updated_at: new Date().toISOString() })
+          .eq('class_id', classId)
+          .eq('type', webDataType);
+        if (updateError) throw updateError;
+      } else {
+        const { error: insertError } = await supabase
+          .from('tm_class_requirements')
+          .insert({
+            class_id: classId,
+            type: webDataType,
+            webData: webDataToSave,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        if (insertError) throw insertError;
       }
-      console.log('[saveWebDataForContext] Insert successful, response:', insertedRecord);
+      return true;
+    } catch (error) {
+      console.error('[saveWebDataForContext] Error:', error);
+      throw error;
     }
-
-    console.log('[saveWebDataForContext] WebData saved successfully');
-    return true;
-  } catch (error) {
-    console.error('[saveWebDataForContext] Error:', error);
-    throw error; // Re-throw to be handled by the caller
   }
-}
+
   const handleDeleteClick = (type: 'subdepartment' | 'class' | 'subclass', index: number) => {
     setDeleteContext({ type, index })
-    // Set the current context for deletion
     const context = {
       type,
       departmentId: activeDept,
@@ -521,29 +446,22 @@ const saveWebDataForContext = async (context: EditingContext, webData: ApiWebDat
 
     try {
       setIsSubmitting(true)
-      const { type, index } = deleteContext
-
-      // Get current webData first
+      const { index } = deleteContext
       const currentWebData = getCurrentWebDataForContext(editingContext)
-      if (!currentWebData || currentWebData.length === 0) return
+      if (!currentWebData) return
 
       const updatedWebData = currentWebData.filter((_, i) => i !== index)
-
-      // Save updated webData
       await saveWebDataForContext(editingContext, updatedWebData)
       await refreshDepartments()
 
       toast({
         title: "Success",
         description: "WebData deleted successfully",
-        variant: "default"
       })
-
       setIsDeleteDialogOpen(false)
       setDeleteContext(null)
-
     } catch (error) {
-      console.error('Error deleting webData')
+      console.error('Error deleting webData', error)
       toast({
         title: "Error",
         description: "Failed to delete webData. Please try again.",
@@ -555,86 +473,29 @@ const saveWebDataForContext = async (context: EditingContext, webData: ApiWebDat
   }
 
   const getCurrentWebDataForContext = (context: EditingContext): ApiWebData[] | null => {
-    console.log('[getCurrentWebDataForContext] Getting webData for context:', JSON.stringify(context, null, 2));
-
     try {
-      // Find the department
-      const dept = departments.find(d =>
-        String(d.id) === String(context.departmentId)
-      );
+      const dept = departments.find(d => String(d.id) === String(context.departmentId));
+      if (!dept) return null;
+      const subdept = dept.tm_subdepartments?.find(s => String(s.id) === String(context.subdepartmentId));
+      if (!subdept) return null;
 
-      if (!dept) {
-        console.error('[getCurrentWebDataForContext] Department not found:', context.departmentId);
-        return null;
-      }
-
-      // Find the subdepartment
-      const subdept = dept.tm_subdepartments?.find(s =>
-        String(s.id) === String(context.subdepartmentId)
-      );
-
-      if (!subdept) {
-        console.error('[getCurrentWebDataForContext] Subdepartment not found:', context.subdepartmentId);
-        return null;
-      }
-
-      // Handle based on context type
       switch (context.type) {
         case 'subdepartment':
-          console.log('[getCurrentWebDataForContext] Found subdepartment webData:', subdept.upload_webData || []);
           return subdept.upload_webData || [];
-
         case 'class':
-          if (!context.classId) {
-            console.error('[getCurrentWebDataForContext] Missing classId in context');
-            return null;
-          }
-
-          const targetClass = subdept.classes?.find(c =>
-            String(c.id) === String(context.classId)
-          );
-
-          if (!targetClass) {
-            console.error('[getCurrentWebDataForContext] Class not found:', context.classId);
-            return null;
-          }
-
-          console.log('[getCurrentWebDataForContext] Found class webData:', targetClass.webData || []);
-          return targetClass.webData || [];
-
+          if (!context.classId) return null;
+          const targetClass = subdept.classes?.find(c => String(c.id) === String(context.classId));
+          return targetClass?.webData || [];
         case 'subclass':
-          if (!context.classId || !context.subclassId) {
-            console.error('[getCurrentWebDataForContext] Missing classId or subclassId in context');
-            return null;
-          }
-
-          const parentClass = subdept.classes?.find(c =>
-            String(c.id) === String(context.classId)
-          );
-
-          if (!parentClass) {
-            console.error('[getCurrentWebDataForContext] Parent class not found:', context.classId);
-            return null;
-          }
-
-          const targetSubclass = parentClass.subClasses?.find(sc =>
-            String(sc.id) === String(context.subclassId)
-          );
-
-          if (!targetSubclass) {
-            console.error('[getCurrentWebDataForContext] Subclass not found:', context.subclassId);
-            return null;
-          }
-
-          console.log('[getCurrentWebDataForContext] Found subclass webData:', targetSubclass.webData || []);
-          return targetSubclass.webData || [];
-
+          if (!context.classId || !context.subclassId) return null;
+          const parentClass = subdept.classes?.find(c => String(c.id) === String(context.classId));
+          const targetSubclass = parentClass?.subClasses?.find(sc => String(sc.id) === String(context.subclassId));
+          return targetSubclass?.webData || [];
         default:
-          console.error('[getCurrentWebDataForContext] Unknown context type:', context.type);
           return null;
       }
     } catch (error) {
-      console.error('[getCurrentWebDataForContext] Error getting webData:', error);
+      console.error('[getCurrentWebDataForContext] Error:', error);
       return null;
     }
   }
@@ -643,525 +504,284 @@ const saveWebDataForContext = async (context: EditingContext, webData: ApiWebDat
     refreshDepartments()
   }, [])
 
-  const addNewWebData = () => {
-    setNewWebData([...newWebData, {
-      name: '',
-      description: '',
-      type: 'standard',
-      isRequired: true,
-      isVisible: true
-    }])
-  }
-
-  const removeNewWebData = (index: number) => {
-    if (newWebData.length > 1) {
-      setNewWebData(newWebData.filter((_, i) => i !== index))
-    }
-  }
-
-  const handleNewWebDataChange = (index: number, field: string, value: any) => {
-    const updated = [...newWebData]
-    updated[index] = { ...updated[index], [field]: value }
-    setNewWebData(updated)
-  }
-
-  const handleBulkInput = (text: string) => {
-    setBulkInput(text)
-
-    if (!text.trim()) {
-      // If text is empty, reset to single empty webData
-      setNewWebData([{
-        name: '',
-        description: '',
-        type: 'standard',
-        isRequired: true,
-        isVisible: true
-      }])
-      return
+  const handleSaveWebData = async (updatedWebData: ApiWebData) => {
+    if (!editingContext) {
+      toast({ title: "Error", description: "No editing context available.", variant: "destructive" });
+      return;
     }
 
-    // Split by new lines and filter out empty lines
-    const lines = text.split('\n').filter(line => line.trim() !== '')
+    try {
+      const currentWebData = getCurrentWebDataForContext(editingContext) || [];
+      let webDataIndex = -1;
 
-    // Map each line to a webData object
-    const webData = lines.map(line => ({
-      name: line.trim(),
-      description: '',
-      type: 'standard' as const,
-      isRequired: true,
-      isVisible: true
-    }))
+      if (editingWebData?.id) {
+        webDataIndex = currentWebData.findIndex(req => String(req.id) === String(editingWebData.id));
+      }
+      if (webDataIndex === -1 && updatedWebData.id) {
+        webDataIndex = currentWebData.findIndex(req => String(req.id) === String(updatedWebData.id));
+      }
+      if (webDataIndex === -1) {
+        webDataIndex = currentWebData.findIndex(req =>
+          req.name === (editingWebData?.name || updatedWebData.name) &&
+          req.order === (editingWebData?.order || updatedWebData.order)
+        );
+      }
 
-    setNewWebData(webData)
-  }
-
-  // Update the renderWebData function to use the new edit dialog
-  const renderWebData = (webData: WebDataTableEntry[] | null | undefined, context: EditingContext) => {
-    const safeWebData = webData || [];
-
-    // Remove the old inline edit logic and update the edit button
-    const handleEditClick = (index: number) => {
-      const webData = safeWebData[index]
-      setEditingWebData(webData)
-      setEditingContext(context)
-      setIsEditDialogOpen(true)
-    }
-
-    // Update the table to remove inline editing
-    return (
-      <div className="relative border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm flex-1 flex flex-col h-full">
-        <div className="flex flex-col h-full">
-          <div className="overflow-hidden flex-1 flex flex-col">
-            <Table className="table-fixed w-full">
-              <TableHeader className="sticky top-0 z-10 bg-blue-600 dark:bg-blue-800 block">
-                <TableRow className="flex">
-                  <TableHead className="w-12 text-white border-r">#</TableHead>
-                  <TableHead className="flex-1 text-white border-r">EFNS Display Name</TableHead>
-                  <TableHead className="w-48 text-white border-r">Automation Variable</TableHead>
-                  <TableHead className="w-32 text-white border-r">Type</TableHead>
-                  <TableHead className="flex-1 text-white border-r">Description</TableHead>
-                  <TableHead className="w-48 text-white">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-            </Table>
-            <div className="overflow-y-auto flex-1">
-              <Table className="table-fixed w-full">
-                <TableBody className="block">
-                  {safeWebData.length > 0 ? (
-                    safeWebData.map((req, idx) => (
-                      <TableRow key={req.id || req.tempId || idx} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 flex">
-                        <TableCell className="font-medium border-r w-12">
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs">
-                            {idx + 1}
-                          </span>
-                        </TableCell>
-                        <TableCell className="border-r flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{req.name}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="border-r w-48">
-                          <code className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs">
-                            {req.variableName || '-'}
-                          </code>
-                        </TableCell>
-                        <TableCell className="border-r w-32">
-                          <Badge variant="outline" className="capitalize">
-                            {req.fieldType || 'text'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="border-r flex-1">
-                          <span className={!req.description ? 'text-gray-400 italic' : ''}>
-                            {req.description || 'No description'}
-                          </span>
-                        </TableCell>
-                        <TableCell className="w-48">
-                          <div className="flex items-center space-x-1 justify-end">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-blue-600"
-                              onClick={() => handleEditClick(idx)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={() => handleMove(idx, 'up')}
-                              disabled={idx === 0}
-                            >
-                              <ArrowUp className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={() => handleMove(idx, 'down')}
-                              disabled={idx === safeWebData.length - 1}
-                            >
-                              <ArrowDown className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-red-500"
-                              onClick={() => handleDeleteClick(context.type, idx)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8 text-gray-500">
-                        <div className="flex flex-col items-center space-y-2">
-                          <FileText className="h-8 w-8 text-gray-400" />
-                          <p>No webData added yet</p>
-                          <p className="text-xs text-gray-400">Click the button above to add webData</p>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-// Fixed handleSaveWebData function for the main WebData component
-const handleSaveWebData = async (updatedWebData: ApiWebData) => {
-  console.log('[handleSaveWebData] Starting with webData:', JSON.stringify(updatedWebData, null, 2));
-  console.log('[handleSaveWebData] Current editing context:', editingContext);
-  console.log('[handleSaveWebData] Editing webData (original):', JSON.stringify(editingWebData, null, 2));
-
-  if (!editingContext) {
-    console.error('[handleSaveWebData] No editing context available');
-    toast({
-      title: "Error",
-      description: "No editing context available. Please refresh the page and try again.",
-      variant: "destructive"
-    });
-    return;
-  }
-
-  try {
-    // Get current webData for the context WITHOUT refreshing (to avoid race conditions)
-    const currentWebData = getCurrentWebDataForContext(editingContext) || [];
-    console.log('[handleSaveWebData] Current webData count:', currentWebData.length);
-
-    // Find the webData to update using multiple strategies
-    let webDataIndex = -1;
-    
-    // Strategy 1: Find by original editing webData ID
-    if (editingWebData?.id) {
-      webDataIndex = currentWebData.findIndex(req =>
-        String(req.id) === String(editingWebData.id)
-      );
-      console.log('[handleSaveWebData] Search by original ID:', editingWebData.id, 'found at index:', webDataIndex);
-    }
-    
-    // Strategy 2: If not found by original ID, try by updated ID
-    if (webDataIndex === -1 && updatedWebData.id) {
-      webDataIndex = currentWebData.findIndex(req =>
-        String(req.id) === String(updatedWebData.id)
-      );
-      console.log('[handleSaveWebData] Search by updated ID:', updatedWebData.id, 'found at index:', webDataIndex);
-    }
-    
-    // Strategy 3: Find by name and order as last resort
-    if (webDataIndex === -1) {
-      webDataIndex = currentWebData.findIndex(req =>
-        req.name === (editingWebData?.name || updatedWebData.name) &&
-        req.order === (editingWebData?.order || updatedWebData.order)
-      );
-      console.log('[handleSaveWebData] Search by name and order found at index:', webDataIndex);
-    }
-
-    // If still not found, this might be a new webData
-    if (webDataIndex === -1) {
-      console.log('[handleSaveWebData] WebData not found in existing records, treating as new');
-      // Add as new webData
-      const newWebDataArray = [
-        ...currentWebData,
-        {
+      if (webDataIndex === -1) {
+        const newWebDataArray = [
+          ...currentWebData,
+          { ...updatedWebData, id: updatedWebData.id || Date.now().toString(), order: updatedWebData.order ?? currentWebData.length }
+        ];
+        await saveWebDataForContext(editingContext, newWebDataArray);
+      } else {
+        const updatedWebDataArray = [...currentWebData];
+        updatedWebDataArray[webDataIndex] = {
+          ...updatedWebDataArray[webDataIndex],
           ...updatedWebData,
-          id: updatedWebData.id || Date.now().toString(),
-          order: updatedWebData.order !== undefined ? updatedWebData.order : currentWebData.length
-        }
-      ];
-      
-      console.log('[handleSaveWebData] Adding as new webData:', JSON.stringify(newWebDataArray[newWebDataArray.length - 1], null, 2));
-      
-      await saveWebDataForContext(editingContext, newWebDataArray);
-    } else {
-      // Update existing webData
-      console.log('[handleSaveWebData] Updating existing webData at index:', webDataIndex);
-      
-      const updatedWebDataArray = [...currentWebData];
-      
-      // Merge the updated data with existing data, preserving important fields
-      updatedWebDataArray[webDataIndex] = {
-        // Start with existing data
-        ...updatedWebDataArray[webDataIndex],
-        // Override with updated data
-        ...updatedWebData,
-        // Ensure we preserve the original ID
-        id: updatedWebData.id || updatedWebDataArray[webDataIndex].id,
-        // Preserve order if not specified
-        order: updatedWebData.order !== undefined ? updatedWebData.order : updatedWebDataArray[webDataIndex].order
-      };
-      
-      console.log('[handleSaveWebData] Updated webData record:', JSON.stringify(updatedWebDataArray[webDataIndex], null, 2));
-      
-      await saveWebDataForContext(editingContext, updatedWebDataArray);
+          id: updatedWebData.id || updatedWebDataArray[webDataIndex].id,
+          order: updatedWebData.order ?? updatedWebDataArray[webDataIndex].order
+        };
+        await saveWebDataForContext(editingContext, updatedWebDataArray);
+      }
+
+      await refreshDepartments();
+      setIsEditDialogOpen(false);
+      setEditingWebData(null);
+      toast({ title: "Success", description: "WebData saved successfully" });
+    } catch (error) {
+      console.error('[handleSaveWebData] Error:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to save webData.",
+        variant: "destructive"
+      });
     }
-
-    // Refresh the data
-    await refreshDepartments();
-
-    // Reset the dialog state
-    setIsEditDialogOpen(false);
-    setEditingWebData(null);
-
-    toast({
-      title: "Success",
-      description: "WebData saved successfully",
-      variant: "default"
-    });
-
-    console.log('[handleSaveWebData] Update completed successfully');
-  } catch (error) {
-    console.error('[handleSaveWebData] Error updating webData:', error);
-    toast({
-      title: "Error",
-      description: error instanceof Error ? error.message : "Failed to save webData. Please try again.",
-      variant: "destructive"
-    });
   }
-}
 
-// Also fix the handleMove function that seems to be missing
-const handleMove = async (index: number, direction: 'up' | 'down') => {
-  if (!editingContext) return;
-  
-  const currentWebData = getCurrentWebDataForContext(editingContext);
-  if (!currentWebData || currentWebData.length === 0) return;
-  
-  const newWebData = [...currentWebData];
-  const targetIndex = direction === 'up' ? index - 1 : index + 1;
-  
-  if (targetIndex < 0 || targetIndex >= newWebData.length) return;
-  
-  // Swap the items
-  [newWebData[index], newWebData[targetIndex]] = [newWebData[targetIndex], newWebData[index]];
-  
-  // Update orders
-  newWebData.forEach((item, idx) => {
-    item.order = idx;
-  });
-  
-  try {
-    await saveWebDataForContext(editingContext, newWebData);
-    await refreshDepartments();
-    
-    toast({
-      title: "Success",
-      description: "WebData order updated successfully",
-      variant: "default"
-    });
-  } catch (error) {
-    console.error('Error moving webData:', error);
-    toast({
-      title: "Error",
-      description: "Failed to update webData order",
-      variant: "destructive"
-    });
-  }
-};
-  const handleDeptClick = (deptId: string) => {
-    setActiveDept(deptId);
+  const handleMove = async (index: number, direction: 'up' | 'down', moveContext: EditingContext) => {
+    if (!moveContext) return;
+
+    const currentWebData = getCurrentWebDataForContext(moveContext);
+    if (!currentWebData || currentWebData.length < 2) return;
+
+    const newWebData = [...currentWebData];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+
+    if (targetIndex < 0 || targetIndex >= newWebData.length) return;
+
+    [newWebData[index], newWebData[targetIndex]] = [newWebData[targetIndex], newWebData[index]];
+
+    newWebData.forEach((item, idx) => { item.order = idx; });
+
+    try {
+      await saveWebDataForContext(moveContext, newWebData);
+      await refreshDepartments();
+      toast({ title: "Success", description: "WebData order updated." });
+    } catch (error) {
+      console.error('Error moving webData:', error);
+      toast({ title: "Error", description: "Failed to update order.", variant: "destructive" });
+    }
   };
 
+  const handleDeptClick = (deptId: string) => setActiveDept(deptId);
   const handleSubdeptClick = (deptId: string, subdeptId: string) => {
     setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }))
     if (activeDept !== deptId) setActiveDept(deptId)
   };
-
   const handleClassClick = (deptId: string, subdeptId: string, classId: string) => {
-    const activeClassKey = `${deptId}-${subdeptId}`;
-    setActiveClass(prev => ({ ...prev, [activeClassKey]: classId }))
+    setActiveClass(prev => ({ ...prev, [`${deptId}-${subdeptId}`]: classId }))
+    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }));
+    if (activeDept !== deptId) setActiveDept(deptId)
+  };
+  const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => {
+    const classKey = `${deptId}-${subdeptId}`;
+    setActiveSubclass(prev => ({ ...prev, [`${classKey}-${classId}`]: subclassId }))
+    setActiveClass(prev => ({ ...prev, [classKey]: classId }))
     setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }));
     if (activeDept !== deptId) setActiveDept(deptId)
   };
 
-  const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => {
-    const activeClassKey = `${deptId}-${subdeptId}`;
-    const activeSubclassKey = `${activeClassKey}-${classId}`;
+  const renderWebData = (webData: WebDataTableEntry[] | null | undefined, context: EditingContext) => {
+    const safeWebData = (webData || []).sort((a, b) => a.order - b.order);
+    const handleEditClick = (req: WebDataTableEntry) => {
+      setEditingWebData(req);
+      setEditingContext(context);
+      setIsEditDialogOpen(true);
+    };
 
-    setActiveSubclass(prev => ({ ...prev, [activeSubclassKey]: subclassId }))
-
-    setActiveClass(prev => ({ ...prev, [activeClassKey]: classId }))
-
-    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }));
-
-    if (activeDept !== deptId) setActiveDept(deptId)
+    return (
+      <div className="relative h-full overflow-y-auto border rounded-lg bg-card">
+        <Table>
+          <TableHeader className="sticky top-0 z-10 bg-blue-500 dark:bg-blue-800 backdrop-blur-sm border-b">
+            <TableRow>
+              <TableHead className="w-[60px] text-white border-r">#</TableHead>
+              <TableHead className="text-white border-r">EFNS Display Name</TableHead>
+              <TableHead className="w-[200px] text-white border-r">Automation Variable</TableHead>
+              <TableHead className="w-[120px] text-white border-r">Type</TableHead>
+              <TableHead className="text-white border-r">Description</TableHead>
+              <TableHead className="w-[160px] text-white">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {safeWebData.length > 0 ? (
+              safeWebData.map((req, idx) => (
+                <TableRow key={req.id || req.tempId || idx} className="group hover:bg-muted/50">
+                  <TableCell className="font-medium border-r">
+                      {req.order + 1}
+                  </TableCell>
+                  <TableCell className="border-r">
+                    <div className="font-medium text-card-foreground">{req.name}</div>
+                  </TableCell>
+                  <TableCell className="border-r">
+                    <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
+                      {req.variableName || '-'}
+                    </code>
+                  </TableCell>
+                  <TableCell className="border-r">
+                    <Badge variant="secondary" className="capitalize">
+                      {req.fieldType || 'text'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground border-r">
+                    <span className={!req.description ? 'italic' : ''}>
+                      {req.description || 'No description'}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right border-r">
+                    <div className="flex items-center space-x-1">
+                      <div className="flex-col">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleMove(idx, 'up', context)} disabled={idx === 0}>
+                          <ChevronUp className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleMove(idx, 'down', context)} disabled={idx === safeWebData.length - 1}>
+                          <ChevronDown className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEditClick(req)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDeleteClick(context.type, idx)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={6} className="h-48 text-center text-muted-foreground">
+                  <div className="flex flex-col items-center space-y-2">
+                    <FileText className="h-8 w-8" />
+                    <p className="font-medium">No WebData Yet</p>
+                    <p className="text-sm">Click "Add WebData" to get started.</p>
+                  </div>
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    );
   };
 
   const renderMainContent = () => {
-    const currentDept = departments.find(d => d.id === activeDept)
+    const currentDept = departments.find(d => d.id === activeDept);
     if (!currentDept) {
       return (
-        <div className="flex items-center justify-center h-full text-gray-500">
+        <div className="flex items-center justify-center h-full text-muted-foreground">
           <div className="text-center">
-            <Layers className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+            <Layers className="h-12 w-12 mx-auto mb-4" />
             <p className="text-lg font-medium">Select a department</p>
-            <p className="text-sm">Choose a department from the sidebar to view its structure</p>
+            <p className="text-sm">Choose a department from the sidebar to view its structure.</p>
           </div>
         </div>
-      )
+      );
     }
 
-    const currentSubdeptId = activeSubdept[currentDept.id]
-    const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id.toString() === currentSubdeptId)
-
+    const currentSubdeptId = activeSubdept[currentDept.id];
+    const currentSubdept = currentDept.tm_subdepartments?.find(s => s.id.toString() === currentSubdeptId);
     if (!currentSubdept) {
       return (
-        <div className="space-y-6">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
-            {currentDept.description && (
-              <p className="text-gray-600 dark:text-gray-400">{currentDept.description}</p>
-            )}
-          </div>
-          <div className="flex items-center justify-center h-64 text-gray-500">
+        <div className="flex flex-col h-full">
+          <h2 className="text-2xl font-bold">{currentDept.name}</h2>
+          {currentDept.description && <p className="text-muted-foreground">{currentDept.description}</p>}
+          <div className="flex items-center justify-center flex-1 text-muted-foreground">
             <div className="text-center">
-              <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+              <FileText className="h-12 w-12 mx-auto mb-4" />
               <p className="text-lg font-medium">Select a subdepartment</p>
-              <p className="text-sm">Choose a subdepartment to view and manage webData</p>
+              <p className="text-sm">Choose a subdepartment to view and manage webData.</p>
             </div>
           </div>
         </div>
-      )
+      );
     }
 
-    const activeClassKey = `${currentDept.id}-${currentSubdept.id}`
-    const currentClassId = activeClass[activeClassKey]
-    const currentClass = currentSubdept.classes?.find(c => c.id.toString() === currentClassId)
+    const activeClassKey = `${currentDept.id}-${currentSubdept.id}`;
+    const currentClassId = activeClass[activeClassKey];
+    const currentClass = currentSubdept.classes?.find(c => c.id.toString() === currentClassId);
+    const activeSubclassKey = `${activeClassKey}-${currentClassId}`;
+    const currentSubclassId = activeSubclass[activeSubclassKey];
+    const currentSubclass = currentClass?.subClasses?.find(sc => sc.id.toString() === currentSubclassId);
 
-    const activeSubclassKey = `${activeClassKey}-${currentClassId}`
-    const currentSubclassId = activeSubclass[activeSubclassKey]
-    const currentSubclass = currentClass?.subClasses?.find(sc => sc.id.toString() === currentSubclassId)
+    const renderTableSection = (title: string, description: string, icon: React.ReactNode, data: any, context: EditingContext) => (
+      <>
+        <div className="flex items-center justify-between flex-shrink-0">
+          <h4 className="text-lg font-medium flex items-center space-x-3">
+            {icon}
+            <span>
+              {title}
+              {description && <span className="text-sm text-muted-foreground ml-2">- {description}</span>}
+            </span>
+          </h4>
+          <Button onClick={() => openWebDataDialog(context)} size="sm" className="bg-blue-600 hover:bg-blue-700 text-white">
+            <Plus className="h-4 w-4 mr-2" />
+            Add WebData
+          </Button>
+        </div>
+        <div className="flex-1 min-h-0">{renderWebData(data, context)}</div>
+      </>
+    );
 
     return (
-      <div className="space-y-4 h-[calc(100vh-200px)] flex flex-col">
-        <div className="flex-1 overflow-hidden">
-          <div className="h-full overflow-auto">
-            {/* Header */}
-            <div className="border-b pb-4">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{currentDept.name}</h2>
-              <h3 className="text-lg text-gray-600 dark:text-gray-400">
-                {currentSubdept.name} - <span className="text-sm text-gray-500">{currentSubdept.description}</span>
-              </h3>
-            </div>
+      <div className="flex flex-col h-full space-y-4">
+        <div className="flex-shrink-0 border-b pb-4">
+          <h2 className="text-2xl font-bold">{currentDept.name}</h2>
+          <h3 className="text-lg text-muted-foreground">{currentSubdept.name}</h3>
+        </div>
 
-            {/* Content based on current selection */}
-            {currentSubclass ? (
-              // Show subclass webData
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-lg font-medium flex items-center space-x-2">
-                    <Layers className="h-5 w-5 text-orange-600" />
-                    <span>
-                      Sub-class WebData: {currentSubclass.name} -
-                      <span className="text-sm text-gray-500">{currentSubclass.description}</span>
-                    </span>
-                  </h4>
-                  <Button
-                    onClick={() => openWebDataDialog({
-                      type: 'subclass',
-                      departmentId: currentDept.id,
-                      subdepartmentId: currentSubdept.id,
-                      classId: currentClass?.id.toString(),
-                      subclassId: currentSubclass.id.toString()
-                    })}
-                    size="sm"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add WebData
-                  </Button>
-                </div>
-                {currentSubclass.webData && renderWebData(currentSubclass.webData, {
-                  type: 'subclass',
-                  departmentId: currentDept.id,
-                  subdepartmentId: currentSubdept.id,
-                  classId: currentClass?.id.toString(),
-                  subclassId: currentSubclass.id.toString()
-                })}
-              </div>
-            ) : currentClass ? (
-              // Show class webData
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-lg font-medium flex items-center space-x-2">
-                    <Layers className="h-5 w-5 text-purple-600" />
-                    <span>Class WebData: {currentClass.name} - <span className="text-sm text-gray-500">{currentClass.description}</span></span>
-                  </h4>
-                  <Button
-                    onClick={() => openWebDataDialog({
-                      type: 'class',
-                      departmentId: currentDept.id,
-                      subdepartmentId: currentSubdept.id,
-                      classId: currentClass.id.toString()
-                    })}
-                    size="sm"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add WebData
-                  </Button>
-                </div>
-                {renderWebData(currentClass.webData, {
-                  type: 'class',
-                  departmentId: currentDept.id,
-                  subdepartmentId: currentSubdept.id,
-                  classId: currentClass.id.toString()
-                })}
-              </div>
-            ) : (
-              // Show subdepartment webData
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-lg font-medium flex items-center space-x-2">
-                    <FileText className="h-5 w-5 text-green-600" />
-                    <span>Subdepartment WebData</span>
-                  </h4>
-                  <Button
-                    onClick={() => openWebDataDialog({
-                      type: 'subdepartment',
-                      departmentId: currentDept.id,
-                      subdepartmentId: currentSubdept.id
-                    })}
-                    size="sm"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add WebData
-                  </Button>
-                </div>
-                {renderWebData(currentSubdept.upload_webData, {
-                  type: 'subdepartment',
-                  departmentId: currentDept.id,
-                  subdepartmentId: currentSubdept.id
-                })}
-              </div>
-            )}
-          </div>
+        <div className="flex flex-col flex-1 min-h-0 space-y-4">
+          {currentSubclass ? renderTableSection(
+            `Sub-class: ${currentSubclass.name}`, currentSubclass.description, <Layers className="h-5 w-5 text-orange-500" />, currentSubclass.webData,
+            { type: 'subclass', departmentId: currentDept.id, subdepartmentId: currentSubdept.id.toString(), classId: currentClass?.id.toString(), subclassId: currentSubclass.id.toString() }
+          ) : currentClass ? renderTableSection(
+            `Class: ${currentClass.name}`, currentClass.description, <Layers className="h-5 w-5 text-purple-500" />, currentClass.webData,
+            { type: 'class', departmentId: currentDept.id, subdepartmentId: currentSubdept.id.toString(), classId: currentClass.id.toString() }
+          ) : renderTableSection(
+            "Subdepartment WebData", "", <FileText className="h-5 w-5 text-green-500" />, currentSubdept.upload_webData,
+            { type: 'subdepartment', departmentId: currentDept.id, subdepartmentId: currentSubdept.id.toString() }
+          )}
         </div>
       </div>
-    )
+    );
   }
 
   if (!departments || departments.length === 0) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-center">
-          <Layers className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-          <p className="text-lg font-medium text-gray-600">No departments found</p>
-          <p className="text-sm text-gray-500">Create departments first to manage webData</p>
+      <div className="flex items-center justify-center p-8 h-full">
+        <div className="text-center text-muted-foreground">
+          <Layers className="h-12 w-12 mx-auto mb-4" />
+          <p className="text-lg font-medium">No departments found</p>
+          <p className="text-sm">Create departments first to manage webData.</p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-bold">WebData</h2>
-      <p className="text-sm text-gray-500">Manage webData for each department, subdepartment, class, and subclass</p>
-      <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-hidden">
+      <p className="text-sm text-muted-foreground">Manage webData for each department, subdepartment, class, and subclass.</p>
+      <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-hidden bg-card">
         <DepartmentSidebar
           departments={departments}
           activeDept={activeDept}
@@ -1175,11 +795,11 @@ const handleMove = async (index: number, direction: 'up' | 'down') => {
           onSubclassClick={handleSubclassClick}
           onToggleExpand={toggleExpanded}
         />
-        <div className="flex-1 p-6 bg-white dark:bg-gray-900 overflow-auto">
+        <div className="flex-1 p-6 flex flex-col">
           {renderMainContent()}
         </div>
       </div>
-      {/* Delete Confirmation Dialog */}
+
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -1189,21 +809,14 @@ const handleMove = async (index: number, direction: 'up' | 'down') => {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDeleteConfirm}
-              disabled={isSubmitting}
-            >
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteConfirm} disabled={isSubmitting}>
               {isSubmitting ? 'Deleting...' : 'Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Add WebData Dialog */}
       <AddWebDataDialog
         isOpen={isAddDialogOpen}
         onOpenChange={setIsAddDialogOpen}

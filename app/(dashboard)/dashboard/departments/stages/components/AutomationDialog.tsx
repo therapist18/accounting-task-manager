@@ -1,49 +1,94 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { useState, useEffect, useCallback } from "react"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { toast } from "@/hooks/use-toast"
-import { Loader2, Trash2, Save, Plus } from "lucide-react"
+import { Loader2, Trash2, Save, Plus, Edit } from "lucide-react"
 import * as z from "zod"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { supabase } from "@/lib/supabase/client"
 
+// Same Zod schema
 const automationFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
   description: z.string().optional(),
   webhook_url: z.string().url("Must be a valid URL"),
-  webhook_type: z.enum(["POST", "PUT", "PATCH"]).default("POST"),
   webhook_method: z.enum(["POST", "PUT", "PATCH", "GET"]).default("POST"),
   is_active: z.boolean().default(true),
-  trigger_conditions: z.record(z.any()).default({}),
-  form_fields: z.array(z.any()).default([]),
-  category: z.enum(["general", "document_processing", "form_automation", "notification", "integration", "workflow"]).default("general"),
+  category: z
+    .enum([
+      "general",
+      "document_processing",
+      "form_automation",
+      "notification",
+      "integration",
+      "workflow",
+    ])
+    .default("general"),
   max_concurrent_runs: z.number().min(1).default(1),
   queue_priority: z.number().default(0),
   async_processing: z.boolean().default(false),
+  // These fields were in the schema but not in the original form, keeping for consistency
+  trigger_conditions: z.record(z.any()).default({}),
+  form_fields: z.array(z.any()).default([]),
 })
 
 type AutomationFormValues = z.infer<typeof automationFormSchema>
+type Automation = AutomationFormValues & { id: string }
 
 interface AutomationDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (automation: any) => void
+  onSave: (automation: any) => Promise<void>
   initialData?: any
 }
 
-export function AutomationDialog({ isOpen, onOpenChange, onSave, initialData }: AutomationDialogProps) {
-  const [isLoading, setIsLoading] = useState(false)
+export function AutomationDialog({
+  isOpen,
+  onOpenChange,
+  onSave,
+  initialData,
+}: AutomationDialogProps) {
+  // State for tabs and data
+  const [activeTab, setActiveTab] = useState(initialData ? "editor" : "existing")
+  const [automations, setAutomations] = useState<Automation[]>([])
+  const [isLoadingList, setIsLoadingList] = useState(false)
+  const [selectedAutomation, setSelectedAutomation] = useState<Automation | null>(initialData || null)
+
+  // State for form actions
+  const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
   const form = useForm<AutomationFormValues>({
@@ -52,36 +97,84 @@ export function AutomationDialog({ isOpen, onOpenChange, onSave, initialData }: 
       name: "",
       description: "",
       webhook_url: "",
-      webhook_type: "POST",
       webhook_method: "POST",
       is_active: true,
-      trigger_conditions: {},
-      form_fields: [],
       category: "general",
       max_concurrent_runs: 1,
       queue_priority: 0,
       async_processing: false,
-      ...initialData,
     },
   })
 
-  useEffect(() => {
-    if (initialData) {
-      form.reset(initialData)
-    } else {
-      form.reset()
+  const fetchAutomations = useCallback(async () => {
+    setIsLoadingList(true)
+    try {
+      const { data, error } = await supabase
+        .from("tm_automations")
+        .select("*")
+        .order("created_at", { ascending: false })
+
+      if (error) throw error
+      setAutomations(data || [])
+    } catch (error) {
+      console.error("Error fetching automations:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load existing automations.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingList(false)
     }
-  }, [initialData, form])
+  }, [])
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchAutomations()
+    }
+  }, [isOpen, fetchAutomations])
+
+  useEffect(() => {
+    if (selectedAutomation) {
+      form.reset(selectedAutomation)
+    } else {
+      form.reset({
+        name: "",
+        description: "",
+        webhook_url: "",
+        webhook_method: "POST",
+        is_active: true,
+        category: "general",
+        max_concurrent_runs: 1,
+        queue_priority: 0,
+        async_processing: false,
+      })
+    }
+  }, [selectedAutomation, form])
+  
+  const handleEditClick = (automation: Automation) => {
+    setSelectedAutomation(automation)
+    setActiveTab("editor")
+  }
+
+  const handleCreateNewClick = () => {
+    setSelectedAutomation(null)
+    setActiveTab("editor")
+  }
 
   const handleSubmit = async (data: AutomationFormValues) => {
     try {
-      setIsLoading(true)
-      await onSave(data)
+      setIsSaving(true)
+      await onSave({ ...data, id: selectedAutomation?.id })
       toast({
         title: "Success",
-        description: initialData ? "Automation updated successfully" : "Automation created successfully",
+        description: selectedAutomation
+          ? "Automation updated successfully"
+          : "Automation created successfully",
       })
-      onOpenChange(false)
+      await fetchAutomations()
+      setActiveTab("existing")
+      setSelectedAutomation(null)
     } catch (error) {
       console.error("Error saving automation:", error)
       toast({
@@ -90,19 +183,19 @@ export function AutomationDialog({ isOpen, onOpenChange, onSave, initialData }: 
         variant: "destructive",
       })
     } finally {
-      setIsLoading(false)
+      setIsSaving(false)
     }
   }
 
   const handleDelete = async () => {
-    if (!initialData?.id) return
-    
+    if (!selectedAutomation?.id) return
+
     try {
       setIsDeleting(true)
       const { error } = await supabase
         .from("tm_automations")
         .delete()
-        .eq("id", initialData.id)
+        .eq("id", selectedAutomation.id)
 
       if (error) throw error
 
@@ -110,7 +203,9 @@ export function AutomationDialog({ isOpen, onOpenChange, onSave, initialData }: 
         title: "Success",
         description: "Automation deleted successfully",
       })
-      onOpenChange(false)
+      await fetchAutomations()
+      setActiveTab("existing")
+      setSelectedAutomation(null)
     } catch (error) {
       console.error("Error deleting automation:", error)
       toast({
@@ -125,253 +220,249 @@ export function AutomationDialog({ isOpen, onOpenChange, onSave, initialData }: 
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>{initialData ? "Edit Automation" : "Create New Automation"}</DialogTitle>
+          <DialogTitle>Manage Automations</DialogTitle>
           <DialogDescription>
-            {initialData ? "Update the automation details below." : "Configure a new automation for your workflow."}
+            Create, view, and manage your workflow automations.
           </DialogDescription>
         </DialogHeader>
 
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6 flex-1 flex flex-col">
-            <ScrollArea className="flex-1 pr-4 -mr-4">
-              <div className="space-y-4 pb-4">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g., Send Email Notification" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="flex-1 flex flex-col overflow-hidden"
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="editor">Create / Edit</TabsTrigger>
+            <TabsTrigger value="existing">Existing Automations</TabsTrigger>
+          </TabsList>
 
-                <FormField
-                  control={form.control}
-                  name="description"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Description</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          placeholder="Describe what this automation does..."
-                          className="min-h-[80px]"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="category"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Category</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a category" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="general">General</SelectItem>
-                          <SelectItem value="document_processing">Document Processing</SelectItem>
-                          <SelectItem value="form_automation">Form Automation</SelectItem>
-                          <SelectItem value="notification">Notification</SelectItem>
-                          <SelectItem value="integration">Integration</SelectItem>
-                          <SelectItem value="workflow">Workflow</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="webhook_url"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Webhook URL</FormLabel>
-                        <FormControl>
-                          <Input placeholder="https://api.example.com/webhook" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="webhook_method"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>HTTP Method</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
+          {/* Editor Tab (Create/Edit Form) */}
+          <TabsContent value="editor" className="flex-1 flex flex-col overflow-hidden mt-2">
+             <Form {...form}>
+               <form
+                onSubmit={form.handleSubmit(handleSubmit)}
+                className="space-y-6 flex-1 flex flex-col"
+              >
+                <ScrollArea className="flex-1 pr-4 -mr-4">
+                  <div className="space-y-4 pb-4">
+                    <FormField
+                      control={form.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Name</FormLabel>
                           <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select method" />
-                            </SelectTrigger>
+                            <Input placeholder="e.g., Send Email Notification" {...field} />
                           </FormControl>
-                          <SelectContent>
-                            <SelectItem value="POST">POST</SelectItem>
-                            <SelectItem value="GET">GET</SelectItem>
-                            <SelectItem value="PUT">PUT</SelectItem>
-                            <SelectItem value="PATCH">PATCH</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                     <FormField
+                      control={form.control}
+                      name="description"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Description</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              placeholder="Describe what this automation does..."
+                              className="min-h-[80px]"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                     <FormField
+                      control={form.control}
+                      name="category"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Category</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select a category" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="general">General</SelectItem>
+                              <SelectItem value="document_processing">Document Processing</SelectItem>
+                              <SelectItem value="form_automation">Form Automation</SelectItem>
+                              <SelectItem value="notification">Notification</SelectItem>
+                              <SelectItem value="integration">Integration</SelectItem>
+                              <SelectItem value="workflow">Workflow</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="webhook_url"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Webhook URL</FormLabel>
+                            <FormControl>
+                              <Input placeholder="https://api.example.com/webhook" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                       <FormField
+                        control={form.control}
+                        name="webhook_method"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>HTTP Method</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select method" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="POST">POST</SelectItem>
+                                <SelectItem value="GET">GET</SelectItem>
+                                <SelectItem value="PUT">PUT</SelectItem>
+                                <SelectItem value="PATCH">PATCH</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="max_concurrent_runs"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Max Concurrent Runs</FormLabel>
+                            <FormControl>
+                              <Input type="number" min={1} {...field} onChange={(e) => field.onChange(Number(e.target.value))}/>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                       <FormField
+                        control={form.control}
+                        name="queue_priority"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Queue Priority</FormLabel>
+                            <FormControl>
+                              <Input type="number" min={0} {...field} onChange={(e) => field.onChange(Number(e.target.value))}/>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                       <FormField
+                        control={form.control}
+                        name="is_active"
+                        render={({ field }) => (
+                          <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                            <div className="space-y-0.5">
+                              <FormLabel className="text-base">Active</FormLabel>
+                            </div>
+                            <FormControl>
+                              <Switch checked={field.value} onCheckedChange={field.onChange} />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </div>
+                </ScrollArea>
+                 <DialogFooter className="pt-4 border-t">
+                  <div className="flex justify-between w-full">
+                    <div>
+                      {selectedAutomation && (
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          onClick={handleDelete}
+                          disabled={isDeleting || isSaving}
+                        >
+                          {isDeleting ? (
+                            <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Deleting...</>
+                          ) : (
+                            <><Trash2 className="mr-2 h-4 w-4" /> Delete</>
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving || isDeleting}>Cancel</Button>
+                      <Button type="submit" disabled={isSaving || isDeleting}>
+                        {isSaving ? (
+                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...</>
+                        ) : (
+                          <><Save className="mr-2 h-4 w-4" /> {selectedAutomation ? "Save Changes" : "Create Automation"}</>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogFooter>
+              </form>
+            </Form>
+          </TabsContent>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="max_concurrent_runs"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Max Concurrent Runs</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="number"
-                            min={1}
-                            {...field}
-                            onChange={(e) => field.onChange(Number(e.target.value))}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="queue_priority"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Queue Priority</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="number"
-                            min={0}
-                            {...field}
-                            onChange={(e) => field.onChange(Number(e.target.value))}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="is_active"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-                        <div className="space-y-0.5">
-                          <FormLabel className="text-base">Active</FormLabel>
-                          <FormDescription>
-                            {field.value ? "This automation is active" : "This automation is inactive"}
-                          </FormDescription>
+          {/* Existing Automations Tab */}
+          <TabsContent value="existing" className="flex-1 flex flex-col overflow-hidden mt-2">
+            <div className="flex justify-end mb-4">
+              <Button onClick={handleCreateNewClick}>
+                <Plus className="mr-2 h-4 w-4" /> Create New Automation
+              </Button>
+            </div>
+             <ScrollArea className="flex-1 pr-2">
+              <div className="space-y-3">
+                {isLoadingList ? (
+                  <div className="flex justify-center items-center h-40">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : automations.length > 0 ? (
+                  automations.map((auto) => (
+                    <div
+                      key={auto.id}
+                      className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50"
+                    >
+                      <div className="flex-1 mr-4">
+                        <div className="flex items-center gap-3">
+                          <p className="font-semibold text-base">{auto.name}</p>
+                          <Badge variant={auto.is_active ? "default" : "secondary"}>
+                            {auto.is_active ? "Active" : "Inactive"}
+                          </Badge>
                         </div>
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
-                </div>
-
-                <FormField
-                  control={form.control}
-                  name="async_processing"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-                      <div className="space-y-0.5">
-                        <FormLabel className="text-base">Asynchronous Processing</FormLabel>
-                        <FormDescription>
-                          {field.value
-                            ? "This automation will run asynchronously"
-                            : "This automation will run synchronously"}
-                        </FormDescription>
+                        <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                          {auto.description || "No description provided."}
+                        </p>
                       </div>
-                      <FormControl>
-                        <Switch
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
+                      <Button variant="outline" size="sm" onClick={() => handleEditClick(auto)}>
+                        <Edit className="mr-2 h-4 w-4" /> Edit
+                      </Button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-40 text-center text-muted-foreground border-2 border-dashed rounded-lg">
+                    <p className="text-lg font-medium">No Automations Found</p>
+                    <p className="text-sm">Click "Create New Automation" to get started.</p>
+                  </div>
+                )}
               </div>
             </ScrollArea>
-
-            <DialogFooter className="pt-4 border-t">
-              <div className="flex justify-between w-full">
-                <div>
-                  {initialData && (
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      onClick={handleDelete}
-                      disabled={isDeleting || isLoading}
-                    >
-                      {isDeleting ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Deleting...
-                        </>
-                      ) : (
-                        <>
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete
-                        </>
-                      )}
-                    </Button>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => onOpenChange(false)}
-                    disabled={isLoading || isDeleting}
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="submit" disabled={isLoading || isDeleting}>
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        <Save className="mr-2 h-4 w-4" />
-                        {initialData ? "Save Changes" : "Create Automation"}
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </DialogFooter>
-          </form>
-        </Form>
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   )
