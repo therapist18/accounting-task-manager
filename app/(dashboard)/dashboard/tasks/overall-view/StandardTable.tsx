@@ -92,7 +92,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
 
   if (!sortedTasks.length) {
     return (
-      <div className="flex flex-col items-center justify-center p-16 bg-slate-50/50 rounded-lg border-2 border-dashed border-slate-200">
+      <div className="flex flex-col items-center justify-center p-16 bg-slate-50 rounded-lg border-2 border-dashed border-slate-200 text-center">
         <FileText className="h-12 w-12 text-slate-400" />
         <p className="mt-4 font-semibold text-slate-700">No {tableType} found</p>
         <p className="text-sm text-slate-500">Tasks with this status will appear here.</p>
@@ -108,7 +108,6 @@ export const StandardTable: React.FC<StandardTableProps> = ({
     .filter(stage => stage && visibleStageIds.has(stage.id.toString()))
     .sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
 
-  // Filter headers based on visibility settings
   const visibleTableHeaders = ENHANCED_TABLE_HEADERS.filter(header =>
     visibleHeaders.has(header.id)
   );
@@ -133,51 +132,51 @@ export const StandardTable: React.FC<StandardTableProps> = ({
     const isSorted = sortConfig?.key === sortKey;
     return (
       <TableHead className={className} onClick={() => requestSort(sortKey)} rowSpan={rowSpan}>
-        <div className="flex items-center justify-center gap-2 cursor-pointer">
+        <div className="flex items-center justify-start gap-2 cursor-pointer group px-3">
           {children}
           {isSorted ? (
             sortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
-          ) : <ArrowUpDown className="h-4 w-4 opacity-30" />}
+          ) : <ArrowUpDown className="h-4 w-4 opacity-40 group-hover:opacity-100" />}
         </div>
       </TableHead>
     )
   }
 
   return (
-    <div className="border border-slate-200 rounded-lg bg-blue-500 overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 200px)' }}>
+    <div className="border border-slate-300 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 200px)' }}>
       <Table className="min-w-full border-separate border-spacing-0">
-        <TableHeader className="sticky top-0 z-20 bg-blue-500/80 backdrop-blur-sm">
-          <TableRow className="h-12">
+        <TableHeader className="sticky top-0 z-20 bg-blue-600/95 backdrop-blur-sm">
+          <TableRow>
             {/* Render only visible headers */}
             {visibleTableHeaders.map(header => (
               <SortableHeader
                 key={header.id}
                 rowSpan={2}
                 sortKey={header.id}
-                className={`bg-blue-500 border-r border-b-2 border-slate-300 text-white font-semibold text-center align-middle ${header.width || 'w-auto'} hover:bg-slate-200`}
+                className={`bg-blue-600 border-r border-b border-blue-700 text-white font-semibold text-sm align-middle ${header.width || 'w-auto'} hover:bg-blue-700 transition-colors`}
               >
                 {header.label}
               </SortableHeader>
             ))}
 
             {/* Workflow stages section */}
-            <TableHead colSpan={totalStageColumns} className="bg-blue-500 border-r border-b-2 border-slate-300 text-white text-center font-bold px-2 align-middle">
+            <TableHead colSpan={totalStageColumns} className="bg-blue-600 border-r border-b border-blue-700 text-white text-center font-bold px-2 align-middle">
               <div className="flex items-center justify-center gap-2">
                 WORKFLOW STAGES
-                <Button variant="ghost" size="icon" className="h-6 w-6 p-0 text-white hover:bg-slate-200" onClick={() => {}} title="Expand All"><Plus className="h-4 w-4" /></Button>
-                <Button variant="ghost" size="icon" className="h-6 w-6 p-0 text-white hover:bg-slate-200" onClick={() => {}} title="Collapse All"><Minus className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="icon" className="h-6 w-6 p-0 text-white hover:bg-blue-700" onClick={() => {}} title="Expand All"><Plus className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="icon" className="h-6 w-6 p-0 text-white hover:bg-blue-700" onClick={() => {}} title="Collapse All"><Minus className="h-4 w-4" /></Button>
               </div>
             </TableHead>
-            <TableHead rowSpan={2} className="bg-blue-500 border-r-0 border-b-2 border-slate-300 text-white font-semibold text-center w-[120px] sticky right-0 z-20 align-middle">
+            <TableHead rowSpan={2} className="bg-blue-600 border-r-0 border-b border-blue-700 text-white font-semibold text-sm text-center w-[120px] sticky right-0 z-20 align-middle">
               Actions
             </TableHead>
           </TableRow>
-          <TableRow className="h-14">
+          <TableRow>
             {/* Stage Sub-Headers */}
             {visibleStages.map(stage => {
-              const subHeaderBaseClasses = "bg-blue-400 border-r border-b border-slate-300 text-white text-center text-sm font-medium align-middle p-1 whitespace-nowrap";
+              const subHeaderBaseClasses = "bg-blue-500 border-r border-b border-blue-600 text-white text-center text-xs font-medium align-middle p-1 whitespace-nowrap";
               if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
-                return <TableHead key={`subhead-stage-${stage.id}`} className={subHeaderBaseClasses}><div className="flex items-center justify-center gap-1">{stage.name} <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-500 hover:bg-slate-200" onClick={() => toggleStageExpansion(stage.id)}><Plus className="h-3 w-3" /></Button></div></TableHead>
+                return <TableHead key={`subhead-stage-${stage.id}`} className={subHeaderBaseClasses}><div className="flex items-center justify-center gap-1">{stage.name} <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-blue-100 hover:bg-blue-600" onClick={() => toggleStageExpansion(stage.id)}><Plus className="h-3 w-3" /></Button></div></TableHead>
               }
 
               return stage.documents.map(doc => {
@@ -187,7 +186,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                 const hasIndicator = false;
 
                 if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0 || hasIndicator || isOldDoc) {
-                  return <TableHead key={`subhead-doc-${doc.id}`} className={subHeaderBaseClasses}><div className="flex items-center justify-center gap-1">{docDisplayName} <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-500 hover:bg-slate-200" onClick={() => toggleDocumentExpansion(doc.id)}><Plus className="h-3 w-3" /></Button></div></TableHead>
+                  return <TableHead key={`subhead-doc-${doc.id}`} className={subHeaderBaseClasses}><div className="flex items-center justify-center gap-1">{docDisplayName} <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-blue-100 hover:bg-blue-600" onClick={() => toggleDocumentExpansion(doc.id)}><Plus className="h-3 w-3" /></Button></div></TableHead>
                 }
 
                 const kycFields = kycFieldsMap.get(doc.kycId) || [];
@@ -198,7 +197,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
             })}
           </TableRow>
         </TableHeader>
-        <TableBody className="divide-y divide-slate-200">
+        <TableBody>
           {(dataLoading.tasks || dataLoading.stages || dataLoading.companies) ? (
             <TableRow><TableCell colSpan={visibleTableHeaders.length + totalStageColumns + 1} className="h-32 text-center text-slate-500">Loading...</TableCell></TableRow>
           ) : error ? (
@@ -208,37 +207,32 @@ export const StandardTable: React.FC<StandardTableProps> = ({
               {sortedTasks.map((task) => (
                 <React.Fragment key={task.id}>
                   {/* Main task row */}
-                  <TableRow className="group bg-white hover:bg-blue-50/50">
+                  <TableRow className="group bg-white hover:bg-slate-50/70 transition-colors duration-150">
                     {/* DYNAMICALLY RENDERED CELLS BASED ON VISIBLE HEADERS */}
                     {visibleTableHeaders.map(header => {
                       const cellContent = getCellContent(task, header.id);
                       const isComplex = React.isValidElement(cellContent);
                       return (
-                        <TableCell key={`${task.id}-${header.id}`} className="border border-gray-200 text-sm p-2 align-middle text-center">
-                          {isComplex ? cellContent : <div className="max-w-[180px] mx-auto truncate" title={cellContent}>{cellContent}</div>}
+                        <TableCell 
+                          key={`${task.id}-${header.id}`} 
+                          className={`border-b border-r border-slate-200 text-sm p-3 align-middle text-start ${
+                            header.id === 'current_stage_status' ? 'text-slate-800' : 'text-slate-700'
+                          }`}
+                        >
+                          {isComplex ? cellContent : <div className="truncate" title={cellContent}>{cellContent}</div>}
                         </TableCell>
                       );
                     })}
                     {/* STAGE CELLS - ALWAYS USE EditableStageCell */}
                     {visibleStages.map(stage => {
                       if (!isStageApplicableToTask(stage, task)) {
-                        return <TableCell key={`${stage.id}-na`} className="border border-gray-200 text-center text-slate-400 italic text-sm align-middle">N/A</TableCell>
+                        return <TableCell key={`${stage.id}-na`} className="border-b border-r border-slate-200 text-center text-slate-400 italic text-sm align-middle">N/A</TableCell>
                       }
 
-                      // ALWAYS use EditableStageCell - this ensures automation buttons appear
                       if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
                         return (
-                          <TableCell key={stage.id} className="border border-gray-200 p-1 align-middle">
-                            <EditableStageCell
-                              stage={stage}
-                              task={task}
-                              value={task.stages?.[stage.id]}
-                              allDocuments={allDocuments}
-                              onDocumentUpload={handleStageDocumentUpload}
-                              onShowDocuments={handleViewDocument}
-                              getKycFields={getKycFields}
-                              onSave={enhancedHandleStageStatusSave}
-                            />
+                          <TableCell key={stage.id} className="border-b border-r border-slate-200 p-1 align-middle">
+                            <EditableStageCell stage={stage} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={handleViewDocument} getKycFields={getKycFields} onSave={enhancedHandleStageStatusSave}/>
                           </TableCell>
                         )
                       }
@@ -250,24 +244,14 @@ export const StandardTable: React.FC<StandardTableProps> = ({
 
                         if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0 || hasIndicator || isOldDoc) {
                           return (
-                            <TableCell key={`${doc.id}`} className="border border-gray-200 p-1 align-middle">
-                              {/* ALWAYS use EditableStageCell for consistency and automation buttons */}
-                              <EditableStageCell
-                                stage={{ ...stage, documents: [doc] }}
-                                task={task}
-                                value={task.stages?.[stage.id]}
-                                allDocuments={allDocuments}
-                                onDocumentUpload={handleStageDocumentUpload}
-                                onShowDocuments={handleViewDocument}
-                                getKycFields={getKycFields}
-                                onSave={enhancedHandleStageStatusSave}
-                              />
+                            <TableCell key={`${doc.id}`} className="border-b border-r border-slate-200 p-1 align-middle">
+                              <EditableStageCell stage={{ ...stage, documents: [doc] }} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={handleViewDocument} getKycFields={getKycFields} onSave={enhancedHandleStageStatusSave}/>
                             </TableCell>
                           )
                         } else {
                           const kycFields = kycFieldsMap.get(doc.kycId) || [];
                           return kycFields.map(field => (
-                            <TableCell key={`${field.id || field.fieldName}`} className="border border-gray-200 p-1 align-middle">
+                            <TableCell key={`${field.id || field.fieldName}`} className="border-b border-r border-slate-200 p-1 align-middle">
                               <DocumentFieldCell document={linkedDocumentForType} field={field} isOldDocument={isOldDoc} />
                             </TableCell>
                           ))
@@ -275,14 +259,12 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                       }).flat()
                     })}
                     {/* ACTIONS CELL */}
-                    <TableCell className="text-center text-sm p-2 align-middle sticky right-0 bg-white group-hover:bg-blue-50/50 border-l border-gray-200">
+                    <TableCell className="text-center text-sm p-2 align-middle sticky right-0 bg-white group-hover:bg-slate-50/70 border-b border-l border-slate-200 transition-colors duration-150">
                       <div className="flex items-center justify-center gap-1">
                         <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100" title="Edit Task"><Edit className="h-4 w-4" /></Button>
                         <Button variant="ghost" size="icon" onClick={() => onTaskAction?.({ type: 'delete', task })} className="h-8 w-8 text-red-600 hover:bg-red-100" title="Delete Task"><Trash2 className="h-4 w-4" /></Button>
                         <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:bg-slate-100" title="More Actions"><ChevronDown className="h-4 w-4" /></Button>
-                          </DropdownMenuTrigger>
+                          <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:bg-slate-200" title="More Actions"><ChevronDown className="h-4 w-4" /></Button></DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => handlePushCase(task, 6, 'Alien')} disabled={isPushingCase}><Send className="mr-2 h-4 w-4" /> Push to Alien</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handlePushCase(task, 7, 'Re-Entry Pass')} disabled={isPushingCase}><Send className="mr-2 h-4 w-4" /> Push to Re-Entry</DropdownMenuItem>
@@ -297,18 +279,19 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                   {expandedDependants.has(task.id.toString()) && (() => {
                     const taskDeps = taskDependants.get(task.id.toString()) || [];
                     return taskDeps.map((dependant, depIndex) => (
-                      <TableRow key={`${task.id}-dep-${depIndex}`} className="group bg-orange-50/30 hover:bg-orange-100/50 border-l-4 border-orange-400">
+                      <TableRow key={`${task.id}-dep-${depIndex}`} className="group bg-blue-50/40 hover:bg-blue-50/80 border-l-4 border-blue-400">
                         {/* DEPENDANT CELLS BASED ON VISIBLE HEADERS */}
                         {visibleTableHeaders.map(header => {
                           let cellContent = '';
                           switch (header.id) {
                             case 'id': cellContent = `${task.id}-D${depIndex + 1}`; break;
                             case 'applicant_name': cellContent = (
-                              <div className="flex items-center gap-2">
-                                <div className="text-xs bg-orange-200 text-orange-800 px-2 py-1 rounded">DEP</div>
+                              <div className="flex items-center gap-3">
+                                {/* Stylish Badge for Dependant */}
+                                <div className="text-xs font-semibold tracking-wider text-blue-800 bg-blue-200/80 border border-blue-300 px-2.5 py-1 rounded-full">DEP</div>
                                 <div>
-                                  <div className="font-medium">{dependant.full_name}</div>
-                                  <div className="text-xs text-gray-500">{dependant.relationship}</div>
+                                  <div className="font-medium text-slate-800">{dependant.full_name}</div>
+                                  <div className="text-xs text-slate-500">{dependant.relationship}</div>
                                 </div>
                               </div>
                             ); break;
@@ -326,30 +309,30 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                           
                           const isComplex = React.isValidElement(cellContent);
                           return (
-                            <TableCell key={`${task.id}-dep-${depIndex}-${header.id}`} className="border border-gray-200 text-sm p-2 align-middle text-center bg-orange-50/20">
-                              {isComplex ? cellContent : <div className="max-w-[180px] mx-auto truncate" title={cellContent}>{cellContent}</div>}
+                            <TableCell key={`${task.id}-dep-${depIndex}-${header.id}`} className="border-b border-r border-slate-200 text-sm p-3 align-middle text-start text-slate-600">
+                              {isComplex ? cellContent : <div className="truncate" title={cellContent}>{cellContent}</div>}
                             </TableCell>
                           );
                         })}
                         {/* STAGE CELLS FOR DEPENDANTS - Show N/A */}
                         {visibleStages.map(stage => {
                           if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
-                            return <TableCell key={`${stage.id}-dep-na`} className="border border-gray-200 text-center text-slate-400 italic text-sm align-middle bg-orange-50/20">N/A</TableCell>
+                            return <TableCell key={`${stage.id}-dep-na`} className="border-b border-r border-slate-200 text-center text-slate-400 italic text-sm align-middle">N/A</TableCell>
                           }
                           return stage.documents.map(doc => {
                             if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0) {
-                              return <TableCell key={`${doc.id}-dep-na`} className="border border-gray-200 text-center text-slate-400 italic text-sm align-middle bg-orange-50/20">N/A</TableCell>
+                              return <TableCell key={`${doc.id}-dep-na`} className="border-b border-r border-slate-200 text-center text-slate-400 italic text-sm align-middle">N/A</TableCell>
                             } else {
                               const kycFields = kycFieldsMap.get(doc.kycId) || [];
                               return kycFields.map(field => (
-                                <TableCell key={`${field.id || field.fieldName}-dep-na`} className="border border-gray-200 text-center text-slate-400 italic text-sm align-middle bg-orange-50/20">N/A</TableCell>
+                                <TableCell key={`${field.id || field.fieldName}-dep-na`} className="border-b border-r border-slate-200 text-center text-slate-400 italic text-sm align-middle">N/A</TableCell>
                               ))
                             }
                           }).flat()
                         })}
                         {/* ACTIONS CELL FOR DEPENDANTS */}
-                        <TableCell className="text-center text-sm p-2 align-middle sticky right-0 bg-orange-50/20 border-l border-gray-200">
-                          <span className="text-xs text-gray-500">Dependant</span>
+                        <TableCell className="text-center text-sm p-2 align-middle sticky right-0 bg-blue-50/40 group-hover:bg-blue-50/80 border-b border-l border-slate-200">
+                          <span className="text-xs text-blue-700">Dependant</span>
                         </TableCell>
                       </TableRow>
                     ));

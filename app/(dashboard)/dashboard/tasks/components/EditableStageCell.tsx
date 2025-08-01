@@ -11,6 +11,7 @@ import { Upload, Calendar, Check, X, Clock, CheckCircle, FileText, Eye, AlertTri
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
+import { AutomationMappingDialog } from "./AutomationMappingDialog"
 
 interface EditableStageCellProps {
   stage: any
@@ -70,6 +71,7 @@ export default function EditableStageCell({
   const [isLoading, setIsLoading] = useState(false);
   const [hasLinkedDocument, setHasLinkedDocument] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<any>(null);
   const [stageDate, setStageDate] = useState('');
@@ -599,75 +601,9 @@ export default function EditableStageCell({
     }
   };
 
-  const handleTriggerAutomation = async (e: React.MouseEvent) => {
+  const handleTriggerAutomation = (e: React.MouseEvent) => {
     e.stopPropagation();
-
-    // FIXED: Use the correct field name for automation ID
-    const automationId = stage?.web_automation?.automationId || stage?.web_automation?.id;
-
-    console.log('Automation trigger clicked:', {
-      stageId: stage?.id,
-      stageName: stage?.name,
-      automationId: automationId,
-      automationName: stage?.web_automation?.automationName,
-      taskId: task?.id,
-      webAutomation: stage?.web_automation
-    });
-
-    if (!automationId) {
-      console.warn('No automation ID found for stage:', stage);
-      toast({
-        title: 'Error',
-        description: 'No automation configured for this stage',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    try {
-      setIsAutomationRunning(true);
-
-      console.log('Making automation API call with ID:', automationId);
-
-      // Call the automation API endpoint
-      const response = await fetch(`/api/automations/trigger`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          automationId: automationId, // Use the correct automation ID
-          taskId: task.id,
-          stageId: stage.id
-        }),
-      });
-
-      console.log('Automation API response status:', response.status);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Automation API error:', errorText);
-        throw new Error(`Failed to trigger automation: ${response.status} ${errorText}`);
-      }
-
-      const result = await response.json();
-      console.log('Automation triggered successfully:', result);
-
-      toast({
-        title: 'Success',
-        description: result.message || `Automation "${stage.web_automation.automationName || 'automation'}" triggered successfully`,
-        variant: 'default',
-      });
-    } catch (error) {
-      console.error('Error triggering automation:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to trigger automation',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsAutomationRunning(false);
-    }
+    setAutomationDialogOpen(true);
   };
   const handleViewDocument = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -796,14 +732,9 @@ export default function EditableStageCell({
                   e.stopPropagation();
                   handleTriggerAutomation(e);
                 }}
-                disabled={isAutomationRunning}
-                title={`Run ${stage.web_automation?.automationName || 'automation'}`}
+                title={`View automation for ${stage.web_automation?.automationName || 'this stage'}`}
               >
-                {isAutomationRunning ? (
-                  <Clock className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Zap className="h-4 w-4" />
-                )}
+                <Zap className="h-4 w-4" />
               </Button>
             )}
 
@@ -913,8 +844,20 @@ export default function EditableStageCell({
     }
   }
 
+  // Get automation ID if it exists
+  const automationId = stage?.web_automation?.automationId || stage?.web_automation?.id;
+
   return (
     <>
+      {/* Automation Mapping Dialog */}
+      <AutomationMappingDialog
+        isOpen={automationDialogOpen}
+        onClose={() => setAutomationDialogOpen(false)}
+        classId={task.class_id}
+        requirementId={stage.id}
+        taskId={task.id}
+        automationId={automationId}
+      />
       <div
         className={`flex items-center justify-center min-h-[32px] cursor-pointer hover:bg-gray-50 rounded p-1 ${requiresUpload ? 'hover:bg-blue-50' : 'hover:bg-gray-50'
           }`}

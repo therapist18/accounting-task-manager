@@ -23,6 +23,8 @@ export interface WebDataForm {
   masterField: any // Store master field data for display
   order: number
   variableName: string
+  efnsDisplayName: string
+  fieldType: 'text' | 'number' | 'boolean' | 'date' | 'select' | 'array' | 'object'
 }
 
 interface JobField {
@@ -172,14 +174,27 @@ export function AddWebDataDialog({
       .toLowerCase()
       .replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase())
 
+    // Map field types from master field to our field types
+    const fieldTypeMap: Record<string, 'text' | 'number' | 'boolean' | 'date' | 'select' | 'array' | 'object'> = {
+      'text': 'text',
+      'number': 'number',
+      'boolean': 'boolean',
+      'date': 'date',
+      'select': 'select',
+      'array': 'array',
+      'object': 'object'
+    }
+
     const newWebDataItem = {
-      name: masterField.label,
+      name: masterField.label, // This will be the master field's name
       description: `Auto-populated from ${masterField.field_key}`,
       isRequired: masterField.is_required,
       masterFieldId: masterField.id.toString(),
       masterField: masterField,
       order: newWebData.length,
-      variableName: defaultVarName
+      variableName: defaultVarName,
+      efnsDisplayName: masterField.label, // Default to the same as master field label
+      fieldType: fieldTypeMap[masterField.type] || 'text' // Default to text if no match
     }
 
     setNewWebData([...newWebData, newWebDataItem])
@@ -205,14 +220,27 @@ export function AddWebDataDialog({
         .toLowerCase()
         .replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase())
 
+      // Map field types from master field to our field types
+      const fieldTypeMap: Record<string, 'text' | 'number' | 'boolean' | 'date' | 'select' | 'array' | 'object'> = {
+        'text': 'text',
+        'number': 'number',
+        'boolean': 'boolean',
+        'date': 'date',
+        'select': 'select',
+        'array': 'array',
+        'object': 'object'
+      }
+
       return {
-        name: field.label,
+        name: field.label, // This will be the master field's name
         description: `Auto-populated from ${field.field_key}`,
         isRequired: field.is_required,
         masterFieldId: field.id.toString(),
         masterField: field,
         order: newWebData.length + index,
-        variableName: defaultVarName
+        variableName: defaultVarName,
+        efnsDisplayName: field.label, // Default to the same as master field label
+        fieldType: fieldTypeMap[field.type] || 'text' // Default to text if no match
       }
     })
 
@@ -338,47 +366,90 @@ export function AddWebDataDialog({
                     </div>
                     <div className="border rounded-md p-2 h-[400px] overflow-y-auto">
                       {filteredCompanyFields.length > 0 ? (
-                        <div className="space-y-2">
-                          {filteredCompanyFields.map((field) => (
-                            <div key={field.id} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded">
-                              <input
-                                type="checkbox"
-                                id={`field-${field.id}`}
-                                checked={selectedFields.includes(field.id)}
-                                onChange={() => toggleFieldSelection(field.id)}
-                                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                              <label htmlFor={`field-${field.id}`} className="flex-1 flex items-center justify-between">
-                                <span className="text-sm">{field.label}</span>
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="outline" className="text-xs">{field.type}</Badge>
-                                  {field.is_required && (
-                                    <Badge variant="default" className="text-xs">Required</Badge>
-                                  )}
-                                </div>
-                              </label>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="h-full flex items-center justify-center text-sm text-gray-500">
-                          No company fields found
-                        </div>
-                      )}
-                    </div>
+                      <div className="space-y-2">
+                        {filteredProfileFields.map((field) => (
+                          <div key={field.id} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded">
+                            <input
+                              type="checkbox"
+                              id={`field-${field.id}`}
+                              checked={selectedFields.includes(field.id)}
+                              onChange={() => toggleFieldSelection(field.id)}
+                              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                            <label htmlFor={`field-${field.id}`} className="flex-1 flex items-center justify-between">
+                              <span className="text-sm">{field.label}</span>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="text-xs">{field.type}</Badge>
+                                {field.is_required && (
+                                  <Badge variant="default" className="text-xs">Required</Badge>
+                                )}
+                              </div>
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-sm text-gray-500">
+                        No profile fields found
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex justify-end pt-2">
-                  <Button
-                    type="button"
-                    onClick={addSelectedFields}
-                    disabled={selectedFields.length === 0}
-                    className="px-6"
-                  >
-                    Add Selected Fields ({selectedFields.length})
-                  </Button>
+                {/* Company Section */}
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <Label className="text-base font-medium">Company Fields</Label>
+                    <div className="relative">
+                      <Input
+                        placeholder="Search company fields..."
+                        value={companySearch}
+                        onChange={(e) => setCompanySearch(e.target.value)}
+                        className="h-9" />
+                    </div>
+                  </div>
+                  <div className="border rounded-md p-2 h-[400px] overflow-y-auto">
+                    {filteredCompanyFields.length > 0 ? (
+                      <div className="space-y-2">
+                        {filteredCompanyFields.map((field) => (
+                          <div key={field.id} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded">
+                            <input
+                              type="checkbox"
+                              id={`field-${field.id}`}
+                              checked={selectedFields.includes(field.id)}
+                              onChange={() => toggleFieldSelection(field.id)}
+                              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                            <label htmlFor={`field-${field.id}`} className="flex-1 flex items-center justify-between">
+                              <span className="text-sm">{field.label}</span>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="text-xs">{field.type}</Badge>
+                                {field.is_required && (
+                                  <Badge variant="default" className="text-xs">Required</Badge>
+                                )}
+                              </div>
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-sm text-gray-500">
+                        No company fields found
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
+
+              <div className="flex justify-end pt-2">
+                <Button
+                  type="button"
+                  onClick={addSelectedFields}
+                  disabled={selectedFields.length === 0}
+                  className="px-6"
+                >
+                  Add Selected Fields ({selectedFields.length})
+                </Button>
+              </div>
+            </div>
           </div>
           <div className="space-y-4">
             {newWebData.map((item, idx) => (
@@ -402,49 +473,68 @@ export function AddWebDataDialog({
                   </Button>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Field Details</Label>
-                  <div className="p-3 bg-gray-50 rounded-md text-sm space-y-3">
-                    <div>
-                      <Label htmlFor={`variable-name-${item.masterFieldId}`} className="text-xs font-medium text-gray-700">
-                        Variable Name
-                      </Label>
-                      <Input
-                        id={`variable-name-${item.masterFieldId}`}
-                        value={item.variableName}
-                        onChange={(e) => {
-                          const updated = [...newWebData]
-                          const index = updated.findIndex(wd => wd.masterFieldId === item.masterFieldId)
-                          if (index !== -1) {
-                            updated[index].variableName = e.target.value
-                            setNewWebData(updated)
-                          }
-                        }}
-                        className="mt-1 h-8 text-xs"
-                        placeholder="Enter variable name"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">Field Key:</span>
-                        <code className="bg-white px-2 py-0.5 rounded border text-xs">
-                          {item.masterField?.field_key || 'N/A'}
-                        </code>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">Type:</span>
-                        <Badge variant="outline" className="text-xs">
-                          {item.masterField?.type || 'text'}
-                        </Badge>
-                      </div>
-                      {item.isRequired && (
-                        <div className="text-xs text-green-600 font-medium">This field is required</div>
-                      )}
-                    </div>
+              <div className="space-y-2">
+                <Label>Field Details</Label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor={`efnsDisplayName-${idx}`}>EFNS Display Name</Label>
+                    <Input
+                      id={`efnsDisplayName-${idx}`}
+                      value={item.efnsDisplayName}
+                      onChange={(e) => handleNewWebDataChange(idx, 'efnsDisplayName', e.target.value)}
+                      placeholder="Display Name in EFNS"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor={`variableName-${idx}`}>Automation Variable Name</Label>
+                    <Input
+                      id={`variableName-${idx}`}
+                      value={item.variableName}
+                      onChange={(e) => handleNewWebDataChange(idx, 'variableName', e.target.value)}
+                      placeholder="variableName"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor={`fieldType-${idx}`}>Field Type</Label>
+                    <Select
+                      value={item.fieldType}
+                      onValueChange={(value) => handleNewWebDataChange(idx, 'fieldType', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select field type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="text">Text</SelectItem>
+                        <SelectItem value="number">Number</SelectItem>
+                        <SelectItem value="boolean">Boolean</SelectItem>
+                        <SelectItem value="date">Date</SelectItem>
+                        <SelectItem value="select">Select</SelectItem>
+                        <SelectItem value="array">Array</SelectItem>
+                        <SelectItem value="object">Object</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               </div>
-            ))}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">Field Key:</span>
+                  <code className="bg-white px-2 py-0.5 rounded border text-xs">
+                    {item.masterField?.field_key || 'N/A'}
+                  </code>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">Type:</span>
+                  <Badge variant="outline" className="text-xs">
+                    {item.masterField?.type || 'text'}
+                  </Badge>
+                </div>
+                {item.isRequired && (
+                  <div className="text-xs text-green-600 font-medium">This field is required</div>
+                )}
+              </div>
+            </div>
+          ))}
           </div>
         </div>
 

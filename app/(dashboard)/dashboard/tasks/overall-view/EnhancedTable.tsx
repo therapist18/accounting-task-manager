@@ -1,10 +1,11 @@
 // @ts-nocheck
 "use client"
 
-import React from "react"
+import React, { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { FileText, Plus, Minus, Loader2, AlertTriangle } from "lucide-react"
+import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap } from "lucide-react"
+import { AutomationMappingDialog } from "../components/AutomationMappingDialog"
 
 interface EnhancedTableProps {
   tasks: any[]
@@ -75,6 +76,15 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   const visibleCaseDetailHeaders = ENHANCED_TABLE_HEADERS.filter(header =>
     visibleHeaders.has(header.id)
   );
+
+  // State for automation dialog
+  const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
+  const [selectedRequirement, setSelectedRequirement] = useState<{classId: string, requirementId: number} | null>(null);
+
+  const handleAutomationClick = (classId: string, requirementId: number) => {
+    setSelectedRequirement({ classId, requirementId });
+    setAutomationDialogOpen(true);
+  };
 
   return (
     <div className="space-y-4">
@@ -186,6 +196,11 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
                           {expandedSections.has(row.document.id) ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
                         </Button>
                       )}
+                      {row.type === 'requirement' && (
+                        <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-500 hover:text-slate-800" onClick={() => handleAutomationClick(row.classId, row.requirementId)}>
+                          <Zap className="h-3 w-3" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                   {headerStructure.map((item, colIndex) => (
@@ -204,6 +219,16 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
         </TableBody>
       </Table>
     </div>
+    
+    {/* Automation Mapping Dialog */}
+    {selectedRequirement && (
+      <AutomationMappingDialog
+        isOpen={automationDialogOpen}
+        onClose={() => setAutomationDialogOpen(false)}
+        classId={selectedRequirement.classId}
+        requirementId={selectedRequirement.requirementId}
+      />
+    )}
   </div>
   )
 }

@@ -684,9 +684,11 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
               <TableHeader className="sticky top-0 z-10 bg-blue-600 dark:bg-blue-800 block">
                 <TableRow className="flex">
                   <TableHead className="w-12 text-white border-r">#</TableHead>
-                  <TableHead className="flex-1 text-white border-r">WebData</TableHead>
+                  <TableHead className="flex-1 text-white border-r">Master Field</TableHead>
+                  <TableHead className="flex-1 text-white border-r">EFNS Display Name</TableHead>
+                  <TableHead className="w-48 text-white border-r">Automation Variable</TableHead>
+                  <TableHead className="w-32 text-white border-r">Type</TableHead>
                   <TableHead className="flex-1 text-white border-r">Description</TableHead>
-                  <TableHead className="w-48 text-white border-r">Master Field</TableHead>
                   <TableHead className="w-24 text-white border-r">Document</TableHead>
                   <TableHead className="w-48 text-white">Actions</TableHead>
                 </TableRow>
@@ -715,18 +717,22 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
                           </div>
                         </TableCell>
                         <TableCell className="border-r flex-1">
+                          <span className="font-medium">{req.efnsDisplayName || '-'}</span>
+                        </TableCell>
+                        <TableCell className="border-r w-48">
+                          <code className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs">
+                            {req.variableName || '-'}
+                          </code>
+                        </TableCell>
+                        <TableCell className="border-r w-32">
+                          <Badge variant="outline" className="capitalize">
+                            {req.fieldType || 'text'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="border-r flex-1">
                           <span className={!req.description ? 'text-gray-400 italic' : ''}>
                             {req.description || 'No description'}
                           </span>
-                        </TableCell>
-                        <TableCell className="border-r w-48">
-                          {req.masterFieldId ? (
-                            <div className="text-sm text-muted-foreground truncate">
-                              {req.masterField?.label || 'Linked'}
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
                         </TableCell>
                         <TableCell className="border-r w-24">
                           <div className="flex items-center justify-center">
