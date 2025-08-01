@@ -27,33 +27,37 @@ interface AddFieldDialogProps {
   onSuccess: () => void
 }
 
+// --- START: Updated Type Definitions (matching LinkSourcesDialog) ---
+
+// Structure for the `arrayConfig` inside a JSONB property
+interface JsonbArrayConfig {
+  fields: Array<{
+    id: string
+    name: string
+    type: string
+    parentField: string
+  }>
+  maxItems: number
+}
+
+// Structure for a single property within the `jsonb_properties` array
+interface JsonbProperty {
+  id: string
+  name: string
+  type: string
+  isArray?: boolean
+  arrayConfig?: JsonbArrayConfig
+}
+
+// Represents a database column, now with an array of JSONB properties
 interface TableColumn {
   column_name: string
   data_type: string
   is_jsonb: boolean
-  jsonb_properties?: Array<{
-    id: string
-    name: string
-    type: string
-    // For nested objects (old structure)
-    properties?: Array<{
-      id: string
-      name: string
-      type: string
-    }>
-    // For arrays of objects (both old and new structures)
-    isArray?: boolean
-    arrayConfig?: {
-      fields: Array<{
-        id: string
-        name: string
-        type: string
-        parentField?: string
-      }>
-      maxItems?: number
-    }
-  }>
+  jsonb_properties?: JsonbProperty[] | null
 }
+
+// --- END: Updated Type Definitions ---
 
 // State for each individual field card
 interface FieldCardState {
@@ -139,68 +143,57 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
     setCards((currentCards) => currentCards.filter((_, i) => i !== index))
   }
 
-  // Enhanced helper to generate JSONB path options for both old and new structures
-  const generateJsonbOptions = (card: FieldCardState) => {
-    const columnSpec = card.tableFields.find(f => f.column_name === card.selectedField)
-    if (!columnSpec?.jsonb_properties) return []
+  // --- START: Updated JSONB Path Generation Logic (from LinkSourcesDialog) ---
 
-    return columnSpec.jsonb_properties.flatMap((prop) => {
-      const propName = (prop.name || "").trim()
-      if (!propName) return []
+  /**
+   * Generates dropdown options for a JSONB column based on its embedded properties array.
+   * @param columnSpec The full specification of the table column.
+   * @returns An array of options for the ComboBox.
+   */
+  const generateJsonbPathOptions = (columnSpec: TableColumn): Array<{ value: string; label: string; className?: string }> => {
+    const columnName = columnSpec.column_name
+    const props = columnSpec.jsonb_properties
 
-      const options: Array<{ value: string; label: string; className?: string }> = []
+    // Fallback for unstructured JSONB or if properties are not in the expected array format
+    if (!props || !Array.isArray(props)) {
+      return [
+        { value: columnName, label: `${columnName} (Full Object)` },
+        { value: `${columnName}->>'key'`, label: `Extract text key (e.g., a->>'b')`, className: "text-muted-foreground" },
+      ]
+    }
 
-      // Handle array of objects structure (both old and new)
-      if ((prop.type === "array" || prop.isArray) && prop.arrayConfig?.fields) {
-        // Add the array itself as an option
-        options.push({
-          value: `${card.selectedField}->>'${propName}'`,
-          label: `${propName} (Array)`,
-        })
+    const options: Array<{ value: string; label: string; className?: string }> = []
+    options.push({ value: columnName, label: `${columnName} (Full Object)` })
 
-        // Add individual fields within the array
+    // Iterate over each defined property in the JSONB structure
+    props.forEach((prop) => {
+      // Escape single quotes for safe SQL query paths
+      const propName = prop.name.replace(/'/g, "''").trim()
+
+      // Case 1: The property is an array of objects with a defined schema
+      if (prop.isArray && prop.arrayConfig?.fields) {
         prop.arrayConfig.fields.forEach((field) => {
-          const fieldName = (field.name || "").trim()
-          if (fieldName) {
-            options.push({
-              value: `${card.selectedField}->'${propName}'->0->>'${fieldName}'`,
-              label: `${propName}[0] -> ${fieldName}`,
-              className: "pl-4",
-            })
-          }
+          const fieldName = field.name.replace(/'/g, "''").trim()
+          options.push({
+            value: `${columnName}->'${propName}'->[INDEX]->>'${fieldName}'`,
+            label: `${fieldName} (from ${propName})`,
+            className: "pl-4",
+          })
         })
       }
-      // Handle nested object structure
-      else if (prop.properties?.length) {
-        // Add the parent object as an option
+      // Case 2: The property is a simple key-value pair at the top level of the JSONB
+      else if (!prop.isArray) {
         options.push({
-          value: `${card.selectedField}->>'${propName}'`,
-          label: `${propName} (Object)`,
-        })
-
-        // Add nested properties
-        prop.properties.forEach((nested) => {
-          const nestedName = (nested.name || "").trim()
-          if (nestedName) {
-            options.push({
-              value: `${card.selectedField}->'${propName}'->>'${nestedName}'`,
-              label: `${propName}.${nestedName} (${nested.type})`,
-              className: "pl-4",
-            })
-          }
+          value: `${columnName}->>'${propName}'`,
+          label: `${propName} (top-level property)`,
         })
       }
-      // Handle simple property
-      else {
-        options.push({
-          value: `${card.selectedField}->>'${propName}'`,
-          label: `${propName} (${prop.type || "text"})`,
-        })
-      }
-
-      return options
     })
+
+    return options
   }
+
+  // --- END: Updated JSONB Path Generation Logic ---
 
   // Submission logic for all cards
   const handleSubmit = async (e: React.FormEvent) => {
@@ -218,10 +211,11 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
           }
         }
         
+        // Build sources array with proper path handling
         const sources = card.selectedTable && card.selectedField ? [{
           source_type: card.source_type,
           table: card.selectedTable,
-          path: card.selectedJsonPath || card.selectedField,
+          path: card.selectedJsonPath || card.selectedField, // Use JSON path if selected, otherwise use field
           priority: 1
         }] : []
 
@@ -327,6 +321,9 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
     onOpenChange(false)
   }
 
+  // Helper function to get the selected field from a path (for consistency with LinkSourcesDialog)
+  const getSelectedFieldFromPath = (path: string) => (path ? path.split("->")[0] : "")
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
@@ -353,91 +350,98 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
         </div>
 
         <form id="add-fields-form" onSubmit={handleSubmit} className="flex-1 overflow-y-auto space-y-6 -mr-6 pr-6 py-2">
-          {cards.map((card, index) => (
-            <div key={card.id} className="p-4 border rounded-lg relative space-y-4 bg-muted/30">
-              {cards.length > 1 && (
-                <Button variant="ghost" size="icon" className="absolute top-1 right-1 h-7 w-7" onClick={() => removeCard(index)}>
-                  <span className="text-xl font-bold leading-none">×</span>
-                  <span className="sr-only">Remove field</span>
-                </Button>
-              )}
+          {cards.map((card, index) => {
+            // Get the currently selected field and check if it's JSONB
+            const selectedField = getSelectedFieldFromPath(card.selectedJsonPath || card.selectedField)
+            const columnSpec = card.tableFields.find(f => f.column_name === selectedField)
+            const fieldIsJsonb = columnSpec?.is_jsonb
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor={`field_key-${card.id}`}>Field Key</Label>
-                  <Input id={`field_key-${card.id}`} value={card.field_key} onChange={(e) => handleCardChange(index, { field_key: e.target.value })} required />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor={`label-${card.id}`}>Label</Label>
-                  <Input id={`label-${card.id}`} value={card.label} onChange={(e) => handleCardChange(index, { label: e.target.value })} required />
-                </div>
-              </div>
+            return (
+              <div key={card.id} className="p-4 border rounded-lg relative space-y-4 bg-muted/30">
+                {cards.length > 1 && (
+                  <Button variant="ghost" size="icon" className="absolute top-1 right-1 h-7 w-7" onClick={() => removeCard(index)}>
+                    <span className="text-xl font-bold leading-none">×</span>
+                    <span className="sr-only">Remove field</span>
+                  </Button>
+                )}
 
-              <div className="space-y-2">
-                <Label htmlFor={`type-${card.id}`}>Type</Label>
-                <ComboBox value={card.type} onValueChange={(v) => handleCardChange(index, { type: v as any })}
-                  options={[{ value: 'text', label: 'Text' }, { value: 'date', label: 'Date' }, { value: 'number', label: 'Number' }, { value: 'select', label: 'Select' }]}
-                />
-              </div>
-
-              {card.type === "select" && (
-                <div className="space-y-2">
-                  <Label htmlFor={`options-${card.id}`}>Options</Label>
-                  <Textarea id={`options-${card.id}`} value={card.optionsText} onChange={(e) => handleCardChange(index, { optionsText: e.target.value })}
-                    placeholder='["Option 1", "Option 2"] or Option 1, Option 2' rows={2}
-                  />
-                </div>
-              )}
-
-              <div className="flex items-center space-x-2 pt-2">
-                <Switch id={`is_required-${card.id}`} checked={card.is_required} onCheckedChange={(c) => handleCardChange(index, { is_required: c })} />
-                <Label htmlFor={`is_required-${card.id}`}>Required field</Label>
-              </div>
-
-              <div className="space-y-4 border-t pt-4 mt-4">
-                <h4 className="text-sm font-medium">Data Source (Optional)</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Source Type</Label>
-                    <ComboBox value={card.source_type} onValueChange={(v) => handleCardChange(index, { source_type: v as any })}
-                      options={[{ value: 'profile', label: 'Profile' }, { value: 'document', label: 'Document' }, { value: 'company', label: 'Company' }]}
-                    />
+                    <Label htmlFor={`field_key-${card.id}`}>Field Key</Label>
+                    <Input id={`field_key-${card.id}`} value={card.field_key} onChange={(e) => handleCardChange(index, { field_key: e.target.value })} required />
                   </div>
                   <div className="space-y-2">
-                    <Label>Table</Label>
-                    <ComboBox value={card.selectedTable} onValueChange={(v) => fetchFieldsForCard(index, v)}
-                      disabled={loadingTables || loading} loading={loadingTables}
-                      options={tables.map(t => ({ value: t.name, label: t.label }))} placeholder="Select a table"
-                    />
+                    <Label htmlFor={`label-${card.id}`}>Label</Label>
+                    <Input id={`label-${card.id}`} value={card.label} onChange={(e) => handleCardChange(index, { label: e.target.value })} required />
                   </div>
                 </div>
-                {card.selectedTable && (
+
+                <div className="space-y-2">
+                  <Label htmlFor={`type-${card.id}`}>Type</Label>
+                  <ComboBox value={card.type} onValueChange={(v) => handleCardChange(index, { type: v as any })}
+                    options={[{ value: 'text', label: 'Text' }, { value: 'date', label: 'Date' }, { value: 'number', label: 'Number' }, { value: 'select', label: 'Select' }]}
+                  />
+                </div>
+
+                {card.type === "select" && (
                   <div className="space-y-2">
-                    <Label>Field</Label>
-                    <ComboBox value={card.selectedField} onValueChange={(v) => handleCardChange(index, { selectedField: v, selectedJsonPath: "" })}
-                      disabled={card.loadingTableFields} loading={card.loadingTableFields}
-                      options={card.tableFields.map(f => ({ value: f.column_name, label: f.column_name, description: f.data_type }))}
-                      placeholder="Select a field"
+                    <Label htmlFor={`options-${card.id}`}>Options</Label>
+                    <Textarea id={`options-${card.id}`} value={card.optionsText} onChange={(e) => handleCardChange(index, { optionsText: e.target.value })}
+                      placeholder='["Option 1", "Option 2"] or Option 1, Option 2' rows={2}
                     />
-                    {card.selectedField && card.tableFields.find(f => f.column_name === card.selectedField)?.is_jsonb && (
-                      <div className="mt-2 pl-4 border-l-2 border-muted">
-                        <Label>JSON Property</Label>
-                        <ComboBox value={card.selectedJsonPath} onValueChange={p => handleCardChange(index, { selectedJsonPath: p })}
-                          options={jsonbOptions[`${card.selectedTable}-${card.selectedField}`] || []}
-                          placeholder="Select a property"
-                          onFocus={() => {
-                            if (card.selectedTable && card.selectedField && !jsonbOptions[`${card.selectedTable}-${card.selectedField}`]) {
-                              loadJsonbOptions(index, card.selectedTable, card.selectedField)
-                            }
-                          }}
-                        />
-                      </div>
-                    )}
                   </div>
                 )}
+
+                <div className="flex items-center space-x-2 pt-2">
+                  <Switch id={`is_required-${card.id}`} checked={card.is_required} onCheckedChange={(c) => handleCardChange(index, { is_required: c })} />
+                  <Label htmlFor={`is_required-${card.id}`}>Required field</Label>
+                </div>
+
+                <div className="space-y-4 border-t pt-4 mt-4">
+                  <h4 className="text-sm font-medium">Data Source (Optional)</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Source Type</Label>
+                      <ComboBox value={card.source_type} onValueChange={(v) => handleCardChange(index, { source_type: v as any })}
+                        options={[{ value: 'profile', label: 'Profile' }, { value: 'document', label: 'Document' }, { value: 'company', label: 'Company' }]}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Table</Label>
+                      <ComboBox value={card.selectedTable} onValueChange={(v) => fetchFieldsForCard(index, v)}
+                        disabled={loadingTables || loading} loading={loadingTables}
+                        options={tables.map(t => ({ value: t.name, label: t.label }))} placeholder="Select a table"
+                      />
+                    </div>
+                  </div>
+                  {card.selectedTable && (
+                    <div className="space-y-2">
+                      <Label>Field</Label>
+                      <ComboBox value={selectedField} onValueChange={(v) => handleCardChange(index, { selectedField: v, selectedJsonPath: "" })}
+                        disabled={card.loadingTableFields} loading={card.loadingTableFields}
+                        options={card.tableFields.map(f => ({ value: f.column_name, label: f.column_name, description: f.data_type }))}
+                        placeholder="Select a field"
+                      />
+                      {fieldIsJsonb && columnSpec && (
+                        <div className="mt-2 pl-4 border-l-2 border-muted">
+                          <Label>JSON Property</Label>
+                          <ComboBox 
+                            value={card.selectedJsonPath.includes("->") ? card.selectedJsonPath : ""}
+                            onValueChange={(value) => {
+                              const newPath = value || selectedField
+                              handleCardChange(index, { selectedJsonPath: newPath })
+                            }}
+                            options={generateJsonbPathOptions(columnSpec)}
+                            placeholder="Select a JSON property or path..."
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </form>
 
         <DialogFooter className="mt-auto pt-4 border-t gap-2 sm:justify-between">

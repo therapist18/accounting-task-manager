@@ -21,7 +21,20 @@ export interface WebDataForm {
 }
 
 interface JobField {
-  id: number; field_key: string; label: string; type: 'text' | 'date' | 'number' | 'select'; is_required: boolean; sources?: Array<{ source_type: 'profile' | 'document' | 'company'; table: string; path: string; priority: number }>; options?: string[]; created_at: string; updated_at: string
+  id: number; 
+  field_key: string; 
+  label: string; 
+  type: 'text' | 'date' | 'number' | 'select'; 
+  is_required: boolean; 
+  sources?: Array<{ 
+    source_type: 'profile' | 'document' | 'company'; 
+    table: string; 
+    path: string; 
+    priority: number 
+  }>; 
+  options?: string[]; 
+  created_at: string; 
+  updated_at: string;
 }
 
 interface WebDataGroup {
@@ -55,7 +68,18 @@ export function AddWebDataDialog({ isOpen, onOpenChange, onSubmit, isSubmitting,
   const [selectedTopLevelFieldIds, setSelectedTopLevelFieldIds] = useState<Set<number>>(new Set())
   const [selectedGroupIdsForMerge, setSelectedGroupIdsForMerge] = useState<Set<string>>(new Set())
 
-  useEffect(() => { if (isOpen) fetchMasterFields() }, [isOpen])
+  // Reset state when dialog opens/closes
+  useEffect(() => {
+    if (isOpen) {
+      fetchMasterFields()
+      // Reset all selection states when dialog opens
+      setSelectedTopLevelFieldIds(new Set())
+      setSelectedGroupIdsForMerge(new Set())
+      setWebDataGroups([])
+      setProfileSearch('')
+      setCompanySearch('')
+    }
+  }, [isOpen])
 
   const fetchMasterFields = async () => {
     setLoadingMasterFields(true)
@@ -63,7 +87,10 @@ export function AddWebDataDialog({ isOpen, onOpenChange, onSubmit, isSubmitting,
       const { data, error } = await supabase.from('tm_job_fields').select('*').order('label')
       if (error) throw error
       setMasterFields(data || [])
-    } catch (error) { toast({ title: 'Error', description: 'Failed to load master fields', variant: 'destructive' }) }
+    } catch (error) { 
+      console.error('Error fetching master fields:', error)
+      toast({ title: 'Error', description: 'Failed to load master fields', variant: 'destructive' }) 
+    }
     finally { setLoadingMasterFields(false) }
   }
   
@@ -77,28 +104,116 @@ export function AddWebDataDialog({ isOpen, onOpenChange, onSubmit, isSubmitting,
   const availableForPicking = useMemo(() => masterFields.filter(f => !allLinkedMasterFieldIds.has(f.id)), [masterFields, allLinkedMasterFieldIds])
 
   const handleClose = () => {
-    onOpenChange(false); setWebDataGroups([]); setSelectedTopLevelFieldIds(new Set()); setSelectedGroupIdsForMerge(new Set())
+    onOpenChange(false)
+    // Reset all state when closing
+    setWebDataGroups([])
+    setSelectedTopLevelFieldIds(new Set())
+    setSelectedGroupIdsForMerge(new Set())
+    setProfileSearch('')
+    setCompanySearch('')
   }
 
   const handleSubmit = async () => {
-    const webDataToSubmit: WebDataForm[] = webDataGroups.map((group, index) => ({
-      name: group.efnsDisplayName, efnsDisplayName: group.efnsDisplayName, variableName: group.variableName, description: `Linked to: ${group.linkedMasterFields.map(f => f.label).join(', ')}`, isRequired: group.linkedMasterFields.some(f => f.is_required), order: index, fieldType: group.fieldType, arrayItems: group.arrayItems, masterFields: group.linkedMasterFields, masterFieldIds: group.linkedMasterFields.map(f => f.id.toString())
-    }))
-    if (webDataToSubmit.length === 0) { handleClose(); return }
-    try { await onSubmit(webDataToSubmit); handleClose() } 
-    catch (error) { toast({ title: 'Error', description: 'Failed to save webData', variant: 'destructive' }) }
+    const webDataToSubmit: WebDataForm[] = webDataGroups.map((group, index) => {
+      // Extract only essential master field data for storage
+      const simplifiedMasterFields = group.linkedMasterFields.map(field => ({
+        id: field.id,
+        label: field.label,
+        field_key: field.field_key,
+        type: field.type,
+        is_required: field.is_required
+      }));
+
+      return {
+        name: group.efnsDisplayName, 
+        efnsDisplayName: group.efnsDisplayName, 
+        variableName: group.variableName, 
+        description: `Linked to: ${group.linkedMasterFields.map(f => f.label).join(', ')}`, 
+        isRequired: group.linkedMasterFields.some(f => f.is_required), 
+        order: index, 
+        fieldType: group.fieldType, 
+        arrayItems: group.arrayItems, 
+        masterFields: simplifiedMasterFields, // Store simplified master field data
+        masterFieldIds: group.linkedMasterFields.map(f => f.id.toString()) // Store just the IDs
+      }
+    })
+    
+    console.log('AddWebDataDialog - Submitting webData:', webDataToSubmit.map(w => ({
+      name: w.name,
+      masterFieldIds: w.masterFieldIds,
+      masterFields: w.masterFields
+    })));
+    
+    if (webDataToSubmit.length === 0) { 
+      handleClose() 
+      return 
+    }
+    
+    try { 
+      await onSubmit(webDataToSubmit)
+      handleClose() 
+    } 
+    catch (error) { 
+      console.error('Error submitting webData:', error)
+      toast({ title: 'Error', description: 'Failed to save webData', variant: 'destructive' }) 
+    }
   }
 
   const toggleTopLevelSelection = (fieldId: number) => {
-    setSelectedTopLevelFieldIds(prev => { const newSet = new Set(prev); if (newSet.has(fieldId)) newSet.delete(fieldId); else newSet.add(fieldId); return newSet })
+    console.log('Toggling selection for field ID:', fieldId)
+    console.log('Current selected IDs before toggle:', Array.from(selectedTopLevelFieldIds))
+    
+    setSelectedTopLevelFieldIds(prev => { 
+      const newSet = new Set(prev)
+      if (newSet.has(fieldId)) {
+        newSet.delete(fieldId)
+        console.log('Removed field ID:', fieldId, 'New set size:', newSet.size, 'New set:', Array.from(newSet))
+      } else {
+        newSet.add(fieldId)
+        console.log('Added field ID:', fieldId, 'New set size:', newSet.size, 'New set:', Array.from(newSet))
+      }
+      return newSet 
+    })
+  }
+
+  // Add a separate handler for checkbox changes to isolate the issue
+  const handleCheckboxChange = (fieldId: number, checked: boolean) => {
+    console.log('Checkbox change - Field ID:', fieldId, 'Checked:', checked)
+    
+    setSelectedTopLevelFieldIds(prev => {
+      const newSet = new Set(prev)
+      if (checked) {
+        newSet.add(fieldId)
+      } else {
+        newSet.delete(fieldId)
+      }
+      console.log('Checkbox handler - New set:', Array.from(newSet))
+      return newSet
+    })
   }
 
   const addSelectedFieldsAsGroups = () => {
+    console.log('Adding selected fields as groups. Selected IDs:', Array.from(selectedTopLevelFieldIds))
     const fieldsToAdd = masterFields.filter(f => selectedTopLevelFieldIds.has(f.id))
+    console.log('Fields to add:', fieldsToAdd.map(f => ({ id: f.id, label: f.label })))
+    
     const newGroups: WebDataGroup[] = fieldsToAdd.map(field => ({
-      id: crypto.randomUUID(), efnsDisplayName: field.label, variableName: field.field_key.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()), fieldType: 'text', linkedMasterFields: [field]
+      id: crypto.randomUUID(), 
+      efnsDisplayName: field.label, 
+      variableName: field.field_key.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase()), 
+      fieldType: 'text', 
+      linkedMasterFields: [field]
     }))
-    setWebDataGroups(prev => [...prev, ...newGroups]); setSelectedTopLevelFieldIds(new Set())
+    
+    setWebDataGroups(prev => {
+      const updated = [...prev, ...newGroups]
+      console.log('Updated webDataGroups:', updated.map(g => ({ id: g.id, name: g.efnsDisplayName })))
+      return updated
+    })
+    
+    // Clear the selection after adding
+    setSelectedTopLevelFieldIds(new Set())
+    console.log('Cleared selectedTopLevelFieldIds')
   }
   
   const updateGroup = (groupId: string, field: keyof WebDataGroup, value: any) => {
@@ -131,8 +246,19 @@ export function AddWebDataDialog({ isOpen, onOpenChange, onSubmit, isSubmitting,
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogHeader><DialogTitle>Add WebData</DialogTitle><DialogDescription>Select master fields to create web data fields. You can merge multiple fields into one later.</DialogDescription></DialogHeader>
       <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Add WebData</DialogTitle>
+          <DialogDescription>Select master fields to create web data fields. You can merge multiple fields into one later.</DialogDescription>
+          {/* Debug info - remove this once issue is fixed */}
+          <div className="text-xs text-gray-500 p-2 bg-gray-50 rounded">
+            Debug: Selected IDs: [{Array.from(selectedTopLevelFieldIds).join(', ')}] | 
+            Groups: {webDataGroups.length} | 
+            Profile Fields: {filteredProfileFields.length} | 
+            Company Fields: {filteredCompanyFields.length}
+          </div>
+        </DialogHeader>
+        
         {/* --- Top Selection Area --- */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {['Profile', 'Company'].map(type => {
@@ -146,16 +272,21 @@ export function AddWebDataDialog({ isOpen, onOpenChange, onSubmit, isSubmitting,
                 <div className="border rounded-md p-2 h-[250px] overflow-y-auto">
                   {loadingMasterFields ? <p>Loading...</p> : fields.length > 0 ? (
                     <div className="space-y-1">{fields.map(field => {
-                      // NEW LOGIC: Check if the field is already in use
+                      // Check if the field is already in use
                       const isInUse = allLinkedMasterFieldIds.has(field.id);
+                      const isSelected = selectedTopLevelFieldIds.has(field.id);
+                      
                       return (
                         <div key={field.id} className="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded">
                           <input
                             type="checkbox"
                             id={`field-sel-${field.id}`}
-                            checked={selectedTopLevelFieldIds.has(field.id)}
-                            onChange={() => toggleTopLevelSelection(field.id)}
-                            disabled={isInUse} // Disable if in use
+                            checked={isSelected}
+                            onChange={(e) => {
+                              console.log('Checkbox onChange triggered for field:', field.id, 'checked:', e.target.checked)
+                              handleCheckboxChange(field.id, e.target.checked)
+                            }}
+                            disabled={isInUse}
                             className="h-4 w-4 rounded border-gray-300"
                           />
                           <label
@@ -166,7 +297,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, onSubmit, isSubmitting,
                             )}
                           >
                             <span>{field.label}</span>
-                            {isInUse && ( // Add a visual indicator if in use
+                            {isInUse && (
                               <Badge variant="outline" className="font-normal text-xs py-0.5 px-1.5">
                                 <Link2 className="h-3 w-3 mr-1" />
                                 In Use
@@ -188,7 +319,8 @@ export function AddWebDataDialog({ isOpen, onOpenChange, onSubmit, isSubmitting,
           </Button>
         </div>
         <hr />
-        {/* --- Created Fields Area (No Changes Needed Here) --- */}
+        
+        {/* --- Created Fields Area --- */}
         <div className="flex-grow overflow-y-auto pr-2 space-y-4">
             <div className="flex justify-between items-center mb-2 sticky top-0 bg-background/95 py-2 z-10">
                 <h3 className="text-lg font-semibold">Web Data Fields ({webDataGroups.length})</h3>
@@ -230,7 +362,12 @@ export function AddWebDataDialog({ isOpen, onOpenChange, onSubmit, isSubmitting,
               </div>
             ))}
         </div>
-        <DialogFooter className="mt-4 pt-4 border-t"><Button variant="outline" onClick={handleClose} disabled={isSubmitting}>Cancel</Button><Button type="button" onClick={handleSubmit} disabled={isSubmitting || webDataGroups.length === 0}>{isSubmitting ? 'Saving...' : 'Save WebData'}</Button></DialogFooter>
+        <DialogFooter className="mt-4 pt-4 border-t">
+          <Button variant="outline" onClick={handleClose} disabled={isSubmitting}>Cancel</Button>
+          <Button type="button" onClick={handleSubmit} disabled={isSubmitting || webDataGroups.length === 0}>
+            {isSubmitting ? 'Saving...' : 'Save WebData'}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

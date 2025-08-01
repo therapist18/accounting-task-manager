@@ -49,7 +49,6 @@ interface ApiWebData {
   order: number
   isVisible: boolean
   isRequired: boolean
-  kycDocumentId?: string
   masterFieldId?: string
   masterField?: any // Store master field data for display
   variableName?: string // Add variable name field
@@ -217,61 +216,292 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       variableName: ''
     }])
   }
-  // Add this function to handle adding new webData
-  const handleAddWebData = async (webData: WebDataForm[]) => {
-    if (!addContext) return;
 
-    try {
-      setIsSubmitting(true);
+const handleAddWebData = async (webData: WebDataForm[]) => {
+  if (!addContext) return;
 
-      // Get current webData
-      const currentWebData = getCurrentWebDataForContext(addContext) || [];
+  try {
+    setIsSubmitting(true);
 
-      // Add new webData with generated IDs and required fields
-      const newWebDataWithIds = webData.map((req, index) => ({
-        id: generateWebDataId(index, currentWebData),
-        name: req.efnsDisplayName || req.name, // Use EFNS display name as the main name
-        description: req.description,
-        type: req.type || 'standard',
-        isRequired: req.isRequired,
-        isVisible: true,
-        order: currentWebData.length + index,
-        variableName: req.variableName || '',
-        kycDocumentId: req.kycDocumentId || undefined,
-        efnsDisplayName: req.efnsDisplayName || req.name, // Store EFNS display name
-        fieldType: req.fieldType || 'text' // Store field type
-      }));
+    // Get current webData
+    const currentWebData = getCurrentWebDataForContext(addContext) || [];
 
-      // Combine with existing webData
-      const updatedWebData = [...currentWebData, ...newWebDataWithIds];
+    // Add new webData with generated IDs and required fields, including ONLY essential master field data
+    const newWebDataWithIds = webData.map((req, index) => ({
+      id: generateWebDataId(index, currentWebData),
+      name: req.efnsDisplayName || req.name,
+      description: req.description,
+      type: req.type || 'standard',
+      isRequired: req.isRequired,
+      isVisible: true,
+      order: currentWebData.length + index,
+      variableName: req.variableName || '',
+      efnsDisplayName: req.efnsDisplayName || req.name,
+      fieldType: req.fieldType || 'text',
+      arrayItems: req.arrayItems || [],
+      masterFieldIds: req.masterFieldIds || [] // This should contain just the ID strings
+    }));
 
-      // Save to database
-      await saveWebDataForContext(addContext, updatedWebData);
+    console.log('handleAddWebData - New webData with IDs:', newWebDataWithIds.map(w => ({
+      name: w.name,
+      masterFieldIds: w.masterFieldIds,
+    })));
 
-      // Refresh the data
-      await refreshDepartments();
+    // Combine with existing webData
+    const updatedWebData = [...currentWebData, ...newWebDataWithIds];
 
-      // Close the dialog
-      setIsAddDialogOpen(false);
+    // Save to database
+    await saveWebDataForContext(addContext, updatedWebData);
 
-      // Show success message
-      toast({
-        title: "Success",
-        description: "WebData added successfully",
-        variant: "default"
-      });
+    // Refresh the data
+    await refreshDepartments();
 
-    } catch (error) {
-      console.error('Error adding webData:', error);
-      toast({
-        title: "Error",
-        description: "Failed to add webData. Please try again.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsSubmitting(false);
+    // Close the dialog
+    setIsAddDialogOpen(false);
+
+    // Show success message
+    toast({
+      title: "Success",
+      description: "WebData added successfully",
+      variant: "default"
+    });
+
+  } catch (error) {
+    console.error('Error adding webData:', error);
+    toast({
+      title: "Error",
+      description: "Failed to add webData. Please try again.",
+      variant: "destructive"
+    });
+  } finally {
+    setIsSubmitting(false);
+  }
+};
+
+// Update the refreshDepartments function to properly handle master field data
+const refreshDepartments = async () => {
+  try {
+    const { data: departmentsData, error } = await supabase
+      .from('tm_departments')
+      .select('*, tm_subdepartments(*)')
+      .order('name')
+
+    if (error) throw error
+
+    const { data: webData, error: reqError } = await supabase
+      .from('tm_class_requirements')
+      .select('*')
+      .order('id')
+
+    if (reqError) throw reqError
+
+    // Process departments and preserve master field IDs but don't store full objects
+    const processedDepartments = departmentsData.map(dept => {
+      const subdepartments = (dept.tm_subdepartments || []).map(subdept => {
+        const classes = (subdept.classes || []).map(cls => {
+          const classId = `${subdept.id}_${cls.id}`
+          const classWebDataRecord = webData?.find(req =>
+            req.class_id === classId && req.type === 'class'
+          )
+
+          const classWebData = classWebDataRecord?.webData?.map((r: any, idx: number) => ({
+            id: r.id?.toString() || generateWebDataId(idx, classWebDataRecord.webData),
+            name: r.name || '',
+            description: r.description || '',
+            type: r.type || 'standard',
+            order: r.order || idx,
+            isVisible: r.isVisible !== false,
+            isRequired: r.isRequired !== false,
+            variableName: r.variableName || '',
+            efnsDisplayName: r.efnsDisplayName || r.name || '',
+            fieldType: r.fieldType || 'text',
+            arrayItems: r.arrayItems || [],
+            // Only store master field IDs, not the full objects (they'll be fetched when needed)
+            masterFieldIds: r.masterFieldIds || [],
+            kycDocumentId: r.kycDocumentId
+          })) || []
+
+          const subClasses = (cls.subClasses || []).map(subCls => {
+            const subClassId = `${classId}_${subCls.id}`
+            const subClassWebDataRecord = webData?.find(req =>
+              req.class_id === subClassId && req.type === 'subclass'
+            )
+
+            const subClassWebData = subClassWebDataRecord?.webData?.map((r: any, idx: number) => ({
+              id: r.id?.toString() || generateWebDataId(idx, subClassWebDataRecord.webData),
+              name: r.name || '',
+              description: r.description || '',
+              type: r.type || 'standard',
+              order: r.order || idx,
+              isVisible: r.isVisible !== false,
+              isRequired: r.isRequired !== false,
+              variableName: r.variableName || '',
+              efnsDisplayName: r.efnsDisplayName || r.name || '',
+              fieldType: r.fieldType || 'text',
+              arrayItems: r.arrayItems || [],
+              masterFieldIds: r.masterFieldIds || [],
+              kycDocumentId: r.kycDocumentId
+            })) || []
+
+            return {
+              ...subCls,
+              parentClassId: classId,
+              webData: subClassWebData
+            }
+          })
+
+          return {
+            ...cls,
+            webData: classWebData,
+            subClasses
+          }
+        })
+
+        const subdeptWebDataRecord = webData?.find(req =>
+          req.class_id === subdept.id.toString() && req.type === 'subdepartment'
+        )
+
+        const uploadWebData = subdeptWebDataRecord?.webData?.map((r: any, idx: number) => ({
+          id: r.id?.toString() || generateWebDataId(idx, subdeptWebDataRecord.webData),
+          name: r.name || '',
+          description: r.description || '',
+          type: r.type || 'standard',
+          order: r.order || idx,
+          isVisible: r.isVisible !== false,
+          isRequired: r.isRequired !== false,
+          variableName: r.variableName || '',
+          efnsDisplayName: r.efnsDisplayName || r.name || '',
+          fieldType: r.fieldType || 'text',
+          arrayItems: r.arrayItems || [],
+          masterFieldIds: r.masterFieldIds || [],
+          kycDocumentId: r.kycDocumentId
+        })) || []
+
+        return {
+          ...subdept,
+          classes,
+          upload_webData: uploadWebData
+        }
+      })
+
+      return {
+        ...dept,
+        tm_subdepartments: subdepartments,
+        subdepartments: subdepartments
+      }
+    })
+
+    setDepartments(processedDepartments)
+  } catch (error) {
+    console.error('Error refreshing departments:', error)
+    toast({
+      title: "Error",
+      description: "Failed to refresh departments. Please try again.",
+      variant: "destructive"
+    })
+  }
+}
+
+// Update the saveWebDataForContext function to preserve all field data
+const saveWebDataForContext = async (context: EditingContext, webData: ApiWebData[]) => {
+  console.log('[saveWebDataForContext] Starting save with context:', JSON.stringify(context, null, 2));
+  console.log('[saveWebDataForContext] WebData to save:', JSON.stringify(webData, null, 2));
+
+  try {
+    let classId = '';
+    let webDataType = '';
+
+    if (context.type === 'subdepartment') {
+      classId = context.subdepartmentId;
+      webDataType = 'subdepartment';
+    } else if (context.type === 'class') {
+      classId = `${context.subdepartmentId}_${context.classId}`;
+      webDataType = 'class';
+    } else if (context.type === 'subclass') {
+      classId = `${context.subdepartmentId}_${context.classId}_${context.subclassId}`;
+      webDataType = 'subclass';
     }
-  };
+
+    console.log(`[saveWebDataForContext] Generated classId: ${classId}, type: ${webDataType}`);
+
+    console.log('[saveWebDataForContext] Checking for existing record...');
+    const { data: existingRecord, error: fetchError } = await supabase
+      .from('tm_class_requirements')
+      .select('*')
+      .eq('class_id', classId)
+      .eq('type', webDataType)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      console.error('[saveWebDataForContext] Error fetching existing record:', fetchError);
+      throw fetchError;
+    }
+
+    console.log('[saveWebDataForContext] Existing record:', existingRecord || 'No existing record found');
+
+    // Preserve all webData fields including master field data
+    const webDataToSave = webData.map(req => ({
+      id: req.id,
+      name: req.name,
+      description: req.description,
+      type: req.type,
+      order: req.order,
+      isVisible: req.isVisible,
+      isRequired: req.isRequired,
+      variableName: req.variableName,
+      efnsDisplayName: req.efnsDisplayName,
+      fieldType: req.fieldType,
+      arrayItems: req.arrayItems,// Preserve master field objects
+      masterFieldIds: req.masterFieldIds, // Preserve master field IDs
+      kycDocumentId: req.kycDocumentId
+    }));
+
+    console.log('[saveWebDataForContext] All processed webData:', JSON.stringify(webDataToSave, null, 2));
+
+    if (existingRecord) {
+      console.log('[saveWebDataForContext] Updating existing record...');
+      const { data: updatedRecord, error: updateError } = await supabase
+        .from('tm_class_requirements')
+        .update({
+          webData: webDataToSave,
+          updated_at: new Date().toISOString()
+        })
+        .eq('class_id', classId)
+        .eq('type', webDataType)
+        .select();
+
+      if (updateError) {
+        console.error('[saveWebDataForContext] Error updating webData:', updateError);
+        throw updateError;
+      }
+      console.log('[saveWebDataForContext] Update successful, response:', updatedRecord);
+    } else {
+      console.log('[saveWebDataForContext] Inserting new record...');
+      const { data: insertedRecord, error: insertError } = await supabase
+        .from('tm_class_requirements')
+        .insert({
+          class_id: classId,
+          type: webDataType,
+          webData: webDataToSave,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select();
+
+      if (insertError) {
+        console.error('[saveWebDataForContext] Error inserting webData:', insertError);
+        throw insertError;
+      }
+      console.log('[saveWebDataForContext] Insert successful, response:', insertedRecord);
+    }
+
+    console.log('[saveWebDataForContext] WebData saved successfully');
+    return true;
+  } catch (error) {
+    console.error('[saveWebDataForContext] Error:', error);
+    throw error; // Re-throw to be handled by the caller
+  }
+}
   const handleDeleteClick = (type: 'subdepartment' | 'class' | 'subclass', index: number) => {
     setDeleteContext({ type, index })
     // Set the current context for deletion
@@ -409,205 +639,6 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     }
   }
 
-  const saveWebDataForContext = async (context: EditingContext, webData: ApiWebData[]) => {
-    console.log('[saveWebDataForContext] Starting save with context:', JSON.stringify(context, null, 2));
-    console.log('[saveWebDataForContext] WebData to save:', JSON.stringify(webData, null, 2));
-
-    try {
-      let classId = '';
-      let webDataType = '';
-
-      if (context.type === 'subdepartment') {
-        classId = context.subdepartmentId;
-        webDataType = 'subdepartment';
-      } else if (context.type === 'class') {
-        classId = `${context.subdepartmentId}_${context.classId}`;
-        webDataType = 'class';
-      } else if (context.type === 'subclass') {
-        classId = `${context.subdepartmentId}_${context.classId}_${context.subclassId}`;
-        webDataType = 'subclass';
-      }
-
-      console.log(`[saveWebDataForContext] Generated classId: ${classId}, type: ${webDataType}`);
-
-      console.log('[saveWebDataForContext] Checking for existing record...');
-      const { data: existingRecord, error: fetchError } = await supabase
-        .from('tm_class_requirements')
-        .select('*')
-        .eq('class_id', classId)
-        .eq('type', webDataType)
-        .single();
-
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        console.error('[saveWebDataForContext] Error fetching existing record:', fetchError);
-        throw fetchError;
-      }
-
-      console.log('[saveWebDataForContext] Existing record:', existingRecord || 'No existing record found');
-
-      // Ensure kycDocumentId is preserved
-      const webDataToSave = webData.map(req => ({
-        ...req,
-        kycDocumentId: req.kycDocumentId || undefined
-      }));
-
-      console.log('[saveWebDataForContext] All processed webData:', JSON.stringify(webDataToSave, null, 2));
-
-      if (existingRecord) {
-        console.log('[saveWebDataForContext] Updating existing record...');
-        const { data: updatedRecord, error: updateError } = await supabase
-          .from('tm_class_requirements')
-          .update({
-            webData: webDataToSave,
-            updated_at: new Date().toISOString()
-          })
-          .eq('class_id', classId)
-          .eq('type', webDataType)
-          .select();
-
-        if (updateError) {
-          console.error('[saveWebDataForContext] Error updating webData:', updateError);
-          throw updateError;
-        }
-        console.log('[saveWebDataForContext] Update successful, response:', updatedRecord);
-      } else {
-        console.log('[saveWebDataForContext] Inserting new record...');
-        const { data: insertedRecord, error: insertError } = await supabase
-          .from('tm_class_requirements')
-          .insert({
-            class_id: classId,
-            type: webDataType,
-            webData: webDataToSave,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .select();
-
-        if (insertError) {
-          console.error('[saveWebDataForContext] Error inserting webData:', insertError);
-          throw insertError;
-        }
-        console.log('[saveWebDataForContext] Insert successful, response:', insertedRecord);
-      }
-
-      console.log('[saveWebDataForContext] WebData saved successfully');
-      return true;
-    } catch (error) {
-      console.error('[saveWebDataForContext] Error:', error);
-      throw error; // Re-throw to be handled by the caller
-    }
-  }
-
-  const refreshDepartments = async () => {
-    try {
-      const { data: departmentsData, error } = await supabase
-        .from('tm_departments')
-        .select('*, tm_subdepartments(*)')
-        .order('name')
-
-      if (error) throw error
-
-      const { data: webData, error: reqError } = await supabase
-        .from('tm_class_requirements')
-        .select('*')
-        .order('id')
-
-      if (reqError) throw reqError
-
-      // Process departments and include KYC document IDs in webData
-      const processedDepartments = departmentsData.map(dept => {
-        const subdepartments = (dept.tm_subdepartments || []).map(subdept => {
-          const classes = (subdept.classes || []).map(cls => {
-            const classId = `${subdept.id}_${cls.id}`
-            const classWebDataRecord = webData?.find(req =>
-              req.class_id === classId && req.type === 'class'
-            )
-
-            const classWebData = classWebDataRecord?.webData?.map((r: any, idx: number) => ({
-              id: r.id?.toString() || generateWebDataId(idx, classWebDataRecord.webData),
-              name: r.name || '',
-              description: r.description || '',
-              type: r.type || 'standard',
-              order: r.order || idx,
-              isVisible: r.isVisible !== false,
-              isRequired: r.isRequired !== false,
-              kycDocumentId: r.kycDocumentId || undefined,
-              variableName: r.variableName || ''
-            })) || []
-
-            const subClasses = (cls.subClasses || []).map(subCls => {
-              const subClassId = `${classId}_${subCls.id}`
-              const subClassWebDataRecord = webData?.find(req =>
-                req.class_id === subClassId && req.type === 'subclass'
-              )
-
-              const subClassWebData = subClassWebDataRecord?.webData?.map((r: any, idx: number) => ({
-                id: r.id?.toString() || generateWebDataId(idx, subClassWebDataRecord.webData),
-                name: r.name || '',
-                description: r.description || '',
-                type: r.type || 'standard',
-                order: r.order || idx,
-                isVisible: r.isVisible !== false,
-                isRequired: r.isRequired !== false,
-                kycDocumentId: r.kycDocumentId || undefined,
-                variableName: r.variableName || ''
-              })) || []
-
-              return {
-                ...subCls,
-                parentClassId: classId,
-                webData: subClassWebData
-              }
-            })
-
-            return {
-              ...cls,
-              webData: classWebData,
-              subClasses
-            }
-          })
-
-          const subdeptWebDataRecord = webData?.find(req =>
-            req.class_id === subdept.id.toString() && req.type === 'subdepartment'
-          )
-
-          const uploadWebData = subdeptWebDataRecord?.webData?.map((r: any, idx: number) => ({
-            id: r.id?.toString() || generateWebDataId(idx, subdeptWebDataRecord.webData),
-            name: r.name || '',
-            description: r.description || '',
-            type: r.type || 'standard',
-            order: r.order || idx,
-            isVisible: r.isVisible !== false,
-            isRequired: r.isRequired !== false,
-            kycDocumentId: r.kycDocumentId || undefined,
-            variableName: r.variableName || ''
-          })) || []
-
-          return {
-            ...subdept,
-            classes,
-            upload_webData: uploadWebData
-          }
-        })
-
-        return {
-          ...dept,
-          tm_subdepartments: subdepartments,
-          subdepartments: subdepartments
-        }
-      })
-
-      setDepartments(processedDepartments)
-    } catch (error) {
-      console.error('Error refreshing departments:', error)
-      toast({
-        title: "Error",
-        description: "Failed to refresh departments. Please try again.",
-        variant: "destructive"
-      })
-    }
-  }
-
   useEffect(() => {
     refreshDepartments()
   }, [])
@@ -685,12 +716,10 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
               <TableHeader className="sticky top-0 z-10 bg-blue-600 dark:bg-blue-800 block">
                 <TableRow className="flex">
                   <TableHead className="w-12 text-white border-r">#</TableHead>
-                  <TableHead className="flex-1 text-white border-r">Master Field</TableHead>
                   <TableHead className="flex-1 text-white border-r">EFNS Display Name</TableHead>
                   <TableHead className="w-48 text-white border-r">Automation Variable</TableHead>
                   <TableHead className="w-32 text-white border-r">Type</TableHead>
                   <TableHead className="flex-1 text-white border-r">Description</TableHead>
-                  <TableHead className="w-24 text-white border-r">Document</TableHead>
                   <TableHead className="w-48 text-white">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -709,16 +738,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
                         <TableCell className="border-r flex-1">
                           <div className="flex items-center gap-2">
                             <span className="font-medium">{req.name}</span>
-                            {req.masterFieldId && (
-                              <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
-                                <Link2 className="h-3 w-3 mr-1" />
-                                Master
-                              </span>
-                            )}
                           </div>
-                        </TableCell>
-                        <TableCell className="border-r flex-1">
-                          <span className="font-medium">{req.efnsDisplayName || '-'}</span>
                         </TableCell>
                         <TableCell className="border-r w-48">
                           <code className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs">
@@ -734,21 +754,6 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
                           <span className={!req.description ? 'text-gray-400 italic' : ''}>
                             {req.description || 'No description'}
                           </span>
-                        </TableCell>
-                        <TableCell className="border-r w-24">
-                          <div className="flex items-center justify-center">
-                            {req.kycDocumentId ? (
-                              <div className="flex items-center gap-1">
-                                <FileText className="h-4 w-4 text-green-600" />
-                                <span className="text-xs text-green-600">Linked</span>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1">
-                                <FileText className="h-4 w-4 text-gray-400" />
-                                <span className="text-xs text-gray-400">None</span>
-                              </div>
-                            )}
-                          </div>
                         </TableCell>
                         <TableCell className="w-48">
                           <div className="flex items-center space-x-1 justify-end">
@@ -809,129 +814,156 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       </div>
     )
   }
-  const handleSaveWebData = async (updatedWebData: ApiWebData) => {
-    console.log('[handleSaveWebData] Starting with webData:', JSON.stringify(updatedWebData, null, 2));
-    console.log('[handleSaveWebData] Current editing context:', editingContext);
+// Fixed handleSaveWebData function for the main WebData component
+const handleSaveWebData = async (updatedWebData: ApiWebData) => {
+  console.log('[handleSaveWebData] Starting with webData:', JSON.stringify(updatedWebData, null, 2));
+  console.log('[handleSaveWebData] Current editing context:', editingContext);
+  console.log('[handleSaveWebData] Editing webData (original):', JSON.stringify(editingWebData, null, 2));
 
-    if (!editingContext) {
-      console.error('[handleSaveWebData] No editing context available');
-      toast({
-        title: "Error",
-        description: "No editing context available. Please refresh the page and try again.",
-        variant: "destructive"
-      });
-      return;
+  if (!editingContext) {
+    console.error('[handleSaveWebData] No editing context available');
+    toast({
+      title: "Error",
+      description: "No editing context available. Please refresh the page and try again.",
+      variant: "destructive"
+    });
+    return;
+  }
+
+  try {
+    // Get current webData for the context WITHOUT refreshing (to avoid race conditions)
+    const currentWebData = getCurrentWebDataForContext(editingContext) || [];
+    console.log('[handleSaveWebData] Current webData count:', currentWebData.length);
+
+    // Find the webData to update using multiple strategies
+    let webDataIndex = -1;
+    
+    // Strategy 1: Find by original editing webData ID
+    if (editingWebData?.id) {
+      webDataIndex = currentWebData.findIndex(req =>
+        String(req.id) === String(editingWebData.id)
+      );
+      console.log('[handleSaveWebData] Search by original ID:', editingWebData.id, 'found at index:', webDataIndex);
+    }
+    
+    // Strategy 2: If not found by original ID, try by updated ID
+    if (webDataIndex === -1 && updatedWebData.id) {
+      webDataIndex = currentWebData.findIndex(req =>
+        String(req.id) === String(updatedWebData.id)
+      );
+      console.log('[handleSaveWebData] Search by updated ID:', updatedWebData.id, 'found at index:', webDataIndex);
+    }
+    
+    // Strategy 3: Find by name and order as last resort
+    if (webDataIndex === -1) {
+      webDataIndex = currentWebData.findIndex(req =>
+        req.name === (editingWebData?.name || updatedWebData.name) &&
+        req.order === (editingWebData?.order || updatedWebData.order)
+      );
+      console.log('[handleSaveWebData] Search by name and order found at index:', webDataIndex);
     }
 
-    try {
-      // First, refresh the departments to ensure we have the latest data
-      console.log('[handleSaveWebData] Refreshing departments to get latest data...');
-      await refreshDepartments();
-
-      // Get current webData for the context
-      const currentWebData = getCurrentWebDataForContext(editingContext) || [];
-      console.log('[handleSaveWebData] Current webData:', JSON.stringify(currentWebData, null, 2));
-
-      // If we still have no webData, try to create a new one
-      if (currentWebData.length === 0) {
-        console.log('[handleSaveWebData] No existing webData found, creating new one...');
-        const newWebData = [{
+    // If still not found, this might be a new webData
+    if (webDataIndex === -1) {
+      console.log('[handleSaveWebData] WebData not found in existing records, treating as new');
+      // Add as new webData
+      const newWebDataArray = [
+        ...currentWebData,
+        {
           ...updatedWebData,
           id: updatedWebData.id || Date.now().toString(),
-          order: 0
-        }];
-
-        console.log('[handleSaveWebData] Creating new webData:', JSON.stringify(newWebData, null, 2));
-        const saveResult = await saveWebDataForContext(editingContext, newWebData);
-        console.log('[handleSaveWebData] saveWebDataForContext result:', saveResult);
-
-        await refreshDepartments();
-
-        // Reset the dialog state
-        setIsEditDialogOpen(false);
-        setEditingWebData(null);
-
-        toast({
-          title: "Success",
-          description: "WebData created successfully",
-          variant: "default"
-        });
-
-        return;
-      }
-
-      // Try to find the webData to update
-      let webDataIndex = -1;
-
-      // First try to find by ID if it exists
-      if (updatedWebData.id) {
-        webDataIndex = currentWebData.findIndex(req =>
-          String(req.id) === String(updatedWebData.id)
-        );
-      }
-
-      // If not found by ID, try to find by name as fallback
-      if (webDataIndex === -1) {
-        webDataIndex = currentWebData.findIndex(req =>
-          req.name === updatedWebData.name
-        );
-      }
-
-      console.log('[handleSaveWebData] Found webData at index:', webDataIndex);
-
-      let updatedWebData = [...currentWebData];
-
-      // If webData not found, add it as a new one
-      if (webDataIndex === -1) {
-        console.log('[handleSaveWebData] WebData not found, adding as new');
-        updatedWebData = [
-          ...currentWebData,
-          {
-            ...updatedWebData,
-            id: updatedWebData.id || Date.now().toString(),
-            order: currentWebData.length
-          }
-        ];
-      } else {
-        // Update existing webData
-        console.log('[handleSaveWebData] Updating existing webData');
-        updatedWebData[webDataIndex] = {
-          ...updatedWebData[webDataIndex],
-          ...updatedWebData,
-          // Preserve the original ID if the updated one is undefined
-          id: updatedWebData.id || updatedWebData[webDataIndex].id
-        };
-      }
-
-      console.log('[handleSaveWebData] Updated webData array:', JSON.stringify(updatedWebData, null, 2));
-
-      console.log('[handleSaveWebData] Calling saveWebDataForContext...');
-      const saveResult = await saveWebDataForContext(editingContext, updatedWebData);
-      console.log('[handleSaveWebData] saveWebDataForContext result:', saveResult);
-
-      console.log('[handleSaveWebData] Refreshing departments...');
-      await refreshDepartments();
-
-      // Reset the dialog state
-      setIsEditDialogOpen(false);
-      setEditingWebData(null);
-
-      toast({
-        title: "Success",
-        description: "WebData saved successfully",
-        variant: "default"
-      });
-
-      console.log('[handleSaveWebData] Update completed successfully');
-    } catch (error) {
-      console.error('[handleSaveWebData] Error updating webData:', error);
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to save webData. Please try again.",
-        variant: "destructive"
-      });
+          order: updatedWebData.order !== undefined ? updatedWebData.order : currentWebData.length
+        }
+      ];
+      
+      console.log('[handleSaveWebData] Adding as new webData:', JSON.stringify(newWebDataArray[newWebDataArray.length - 1], null, 2));
+      
+      await saveWebDataForContext(editingContext, newWebDataArray);
+    } else {
+      // Update existing webData
+      console.log('[handleSaveWebData] Updating existing webData at index:', webDataIndex);
+      
+      const updatedWebDataArray = [...currentWebData];
+      
+      // Merge the updated data with existing data, preserving important fields
+      updatedWebDataArray[webDataIndex] = {
+        // Start with existing data
+        ...updatedWebDataArray[webDataIndex],
+        // Override with updated data
+        ...updatedWebData,
+        // Ensure we preserve the original ID
+        id: updatedWebData.id || updatedWebDataArray[webDataIndex].id,
+        // Preserve order if not specified
+        order: updatedWebData.order !== undefined ? updatedWebData.order : updatedWebDataArray[webDataIndex].order
+      };
+      
+      console.log('[handleSaveWebData] Updated webData record:', JSON.stringify(updatedWebDataArray[webDataIndex], null, 2));
+      
+      await saveWebDataForContext(editingContext, updatedWebDataArray);
     }
+
+    // Refresh the data
+    await refreshDepartments();
+
+    // Reset the dialog state
+    setIsEditDialogOpen(false);
+    setEditingWebData(null);
+
+    toast({
+      title: "Success",
+      description: "WebData saved successfully",
+      variant: "default"
+    });
+
+    console.log('[handleSaveWebData] Update completed successfully');
+  } catch (error) {
+    console.error('[handleSaveWebData] Error updating webData:', error);
+    toast({
+      title: "Error",
+      description: error instanceof Error ? error.message : "Failed to save webData. Please try again.",
+      variant: "destructive"
+    });
   }
+}
+
+// Also fix the handleMove function that seems to be missing
+const handleMove = async (index: number, direction: 'up' | 'down') => {
+  if (!editingContext) return;
+  
+  const currentWebData = getCurrentWebDataForContext(editingContext);
+  if (!currentWebData || currentWebData.length === 0) return;
+  
+  const newWebData = [...currentWebData];
+  const targetIndex = direction === 'up' ? index - 1 : index + 1;
+  
+  if (targetIndex < 0 || targetIndex >= newWebData.length) return;
+  
+  // Swap the items
+  [newWebData[index], newWebData[targetIndex]] = [newWebData[targetIndex], newWebData[index]];
+  
+  // Update orders
+  newWebData.forEach((item, idx) => {
+    item.order = idx;
+  });
+  
+  try {
+    await saveWebDataForContext(editingContext, newWebData);
+    await refreshDepartments();
+    
+    toast({
+      title: "Success",
+      description: "WebData order updated successfully",
+      variant: "default"
+    });
+  } catch (error) {
+    console.error('Error moving webData:', error);
+    toast({
+      title: "Error",
+      description: "Failed to update webData order",
+      variant: "destructive"
+    });
+  }
+};
   const handleDeptClick = (deptId: string) => {
     setActiveDept(deptId);
   };

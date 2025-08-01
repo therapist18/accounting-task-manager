@@ -7,11 +7,12 @@ import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2, Zap } from "lucide-react"
+import { Pencil, Info, Minus, Plus, Clock, FileText, ChevronLeft, ChevronRight, FileSpreadsheet, ChevronDown, ChevronUp, Star, RotateCcw, RotateCw, Trash2, Zap, Settings } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { supabase } from "@/lib/supabase/client"
 import { AddStageDialog } from "./components/add-stage-dialog"
 import { EditStageDialog } from "./components/edit-stage-dialog"
+import { AutomationDialog } from "./components/AutomationDialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import type { Department, Stage, DepartmentOption } from "./stagesdb"
@@ -92,6 +93,8 @@ export default function Stages() {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false)
   const [isTransposed, setIsTransposed] = useState(false)
+  const [isAutomationDialogOpen, setIsAutomationDialogOpen] = useState(false)
+  const [currentAutomation, setCurrentAutomation] = useState<any>(null)
   const [allKycDocuments, setAllKycDocuments] = useState<Map<string, any>>(new Map())
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map())
   const [kycDocumentsLoading, setKycDocumentsLoading] = useState(false)
@@ -1416,6 +1419,52 @@ export default function Stages() {
       })
     }
   }
+
+  const handleSaveAutomation = async (automation: any) => {
+    try {
+      // If there's an existing automation (editing)
+      if (currentAutomation) {
+        const { error } = await supabase
+          .from('automations')
+          .update(automation)
+          .eq('id', currentAutomation.id);
+          
+        if (error) throw error;
+        
+        toast({
+          title: "Success",
+          description: "Automation updated successfully",
+        });
+      } else {
+        // Creating a new automation
+        const { data, error } = await supabase
+          .from('automations')
+          .insert([automation])
+          .select()
+          .single();
+          
+        if (error) throw error;
+        
+        toast({
+          title: "Success",
+          description: "Automation created successfully",
+        });
+      }
+      
+      setIsAutomationDialogOpen(false);
+      setCurrentAutomation(null);
+      
+      // TODO: Refresh automations list if needed
+      
+    } catch (error) {
+      console.error('Error saving automation:', error);
+      toast({
+        title: "Error",
+        description: "Failed to save automation. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
 
   const handleUpdateStage = async (updatedStage: Stage) => {
     try {
@@ -3218,83 +3267,109 @@ export default function Stages() {
                 <span className="ml-2 text-green-600">• {allKycDocuments.size} KYC documents loaded</span>
               )}
             </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {/* View Toggle Button */}
-            <Button
-              variant="outline"
-              onClick={() => setIsTransposed(!isTransposed)}
-              className="flex items-center gap-2"
-            >
-              {isTransposed ? (
-                <>
-                  <RotateCcw className="h-4 w-4" />
-                  Normal View
-                </>
-              ) : (
-                <>
-                  <RotateCw className="h-4 w-4" />
-                  Transposed View
-                </>
-              )}
-            </Button>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* View Toggle Button */}
+          <Button
+            variant="outline"
+            onClick={() => setIsTransposed(!isTransposed)}
+            className="flex items-center gap-2"
+          >
+            {isTransposed ? (
+              <>
+                <RotateCcw className="h-4 w-4" />
+                Normal View
+              </>
+            ) : (
+              <>
+                <RotateCw className="h-4 w-4" />
+                Transposed View
+              </>
+            )}
+          </Button>
 
-            {/* Expand/Collapse All Buttons */}
-            <Button
-              variant="outline"
-              onClick={areAllRowsExpanded ? collapseAllRows : expandAllRows}
-              className="flex items-center gap-2 bg-transparent"
-            >
-              {areAllRowsExpanded ? (
-                <>
-                  <ChevronUp className="h-4 w-4" />
-                  Collapse All
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="h-4 w-4" />
-                  Expand All
-                </>
-              )}
-            </Button>
+          {/* Expand/Collapse All Buttons */}
+          <Button
+            variant="outline"
+            onClick={areAllRowsExpanded ? collapseAllRows : expandAllRows}
+            className="flex items-center gap-2 bg-transparent"
+          >
+            {areAllRowsExpanded ? (
+              <>
+                <ChevronUp className="h-4 w-4" />
+                Collapse All
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-4 w-4" />
+                Expand All
+              </>
+            )}
+          </Button>
 
-            {/* Column Visibility Control */}
-            <ColumnVisibilityControl
-              columns={columnVisibilityOptions}
-              onVisibilityChange={handleColumnVisibilityChange}
-              onShowAll={handleShowAllColumns}
-              onHideAll={handleHideAllColumns}
-              onResetToDefault={handleResetToDefault}
-              title="Column Visibility"
-              description="Control which columns are visible in the table"
-            />
+          {/* Column Visibility Control */}
+          <ColumnVisibilityControl
+            columns={columnVisibilityOptions}
+            onVisibilityChange={handleColumnVisibilityChange}
+            onShowAll={handleShowAllColumns}
+            onHideAll={handleHideAllColumns}
+            onResetToDefault={handleResetToDefault}
+            title="Column Visibility"
+            description="Control which columns are visible in the table"
+          />
 
-            {/* Entity Visibility Control */}
-            <EntityVisibilityControl
-              entities={entityVisibilityOptions}
-              onVisibilityChange={handleEntityVisibilityChange}
-              onShowAll={handleShowAllEntities}
-              onHideAll={handleHideAllEntities}
-              onResetToDefault={handleResetEntitiesToDefault}
-              showDefaultDisplayOnly={showDefaultDisplayOnly}
-              onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
-              title={isTransposed ? "Entity Visibility" : "Row Visibility"}
-              description={
-                isTransposed
-                  ? "Control which entities are visible as columns"
-                  : "Control which departments, classes, and subclasses are visible"
-              }
-            />
+          {/* Entity Visibility Control */}
+          <EntityVisibilityControl
+            entities={entityVisibilityOptions}
+            onVisibilityChange={handleEntityVisibilityChange}
+            onShowAll={handleShowAllEntities}
+            onHideAll={handleHideAllEntities}
+            onResetToDefault={handleResetEntitiesToDefault}
+            showDefaultDisplayOnly={showDefaultDisplayOnly}
+            onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
+            title={isTransposed ? "Entity Visibility" : "Row Visibility"}
+            description={
+              isTransposed
+                ? "Control which entities are visible as columns"
+                : "Control which departments, classes, and subclasses are visible"
+            }
+          />
 
-            <Button
-              variant="outline"
-              onClick={handleExportToExcel}
-              disabled={!currentDept || !currentDept.stages || currentDept.stages.length === 0}
-              className="flex items-center gap-2 bg-transparent"
-            >
-              <FileSpreadsheet className="h-4 w-4" />
-              Export to Excel
-            </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setCurrentAutomation(null)
+              setIsAutomationDialogOpen(true)
+            }}
+          >
+            <Settings className="mr-2 h-4 w-4" />
+            Automation Settings
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setCurrentAutomation(null);
+              setIsAutomationDialogOpen(true);
+            }}
+            className="flex items-center gap-2 bg-transparent"
+          >
+            <Zap className="mr-2 h-4 w-4" />
+            Add Automation
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportToExcel}
+            disabled={!currentDept || !currentDept.stages || currentDept.stages.length === 0}
+            className="flex items-center gap-2 bg-transparent"
+          >
+            <FileSpreadsheet className="mr-2 h-4 w-4" />
+            Export to Excel
+          </Button>
 
             <AddStageDialog
               open={isDialogOpen}
@@ -3302,11 +3377,11 @@ export default function Stages() {
               onAddStages={handleAddStages}
               departments={departmentList}
             />
-          </div>
         </div>
+      </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="mb-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="mb-4">
             {departments.map((dept) => (
               <TabsTrigger key={dept.id} value={dept.id}>
                 {dept.name}
@@ -3354,6 +3429,13 @@ export default function Stages() {
           }}
           stage={editingStage}
           onSave={handleUpdateStage}
+        />
+
+        <AutomationDialog
+          isOpen={isAutomationDialogOpen}
+          onOpenChange={setIsAutomationDialogOpen}
+          onSave={handleSaveAutomation}
+          initialData={currentAutomation}
         />
       </div>
     </div>
