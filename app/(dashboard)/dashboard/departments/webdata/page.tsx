@@ -230,15 +230,16 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       // Add new webData with generated IDs and required fields
       const newWebDataWithIds = webData.map((req, index) => ({
         id: generateWebDataId(index, currentWebData),
-        name: req.name,
+        name: req.efnsDisplayName || req.name, // Use EFNS display name as the main name
         description: req.description,
-        type: 'standard' as const,
+        type: req.type || 'standard',
         isRequired: req.isRequired,
         isVisible: true,
         order: currentWebData.length + index,
-        masterFieldId: req.masterFieldId,
-        kycDocumentId: undefined,
-        variableName: req.variableName || ''
+        variableName: req.variableName || '',
+        kycDocumentId: req.kycDocumentId || undefined,
+        efnsDisplayName: req.efnsDisplayName || req.name, // Store EFNS display name
+        fieldType: req.fieldType || 'text' // Store field type
       }));
 
       // Combine with existing webData

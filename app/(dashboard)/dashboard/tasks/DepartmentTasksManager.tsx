@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Loader2, Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download } from "lucide-react"
+import { Loader2, Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud } from "lucide-react"
 import { Building, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
 import { format } from 'date-fns';
@@ -42,6 +42,7 @@ import {
   filterTasksBySearch
 } from './overall-view/tableUtils';
 import EditableStageCell from "./components/EditableStageCell"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 export default function DepartmentTasksManager({
   error,

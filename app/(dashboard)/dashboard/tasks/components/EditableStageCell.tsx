@@ -851,13 +851,17 @@ export default function EditableStageCell({
     <>
       {/* Automation Mapping Dialog */}
       <AutomationMappingDialog
-        isOpen={automationDialogOpen}
-        onClose={() => setAutomationDialogOpen(false)}
-        classId={task.class_id}
-        requirementId={stage.id}
-        taskId={task.id}
-        automationId={automationId}
-      />
+      isOpen={automationDialogOpen}
+      onClose={() => setAutomationDialogOpen(false)}
+      classId={task.class_id}
+      requirementId={stage.id}
+      taskId={task.id}
+      automationId={automationId}
+      task={task} // Pass the entire task object
+      subDeptId={task.subdepartment?.id?.toString() || task.subdepartment_id?.toString() || task.sub_dept_id?.toString()}
+      isSubclass={!!task.subclass_id}
+      subclassId={task.subclass_id?.toString()}
+    />
       <div
         className={`flex items-center justify-center min-h-[32px] cursor-pointer hover:bg-gray-50 rounded p-1 ${requiresUpload ? 'hover:bg-blue-50' : 'hover:bg-gray-50'
           }`}

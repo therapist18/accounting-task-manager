@@ -1,3 +1,6 @@
+// Updated AutomationMappingDialog component to handle missing subDeptId
+// In AutomationMappingDialog.tsx
+
 "use client"
 
 import React, { useState, useEffect } from 'react';
@@ -5,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/button"
 import { Loader2, Zap } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import supabase from '@/lib/supabase/client';
 
 interface AutomationMappingDialogProps {
   isOpen: boolean;
@@ -13,6 +17,11 @@ interface AutomationMappingDialogProps {
   requirementId: string;
   taskId?: string;
   automationId?: string;
+  isSubclass?: boolean;
+  subDeptId?: string;
+  subclassId?: string;
+  // Add task object to extract subdepartment info if needed
+  task?: any;
 }
 
 interface WebDataItem {
@@ -66,12 +75,72 @@ export const AutomationMappingDialog = ({
   requirementId,
   taskId,
   automationId,
+  isSubclass = false,
+  subDeptId = '',
+  subclassId = '',
+  task
 }: AutomationMappingDialogProps) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [webData, setWebData] = useState<WebDataItem[]>([]);
   const [jobFields, setJobFields] = useState<Record<string, JobField>>({});
+  
+  // Enhanced getRequirementId function with better subdepartment handling
+  const getRequirementId = () => {
+    console.log('Constructing requirement ID with:', { 
+      subDeptId, 
+      classId, 
+      isSubclass, 
+      subclassId,
+      taskId,
+      task
+    });
+    
+    // First try to get subDeptId from the passed parameter
+    let effectiveSubDeptId = subDeptId;
+    
+    // If no subDeptId is provided, try to extract it from the task object
+    if (!effectiveSubDeptId && task) {
+      if (task.subdepartment?.id) {
+        effectiveSubDeptId = task.subdepartment.id.toString();
+        console.log('Extracted subDeptId from task.subdepartment.id:', effectiveSubDeptId);
+      } else if (task.subdepartment_id) {
+        effectiveSubDeptId = task.subdepartment_id.toString();
+        console.log('Extracted subDeptId from task.subdepartment_id:', effectiveSubDeptId);
+      } else if (task.sub_dept_id) {
+        effectiveSubDeptId = task.sub_dept_id.toString();
+        console.log('Extracted subDeptId from task.sub_dept_id:', effectiveSubDeptId);
+      }
+    }
+    
+    // If still no subDeptId, log warning and try to use classId alone
+    if (!effectiveSubDeptId) {
+      console.warn('No subDeptId could be determined from parameters or task object. Available task keys:', task ? Object.keys(task) : 'No task provided');
+      
+      // For subclass requirements, we need both subDeptId and subclassId
+      if (isSubclass && subclassId) {
+        console.error('Cannot construct subclass ID without subDeptId');
+        return classId; // Fallback to just classId
+      }
+      
+      // Fallback to just classId for regular class requirements
+      console.log('Falling back to classId only:', classId);
+      return classId;
+    }
+    
+    // Construct the ID based on the type
+    if (isSubclass && subclassId) {
+      const id = `${effectiveSubDeptId}_${classId}_${subclassId}`;
+      console.log('Constructed subclass ID:', id);
+      return id;
+    }
+    
+    // For regular class requirements
+    const id = `${effectiveSubDeptId}_${classId}`;
+    console.log('Constructed class ID:', id);
+    return id;
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -81,48 +150,107 @@ export const AutomationMappingDialog = ({
         setIsLoading(true);
         setError(null);
 
-        // Fetch class requirements
-        const requirementsRes = await fetch(
-          `https://zyszsqgdlrpnunkegipk.supabase.co/rest/v1/tm_class_requirements?class_id=eq.${classId}&select=*`,
-          {
-            headers: {
-              apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
-              Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-            },
+        const requirementId = getRequirementId();
+        console.log('Fetching requirement with ID:', requirementId);
+        
+        // Log the exact query for debugging
+        const query = `SELECT * FROM tm_class_requirements WHERE class_id = '${requirementId}'`;
+        console.log('Executing query:', query);
+        
+        // Use Supabase client to fetch the requirement
+        const { data: requirement, error: requirementError } = await supabase
+          .from('tm_class_requirements')
+          .select('*')
+          .eq('class_id', requirementId)
+          .maybeSingle();
+          
+        console.log('Supabase query result:', { 
+          requirement, 
+          error: requirementError,
+          query
+        });
+          
+        if (requirementError) {
+          console.error('Failed to fetch class requirements:', requirementError);
+          throw new Error(`Failed to fetch class requirements: ${requirementError.message}`);
+        }
+        
+        console.log('Fetched requirement:', requirement);
+        
+        if (!requirement) {
+          console.error('No requirement found with ID:', requirementId);
+          
+          // Try alternative search strategies
+          console.log('Trying alternative search strategies...');
+          
+          // Strategy 1: Search by just the classId
+          const { data: fallbackReq, error: fallbackError } = await supabase
+            .from('tm_class_requirements')
+            .select('*')
+            .eq('class_id', classId)
+            .maybeSingle();
+          
+          if (fallbackReq && !fallbackError) {
+            console.log('Found requirement using classId fallback:', fallbackReq);
+            setWebData(fallbackReq.webData || []);
+            
+            // Continue with job fields fetching...
+            const masterFieldIds = (fallbackReq.webData || [])
+              .map((item: WebDataItem) => item.masterFieldId)
+              .filter(Boolean);
+
+            if (masterFieldIds.length > 0) {
+              const { data: fields, error: fieldsError } = await supabase
+                .from('tm_job_fields')
+                .select('*')
+                .in('id', masterFieldIds);
+                
+              if (fieldsError) {
+                console.error('Error fetching job fields:', fieldsError);
+                throw new Error('Failed to fetch job fields');
+              }
+              
+              if (fields && fields.length > 0) {
+                const fieldsMap = fields.reduce((acc: Record<string, JobField>, field: JobField) => {
+                  acc[field.id] = field;
+                  return acc;
+                }, {});
+                setJobFields(fieldsMap);
+              }
+            }
+            return; // Exit successfully
           }
-        );
-
-        if (!requirementsRes.ok) {
-          throw new Error('Failed to fetch class requirements');
+          
+          // If all strategies fail, throw error
+          throw new Error(`No requirement found for ID: ${requirementId}. Also tried classId: ${classId}`);
         }
 
-        const requirements = await requirementsRes.json();
-        const requirement = requirements.find((r: any) => r.id === requirementId);
-
-        if (!requirement || !requirement.webData) {
-          throw new Error('No webData found for this requirement');
+        const webData = requirement.webData;
+        
+        if (!webData || !Array.isArray(webData)) {
+          console.log('No webdata found for requirement:', requirement);
+          throw new Error('No webdata found for this requirement');
         }
 
-        setWebData(requirement.webData);
+        setWebData(webData);
 
         // Fetch all job fields for the masterFieldIds
-        const masterFieldIds = requirement.webData
+        const masterFieldIds = webData
           .map((item: WebDataItem) => item.masterFieldId)
           .filter(Boolean);
 
         if (masterFieldIds.length > 0) {
-          const jobFieldsRes = await fetch(
-            `https://zyszsqgdlrpnunkegipk.supabase.co/rest/v1/tm_job_fields?id=in.(${masterFieldIds.join(',')})`,
-            {
-              headers: {
-                apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
-                Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-              },
-            }
-          );
-
-          if (jobFieldsRes.ok) {
-            const fields = await jobFieldsRes.json();
+          const { data: fields, error: fieldsError } = await supabase
+            .from('tm_job_fields')
+            .select('*')
+            .in('id', masterFieldIds);
+            
+          if (fieldsError) {
+            console.error('Error fetching job fields:', fieldsError);
+            throw new Error('Failed to fetch job fields');
+          }
+          
+          if (fields && fields.length > 0) {
             const fieldsMap = fields.reduce((acc: Record<string, JobField>, field: JobField) => {
               acc[field.id] = field;
               return acc;
@@ -139,7 +267,7 @@ export const AutomationMappingDialog = ({
     };
 
     fetchData();
-  }, [isOpen, classId, requirementId]);
+  }, [isOpen, classId, requirementId, task]);
 
   const handleRunAutomation = async () => {
     if (!automationId || !taskId) {

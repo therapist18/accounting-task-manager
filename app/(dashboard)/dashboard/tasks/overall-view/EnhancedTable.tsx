@@ -79,10 +79,24 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
 
   // State for automation dialog
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
-  const [selectedRequirement, setSelectedRequirement] = useState<{classId: string, requirementId: number} | null>(null);
+  const [selectedRequirement, setSelectedRequirement] = useState<{
+    classId: string, 
+    requirementId: number, 
+    subDeptId?: string,
+    taskId: string,
+    task?: any // Add task object to state
+  } | null>(null);
 
-  const handleAutomationClick = (classId: string, requirementId: number) => {
-    setSelectedRequirement({ classId, requirementId });
+  const handleAutomationClick = (classId: string, requirementId: number, taskId: string) => {
+    // Find the task to get the subDeptId
+    const task = tasks.find(t => t.id === taskId);
+    setSelectedRequirement({ 
+      classId, 
+      requirementId,
+      subDeptId: task.subdepartment?.id?.toString() || task.subdepartment_id?.toString() || task.sub_dept_id?.toString() || '',
+      taskId,
+      task // Store the entire task object
+    });
     setAutomationDialogOpen(true);
   };
 
@@ -197,7 +211,12 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
                         </Button>
                       )}
                       {row.type === 'requirement' && (
-                        <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-500 hover:text-slate-800" onClick={() => handleAutomationClick(row.classId, row.requirementId)}>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-5 w-5 p-0 text-slate-500 hover:text-slate-800" 
+                          onClick={() => handleAutomationClick(row.classId, row.requirementId, row.taskId)}
+                        >
                           <Zap className="h-3 w-3" />
                         </Button>
                       )}
@@ -219,16 +238,19 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
         </TableBody>
       </Table>
     </div>
-    
-    {/* Automation Mapping Dialog */}
     {selectedRequirement && (
-      <AutomationMappingDialog
-        isOpen={automationDialogOpen}
-        onClose={() => setAutomationDialogOpen(false)}
-        classId={selectedRequirement.classId}
-        requirementId={selectedRequirement.requirementId}
-      />
-    )}
+  <AutomationMappingDialog
+    isOpen={automationDialogOpen}
+    onClose={() => setAutomationDialogOpen(false)}
+    classId={selectedRequirement.classId}
+    requirementId={selectedRequirement.requirementId.toString()}
+    taskId={selectedRequirement.taskId}
+    subDeptId={selectedRequirement.subDeptId}
+    task={selectedRequirement.task} // Pass the complete task object
+    isSubclass={!!selectedRequirement.task?.subclass_id}
+    subclassId={selectedRequirement.task?.subclass_id?.toString()}
+  />
+)}
   </div>
   )
 }
