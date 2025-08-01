@@ -37,17 +37,17 @@ interface ApiWebData {
 }
 
 interface JobField {
-  id: number; 
-  field_key: string; 
-  label: string; 
-  type: 'text' | 'date' | 'number' | 'select'; 
+  id: number;
+  field_key: string;
+  label: string;
+  type: 'text' | 'date' | 'number' | 'select';
   is_required: boolean;
-  sources?: Array<{ 
-    source_type: 'profile' | 'document' | 'company'; 
-    table: string; 
-    path: string; 
-    priority: number 
-  }>; 
+  sources?: Array<{
+    source_type: 'profile' | 'document' | 'company';
+    table: string;
+    path: string;
+    priority: number
+  }>;
   options?: string[];
   created_at?: string;
   updated_at?: string;
@@ -64,9 +64,9 @@ interface EditWebDataDialogProps {
 
 function MasterFieldPicker({ availableFields, onSelect }: { availableFields: JobField[]; onSelect: (field: JobField) => void }) {
   const [open, setOpen] = useState(false)
-  
+
   console.log('MasterFieldPicker - Available fields:', availableFields.length, availableFields.map(f => ({ id: f.id, label: f.label })));
-  
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -82,7 +82,7 @@ function MasterFieldPicker({ availableFields, onSelect }: { availableFields: Job
             <CommandEmpty>No fields available.</CommandEmpty>
             <CommandGroup>
               {availableFields.map((field) => (
-                <CommandItem 
+                <CommandItem
                   key={`field-${field.id}`}
                   onSelect={() => {
                     onSelect(field);
@@ -119,7 +119,7 @@ export function EditWebDataDialog({
   useEffect(() => {
     if (webData && isOpen) {
       console.log('EditWebDataDialog - Opening with webData:', JSON.stringify(webData, null, 2));
-      
+
       // Convert legacy single field format to new array format if needed
       let masterFields = [];
       let masterFieldIds = [];
@@ -158,7 +158,7 @@ export function EditWebDataDialog({
       })
 
       setKycDocumentOption(webData.kycDocumentId ? 'existing' : 'none')
-      
+
       fetchKycDocuments()
       fetchMasterFields()
     }
@@ -171,7 +171,7 @@ export function EditWebDataDialog({
       if (!formData.masterFields || formData.masterFields.length === 0) {
         console.log('EditWebDataDialog - Attempting to populate master fields from IDs:', formData.masterFieldIds);
         console.log('EditWebDataDialog - Available master fields:', allMasterFields.length);
-        
+
         const populatedFields = formData.masterFieldIds
           .map(id => {
             const field = allMasterFields.find(f => f.id.toString() === id.toString());
@@ -181,9 +181,9 @@ export function EditWebDataDialog({
             return field;
           })
           .filter(Boolean);
-        
+
         console.log('EditWebDataDialog - Populated master fields:', populatedFields.map(f => ({ id: f.id, label: f.label })));
-        
+
         if (populatedFields.length > 0) {
           setFormData(prev => prev ? ({
             ...prev,
@@ -240,7 +240,7 @@ export function EditWebDataDialog({
     setIsSubmitting(true)
     try {
       const updatedData = { ...formData }
-      
+
       if (kycDocumentOption === 'create_new') {
         const departmentName = context?.subdepartmentName?.split(' ')[0] || 'General'
         const newDocId = await createNewKycDocument(formData.name, departmentName)
@@ -249,7 +249,7 @@ export function EditWebDataDialog({
       } else if (kycDocumentOption === 'none') {
         updatedData.kycDocumentId = ''
       }
-      
+
       // Extract only essential master field data for storage (just id, label, field_key)
       const simplifiedMasterFields = (updatedData.masterFields || []).map(field => ({
         id: field.id,
@@ -258,7 +258,7 @@ export function EditWebDataDialog({
         type: field.type,
         is_required: field.is_required
       }));
-      
+
       const updatedWebData: ApiWebData = {
         ...updatedData,
         name: updatedData.name.trim(),
@@ -271,25 +271,25 @@ export function EditWebDataDialog({
         efnsDisplayName: updatedData.efnsDisplayName || updatedData.name,
         arrayItems: updatedData.arrayItems || []
       }
-      
+
       console.log('EditWebDataDialog - Submitting webData with master field IDs:', updatedWebData.masterFieldIds);
       console.log('EditWebDataDialog - Full webData being submitted:', JSON.stringify(updatedWebData, null, 2));
-      
+
       await onSave(updatedWebData)
       toast({ title: 'Success', description: 'WebData updated successfully' })
       handleClose()
-      
+
     } catch (error) {
       toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to save webData', variant: 'destructive' })
     } finally {
       setIsSubmitting(false)
     }
   }
-  
+
   const linkMasterField = (fieldToAdd: JobField) => {
     console.log('EditWebDataDialog - Linking master field:', { id: fieldToAdd.id, label: fieldToAdd.label });
-    setFormData(prev => prev ? ({ 
-      ...prev, 
+    setFormData(prev => prev ? ({
+      ...prev,
       masterFields: [...(prev.masterFields || []), fieldToAdd],
       masterFieldIds: [...(prev.masterFieldIds || []), fieldToAdd.id.toString()]
     }) : null);
@@ -297,8 +297,8 @@ export function EditWebDataDialog({
 
   const unlinkMasterField = (fieldIdToRemove: number) => {
     console.log('EditWebDataDialog - Unlinking master field:', fieldIdToRemove);
-    setFormData(prev => prev ? ({ 
-      ...prev, 
+    setFormData(prev => prev ? ({
+      ...prev,
       masterFields: (prev.masterFields || []).filter(f => f.id !== fieldIdToRemove),
       masterFieldIds: (prev.masterFieldIds || []).filter(id => id !== fieldIdToRemove.toString())
     }) : null);
@@ -344,22 +344,22 @@ export function EditWebDataDialog({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>WebData Name (EFNS Display Name) *</Label>
-              <Input 
-                value={formData.efnsDisplayName || formData.name} 
-                onChange={(e) => setFormData(prev => ({ 
-                  ...prev, 
+              <Input
+                value={formData.efnsDisplayName || formData.name}
+                onChange={(e) => setFormData(prev => ({
+                  ...prev,
                   name: e.target.value,
-                  efnsDisplayName: e.target.value 
-                }))} 
-                placeholder="e.g., Full Legal Name" 
+                  efnsDisplayName: e.target.value
+                }))}
+                placeholder="e.g., Full Legal Name"
               />
             </div>
             <div className="space-y-2">
               <Label>Automation Variable Name</Label>
-              <Input 
-                value={formData.variableName || ''} 
-                onChange={(e) => setFormData(prev => ({ ...prev, variableName: e.target.value }))} 
-                placeholder="e.g., fullName" 
+              <Input
+                value={formData.variableName || ''}
+                onChange={(e) => setFormData(prev => ({ ...prev, variableName: e.target.value }))}
+                placeholder="e.g., fullName"
               />
             </div>
           </div>
@@ -367,8 +367,8 @@ export function EditWebDataDialog({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Field Type</Label>
-              <Select 
-                value={formData.fieldType || 'text'} 
+              <Select
+                value={formData.fieldType || 'text'}
                 onValueChange={(value) => setFormData(prev => ({ ...prev, fieldType: value }))}
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -398,10 +398,10 @@ export function EditWebDataDialog({
 
           <div className="space-y-2">
             <Label>Description</Label>
-            <Input 
-              value={formData.description || ''} 
-              onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))} 
-              placeholder="Description (optional)" 
+            <Input
+              value={formData.description || ''}
+              onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+              placeholder="Description (optional)"
             />
           </div>
 
@@ -413,11 +413,11 @@ export function EditWebDataDialog({
                 {(formData.masterFields || []).map(field => (
                   <Badge key={field.id} variant="secondary" className="pl-2 pr-1 py-1 text-sm">
                     {field.label}
-                    <button 
-                      onClick={() => unlinkMasterField(field.id)} 
+                    <button
+                      onClick={() => unlinkMasterField(field.id)}
                       className="ml-2 rounded-full hover:bg-gray-300 p-0.5"
                     >
-                      <X className="h-3 w-3"/>
+                      <X className="h-3 w-3" />
                     </button>
                   </Badge>
                 ))}
@@ -427,9 +427,9 @@ export function EditWebDataDialog({
                   <MasterFieldPicker availableFields={availableMasterFields} onSelect={linkMasterField} />
                 )}
               </div>
-                           {(formData.masterFields || []).length === 0 && !loadingMasterFields && (
+              {(formData.masterFields || []).length === 0 && !loadingMasterFields && (
                 <p className="text-sm text-gray-500 italic">
-                  {formData.masterFieldIds && formData.masterFieldIds.length > 0 
+                  {formData.masterFieldIds && formData.masterFieldIds.length > 0
                     ? `Found ${formData.masterFieldIds.length} master field ID(s) but couldn't load field details. Use "Add Field" to link new fields.`
                     : "No master fields linked. Use the \"Add Field\" button to link master fields."
                   }
@@ -448,27 +448,27 @@ export function EditWebDataDialog({
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-grow">
                       <div className="space-y-1">
                         <Label className="text-xs">Display Name</Label>
-                        <Input 
-                          value={item.name} 
+                        <Input
+                          value={item.name}
                           onChange={(e) => updateArrayItem(index, 'name', e.target.value)}
                           placeholder="Item name"
                         />
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Variable Name</Label>
-                        <Input 
-                          value={item.variableName} 
+                        <Input
+                          value={item.variableName}
                           onChange={(e) => updateArrayItem(index, 'variableName', e.target.value)}
                           placeholder="itemVariable"
                         />
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Type</Label>
-                        <Select 
-                          value={item.type} 
+                        <Select
+                          value={item.type}
                           onValueChange={(value) => updateArrayItem(index, 'type', value)}
                         >
-                          <SelectTrigger><SelectValue/></SelectTrigger>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="text">Text</SelectItem>
                             <SelectItem value="number">Number</SelectItem>
@@ -479,20 +479,20 @@ export function EditWebDataDialog({
                         </Select>
                       </div>
                     </div>
-                    <Button 
-                      type="button" 
-                      variant="ghost" 
-                      size="icon" 
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
                       onClick={() => removeArrayItem(index)}
                     >
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
                 ))}
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  size="sm" 
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={addArrayItem}
                 >
                   <Plus className="h-4 w-4 mr-2" />
@@ -504,79 +504,25 @@ export function EditWebDataDialog({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="flex items-center space-x-2">
-              <Checkbox 
-                checked={formData.isRequired} 
-                onCheckedChange={(c) => setFormData(p => ({...p, isRequired: !!c}))} 
+              <Checkbox
+                checked={formData.isRequired}
+                onCheckedChange={(c) => setFormData(p => ({ ...p, isRequired: !!c }))}
               />
               <Label>Required</Label>
             </div>
             <div className="flex items-center space-x-2">
-              <Checkbox 
-                checked={formData.isVisible} 
-                onCheckedChange={(c) => setFormData(p => ({...p, isVisible: !!c}))} 
+              <Checkbox
+                checked={formData.isVisible}
+                onCheckedChange={(c) => setFormData(p => ({ ...p, isVisible: !!c }))}
               />
               <Label>Visible</Label>
-            </div>
-          </div>
-
-          <div className="space-y-4 border-t pt-4">
-            <Label className="font-medium flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Field Association
-            </Label>
-            <div className="space-y-3">
-              <div className="flex items-center space-x-2">
-                <input 
-                  type="radio" 
-                  id="none-option" 
-                  name="kyc-option" 
-                  checked={kycDocumentOption === 'none'} 
-                  onChange={() => {
-                    setKycDocumentOption('none'); 
-                    setFormData(p => ({ ...p, kycDocumentId: '' }))
-                  }} 
-                />
-                <Label htmlFor="none-option" className="text-sm">No field association</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <input 
-                  type="radio" 
-                  id="existing-option" 
-                  name="kyc-option" 
-                  checked={kycDocumentOption === 'existing'} 
-                  onChange={() => setKycDocumentOption('existing')} 
-                />
-                <Label htmlFor="existing-option" className="text-sm">Linked to existing field</Label>
-              </div>
-              {kycDocumentOption === 'existing' && (
-                <div className="ml-6 space-y-2">
-                  <Label className="text-sm">Select Field</Label>
-                  <Select 
-                    value={formData.kycDocumentId || ''} 
-                    onValueChange={(v) => setFormData(p => ({ ...p, kycDocumentId: v }))}
-                  >
-                    <SelectTrigger><SelectValue placeholder="Select a field" /></SelectTrigger>
-                    <SelectContent>
-                      {loadingKycDocs ? (
-                        <SelectItem value="loading" disabled>Loading...</SelectItem>
-                      ) : (
-                        kycDocuments.map((doc) => (
-                          <SelectItem key={doc.id} value={doc.id}>
-                            {doc.display_name || doc.name}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
             </div>
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>Cancel</Button>
-          <Button 
-            onClick={handleSubmit} 
+          <Button
+            onClick={handleSubmit}
             disabled={isSubmitting || !formData.name.trim()}
           >
             {isSubmitting ? 'Saving...' : 'Save Changes'}
