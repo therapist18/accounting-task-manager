@@ -52,6 +52,7 @@ interface ApiWebData {
   kycDocumentId?: string
   masterFieldId?: string
   masterField?: any // Store master field data for display
+  variableName?: string // Add variable name field
 }
 
 interface WebDataTableEntry extends ApiWebData {
@@ -89,13 +90,15 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     description: string,
     type: 'standard' | 'conditional' | 'optional',
     isRequired: boolean,
-    isVisible: boolean
+    isVisible: boolean,
+    variableName: string
   }[]>([{
     name: '',
     description: '',
     type: 'standard',
     isRequired: true,
-    isVisible: true
+    isVisible: true,
+    variableName: ''
   }])
   const [bulkInput, setBulkInput] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -105,7 +108,8 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     description: '',
     type: 'standard' as 'standard' | 'conditional' | 'optional',
     isRequired: true,
-    isVisible: true
+    isVisible: true,
+    variableName: ''
   })
   const [isReady, setIsReady] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
@@ -209,7 +213,8 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       description: '',
       type: 'standard',
       isRequired: true,
-      isVisible: true
+      isVisible: true,
+      variableName: ''
     }])
   }
   // Add this function to handle adding new webData
@@ -232,7 +237,8 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
         isVisible: true,
         order: currentWebData.length + index,
         masterFieldId: req.masterFieldId,
-        kycDocumentId: undefined
+        kycDocumentId: undefined,
+        variableName: req.variableName || ''
       }));
 
       // Combine with existing webData
@@ -524,7 +530,8 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
               order: r.order || idx,
               isVisible: r.isVisible !== false,
               isRequired: r.isRequired !== false,
-              kycDocumentId: r.kycDocumentId || undefined // Include KYC document ID
+              kycDocumentId: r.kycDocumentId || undefined,
+              variableName: r.variableName || ''
             })) || []
 
             const subClasses = (cls.subClasses || []).map(subCls => {
@@ -541,7 +548,8 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
                 order: r.order || idx,
                 isVisible: r.isVisible !== false,
                 isRequired: r.isRequired !== false,
-                kycDocumentId: r.kycDocumentId || undefined // Include KYC document ID
+                kycDocumentId: r.kycDocumentId || undefined,
+                variableName: r.variableName || ''
               })) || []
 
               return {
@@ -570,7 +578,8 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
             order: r.order || idx,
             isVisible: r.isVisible !== false,
             isRequired: r.isRequired !== false,
-            kycDocumentId: r.kycDocumentId || undefined // Include KYC document ID
+            kycDocumentId: r.kycDocumentId || undefined,
+            variableName: r.variableName || ''
           })) || []
 
           return {

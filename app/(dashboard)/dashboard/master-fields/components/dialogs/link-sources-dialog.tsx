@@ -28,20 +28,27 @@ interface LinkSourcesDialogProps {
   onSuccess: () => void
 }
 
+// Represents a database column, potentially with a parsed JSONB structure
 interface TableColumn {
   column_name: string
   data_type: string
   is_jsonb: boolean
-  jsonb_properties?: Array<{
-    id: string
-    name: string
-    type: string
-    properties?: Array<{
-      id: string
-      name: string
-      type: string
-    }>
-  }>
+  // Represents the structure within a JSONB column
+  jsonb_properties?: JsonbProperty[]
+}
+
+// Represents a single property within a JSONB column. Can be simple, nested object, or array of objects.
+type JsonbProperty = {
+  id: string
+  name: string
+  type: string
+  // For nested objects
+  properties?: Array<{ id: string; name: string; type: string }>
+  // For arrays of objects
+  isArray?: boolean
+  arrayConfig?: {
+    fields: Array<{ id: string; name: string; type: string }>
+  }
 }
 
 // Extend the source type with UI-specific state
@@ -107,7 +114,7 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
     if (!tableName) return
 
     setSources((prev) =>
-      prev.map((s, i) => (i === index ? { ...s, loadingFields: true, fields: [], path: "" } : s)),
+      prev.map((s, i) => (i === index ? { ...s, loadingFields: true } : s)),
     )
 
     try {
@@ -123,14 +130,14 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
 
   // Effect to fetch fields for existing sources on load
   useEffect(() => {
-    if (open && sources.length > 0 && tables.length > 0) {
+    if (open && sources.length > 0) {
       sources.forEach((source, index) => {
         if (source.table && source.fields.length === 0 && !source.loadingFields) {
           fetchFieldsForSource(index, source.table)
         }
       })
     }
-  }, [open, sources, tables.length, fetchFieldsForSource])
+  }, [open, sources, fetchFieldsForSource])
 
   const addSource = () => {
     setSources((prev) => [
@@ -192,8 +199,8 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
 
   if (!field) return null
 
-  // Helper to parse the path for UI selection
-  const getSelectedFieldFromPath = (path: string) => path.split("->")[0]
+  // Helper to parse the base column from the full path
+  const getSelectedFieldFromPath = (path: string) => (path ? path.split("->")[0] : "")
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -208,7 +215,8 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
         <form onSubmit={handleSubmit} id="link-sources-form" className="flex-1 overflow-y-auto -mr-4 pr-4 space-y-4">
           {sources.map((source, index) => {
             const selectedField = getSelectedFieldFromPath(source.path)
-            const fieldIsJsonb = source.fields.find((f) => f.column_name === selectedField)?.is_jsonb
+            const columnSpec = source.fields.find((f) => f.column_name === selectedField)
+            const fieldIsJsonb = columnSpec?.is_jsonb
 
             return (
               <Card key={source.id}>
@@ -251,7 +259,9 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
                     <Label>Table</Label>
                     <ComboBox
                       value={source.table}
-                      onValueChange={(value) => updateSource(index, { table: value })}
+                      onValueChange={(value) => {
+                        updateSource(index, { table: value, path: "", fields: [] })
+                      }}
                       loading={loadingTables}
                       options={tables.map((t) => ({ value: t.name, label: t.label, description: t.name }))}
                       placeholder="Select a table..."
@@ -262,7 +272,11 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
                       <Label>Field / Path</Label>
                       <ComboBox
                         value={selectedField}
-                        onValueChange={(value) => updateSource(index, { path: value })}
+                        onValueChange={(value) => {
+                          if (value !== selectedField) {
+                            updateSource(index, { path: value })
+                          }
+                        }}
                         loading={source.loadingFields}
                         disabled={!source.table}
                         options={source.fields.map((f) => ({ value: f.column_name, label: f.column_name, description: f.data_type }))}
@@ -275,17 +289,49 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
                       <Label>JSON Property</Label>
                       <ComboBox
                         value={source.path.includes("->") ? source.path : ""}
-                        onValueChange={(value) => updateSource(index, { path: value })}
-                        options={(source.fields.find(f => f.column_name === selectedField)?.jsonb_properties ?? []).flatMap(prop => {
-                            const baseItem = { value: `${selectedField}->>'${prop.name}'`, label: `${prop.name} (${prop.type})` };
-                            return prop.properties?.length
-                              ? [baseItem, ...prop.properties.map(nested => ({
-                                  value: `${selectedField}->'${prop.name}'->>'${nested.name}'`,
-                                  label: `${prop.name}.${nested.name} (${nested.type})`,
-                                  className: 'pl-6'
-                                }))]
-                              : [baseItem];
-                          })}
+                        onValueChange={(value) => {
+                          const newPath = value || selectedField
+                          updateSource(index, { path: newPath })
+                        }}
+                        options={(columnSpec?.jsonb_properties ?? []).flatMap((prop) => {
+                          const propName = (prop.name || "").trim()
+                          if (!propName) return []
+
+                          // Case 1: Handle array of objects structure
+                          if (prop.type === "array" && prop.arrayConfig?.fields) {
+                            return prop.arrayConfig.fields.map((field) => {
+                              const fieldName = (field.name || "").trim()
+                              return {
+                                value: `${selectedField}->'${propName}'->>'${fieldName}'`,
+                                label: `${propName} -> ${fieldName}`,
+                                className: "pl-4",
+                              }
+                            })
+                          }
+
+                          // Case 2: Handle nested object structure
+                          if (prop.properties?.length) {
+                            const nestedItems = prop.properties.map((nested) => {
+                              const nestedName = (nested.name || "").trim()
+                              return {
+                                value: `${selectedField}->'${propName}'->>'${nestedName}'`,
+                                label: `${propName}.${nestedName} (${nested.type})`,
+                                className: "pl-4",
+                              }
+                            })
+                            const parentItem = {
+                              value: `${selectedField}->>'${propName}'`,
+                              label: `${propName} (Object)`,
+                            }
+                            return [parentItem, ...nestedItems]
+                          }
+
+                          // Case 3: Handle simple property
+                          return [{
+                            value: `${selectedField}->>'${propName}'`,
+                            label: `${propName} (${prop.type || "text"})`,
+                          }]
+                        })}
                         placeholder="Select a JSON property..."
                       />
                     </div>

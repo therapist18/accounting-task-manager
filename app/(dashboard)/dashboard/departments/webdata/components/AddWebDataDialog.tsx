@@ -22,6 +22,7 @@ export interface WebDataForm {
   masterFieldId: string
   masterField: any // Store master field data for display
   order: number
+  variableName: string
 }
 
 interface JobField {
@@ -75,8 +76,6 @@ export function AddWebDataDialog({
       fetchMasterFields()
     }
   }, [isOpen])
-
-
 
   const fetchMasterFields = async () => {
     try {
@@ -152,8 +151,6 @@ export function AddWebDataDialog({
     setSelectedFields([])
   }
 
-
-
   const removeNewWebData = (index: number) => {
     if (newWebData.length > 1) {
       setNewWebData(newWebData.filter((_, i) => i !== index))
@@ -170,13 +167,19 @@ export function AddWebDataDialog({
     const masterField = masterFields.find(f => f.id.toString() === masterFieldId)
     if (!masterField) return
 
+    // Convert field key to camelCase for default variable name
+    const defaultVarName = masterField.field_key
+      .toLowerCase()
+      .replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase())
+
     const newWebDataItem = {
       name: masterField.label,
       description: `Auto-populated from ${masterField.field_key}`,
       isRequired: masterField.is_required,
       masterFieldId: masterField.id.toString(),
       masterField: masterField,
-      order: newWebData.length
+      order: newWebData.length,
+      variableName: defaultVarName
     }
 
     setNewWebData([...newWebData, newWebDataItem])
@@ -196,14 +199,22 @@ export function AddWebDataDialog({
       !newWebData.some(item => item.masterFieldId === field.id.toString())
     )
 
-    const newFields = fieldsToAdd.map((field, index) => ({
-      name: field.label,
-      description: `Auto-populated from ${field.field_key}`,
-      isRequired: field.is_required,
-      masterFieldId: field.id.toString(),
-      masterField: field,
-      order: newWebData.length + index
-    }))
+    const newFields = fieldsToAdd.map((field, index) => {
+      // Convert field key to camelCase for default variable name
+      const defaultVarName = field.field_key
+        .toLowerCase()
+        .replace(/[^a-z0-9]+(.)/g, (_, chr) => chr.toUpperCase())
+
+      return {
+        name: field.label,
+        description: `Auto-populated from ${field.field_key}`,
+        isRequired: field.is_required,
+        masterFieldId: field.id.toString(),
+        masterField: field,
+        order: newWebData.length + index,
+        variableName: defaultVarName
+      }
+    })
 
     setNewWebData(prev => [...prev, ...newFields])
     setSelectedFields([])
@@ -222,10 +233,6 @@ export function AddWebDataDialog({
       field.sources?.some(s => s.source_type === 'company') &&
       field.label.toLowerCase().includes(companySearch.toLowerCase())
     )
-
-
-
-
 
   if (!context) return null
 
@@ -397,7 +404,26 @@ export function AddWebDataDialog({
 
                 <div className="space-y-2">
                   <Label>Field Details</Label>
-                  <div className="p-3 bg-gray-50 rounded-md text-sm">
+                  <div className="p-3 bg-gray-50 rounded-md text-sm space-y-3">
+                    <div>
+                      <Label htmlFor={`variable-name-${item.masterFieldId}`} className="text-xs font-medium text-gray-700">
+                        Variable Name
+                      </Label>
+                      <Input
+                        id={`variable-name-${item.masterFieldId}`}
+                        value={item.variableName}
+                        onChange={(e) => {
+                          const updated = [...newWebData]
+                          const index = updated.findIndex(wd => wd.masterFieldId === item.masterFieldId)
+                          if (index !== -1) {
+                            updated[index].variableName = e.target.value
+                            setNewWebData(updated)
+                          }
+                        }}
+                        className="mt-1 h-8 text-xs"
+                        placeholder="Enter variable name"
+                      />
+                    </div>
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
                         <span className="font-medium">Field Key:</span>

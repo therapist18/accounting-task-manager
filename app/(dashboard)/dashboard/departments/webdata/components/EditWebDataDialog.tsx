@@ -32,6 +32,7 @@ export function EditWebDataDialog({
   const [formData, setFormData] = useState<ApiWebData>({
     id: '',
     name: '',
+    variableName: '',
     description: '',
     type: 'standard',
     order: 0,
@@ -267,6 +268,20 @@ export function EditWebDataDialog({
 
         <div className="space-y-6">
           {/* Basic Information */}
+          <div className="grid grid-cols-1 gap-4">
+            <div className="space-y-2">
+              <Label>Variable Name</Label>
+              <Input
+                value={formData.variableName || ''}
+                onChange={(e) => setFormData(prev => ({ ...prev, variableName: e.target.value }))}
+                placeholder="Variable name (e.g., clientName, invoiceNumber)"
+              />
+              <p className="text-xs text-muted-foreground">
+                Internal reference name for this field (lowercase, no spaces, use camelCase)
+              </p>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <div className="flex justify-between items-center">
