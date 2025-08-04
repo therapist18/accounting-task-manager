@@ -58,7 +58,7 @@ interface EditWebDataDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
   webData: ApiWebData | null
-  onSave: (updatedWebData: ApiWebData) => Promise<void>
+  onSave: (updatedWebData: any) => Promise<void> // Updated to handle new structure
   isSubmitting: boolean
   context: { 
     subdepartmentName: string 
@@ -121,6 +121,8 @@ export function EditWebDataDialog({
   const [loadingMasterFields, setLoadingMasterFields] = useState(false)
   const [selectedFormId, setSelectedFormId] = useState<string>('')
 
+  const availableForms = context?.availableForms || [];
+
   useEffect(() => {
     if (webData && isOpen) {
       console.log('EditWebDataDialog - Opening with webData:', JSON.stringify(webData, null, 2));
@@ -163,12 +165,19 @@ export function EditWebDataDialog({
         arrayItems: webData.arrayItems || []
       });
 
-      // Set the selected form if it exists
-      if (webData.formName) {
-        setSelectedFormId(webData.formName);
-      } else {
-        setSelectedFormId('');
-      }
+      // Set the selected form if it exists - check both formId and formName for backward compatibility
+      const formIdToSelect = webData.formId || 
+                           (webData.formName && availableForms.length > 0 
+                             ? availableForms.find(f => f.name === webData.formName)?.id 
+                             : undefined);
+      setSelectedFormId(formIdToSelect || '');
+      
+      console.log('EditWebDataDialog - Setting selected form:', {
+        webDataFormId: webData.formId,
+        webDataFormName: webData.formName,
+        selectedFormId: formIdToSelect,
+        availableForms: availableForms.map(f => ({ id: f.id, name: f.name }))
+      });
 
       setKycDocumentOption(webData.kycDocumentId ? 'existing' : 'none')
 
@@ -263,7 +272,12 @@ export function EditWebDataDialog({
         updatedData.kycDocumentId = ''
       }
 
-      // Extract only essential master field data for storage (just id, label, field_key)
+      // Get the selected form details
+      const selectedForm = selectedFormId && availableForms.length 
+        ? availableForms.find(f => f.id === selectedFormId)
+        : null;
+
+      // Extract only essential master field data for storage
       const simplifiedMasterFields = (updatedData.masterFields || []).map(field => ({
         id: field.id,
         label: field.label,
@@ -272,21 +286,31 @@ export function EditWebDataDialog({
         is_required: field.is_required
       }));
 
-      const updatedWebData: ApiWebData = {
+      const automationId = `auto_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+      
+      // Create the field data
+      const fieldData = {
         ...updatedData,
         name: updatedData.name.trim(),
         description: updatedData.description?.trim() || '',
         kycDocumentId: updatedData.kycDocumentId || undefined,
-        // Don't store the full masterFields objects in the database - only store the IDs
-        masterFields: undefined, // Remove this from database storage
-        masterFieldIds: (updatedData.masterFields || []).map(f => f.id.toString()), // Only store IDs
+        masterFields: simplifiedMasterFields,
+        masterFieldIds: (updatedData.masterFields || []).map(f => f.id.toString()),
         fieldType: updatedData.fieldType || 'text',
         efnsDisplayName: updatedData.efnsDisplayName || updatedData.name,
-        formName: selectedFormId || undefined,
-        arrayItems: updatedData.arrayItems || []
-      }
+        arrayItems: updatedData.arrayItems || [],
+        doc_id: selectedForm?.id || null,
+        form_name: selectedForm?.name || null
+      };
 
-      console.log('EditWebDataDialog - Submitting webData with master field IDs:', updatedWebData.masterFieldIds);
+      // Create the submission structure - wrap with automation_id only
+      const updatedWebData = {
+        [automationId]: {
+          fields: [fieldData]
+        }
+      };
+
+      console.log('EditWebDataDialog - Submitting webData with master field IDs:', fieldData.masterFieldIds);
       console.log('EditWebDataDialog - Full webData being submitted:', JSON.stringify(updatedWebData, null, 2));
 
       await onSave(updatedWebData)
@@ -419,7 +443,7 @@ export function EditWebDataDialog({
             />
           </div>
 
-          {context?.availableForms && context.availableForms.length > 0 && (
+          {availableForms.length > 0 && (
             <div className="space-y-2">
               <Label>Associated Form</Label>
               <Select
@@ -433,11 +457,11 @@ export function EditWebDataDialog({
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select a form (optional)" />
+                  <SelectValue placeholder="Select a form*" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="">None (Available for all forms)</SelectItem>
-                  {context.availableForms.map(form => (
+                  {availableForms.map(form => (
                     <SelectItem key={form.id} value={form.id}>
                       {form.name}
                     </SelectItem>

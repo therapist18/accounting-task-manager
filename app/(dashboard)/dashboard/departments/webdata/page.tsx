@@ -126,14 +126,36 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
   useEffect(() => {
     const fetchForms = async () => {
       try {
-        const { data: forms, error } = await supabase
-          .from('forms') // Adjust the table name as per your database schema
-          .select('id, name')
+        // First, get all departments with their stages (stored as JSONB array)
+        const { data: departments, error } = await supabase
+          .from('tm_departments')
+          .select('id, name, stages')
           .order('name');
         
         if (error) throw error;
+    
+        // Extract all documents with docType 'form' from all stages
+        const forms = departments.flatMap(dept => {
+          if (!dept.stages || !Array.isArray(dept.stages)) return [];
+          
+          return dept.stages.flatMap((stage: any) => 
+            (stage.documents || [])
+              .filter((doc: any) => doc.docType === 'form')
+              .map((doc: any) => ({
+                id: doc.id,
+                name: doc.name,
+                departmentId: dept.id,
+                departmentName: dept.name,
+                stageId: stage.id,
+                stageName: stage.name
+              }))
+          );
+        });
         
-        setAvailableForms(forms || []);
+        // Remove duplicates by form ID
+        const uniqueForms = Array.from(new Map(forms.map(form => [form.id, form])).values());
+        
+        setAvailableForms(uniqueForms);
       } catch (error) {
         console.error('Error fetching forms:', error);
         toast({
@@ -198,15 +220,38 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       variableName: ''
     }])
   }
-
-  const handleAddWebData = async (webData: WebDataForm[]) => {
+  const handleAddWebData = async (webData: any) => {
     if (!addContext) return;
-
+  
     try {
       setIsSubmitting(true);
       const currentWebData = getCurrentWebDataForContext(addContext) || [];
-
-      const newWebDataWithIds = webData.map((req, index) => ({
+  
+      // Extract fields from the automation_id wrapper
+      let fieldsToAdd = [];
+      
+      // Check if data is wrapped with automation_id
+      const automationKeys = Object.keys(webData).filter(key => key.startsWith('auto_'));
+      
+      if (automationKeys.length > 0) {
+        // Data is wrapped with automation_id
+        const automationId = automationKeys[0];
+        fieldsToAdd = webData[automationId]?.fields || [];
+        console.log('Extracted fields from automation wrapper:', fieldsToAdd);
+      } else if (webData.fields) {
+        // Legacy format - fields directly available
+        fieldsToAdd = webData.fields;
+      } else {
+        // Fallback - assume webData is the fields array
+        fieldsToAdd = Array.isArray(webData) ? webData : [webData];
+      }
+  
+      if (!fieldsToAdd.length) {
+        console.warn('No fields found in webData:', webData);
+        return;
+      }
+  
+      const newWebDataWithIds = fieldsToAdd.map((req, index) => ({
         id: generateWebDataId(index, currentWebData),
         name: req.efnsDisplayName || req.name,
         description: req.description,
@@ -218,20 +263,22 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
         efnsDisplayName: req.efnsDisplayName || req.name,
         fieldType: req.fieldType || 'text',
         arrayItems: req.arrayItems || [],
-        masterFieldIds: req.masterFieldIds || []
+        masterFieldIds: req.masterFieldIds || [],
+        doc_id: req.doc_id || null,
+        form_name: req.form_name || null
       }));
-
+  
       const updatedWebData = [...currentWebData, ...newWebDataWithIds];
       await saveWebDataForContext(addContext, updatedWebData);
       await refreshDepartments();
       setIsAddDialogOpen(false);
-
+  
       toast({
         title: "Success",
         description: "WebData added successfully",
         variant: "default"
       });
-
+  
     } catch (error) {
       console.error('Error adding webData:', error);
       toast({
@@ -243,7 +290,89 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       setIsSubmitting(false);
     }
   };
-
+  
+  const handleSaveWebData = async (updatedWebData: any) => {
+    if (!editingContext) {
+      toast({ title: "Error", description: "No editing context available.", variant: "destructive" });
+      return;
+    }
+  
+    try {
+      const currentWebData = getCurrentWebDataForContext(editingContext) || [];
+      let webDataIndex = -1;
+  
+      // Extract fields from the automation_id wrapper
+      let fieldsToUpdate = [];
+      const automationKeys = Object.keys(updatedWebData).filter(key => key.startsWith('auto_'));
+      
+      if (automationKeys.length > 0) {
+        // Data is wrapped with automation_id
+        const automationId = automationKeys[0];
+        fieldsToUpdate = updatedWebData[automationId]?.fields || [];
+      } else if (updatedWebData.fields) {
+        // Legacy format
+        fieldsToUpdate = updatedWebData.fields;
+      } else {
+        // Single field update
+        fieldsToUpdate = [updatedWebData];
+      }
+  
+      if (!fieldsToUpdate.length) {
+        console.warn('No fields found in updatedWebData:', updatedWebData);
+        return;
+      }
+  
+      const fieldToUpdate = fieldsToUpdate[0]; // For edit, we expect only one field
+  
+      if (editingWebData?.id) {
+        webDataIndex = currentWebData.findIndex(req => String(req.id) === String(editingWebData.id));
+      }
+      if (webDataIndex === -1 && fieldToUpdate.id) {
+        webDataIndex = currentWebData.findIndex(req => String(req.id) === String(fieldToUpdate.id));
+      }
+      if (webDataIndex === -1) {
+        webDataIndex = currentWebData.findIndex(req =>
+          req.name === (editingWebData?.name || fieldToUpdate.name) &&
+          req.order === (editingWebData?.order || fieldToUpdate.order)
+        );
+      }
+  
+      if (webDataIndex === -1) {
+        // Adding new webData
+        const newWebDataArray = [
+          ...currentWebData,
+          { 
+            ...fieldToUpdate, 
+            id: fieldToUpdate.id || Date.now().toString(), 
+            order: fieldToUpdate.order ?? currentWebData.length 
+          }
+        ];
+        await saveWebDataForContext(editingContext, newWebDataArray);
+      } else {
+        // Updating existing webData
+        const updatedWebDataArray = [...currentWebData];
+        updatedWebDataArray[webDataIndex] = {
+          ...updatedWebDataArray[webDataIndex],
+          ...fieldToUpdate,
+          id: fieldToUpdate.id || updatedWebDataArray[webDataIndex].id,
+          order: fieldToUpdate.order ?? updatedWebDataArray[webDataIndex].order
+        };
+        await saveWebDataForContext(editingContext, updatedWebDataArray);
+      }
+  
+      await refreshDepartments();
+      setIsEditDialogOpen(false);
+      setEditingWebData(null);
+      toast({ title: "Success", description: "WebData saved successfully" });
+    } catch (error) {
+      console.error('[handleSaveWebData] Error:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to save webData.",
+        variant: "destructive"
+      });
+    }
+  };
   const refreshDepartments = async () => {
     try {
       const { data: departmentsData, error } = await supabase
@@ -508,60 +637,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     refreshDepartments()
   }, [])
 
-  const handleSaveWebData = async (updatedWebData: ApiWebData) => {
-    if (!editingContext) {
-      toast({ title: "Error", description: "No editing context available.", variant: "destructive" });
-      return;
-    }
-
-    try {
-      const currentWebData = getCurrentWebDataForContext(editingContext) || [];
-      let webDataIndex = -1;
-
-      if (editingWebData?.id) {
-        webDataIndex = currentWebData.findIndex(req => String(req.id) === String(editingWebData.id));
-      }
-      if (webDataIndex === -1 && updatedWebData.id) {
-        webDataIndex = currentWebData.findIndex(req => String(req.id) === String(updatedWebData.id));
-      }
-      if (webDataIndex === -1) {
-        webDataIndex = currentWebData.findIndex(req =>
-          req.name === (editingWebData?.name || updatedWebData.name) &&
-          req.order === (editingWebData?.order || updatedWebData.order)
-        );
-      }
-
-      if (webDataIndex === -1) {
-        const newWebDataArray = [
-          ...currentWebData,
-          { ...updatedWebData, id: updatedWebData.id || Date.now().toString(), order: updatedWebData.order ?? currentWebData.length }
-        ];
-        await saveWebDataForContext(editingContext, newWebDataArray);
-      } else {
-        const updatedWebDataArray = [...currentWebData];
-        updatedWebDataArray[webDataIndex] = {
-          ...updatedWebDataArray[webDataIndex],
-          ...updatedWebData,
-          id: updatedWebData.id || updatedWebDataArray[webDataIndex].id,
-          order: updatedWebData.order ?? updatedWebDataArray[webDataIndex].order
-        };
-        await saveWebDataForContext(editingContext, updatedWebDataArray);
-      }
-
-      await refreshDepartments();
-      setIsEditDialogOpen(false);
-      setEditingWebData(null);
-      toast({ title: "Success", description: "WebData saved successfully" });
-    } catch (error) {
-      console.error('[handleSaveWebData] Error:', error);
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to save webData.",
-        variant: "destructive"
-      });
-    }
-  }
-
+  
   const handleMove = async (index: number, direction: 'up' | 'down', moveContext: EditingContext) => {
     if (!moveContext) return;
 
