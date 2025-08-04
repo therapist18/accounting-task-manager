@@ -319,6 +319,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
       description: '',
       isRequired: false,
       documentType: 'both',
+      docType: 'normal_doc',
       inputType: 'file',
       extractionSpecs: [],
       isSpecial,
@@ -467,10 +468,14 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
                   document_type: 'one_off',
                   fields: doc.extractionSpecs || [],
                   display_name: doc.name,
-                  metadata: doc.isSpecial ? {
-                    isSpecial: true,
-                    targetEntities: doc.targetEntities || []
-                  } : undefined
+                  doc_type: doc.docType || 'normal_doc',
+                  metadata: {
+                    ...(doc.isSpecial ? {
+                      isSpecial: true,
+                      targetEntities: doc.targetEntities || []
+                    } : {}),
+                    doc_type: doc.docType || 'normal_doc'
+                  }
                 });
                 return { ...doc, kycId, linkedKycDocument: kycId };
               } catch (error) {
@@ -1344,6 +1349,8 @@ function DocumentCard({
         linkedKycDocument: selectedKycDoc.id,
         kycId: selectedKycDoc.id,
         name: selectedKycDoc.display_name || selectedKycDoc.name,
+        // Preserve the existing docType or default to 'normal_doc'
+        docType: doc.docType || 'normal_doc',
         // The fields are already transformed correctly, including arrays
         extractionSpecs: selectedKycDoc.fields || []
       })
@@ -1503,8 +1510,34 @@ function DocumentCard({
                 <SelectItem value="both">
                   <div className="flex items-center gap-2">
                     <FileText className="h-4 w-4" />
-                    <Info className="h-4 w-4" />
-                    Upload + Extraction
+                    <span>Upload with Data Extraction</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs font-medium text-gray-700">Doc Type</Label>
+            <Select
+              value={doc.docType || 'normal_doc'}
+              onValueChange={(value: 'form' | 'normal_doc') =>
+                onUpdateDocument(doc.id, { docType: value })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="form">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Form
+                  </div>
+                </SelectItem>
+                <SelectItem value="normal_doc">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Normal Doc
                   </div>
                 </SelectItem>
               </SelectContent>

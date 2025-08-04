@@ -342,6 +342,17 @@ export default function Stages() {
           </div>
 
           {doc.description && <div className="text-gray-600 text-xs">{doc.description}</div>}
+          {doc.docType && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-xs font-medium">
+                <Info className="h-3 w-3" />
+                <span>Document Type:</span>
+              </div>
+              <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                {doc.docType}
+              </Badge>
+            </div>
+          )}
 
           {/* Enhanced KYC Fields display */}
           {fieldsLoading ? (
@@ -1428,9 +1439,9 @@ export default function Stages() {
           .from('automations')
           .update(automation)
           .eq('id', currentAutomation.id);
-          
+
         if (error) throw error;
-        
+
         toast({
           title: "Success",
           description: "Automation updated successfully",
@@ -1442,20 +1453,20 @@ export default function Stages() {
           .insert([automation])
           .select()
           .single();
-          
+
         if (error) throw error;
-        
+
         toast({
           title: "Success",
           description: "Automation created successfully",
         });
       }
-      
+
       setIsAutomationDialogOpen(false);
       setCurrentAutomation(null);
-      
+
       // TODO: Refresh automations list if needed
-      
+
     } catch (error) {
       console.error('Error saving automation:', error);
       toast({
@@ -2076,10 +2087,10 @@ export default function Stages() {
                       className={cn(
                         "sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white align-middle",
                         columnVisibility.index && columnVisibility.entity
-                            ? "left-100"
-                            : columnVisibility.index || columnVisibility.entity
-                              ? "left-164"
-                              : "left-0",
+                          ? "left-100"
+                          : columnVisibility.index || columnVisibility.entity
+                            ? "left-164"
+                            : "left-0",
                       )}
                       rowSpan={totalHeaderRows}
                     >
@@ -2089,10 +2100,10 @@ export default function Stages() {
                       className={cn(
                         "sticky bg-blue-700 border-r-2 border-blue-500 z-20 text-white align-middle",
                         columnVisibility.index && columnVisibility.entity
-                            ? "left-120"
-                            : columnVisibility.index || columnVisibility.entity
-                              ? "left-164"
-                              : "left-0",
+                          ? "left-120"
+                          : columnVisibility.index || columnVisibility.entity
+                            ? "left-164"
+                            : "left-0",
                       )}
                       rowSpan={totalHeaderRows}
                     >
@@ -2150,7 +2161,7 @@ export default function Stages() {
                 {leafEntities.map((entity) => {
                   const stage = currentDept.stages.find(s => s.id === entity.id);
                   const automationName = stage?.web_automation?.automationName || '';
-                  
+
                   return (
                     <TableHead
                       key={`automation-${entity.id}`}
@@ -3267,109 +3278,109 @@ export default function Stages() {
                 <span className="ml-2 text-green-600">• {allKycDocuments.size} KYC documents loaded</span>
               )}
             </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* View Toggle Button */}
-          <Button
-            variant="outline"
-            onClick={() => setIsTransposed(!isTransposed)}
-            className="flex items-center gap-2"
-          >
-            {isTransposed ? (
-              <>
-                <RotateCcw className="h-4 w-4" />
-                Normal View
-              </>
-            ) : (
-              <>
-                <RotateCw className="h-4 w-4" />
-                Transposed View
-              </>
-            )}
-          </Button>
+          </div>
+          <div className="flex items-center gap-3">
+            {/* View Toggle Button */}
+            <Button
+              variant="outline"
+              onClick={() => setIsTransposed(!isTransposed)}
+              className="flex items-center gap-2"
+            >
+              {isTransposed ? (
+                <>
+                  <RotateCcw className="h-4 w-4" />
+                  Normal View
+                </>
+              ) : (
+                <>
+                  <RotateCw className="h-4 w-4" />
+                  Transposed View
+                </>
+              )}
+            </Button>
 
-          {/* Expand/Collapse All Buttons */}
-          <Button
-            variant="outline"
-            onClick={areAllRowsExpanded ? collapseAllRows : expandAllRows}
-            className="flex items-center gap-2 bg-transparent"
-          >
-            {areAllRowsExpanded ? (
-              <>
-                <ChevronUp className="h-4 w-4" />
-                Collapse All
-              </>
-            ) : (
-              <>
-                <ChevronDown className="h-4 w-4" />
-                Expand All
-              </>
-            )}
-          </Button>
+            {/* Expand/Collapse All Buttons */}
+            <Button
+              variant="outline"
+              onClick={areAllRowsExpanded ? collapseAllRows : expandAllRows}
+              className="flex items-center gap-2 bg-transparent"
+            >
+              {areAllRowsExpanded ? (
+                <>
+                  <ChevronUp className="h-4 w-4" />
+                  Collapse All
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-4 w-4" />
+                  Expand All
+                </>
+              )}
+            </Button>
 
-          {/* Column Visibility Control */}
-          <ColumnVisibilityControl
-            columns={columnVisibilityOptions}
-            onVisibilityChange={handleColumnVisibilityChange}
-            onShowAll={handleShowAllColumns}
-            onHideAll={handleHideAllColumns}
-            onResetToDefault={handleResetToDefault}
-            title="Column Visibility"
-            description="Control which columns are visible in the table"
-          />
+            {/* Column Visibility Control */}
+            <ColumnVisibilityControl
+              columns={columnVisibilityOptions}
+              onVisibilityChange={handleColumnVisibilityChange}
+              onShowAll={handleShowAllColumns}
+              onHideAll={handleHideAllColumns}
+              onResetToDefault={handleResetToDefault}
+              title="Column Visibility"
+              description="Control which columns are visible in the table"
+            />
 
-          {/* Entity Visibility Control */}
-          <EntityVisibilityControl
-            entities={entityVisibilityOptions}
-            onVisibilityChange={handleEntityVisibilityChange}
-            onShowAll={handleShowAllEntities}
-            onHideAll={handleHideAllEntities}
-            onResetToDefault={handleResetEntitiesToDefault}
-            showDefaultDisplayOnly={showDefaultDisplayOnly}
-            onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
-            title={isTransposed ? "Entity Visibility" : "Row Visibility"}
-            description={
-              isTransposed
-                ? "Control which entities are visible as columns"
-                : "Control which departments, classes, and subclasses are visible"
-            }
-          />
+            {/* Entity Visibility Control */}
+            <EntityVisibilityControl
+              entities={entityVisibilityOptions}
+              onVisibilityChange={handleEntityVisibilityChange}
+              onShowAll={handleShowAllEntities}
+              onHideAll={handleHideAllEntities}
+              onResetToDefault={handleResetEntitiesToDefault}
+              showDefaultDisplayOnly={showDefaultDisplayOnly}
+              onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
+              title={isTransposed ? "Entity Visibility" : "Row Visibility"}
+              description={
+                isTransposed
+                  ? "Control which entities are visible as columns"
+                  : "Control which departments, classes, and subclasses are visible"
+              }
+            />
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setCurrentAutomation(null)
-              setIsAutomationDialogOpen(true)
-            }}
-          >
-            <Settings className="mr-2 h-4 w-4" />
-            Automation Settings
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setCurrentAutomation(null)
+                setIsAutomationDialogOpen(true)
+              }}
+            >
+              <Settings className="mr-2 h-4 w-4" />
+              Automation Settings
+            </Button>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setCurrentAutomation(null);
-              setIsAutomationDialogOpen(true);
-            }}
-            className="flex items-center gap-2 bg-transparent"
-          >
-            <Zap className="mr-2 h-4 w-4" />
-            Add Automation
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setCurrentAutomation(null);
+                setIsAutomationDialogOpen(true);
+              }}
+              className="flex items-center gap-2 bg-transparent"
+            >
+              <Zap className="mr-2 h-4 w-4" />
+              Add Automation
+            </Button>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleExportToExcel}
-            disabled={!currentDept || !currentDept.stages || currentDept.stages.length === 0}
-            className="flex items-center gap-2 bg-transparent"
-          >
-            <FileSpreadsheet className="mr-2 h-4 w-4" />
-            Export to Excel
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportToExcel}
+              disabled={!currentDept || !currentDept.stages || currentDept.stages.length === 0}
+              className="flex items-center gap-2 bg-transparent"
+            >
+              <FileSpreadsheet className="mr-2 h-4 w-4" />
+              Export to Excel
+            </Button>
 
             <AddStageDialog
               open={isDialogOpen}
@@ -3377,11 +3388,11 @@ export default function Stages() {
               onAddStages={handleAddStages}
               departments={departmentList}
             />
+          </div>
         </div>
-      </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="mb-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="mb-4">
             {departments.map((dept) => (
               <TabsTrigger key={dept.id} value={dept.id}>
                 {dept.name}

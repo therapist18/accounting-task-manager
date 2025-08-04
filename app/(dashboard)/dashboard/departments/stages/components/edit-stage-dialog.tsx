@@ -828,7 +828,10 @@ function DocumentCard({
         const selectedKycDoc = kycDocuments.find(d => d.id === kycDocId);
         if (selectedKycDoc) {
             onUpdateDocument(doc.id, {
-                linkedKycDocument: selectedKycDoc.id, kycId: selectedKycDoc.id, name: selectedKycDoc.display_name || selectedKycDoc.name,
+                linkedKycDocument: selectedKycDoc.id, 
+                kycId: selectedKycDoc.id, 
+                name: selectedKycDoc.display_name || selectedKycDoc.name,
+                docType: doc.docType || 'normal_doc',
                 extractionSpecs: selectedKycDoc.fields || []
             });
         }
@@ -881,10 +884,25 @@ function DocumentCard({
                         <MultiEntityPicker entities={entityOptions} selectedEntities={doc.targetEntities || []} onSelectionChange={(selectedEntities) => onUpdateDocument(doc.id, { targetEntities: selectedEntities })} loading={loadingEntities} placeholder="Select which entities need this document..." />
                     </div>
                 )}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Document Name *</Label><Input value={doc.name || ''} onChange={(e) => onUpdateDocument(doc.id, { name: e.target.value })} placeholder="e.g., Application Form" disabled={isLinkedDocument} /></div>
                     <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Document Type</Label><Select value={doc.documentType} onValueChange={(value) => onUpdateDocument(doc.id, { documentType: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="upload">Upload Only</SelectItem><SelectItem value="extraction">Data Extraction Only</SelectItem><SelectItem value="both">Upload + Extraction</SelectItem></SelectContent></Select></div>
                     <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Input Type</Label><Select value={doc.inputType || 'file'} onValueChange={(value) => onUpdateDocument(doc.id, { inputType: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="file">File Upload</SelectItem><SelectItem value="message">Message/Text</SelectItem><SelectItem value="both">Both</SelectItem></SelectContent></Select></div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium text-gray-700">Doc Type</Label>
+                      <Select 
+                        value={doc.docType || 'normal_doc'} 
+                        onValueChange={(value: 'form' | 'normal_doc') => onUpdateDocument(doc.id, { docType: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="form">Form</SelectItem>
+                          <SelectItem value="normal_doc">Normal Doc</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                 </div>
                 <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Description</Label><Textarea value={doc.description || ''} onChange={(e) => onUpdateDocument(doc.id, { description: e.target.value })} placeholder="Brief description of this document's purpose..." rows={2} /></div>
                 <div className="flex items-center space-x-2"><Checkbox checked={doc.isRequired} onCheckedChange={(checked) => onUpdateDocument(doc.id, { isRequired: checked as boolean })} className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" /><Label className="text-sm font-normal text-gray-700">This document is required for stage completion</Label></div>

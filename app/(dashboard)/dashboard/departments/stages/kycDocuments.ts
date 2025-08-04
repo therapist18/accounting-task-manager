@@ -9,6 +9,8 @@ export interface KYCDocumentData {
   document_type: string
   fields: DocumentExtraction[]
   display_name?: string
+  doc_type?: 'form' | 'normal_doc'
+  metadata?: Record<string, any>
 }
 
 export async function createKYCDocument(documentData: KYCDocumentData): Promise<string> {
@@ -22,10 +24,15 @@ export async function createKYCDocument(documentData: KYCDocumentData): Promise<
         document_type: 'one_off',
         fields: documentData.fields,
         display_name: documentData.display_name || documentData.name,
+        doc_type: documentData.doc_type || 'normal_doc',
         listed: true,
         validity_days: '0',
         reminder_days: 'NULL',
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        metadata: {
+          ...(documentData.metadata || {}),
+          doc_type: documentData.doc_type || 'normal_doc'
+        }
       })
       .select('id')
       .single()

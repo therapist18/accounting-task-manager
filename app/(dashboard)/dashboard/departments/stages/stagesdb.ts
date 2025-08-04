@@ -36,7 +36,8 @@ export interface StageDocument {
       entityName: string
     }>
     kycId?: string
-    linkedKycDocument?: string // NEW FIELD
+    linkedKycDocument?: string
+    docType?: 'form' | 'normal_doc'
   }
   
   export interface EntityOption {
