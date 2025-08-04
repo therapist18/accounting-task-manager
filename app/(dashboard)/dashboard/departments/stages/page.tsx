@@ -343,7 +343,7 @@ export default function Stages() {
 
           {doc.description && <div className="text-gray-600 text-xs">{doc.description}</div>}
           {doc.docType && (
-            <div className="space-y-3">
+            <div className="flex items-center gap-2">
               <div className="flex items-center gap-2 text-xs font-medium">
                 <Info className="h-3 w-3" />
                 <span>Document Type:</span>
