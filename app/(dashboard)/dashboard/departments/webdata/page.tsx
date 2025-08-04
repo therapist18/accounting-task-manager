@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { useEffect, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
 import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, ChevronUp } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -38,20 +38,33 @@ interface EditingContext {
   className?: string
   subclassId?: string
   subclassName?: string
+  availableForms?: Array<{ id: string; name: string }>
 }
 
-// Also update the ApiWebData interface
 interface ApiWebData {
   id?: string
   name: string
+  efnsDisplayName?: string
   description?: string
-  type: 'standard' | 'conditional' | 'optional'
+  type: 'standard' | 'conditional' | 'optional' | 'document'
   order: number
   isVisible: boolean
   isRequired: boolean
   masterFieldId?: string
-  masterField?: any // Store master field data for display
-  variableName?: string // Add variable name field
+  masterField?: any
+  variableName?: string
+  fieldType?: 'text' | 'number' | 'boolean' | 'date' | 'select' | 'array' | 'object' | 'file'
+  entityType?: 'principal' | 'dependant' | 'both'
+  arrayItems?: Array<{ name: string; variableName: string; type: string }>
+  masterFieldIds?: string[]
+  kycDocumentId?: string
+  doc_id?: string
+  form_name?: string
+  doc_name?: string
+  automationId?: string
+  documentType?: string
+  fileExtensions?: string[]
+  maxFileSizeMb?: number
 }
 
 interface WebDataTableEntry extends ApiWebData {
@@ -115,6 +128,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
   })
   const [isReady, setIsReady] = useState(false)
   const [availableForms, setAvailableForms] = useState<Array<{ id: string; name: string }>>([])
+  const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set());
 
   const toggleExpanded = (key: string) => {
     setExpandedItems(prev => ({
@@ -131,14 +145,14 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
           .from('tm_departments')
           .select('id, name, stages')
           .order('name');
-        
+
         if (error) throw error;
-    
+
         // Extract all documents with docType 'form' from all stages
         const forms = departments.flatMap(dept => {
           if (!dept.stages || !Array.isArray(dept.stages)) return [];
-          
-          return dept.stages.flatMap((stage: any) => 
+
+          return dept.stages.flatMap((stage: any) =>
             (stage.documents || [])
               .filter((doc: any) => doc.docType === 'form')
               .map((doc: any) => ({
@@ -151,10 +165,10 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
               }))
           );
         });
-        
+
         // Remove duplicates by form ID
         const uniqueForms = Array.from(new Map(forms.map(form => [form.id, form])).values());
-        
+
         setAvailableForms(uniqueForms);
       } catch (error) {
         console.error('Error fetching forms:', error);
@@ -220,24 +234,37 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       variableName: ''
     }])
   }
+  // Updated data handler functions for the main WebData component
+
+  // Add these functions to your main WebData component
+
   const handleAddWebData = async (webData: any) => {
     if (!addContext) return;
-  
+
     try {
       setIsSubmitting(true);
       const currentWebData = getCurrentWebDataForContext(addContext) || [];
-  
-      // Extract fields from the automation_id wrapper
+
+      // Process the new structure with automation IDs
       let fieldsToAdd = [];
-      
-      // Check if data is wrapped with automation_id
-      const automationKeys = Object.keys(webData).filter(key => key.startsWith('auto_'));
-      
+
+      // Handle the new structure where data is keyed by automation ID
+      const automationKeys = Object.keys(webData).filter(key => key.startsWith('auto_') || key.includes('auto'));
+
       if (automationKeys.length > 0) {
-        // Data is wrapped with automation_id
-        const automationId = automationKeys[0];
-        fieldsToAdd = webData[automationId]?.fields || [];
-        console.log('Extracted fields from automation wrapper:', fieldsToAdd);
+        // Process each automation group
+        for (const automationId of automationKeys) {
+          const automationGroup = webData[automationId];
+          if (automationGroup?.fields) {
+            const groupFields = automationGroup.fields.map((field: any) => ({
+              ...field,
+              automationId: automationId,
+              doc_name: automationGroup.documentName,
+              form_name: automationGroup.documentName
+            }));
+            fieldsToAdd.push(...groupFields);
+          }
+        }
       } else if (webData.fields) {
         // Legacy format - fields directly available
         fieldsToAdd = webData.fields;
@@ -245,40 +272,47 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
         // Fallback - assume webData is the fields array
         fieldsToAdd = Array.isArray(webData) ? webData : [webData];
       }
-  
+
       if (!fieldsToAdd.length) {
         console.warn('No fields found in webData:', webData);
         return;
       }
-  
-      const newWebDataWithIds = fieldsToAdd.map((req, index) => ({
+
+      const newWebDataWithIds = fieldsToAdd.map((field, index) => ({
         id: generateWebDataId(index, currentWebData),
-        name: req.efnsDisplayName || req.name,
-        description: req.description,
-        type: req.type || 'standard',
-        isRequired: req.isRequired,
+        name: field.efnsDisplayName || field.name,
+        efnsDisplayName: field.efnsDisplayName || field.name,
+        description: field.description,
+        type: field.type || 'standard',
+        isRequired: field.isRequired,
         isVisible: true,
         order: currentWebData.length + index,
-        variableName: req.variableName || '',
-        efnsDisplayName: req.efnsDisplayName || req.name,
-        fieldType: req.fieldType || 'text',
-        arrayItems: req.arrayItems || [],
-        masterFieldIds: req.masterFieldIds || [],
-        doc_id: req.doc_id || null,
-        form_name: req.form_name || null
+        variableName: field.variableName || '',
+        fieldType: field.fieldType || 'text',
+        entityType: field.entityType || 'both',
+        arrayItems: field.arrayItems || [],
+        masterFieldIds: field.masterFieldIds || [],
+        kycDocumentId: field.kycDocumentId || null,
+        doc_id: field.doc_id || null,
+        form_name: field.form_name || null,
+        doc_name: field.doc_name || null,
+        automationId: field.automationId,
+        documentType: field.documentType,
+        fileExtensions: field.fileExtensions,
+        maxFileSizeMb: field.maxFileSizeMb
       }));
-  
+
       const updatedWebData = [...currentWebData, ...newWebDataWithIds];
       await saveWebDataForContext(addContext, updatedWebData);
       await refreshDepartments();
       setIsAddDialogOpen(false);
-  
+
       toast({
         title: "Success",
-        description: "WebData added successfully",
+        description: `${newWebDataWithIds.length} webData item(s) added successfully`,
         variant: "default"
       });
-  
+
     } catch (error) {
       console.error('Error adding webData:', error);
       toast({
@@ -290,89 +324,8 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       setIsSubmitting(false);
     }
   };
-  
-  const handleSaveWebData = async (updatedWebData: any) => {
-    if (!editingContext) {
-      toast({ title: "Error", description: "No editing context available.", variant: "destructive" });
-      return;
-    }
-  
-    try {
-      const currentWebData = getCurrentWebDataForContext(editingContext) || [];
-      let webDataIndex = -1;
-  
-      // Extract fields from the automation_id wrapper
-      let fieldsToUpdate = [];
-      const automationKeys = Object.keys(updatedWebData).filter(key => key.startsWith('auto_'));
-      
-      if (automationKeys.length > 0) {
-        // Data is wrapped with automation_id
-        const automationId = automationKeys[0];
-        fieldsToUpdate = updatedWebData[automationId]?.fields || [];
-      } else if (updatedWebData.fields) {
-        // Legacy format
-        fieldsToUpdate = updatedWebData.fields;
-      } else {
-        // Single field update
-        fieldsToUpdate = [updatedWebData];
-      }
-  
-      if (!fieldsToUpdate.length) {
-        console.warn('No fields found in updatedWebData:', updatedWebData);
-        return;
-      }
-  
-      const fieldToUpdate = fieldsToUpdate[0]; // For edit, we expect only one field
-  
-      if (editingWebData?.id) {
-        webDataIndex = currentWebData.findIndex(req => String(req.id) === String(editingWebData.id));
-      }
-      if (webDataIndex === -1 && fieldToUpdate.id) {
-        webDataIndex = currentWebData.findIndex(req => String(req.id) === String(fieldToUpdate.id));
-      }
-      if (webDataIndex === -1) {
-        webDataIndex = currentWebData.findIndex(req =>
-          req.name === (editingWebData?.name || fieldToUpdate.name) &&
-          req.order === (editingWebData?.order || fieldToUpdate.order)
-        );
-      }
-  
-      if (webDataIndex === -1) {
-        // Adding new webData
-        const newWebDataArray = [
-          ...currentWebData,
-          { 
-            ...fieldToUpdate, 
-            id: fieldToUpdate.id || Date.now().toString(), 
-            order: fieldToUpdate.order ?? currentWebData.length 
-          }
-        ];
-        await saveWebDataForContext(editingContext, newWebDataArray);
-      } else {
-        // Updating existing webData
-        const updatedWebDataArray = [...currentWebData];
-        updatedWebDataArray[webDataIndex] = {
-          ...updatedWebDataArray[webDataIndex],
-          ...fieldToUpdate,
-          id: fieldToUpdate.id || updatedWebDataArray[webDataIndex].id,
-          order: fieldToUpdate.order ?? updatedWebDataArray[webDataIndex].order
-        };
-        await saveWebDataForContext(editingContext, updatedWebDataArray);
-      }
-  
-      await refreshDepartments();
-      setIsEditDialogOpen(false);
-      setEditingWebData(null);
-      toast({ title: "Success", description: "WebData saved successfully" });
-    } catch (error) {
-      console.error('[handleSaveWebData] Error:', error);
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to save webData.",
-        variant: "destructive"
-      });
-    }
-  };
+
+  // Updated refreshDepartments function to handle the new data structure
   const refreshDepartments = async () => {
     try {
       const { data: departmentsData, error } = await supabase
@@ -397,21 +350,68 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
               req.class_id === classId && req.type === 'class'
             )
 
-            const classWebData = classWebDataRecord?.webData?.map((r: any, idx: number) => ({
-              id: r.id?.toString() || generateWebDataId(idx, classWebDataRecord.webData),
-              name: r.name || '',
-              description: r.description || '',
-              type: r.type || 'standard',
-              order: r.order ?? idx,
-              isVisible: r.isVisible !== false,
-              isRequired: r.isRequired !== false,
-              variableName: r.variableName || '',
-              efnsDisplayName: r.efnsDisplayName || r.name || '',
-              fieldType: r.fieldType || 'text',
-              arrayItems: r.arrayItems || [],
-              masterFieldIds: r.masterFieldIds || [],
-              kycDocumentId: r.kycDocumentId
-            })) || []
+            // Process the new webData structure
+            let classWebData = [];
+            if (classWebDataRecord?.webData) {
+              // Check if webData is an array (old format) or object with automation IDs (new format)
+              if (Array.isArray(classWebDataRecord.webData)) {
+                // Old format - convert to new structure
+                classWebData = classWebDataRecord.webData.map((r: any, idx: number) => ({
+                  id: r.id?.toString() || generateWebDataId(idx, classWebDataRecord.webData),
+                  name: r.efnsDisplayName || r.name || '',
+                  efnsDisplayName: r.efnsDisplayName || r.name || '',
+                  description: r.description || '',
+                  type: r.type || 'standard',
+                  order: r.order ?? idx,
+                  isVisible: r.isVisible !== false,
+                  isRequired: r.isRequired !== false,
+                  variableName: r.variableName || '',
+                  fieldType: r.fieldType || 'text',
+                  entityType: r.entityType || 'both',
+                  arrayItems: r.arrayItems || [],
+                  masterFieldIds: r.masterFieldIds || [],
+                  kycDocumentId: r.kycDocumentId,
+                  doc_id: r.doc_id,
+                  form_name: r.form_name,
+                  doc_name: r.doc_name,
+                  automationId: r.automationId || 'legacy'
+                }))
+              } else {
+                // New format - flatten automation groups
+                const flattenedData = [];
+                Object.keys(classWebDataRecord.webData).forEach(automationId => {
+                  const group = classWebDataRecord.webData[automationId];
+                  if (group?.fields) {
+                    group.fields.forEach((field: any, idx: number) => {
+                      flattenedData.push({
+                        id: field.id?.toString() || generateWebDataId(idx, group.fields),
+                        name: field.efnsDisplayName || field.name || '',
+                        efnsDisplayName: field.efnsDisplayName || field.name || '',
+                        description: field.description || '',
+                        type: field.type || 'standard',
+                        order: field.order ?? idx,
+                        isVisible: field.isVisible !== false,
+                        isRequired: field.isRequired !== false,
+                        variableName: field.variableName || '',
+                        fieldType: field.fieldType || 'text',
+                        entityType: field.entityType || 'both',
+                        arrayItems: field.arrayItems || [],
+                        masterFieldIds: field.masterFieldIds || [],
+                        kycDocumentId: field.kycDocumentId,
+                        doc_id: field.doc_id,
+                        form_name: field.form_name || group.documentName,
+                        doc_name: field.doc_name || group.documentName,
+                        automationId: automationId,
+                        documentType: field.documentType,
+                        fileExtensions: field.fileExtensions,
+                        maxFileSizeMb: field.maxFileSizeMb
+                      });
+                    });
+                  }
+                });
+                classWebData = flattenedData;
+              }
+            }
 
             const subClasses = (cls.subClasses || []).map(subCls => {
               const subClassId = `${classId}_${subCls.id}`
@@ -419,21 +419,65 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
                 req.class_id === subClassId && req.type === 'subclass'
               )
 
-              const subClassWebData = subClassWebDataRecord?.webData?.map((r: any, idx: number) => ({
-                id: r.id?.toString() || generateWebDataId(idx, subClassWebDataRecord.webData),
-                name: r.name || '',
-                description: r.description || '',
-                type: r.type || 'standard',
-                order: r.order ?? idx,
-                isVisible: r.isVisible !== false,
-                isRequired: r.isRequired !== false,
-                variableName: r.variableName || '',
-                efnsDisplayName: r.efnsDisplayName || r.name || '',
-                fieldType: r.fieldType || 'text',
-                arrayItems: r.arrayItems || [],
-                masterFieldIds: r.masterFieldIds || [],
-                kycDocumentId: r.kycDocumentId
-              })) || []
+              // Process subclass webData with same logic
+              let subClassWebData = [];
+              if (subClassWebDataRecord?.webData) {
+                if (Array.isArray(subClassWebDataRecord.webData)) {
+                  subClassWebData = subClassWebDataRecord.webData.map((r: any, idx: number) => ({
+                    id: r.id?.toString() || generateWebDataId(idx, subClassWebDataRecord.webData),
+                    name: r.efnsDisplayName || r.name || '',
+                    efnsDisplayName: r.efnsDisplayName || r.name || '',
+                    description: r.description || '',
+                    type: r.type || 'standard',
+                    order: r.order ?? idx,
+                    isVisible: r.isVisible !== false,
+                    isRequired: r.isRequired !== false,
+                    variableName: r.variableName || '',
+                    fieldType: r.fieldType || 'text',
+                    entityType: r.entityType || 'both',
+                    arrayItems: r.arrayItems || [],
+                    masterFieldIds: r.masterFieldIds || [],
+                    kycDocumentId: r.kycDocumentId,
+                    doc_id: r.doc_id,
+                    form_name: r.form_name,
+                    doc_name: r.doc_name,
+                    automationId: r.automationId || 'legacy'
+                  }))
+                } else {
+                  const flattenedData = [];
+                  Object.keys(subClassWebDataRecord.webData).forEach(automationId => {
+                    const group = subClassWebDataRecord.webData[automationId];
+                    if (group?.fields) {
+                      group.fields.forEach((field: any, idx: number) => {
+                        flattenedData.push({
+                          id: field.id?.toString() || generateWebDataId(idx, group.fields),
+                          name: field.efnsDisplayName || field.name || '',
+                          efnsDisplayName: field.efnsDisplayName || field.name || '',
+                          description: field.description || '',
+                          type: field.type || 'standard',
+                          order: field.order ?? idx,
+                          isVisible: field.isVisible !== false,
+                          isRequired: field.isRequired !== false,
+                          variableName: field.variableName || '',
+                          fieldType: field.fieldType || 'text',
+                          entityType: field.entityType || 'both',
+                          arrayItems: field.arrayItems || [],
+                          masterFieldIds: field.masterFieldIds || [],
+                          kycDocumentId: field.kycDocumentId,
+                          doc_id: field.doc_id,
+                          form_name: field.form_name || group.documentName,
+                          doc_name: field.doc_name || group.documentName,
+                          automationId: automationId,
+                          documentType: field.documentType,
+                          fileExtensions: field.fileExtensions,
+                          maxFileSizeMb: field.maxFileSizeMb
+                        });
+                      });
+                    }
+                  });
+                  subClassWebData = flattenedData;
+                }
+              }
 
               return {
                 ...subCls,
@@ -453,21 +497,65 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
             req.class_id === subdept.id.toString() && req.type === 'subdepartment'
           )
 
-          const uploadWebData = subdeptWebDataRecord?.webData?.map((r: any, idx: number) => ({
-            id: r.id?.toString() || generateWebDataId(idx, subdeptWebDataRecord.webData),
-            name: r.name || '',
-            description: r.description || '',
-            type: r.type || 'standard',
-            order: r.order ?? idx,
-            isVisible: r.isVisible !== false,
-            isRequired: r.isRequired !== false,
-            variableName: r.variableName || '',
-            efnsDisplayName: r.efnsDisplayName || r.name || '',
-            fieldType: r.fieldType || 'text',
-            arrayItems: r.arrayItems || [],
-            masterFieldIds: r.masterFieldIds || [],
-            kycDocumentId: r.kycDocumentId
-          })) || []
+          // Process subdepartment webData with same logic
+          let uploadWebData = [];
+          if (subdeptWebDataRecord?.webData) {
+            if (Array.isArray(subdeptWebDataRecord.webData)) {
+              uploadWebData = subdeptWebDataRecord.webData.map((r: any, idx: number) => ({
+                id: r.id?.toString() || generateWebDataId(idx, subdeptWebDataRecord.webData),
+                name: r.efnsDisplayName || r.name || '',
+                efnsDisplayName: r.efnsDisplayName || r.name || '',
+                description: r.description || '',
+                type: r.type || 'standard',
+                order: r.order ?? idx,
+                isVisible: r.isVisible !== false,
+                isRequired: r.isRequired !== false,
+                variableName: r.variableName || '',
+                fieldType: r.fieldType || 'text',
+                entityType: r.entityType || 'both',
+                arrayItems: r.arrayItems || [],
+                masterFieldIds: r.masterFieldIds || [],
+                kycDocumentId: r.kycDocumentId,
+                doc_id: r.doc_id,
+                form_name: r.form_name,
+                doc_name: r.doc_name,
+                automationId: r.automationId || 'legacy'
+              }))
+            } else {
+              const flattenedData = [];
+              Object.keys(subdeptWebDataRecord.webData).forEach(automationId => {
+                const group = subdeptWebDataRecord.webData[automationId];
+                if (group?.fields) {
+                  group.fields.forEach((field: any, idx: number) => {
+                    flattenedData.push({
+                      id: field.id?.toString() || generateWebDataId(idx, group.fields),
+                      name: field.efnsDisplayName || field.name || '',
+                      efnsDisplayName: field.efnsDisplayName || field.name || '',
+                      description: field.description || '',
+                      type: field.type || 'standard',
+                      order: field.order ?? idx,
+                      isVisible: field.isVisible !== false,
+                      isRequired: field.isRequired !== false,
+                      variableName: field.variableName || '',
+                      fieldType: field.fieldType || 'text',
+                      entityType: field.entityType || 'both',
+                      arrayItems: field.arrayItems || [],
+                      masterFieldIds: field.masterFieldIds || [],
+                      kycDocumentId: field.kycDocumentId,
+                      doc_id: field.doc_id,
+                      form_name: field.form_name || group.documentName,
+                      doc_name: field.doc_name || group.documentName,
+                      automationId: automationId,
+                      documentType: field.documentType,
+                      fileExtensions: field.fileExtensions,
+                      maxFileSizeMb: field.maxFileSizeMb
+                    });
+                  });
+                }
+              });
+              uploadWebData = flattenedData;
+            }
+          }
 
           return {
             ...subdept,
@@ -494,6 +582,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     }
   }
 
+  // Updated saveWebDataForContext to handle the new structure
   const saveWebDataForContext = async (context: EditingContext, webData: ApiWebData[]) => {
     try {
       let classId = '';
@@ -519,26 +608,52 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
 
       if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
 
-      const webDataToSave = webData.map(req => ({
-        id: req.id,
-        name: req.name,
-        description: req.description,
-        type: req.type,
-        order: req.order,
-        isVisible: req.isVisible,
-        isRequired: req.isRequired,
-        variableName: req.variableName,
-        efnsDisplayName: req.efnsDisplayName,
-        fieldType: req.fieldType,
-        arrayItems: req.arrayItems,
-        masterFieldIds: req.masterFieldIds,
-        kycDocumentId: req.kycDocumentId
-      }));
+      // Group webData by automation ID for the new structure
+      const groupedWebData: Record<string, any> = {};
+
+      webData.forEach(field => {
+        const automationId = field.automationId || 'legacy';
+
+        if (!groupedWebData[automationId]) {
+          groupedWebData[automationId] = {
+            automationId: automationId,
+            documentName: field.form_name || field.doc_name || 'Ungrouped Fields',
+            documentId: field.doc_id || null,
+            fields: []
+          };
+        }
+
+        groupedWebData[automationId].fields.push({
+          id: field.id,
+          name: field.name,
+          efnsDisplayName: field.efnsDisplayName || field.name,
+          description: field.description,
+          type: field.type,
+          order: field.order,
+          isVisible: field.isVisible,
+          isRequired: field.isRequired,
+          variableName: field.variableName,
+          fieldType: field.fieldType,
+          entityType: field.entityType,
+          arrayItems: field.arrayItems,
+          masterFieldIds: field.masterFieldIds,
+          kycDocumentId: field.kycDocumentId,
+          doc_id: field.doc_id,
+          form_name: field.form_name,
+          doc_name: field.doc_name,
+          documentType: field.documentType,
+          fileExtensions: field.fileExtensions,
+          maxFileSizeMb: field.maxFileSizeMb
+        });
+      });
 
       if (existingRecord) {
         const { error: updateError } = await supabase
           .from('tm_class_requirements')
-          .update({ webData: webDataToSave, updated_at: new Date().toISOString() })
+          .update({
+            webData: groupedWebData,
+            updated_at: new Date().toISOString()
+          })
           .eq('class_id', classId)
           .eq('type', webDataType);
         if (updateError) throw updateError;
@@ -548,7 +663,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
           .insert({
             class_id: classId,
             type: webDataType,
-            webData: webDataToSave,
+            webData: groupedWebData,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           });
@@ -560,7 +675,88 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       throw error;
     }
   }
+  const handleSaveWebData = async (updatedWebData: any) => {
+    if (!editingContext) {
+      toast({ title: "Error", description: "No editing context available.", variant: "destructive" });
+      return;
+    }
 
+    try {
+      const currentWebData = getCurrentWebDataForContext(editingContext) || [];
+      let webDataIndex = -1;
+
+      // Extract fields from the automation_id wrapper
+      let fieldsToUpdate = [];
+      const automationKeys = Object.keys(updatedWebData).filter(key => key.startsWith('auto_'));
+
+      if (automationKeys.length > 0) {
+        // Data is wrapped with automation_id
+        const automationId = automationKeys[0];
+        fieldsToUpdate = updatedWebData[automationId]?.fields || [];
+      } else if (updatedWebData.fields) {
+        // Legacy format
+        fieldsToUpdate = updatedWebData.fields;
+      } else {
+        // Single field update
+        fieldsToUpdate = [updatedWebData];
+      }
+
+      if (!fieldsToUpdate.length) {
+        console.warn('No fields found in updatedWebData:', updatedWebData);
+        return;
+      }
+
+      const fieldToUpdate = fieldsToUpdate[0]; // For edit, we expect only one field
+
+      if (editingWebData?.id) {
+        webDataIndex = currentWebData.findIndex(req => String(req.id) === String(editingWebData.id));
+      }
+      if (webDataIndex === -1 && fieldToUpdate.id) {
+        webDataIndex = currentWebData.findIndex(req => String(req.id) === String(fieldToUpdate.id));
+      }
+      if (webDataIndex === -1) {
+        webDataIndex = currentWebData.findIndex(req =>
+          req.name === (editingWebData?.name || fieldToUpdate.name) &&
+          req.order === (editingWebData?.order || fieldToUpdate.order)
+        );
+      }
+
+      if (webDataIndex === -1) {
+        // Adding new webData
+        const newWebDataArray = [
+          ...currentWebData,
+          {
+            ...fieldToUpdate,
+            id: fieldToUpdate.id || Date.now().toString(),
+            order: fieldToUpdate.order ?? currentWebData.length
+          }
+        ];
+        await saveWebDataForContext(editingContext, newWebDataArray);
+      } else {
+        // Updating existing webData
+        const updatedWebDataArray = [...currentWebData];
+        updatedWebDataArray[webDataIndex] = {
+          ...updatedWebDataArray[webDataIndex],
+          ...fieldToUpdate,
+          id: fieldToUpdate.id || updatedWebDataArray[webDataIndex].id,
+          order: fieldToUpdate.order ?? updatedWebDataArray[webDataIndex].order
+        };
+        await saveWebDataForContext(editingContext, updatedWebDataArray);
+      }
+
+      await refreshDepartments();
+      setIsEditDialogOpen(false);
+      setEditingWebData(null);
+      toast({ title: "Success", description: "WebData saved successfully" });
+    } catch (error) {
+      console.error('[handleSaveWebData] Error:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to save webData.",
+        variant: "destructive"
+      });
+    }
+  };
   const handleDeleteClick = (type: 'subdepartment' | 'class' | 'subclass', index: number) => {
     setDeleteContext({ type, index })
     const context = {
@@ -637,7 +833,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     refreshDepartments()
   }, [])
 
-  
+
   const handleMove = async (index: number, direction: 'up' | 'down', moveContext: EditingContext) => {
     if (!moveContext) return;
 
@@ -681,13 +877,60 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     if (activeDept !== deptId) setActiveDept(deptId)
   };
 
+
+  // Group webData by automation ID (document)
+  const groupWebDataByDocument = useCallback((webData: WebDataTableEntry[]) => {
+    const groups: Record<string, {
+      automationId: string;
+      documentName: string;
+      docId: string | null;
+      fields: WebDataTableEntry[];
+    }> = {};
+
+    webData.forEach(field => {
+      const automationId = field.automationId || 'ungrouped';
+      const documentName = field.form_name || field.doc_name || 'Ungrouped Fields';
+      const docId = field.doc_id || null;
+
+      if (!groups[automationId]) {
+        groups[automationId] = {
+          automationId,
+          documentName,
+          docId,
+          fields: []
+        };
+      }
+
+      groups[automationId].fields.push(field);
+    });
+
+    return groups;
+  }, []);
+  const toggleDocumentExpansion = useCallback((automationId: string) => {
+    setExpandedDocuments(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(automationId)) {
+        newSet.delete(automationId);
+      } else {
+        newSet.add(automationId);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const handleEditClick = useCallback((req: WebDataTableEntry, context: EditingContext) => {
+    setEditingWebData(req);
+    setEditingContext(context);
+    setIsEditDialogOpen(true);
+  }, []);
+
   const renderWebData = (webData: WebDataTableEntry[] | null | undefined, context: EditingContext) => {
     const safeWebData = (webData || []).sort((a, b) => a.order - b.order);
-    const handleEditClick = (req: WebDataTableEntry) => {
-      setEditingWebData(req);
-      setEditingContext(context);
-      setIsEditDialogOpen(true);
-    };
+    const groupedByDocument = groupWebDataByDocument(safeWebData);
+
+    const onEditClick = (req: WebDataTableEntry) => handleEditClick(req, context);
+    const onDeleteClick = (type: 'subdepartment' | 'class' | 'subclass', index: number) => handleDeleteClick(type, index);
+    const onMove = (index: number, direction: 'up' | 'down', moveContext: EditingContext) => handleMove(index, direction, moveContext);
 
     return (
       <div className="relative h-full overflow-y-auto border rounded-lg bg-card">
@@ -695,7 +938,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
           <TableHeader className="sticky top-0 z-10 bg-blue-500 dark:bg-blue-800 backdrop-blur-sm border-b">
             <TableRow>
               <TableHead className="w-[60px] text-white border-r">#</TableHead>
-              <TableHead className="text-white border-r">EFNS Display Name</TableHead>
+              <TableHead className="text-white border-r">Document/Field Name</TableHead>
               <TableHead className="w-[200px] text-white border-r">Automation Variable</TableHead>
               <TableHead className="w-[120px] text-white border-r">Type</TableHead>
               <TableHead className="text-white border-r">Description</TableHead>
@@ -703,49 +946,138 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
             </TableRow>
           </TableHeader>
           <TableBody>
-            {safeWebData.length > 0 ? (
-              safeWebData.map((req, idx) => (
-                <TableRow key={req.id || req.tempId || idx} className="group hover:bg-muted/50">
-                  <TableCell className="font-medium border-r">
-                      {req.order + 1}
-                  </TableCell>
-                  <TableCell className="border-r">
-                    <div className="font-medium text-card-foreground">{req.name}</div>
-                  </TableCell>
-                  <TableCell className="border-r">
-                    <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
-                      {req.variableName || '-'}
-                    </code>
-                  </TableCell>
-                  <TableCell className="border-r">
-                    <Badge variant="secondary" className="capitalize">
-                      {req.fieldType || 'text'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground border-r">
-                    <span className={!req.description ? 'italic' : ''}>
-                      {req.description || 'No description'}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-right border-r">
-                    <div className="flex items-center space-x-1">
-                      <div className="flex-col">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleMove(idx, 'up', context)} disabled={idx === 0}>
-                          <ChevronUp className="h-4 w-4" />
+            {Object.keys(groupedByDocument).length > 0 ? (
+              Object.entries(groupedByDocument).map(([automationId, group], groupIndex) => (
+                <React.Fragment key={automationId}>
+                  {/* Document Header Row */}
+                  <TableRow className="bg-muted/30 border-b-2">
+                    <TableCell className="font-medium border-r">
+                      <Badge variant="outline" className="text-xs">
+                        DOC
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="border-r">
+                      <div className="flex items-center space-x-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => toggleDocumentExpansion(automationId)}
+                          className="h-6 w-6 p-0"
+                        >
+                          {expandedDocuments.has(automationId) ?
+                            <ChevronDown className="h-4 w-4" /> :
+                            <ChevronRight className="h-4 w-4" />
+                          }
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleMove(idx, 'down', context)} disabled={idx === safeWebData.length - 1}>
-                          <ChevronDown className="h-4 w-4" />
+                        <FileText className="h-4 w-4 text-blue-500" />
+                        <span className="font-medium text-card-foreground">
+                          {group.documentName}
+                        </span>
+                        <Badge variant="secondary" className="text-xs">
+                          {group.fields.length} fields
+                        </Badge>
+                      </div>
+                    </TableCell>
+                    <TableCell className="border-r">
+                      <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
+                        {automationId}
+                      </code>
+                    </TableCell>
+                    <TableCell className="border-r">
+                      <Badge variant="outline" className="capitalize">
+                        Document
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground border-r">
+                      Form with {group.fields.length} field{group.fields.length !== 1 ? 's' : ''}
+                    </TableCell>
+                    <TableCell className="border-r">
+                      <div className="flex items-center space-x-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => toggleDocumentExpansion(automationId)}
+                        >
+                          <Plus className="h-4 w-4" />
                         </Button>
                       </div>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEditClick(req)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDeleteClick(context.type, idx)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
+                    </TableCell>
+                  </TableRow>
+
+                  {/* Field Rows (shown when expanded) */}
+                  {expandedDocuments.has(automationId) && group.fields.map((field, fieldIndex) => (
+                    <TableRow key={field.id || field.tempId || `${automationId}-${fieldIndex}`} className="group hover:bg-muted/50 pl-8">
+                      <TableCell className="font-medium border-r pl-8">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-4 h-px bg-muted-foreground"></div>
+                          <span className="text-sm">{field.order + 1}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="border-r pl-8">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-4 h-px bg-muted-foreground"></div>
+                          <div className="font-medium text-card-foreground">{field.efnsDisplayName || field.name}</div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="border-r">
+                        <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
+                          {field.variableName || '-'}
+                        </code>
+                      </TableCell>
+                      <TableCell className="border-r">
+                        <Badge variant="secondary" className="capitalize">
+                          {field.fieldType || 'text'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground border-r">
+                        <span className={!field.description ? 'italic' : ''}>
+                          {field.description || 'No description'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right border-r">
+                        <div className="flex items-center space-x-1">
+                          <div className="flex-col">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => handleMove(field.order, 'up', context)}
+                              disabled={field.order === 0}
+                            >
+                              <ChevronUp className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => handleMove(field.order, 'down', context)}
+                              disabled={field.order === safeWebData.length - 1}
+                            >
+                              <ChevronDown className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => handleEditClick(field)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => handleDeleteClick(context.type, field.order)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </React.Fragment>
               ))
             ) : (
               <TableRow>

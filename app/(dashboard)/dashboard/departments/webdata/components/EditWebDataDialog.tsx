@@ -460,7 +460,7 @@ export function EditWebDataDialog({
                   <SelectValue placeholder="Select a form*" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None (Available for all forms)</SelectItem>
+                  <SelectItem value="none">None (Available for all forms)</SelectItem>
                   {availableForms.map(form => (
                     <SelectItem key={form.id} value={form.id}>
                       {form.name}
