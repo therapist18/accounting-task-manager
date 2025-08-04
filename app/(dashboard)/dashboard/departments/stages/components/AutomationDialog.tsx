@@ -44,29 +44,39 @@ import { supabase } from "@/lib/supabase/client"
 const automationFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
   description: z.string().optional(),
-  webhook_url: z.string().url("Must be a valid URL"),
-  webhook_method: z.enum(["POST", "PUT", "PATCH", "GET"]).default("POST"),
+  webhook_url: z.string().url("Must be a valid URL").optional().or(z.literal("")),
+  webhook_method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).default("POST"),
   is_active: z.boolean().default(true),
   category: z
     .enum([
       "general",
-      "document_processing",
+      "notifications",
+      "integrations",
       "form_automation",
-      "notification",
-      "integration",
-      "workflow",
+      "workflows",
+      "data_sync",
+      "custom",
     ])
     .default("general"),
   max_concurrent_runs: z.number().min(1).default(1),
   queue_priority: z.number().default(0),
   async_processing: z.boolean().default(false),
-  // These fields were in the schema but not in the original form, keeping for consistency
+  login: z.object({
+    url: z.string().url("Must be a valid URL").optional(),
+    email: z.string().email("Must be a valid email"),
+    idNumber: z.string().min(1, "ID Number is required"),
+    password: z.string().min(1, "Password is required")
+  }).optional(),
   trigger_conditions: z.record(z.any()).default({}),
   form_fields: z.array(z.any()).default([]),
 })
 
 type AutomationFormValues = z.infer<typeof automationFormSchema>
-type Automation = AutomationFormValues & { id: string }
+type Automation = AutomationFormValues & { 
+  id: string
+  created_at?: string
+  updated_at?: string
+}
 
 interface AutomationDialogProps {
   isOpen: boolean
@@ -165,16 +175,37 @@ export function AutomationDialog({
   const handleSubmit = async (data: AutomationFormValues) => {
     try {
       setIsSaving(true)
-      await onSave({ ...data, id: selectedAutomation?.id })
+      
+      // Generate a new ID if this is a new automation
+      const automationId = selectedAutomation?.id || crypto.randomUUID()
+      
+      // Prepare the automation data with proper structure
+      const automationData = {
+        ...data,
+        id: automationId, // Use existing ID or generate a new one
+        // Ensure login credentials are properly structured
+        login: data.login ? {
+          email: data.login.email,
+          idNumber: data.login.idNumber,
+          password: data.login.password
+        } : undefined,
+        created_at: selectedAutomation?.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+      
+      await onSave(automationData)
+      
       toast({
         title: "Success",
         description: selectedAutomation
           ? "Automation updated successfully"
           : "Automation created successfully",
       })
+      
       await fetchAutomations()
       setActiveTab("existing")
       setSelectedAutomation(null)
+      form.reset()
     } catch (error) {
       console.error("Error saving automation:", error)
       toast({
@@ -339,6 +370,66 @@ export function AutomationDialog({
                           </FormItem>
                         )}
                       />
+                    </div>
+                     <div className="pt-4 border-t">
+                      <h4 className="text-sm font-medium mb-4">Form Automation</h4>
+                      <FormField
+                        control={form.control}
+                        name="login.url"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Form URL</FormLabel>
+                            <FormControl>
+                              <Input placeholder="https://example.com/form" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <div className="mt-4 space-y-4 p-4 bg-gray-50 rounded-lg">
+                        <h5 className="text-sm font-medium">Login Credentials</h5>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <FormField
+                            control={form.control}
+                            name="login.email"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Email</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="user@example.com" type="email" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name="login.idNumber"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>ID Number</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="12345678" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name="login.password"
+                            render={({ field }) => (
+                              <FormItem className="md:col-span-2">
+                                <FormLabel>Password</FormLabel>
+                                <FormControl>
+                                  <Input type="password" placeholder="••••••••" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      </div>
                     </div>
                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <FormField

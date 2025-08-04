@@ -1436,7 +1436,7 @@ export default function Stages() {
       // If there's an existing automation (editing)
       if (currentAutomation) {
         const { error } = await supabase
-          .from('automations')
+          .from('tm_automations')
           .update(automation)
           .eq('id', currentAutomation.id);
 
@@ -1449,7 +1449,7 @@ export default function Stages() {
       } else {
         // Creating a new automation
         const { data, error } = await supabase
-          .from('automations')
+          .from('tm_automations')
           .insert([automation])
           .select()
           .single();
@@ -3357,20 +3357,6 @@ export default function Stages() {
               <Settings className="mr-2 h-4 w-4" />
               Automation Settings
             </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setCurrentAutomation(null);
-                setIsAutomationDialogOpen(true);
-              }}
-              className="flex items-center gap-2 bg-transparent"
-            >
-              <Zap className="mr-2 h-4 w-4" />
-              Add Automation
-            </Button>
-
             <Button
               variant="outline"
               size="sm"

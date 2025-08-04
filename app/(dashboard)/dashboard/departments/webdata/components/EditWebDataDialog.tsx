@@ -33,6 +33,7 @@ interface ApiWebData {
   masterFieldIds?: string[] // New array format
   fieldType?: 'text' | 'number' | 'boolean' | 'date' | 'select' | 'array' | 'object'
   efnsDisplayName?: string
+  formName?: string
   arrayItems?: Array<{ name: string; variableName: string; type: 'text' | 'number' | 'boolean' | 'date' | 'select' }>
 }
 
@@ -59,7 +60,10 @@ interface EditWebDataDialogProps {
   webData: ApiWebData | null
   onSave: (updatedWebData: ApiWebData) => Promise<void>
   isSubmitting: boolean
-  context: { subdepartmentName: string } | null
+  context: { 
+    subdepartmentName: string 
+    availableForms?: Array<{ id: string; name: string }> 
+  } | null
 }
 
 function MasterFieldPicker({ availableFields, onSelect }: { availableFields: JobField[]; onSelect: (field: JobField) => void }) {
@@ -115,6 +119,7 @@ export function EditWebDataDialog({
   const [kycDocumentOption, setKycDocumentOption] = useState<'existing' | 'create_new' | 'none'>('none')
   const [allMasterFields, setAllMasterFields] = useState<JobField[]>([])
   const [loadingMasterFields, setLoadingMasterFields] = useState(false)
+  const [selectedFormId, setSelectedFormId] = useState<string>('')
 
   useEffect(() => {
     if (webData && isOpen) {
@@ -154,8 +159,16 @@ export function EditWebDataDialog({
         masterFieldIds: masterFieldIds,
         fieldType: webData.fieldType || 'text',
         efnsDisplayName: webData.efnsDisplayName || webData.name,
+        formName: webData.formName || '',
         arrayItems: webData.arrayItems || []
-      })
+      });
+
+      // Set the selected form if it exists
+      if (webData.formName) {
+        setSelectedFormId(webData.formName);
+      } else {
+        setSelectedFormId('');
+      }
 
       setKycDocumentOption(webData.kycDocumentId ? 'existing' : 'none')
 
@@ -269,6 +282,7 @@ export function EditWebDataDialog({
         masterFieldIds: (updatedData.masterFields || []).map(f => f.id.toString()), // Only store IDs
         fieldType: updatedData.fieldType || 'text',
         efnsDisplayName: updatedData.efnsDisplayName || updatedData.name,
+        formName: selectedFormId || undefined,
         arrayItems: updatedData.arrayItems || []
       }
 
@@ -404,6 +418,39 @@ export function EditWebDataDialog({
               placeholder="Description (optional)"
             />
           </div>
+
+          {context?.availableForms && context.availableForms.length > 0 && (
+            <div className="space-y-2">
+              <Label>Associated Form</Label>
+              <Select
+                value={selectedFormId}
+                onValueChange={(value) => {
+                  setSelectedFormId(value);
+                  setFormData(prev => ({
+                    ...prev!,
+                    formName: value || undefined
+                  }));
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a form (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">None (Available for all forms)</SelectItem>
+                  {context.availableForms.map(form => (
+                    <SelectItem key={form.id} value={form.id}>
+                      {form.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {selectedFormId 
+                  ? `Field will only be available for the selected form`
+                  : 'Field will be available for all forms'}
+              </p>
+            </div>
+          )}
 
           {/* Master Field Linking UI */}
           <div className="space-y-3">

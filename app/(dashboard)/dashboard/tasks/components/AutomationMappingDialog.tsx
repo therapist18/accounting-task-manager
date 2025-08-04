@@ -237,23 +237,99 @@ export const AutomationMappingDialog = ({
     }
   }, [currentIndividualId, jobFields]);
 
+  // Function to prepare form data from source data
+  const prepareFormData = () => {
+    const formData: Record<string, any> = {};
+    
+    // Map webData fields to form data based on their variable names
+    webData.forEach(item => {
+      const { sources } = getSourceInfo(item.masterFieldIds || []);
+      if (sources.length > 0) {
+        const sourceInfo = sources[0]; // Use first source
+        const value = getSourceValue(sourceInfo.table, sourceInfo.path);
+        
+        // Convert the value to string if it's not "Missing"
+        if (typeof value === 'string' && value !== 'Missing') {
+          formData[item.variableName] = value;
+        }
+      }
+    });
+
+    return formData;
+  };
+
   const handleRunAutomation = async () => {
-    if (!automationId || !taskId) {
-      toast({ title: 'Error', description: 'Missing required information to start automation', variant: 'destructive' });
+    if (!currentIndividualId) {
+      toast({ 
+        title: 'Error', 
+        description: 'Please enter an Individual ID to run automation', 
+        variant: 'destructive' 
+      });
       return;
     }
+
     try {
       setIsAutomationRunning(true);
-      const response = await fetch(`/api/automations/trigger`, {
+      
+      // Prepare the form data from current source data
+      const formData = prepareFormData();
+      
+      // Prepare the payload for the local API
+      const payload = {
+        url: "https://fns.immigration.go.ke/account/login.html",
+        login: {
+          email: "edwinnyakundi91@gmail.com",
+          idNumber: "30247621",
+          password: "Nyakundi298"
+        },
+        formData: formData,
+        // Include additional context
+        taskId: taskId,
+        individualId: currentIndividualId,
+        classId: classId,
+        requirementId: getRequirementId()
+      };
+
+      console.log('Sending automation request with payload:', payload);
+
+      // Call the local API
+      const response = await fetch('http://localhost:3000/api/permit/class-C', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ automationId, taskId, stageId: requirementId, individualId: currentIndividualId }),
+        headers: { 
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
       });
-      if (!response.ok) throw new Error((await response.json()).message || 'Failed to start automation');
-      toast({ title: 'Success', description: (await response.json()).message || 'Automation started successfully', variant: 'default' });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || 'Failed to start automation');
+      }
+
+      toast({ 
+        title: 'Success', 
+        description: result.message || 'Automation completed successfully', 
+        variant: 'default' 
+      });
+
     } catch (error) {
       console.error('Error triggering automation:', error);
-      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to start automation', variant: 'destructive' });
+      
+      // Check if it's a network error (server not running)
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        toast({ 
+          title: 'Connection Error', 
+          description: 'Could not connect to automation server. Make sure the server is running on localhost:3000', 
+          variant: 'destructive' 
+        });
+      } else {
+        toast({ 
+          title: 'Error', 
+          description: error instanceof Error ? error.message : 'Failed to start automation', 
+          variant: 'destructive' 
+        });
+      }
     } finally {
       setIsAutomationRunning(false);
     }
@@ -277,17 +353,17 @@ export const AutomationMappingDialog = ({
 
   const getSourceValue = (table: string, path: string) => {
     const tableData = sourceData[table];
-    if (!tableData) return <span className="text-red-600">Missing</span>;
+    if (!tableData) return "Missing";
     if (Array.isArray(tableData)) {
-      if (tableData.length === 0) return <span className="text-red-600">Missing</span>;
+      if (tableData.length === 0) return "Missing";
       for (const row of tableData) {
         const value = getNestedValue(row, path);
         if (value !== undefined && value !== null) return String(value);
       }
-      return <span className="text-red-600">Missing</span>;
+      return "Missing";
     }
     const value = getNestedValue(tableData, path);
-    return value !== undefined && value !== null ? String(value) : <span className="text-red-600">Missing</span>;
+    return value !== undefined && value !== null ? String(value) : "Missing";
   };
 
   const startEditing = (rowIndex: number, sourceIndex: number, table: string, path: string, currentValue: string) => {
@@ -517,12 +593,13 @@ export const AutomationMappingDialog = ({
                                   <div className="space-y-2 text-sm">
                                     {sources.map((sourceInfo, idx) => {
                                       const isEditing = editingCell?.rowIndex === index && editingCell?.sourceIndex === idx;
+                                      const value = getSourceValue(sourceInfo.table, sourceInfo.path);
                                       return (
                                         <div 
                                           key={idx} 
                                           className={`p-1 rounded ${isEditing ? 'ring-1 ring-blue-500' : 'hover:bg-gray-100'}`}
                                         >
-                                          {getSourceValue(sourceInfo.table, sourceInfo.path)}
+                                          {typeof value === 'string' ? value : <span className="text-red-600">Missing</span>}
                                         </div>
                                       );
                                     })}
@@ -552,21 +629,19 @@ export const AutomationMappingDialog = ({
 
         <div className="flex justify-between items-center pt-4 border-t mt-auto">
           <div>
-            {automationId && (
-              <Button
-                onClick={handleRunAutomation}
-                disabled={isAutomationRunning || !currentIndividualId || isLoadingData}
-                variant="default"
-                className="gap-2"
-              >
-                {isAutomationRunning ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Zap className="h-4 w-4" />
-                )}
-                Start Automation
-              </Button>
-            )}
+            <Button
+              onClick={handleRunAutomation}
+              disabled={isAutomationRunning || !currentIndividualId || isLoadingData}
+              variant="default"
+              className="gap-2"
+            >
+              {isAutomationRunning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Zap className="h-4 w-4" />
+              )}
+              Start Automation
+            </Button>
           </div>
           <Button variant="outline" onClick={onClose}>Close</Button>
         </div>

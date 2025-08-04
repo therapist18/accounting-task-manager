@@ -25,61 +25,61 @@ import { toast } from "@/hooks/use-toast"
 type Stage = any; type TimeConfig = any; type StageDocument = any; type DocumentExtraction = any; type EntityOption = any;
 
 const SectionWrapper = ({ title, icon, children, actionButton = null }: { title: string, icon: React.ReactNode, children: React.ReactNode, actionButton?: React.ReactNode }) => (
-    <Card className="bg-white rounded-lg shadow-sm border border-slate-200/90 overflow-hidden">
-        <div className="p-4 bg-blue-50/50 border-b border-gray-200/50 text-blue-800 flex justify-between items-center">
-            <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                {React.cloneElement(icon as React.ReactElement, { className: "h-5 w-5 text-blue-600" })}
-                {title}
-            </h3>
-            {actionButton}
-        </div>
-        <CardContent className="p-4 space-y-4">{children}</CardContent>
-    </Card>
+  <Card className="bg-white rounded-lg shadow-sm border border-slate-200/90 overflow-hidden">
+    <div className="p-4 bg-blue-50/50 border-b border-gray-200/50 text-blue-800 flex justify-between items-center">
+      <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+        {React.cloneElement(icon as React.ReactElement, { className: "h-5 w-5 text-blue-600" })}
+        {title}
+      </h3>
+      {actionButton}
+    </div>
+    <CardContent className="p-4 space-y-4">{children}</CardContent>
+  </Card>
 );
 
 // Helper for form fields to reduce repetition and ensure consistent styling.
 const FormField = ({ label, required = false, description, children }: { label: string, required?: boolean, description?: string, children: React.ReactNode }) => (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-start">
-        <div className="space-y-1.5 md:col-span-1">
-            <Label className="font-medium text-sm text-gray-700">
-                {label}
-                {required && <span className="text-red-500 ml-0.5">*</span>}
-            </Label>
-            {description && <p className="text-xs text-muted-foreground">{description}</p>}
-        </div>
-        <div className="md:col-span-3">{children}</div>
+  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-start">
+    <div className="space-y-1.5 md:col-span-1">
+      <Label className="font-medium text-sm text-gray-700">
+        {label}
+        {required && <span className="text-red-500 ml-0.5">*</span>}
+      </Label>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
     </div>
+    <div className="md:col-span-3">{children}</div>
+  </div>
 );
 
 
 // Simple UUID generator
 const generateId = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
+  const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+  return v.toString(16);
 });
 
 // Recursive helper to transform KYC fields, handling nested arrays
 const transformKycFields = (fields: any[]): DocumentExtraction[] => {
-    if (!Array.isArray(fields)) return [];
-    return fields.map((field: any) => {
-        const isArray = field.type === 'array' || field.isArray === true;
-        const transformedField: any = {
-            id: field.id || generateId(),
-            fieldName: field.name || field.fieldName || '',
-            description: field.description || '',
-            isRequired: field.isRequired !== false,
-            fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
-            parentField: field.parentField,
-            isArray: isArray,
-        };
-        if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
-            transformedField.arrayConfig = {
-                maxItems: field.arrayConfig.maxItems,
-                fields: transformKycFields(field.arrayConfig.fields)
-            };
-        }
-        return transformedField as DocumentExtraction;
-    });
+  if (!Array.isArray(fields)) return [];
+  return fields.map((field: any) => {
+    const isArray = field.type === 'array' || field.isArray === true;
+    const transformedField: any = {
+      id: field.id || generateId(),
+      fieldName: field.name || field.fieldName || '',
+      description: field.description || '',
+      isRequired: field.isRequired !== false,
+      fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
+      parentField: field.parentField,
+      isArray: isArray,
+    };
+    if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
+      transformedField.arrayConfig = {
+        maxItems: field.arrayConfig.maxItems,
+        fields: transformKycFields(field.arrayConfig.fields)
+      };
+    }
+    return transformedField as DocumentExtraction;
+  });
 };
 
 // --- INTERFACES ---
@@ -223,41 +223,14 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
     const trimmedName = formData.name.trim();
     if (!trimmedName) return;
 
-    // Validate web form fields if enabled
-    if (formData.hasWebForm && !formData.webFormName?.trim()) {
-      toast({
-        title: 'Error',
-        description: 'Web form name is required when web form is enabled.',
-        variant: 'destructive'
-      });
-      return;
-    }
-
     setSaving(true);
     try {
       const targetDepartment = getTargetDepartmentName();
-      
-      // Prepare web automation data if enabled
-      let webAutomation = null;
-      if (formData.hasWebForm && formData.automationId) {
-        const selectedAutomation = automationTypes.find(a => a.id === formData.automationId);
-        if (selectedAutomation) {
-          webAutomation = {
-            automationId: selectedAutomation.id,
-            automationName: selectedAutomation.name,
-            webFormName: formData.webFormName?.trim(),
-            webhookUrl: selectedAutomation.webhook_url,
-            webhookType: selectedAutomation.webhook_type,
-            isActive: selectedAutomation.is_active,
-            description: selectedAutomation.description,
-            createdAt: new Date().toISOString()
-          };
-        }
-      }
+
       const docsWithKyc = await Promise.all(
         (formData.documents || []).map(async (doc) => {
           if (!doc.name?.trim()) return doc;
-          
+
           const isLinked = !!doc.linkedKycDocument;
           const kycPayload = {
             name: doc.name, fields: doc.extractionSpecs || [], display_name: doc.name,
@@ -287,10 +260,6 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
         description: formData.description?.trim() || undefined,
         documents: docsWithKyc.map(({ extractionSpecs, ...doc }) => doc),
         timeConfigs: formData.timeConfigs?.map(tc => ({ ...tc, applicationType: tc.applicationType || 'Default', days: tc.days || 0, hours: tc.hours || 0, minutes: tc.minutes || 0 })) || [],
-        // Include web automation data
-        web_automation: webAutomation,
-        // For backward compatibility
-        hasWebForm: formData.hasWebForm || false,
       };
 
       await onSave(updatedStage);
@@ -307,7 +276,7 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
     const { name, value } = e.target;
     setFormData(prev => (prev ? { ...prev, [name]: value } : null));
   };
-  
+
   const updateTimeConfig = (index: number, updates: Partial<TimeConfig>) => {
     setFormData(prev => {
       if (!prev) return null;
@@ -496,84 +465,6 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                   </FormField>
                 </SectionWrapper>
 
-                <SectionWrapper title="Automation" icon={<Zap />}>
-                  <div className="space-y-4">
-                    <div className="flex items-center space-x-3">
-                      <Checkbox
-                        id="hasAutomation"
-                        checked={formData.hasWebForm || false}
-                        onCheckedChange={(checked) => setFormData(prev => (prev ? { ...prev, hasWebForm: Boolean(checked) } : null))}
-                        className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
-                      />
-                      <div>
-                        <Label htmlFor="hasAutomation" className="font-medium flex items-center gap-2 text-gray-800">
-                          Enable Web Form Automation
-                        </Label>
-                        <p className="text-sm text-muted-foreground">
-                          Trigger automations when this stage is activated.
-                        </p>
-                      </div>
-                    </div>
-
-                    {formData.hasWebForm && (
-                      <div className="space-y-4 pl-8 border-l-2 border-blue-100">
-                        <FormField label="Web Form Name" required>
-                          <Input
-                            value={formData.webFormName || ''}
-                            onChange={(e) => setFormData(prev => (prev ? { ...prev, webFormName: e.target.value } : null))}
-                            placeholder="e.g., Application Review Form"
-                          />
-                        </FormField>
-
-                        <FormField label="Automation Type">
-                          <Select
-                            value={formData.automationId || ''}
-                            onValueChange={(value) => setFormData(prev => (prev ? { ...prev, automationId: value } : null))}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select an automation" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {loadingAutomations ? (
-                                <SelectItem value="loading" disabled>Loading automations...</SelectItem>
-                              ) : (
-                                <>
-                                  <SelectItem value="none">No automation</SelectItem>
-                                  {automationTypes.map((automation) => (
-                                    <SelectItem key={automation.id} value={automation.id}>
-                                      <div className="flex items-center gap-2">
-                                        <Webhook className="h-4 w-4 text-blue-500" />
-                                        <span>{automation.name}</span>
-                                        {automation.description && (
-                                          <span className="text-xs text-muted-foreground ml-2">
-                                            {automation.description}
-                                          </span>
-                                        )}
-                                      </div>
-                                    </SelectItem>
-                                  ))}
-                                </>
-                              )}
-                            </SelectContent>
-                          </Select>
-                        </FormField>
-
-                        {formData.automationId && (
-                          <div className="p-3 bg-blue-50 rounded-md text-sm text-blue-700 flex items-start gap-2">
-                            <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                            <div>
-                              <p className="font-medium">Automation Details</p>
-                              <p className="text-xs mt-1">
-                                This automation will be triggered when this stage is activated. Make sure the selected automation is properly configured.
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </SectionWrapper>
-
                 <SectionWrapper title="Timing & Follow-up" icon={<Clock />}>
                   <div className="space-y-4">
                     <div className="flex items-center space-x-3">
@@ -688,22 +579,25 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
                   <p className="text-sm text-muted-foreground -mt-2">
                     Define documents for this stage. New documents will be added to the KYC system under the <span className="font-semibold text-blue-700">{getTargetDepartmentName()}</span> department.
                   </p>
-                   {(formData.documents || []).length > 0 ? (
-                      <div className="space-y-4 pt-4 border-t">
-                        {(formData.documents || []).map((doc, index) => (
-                            <DocumentCard
-                                key={doc.id || index} doc={doc} docIndex={index} entityOptions={entityOptions} loadingEntities={loadingEntities} kycDocuments={kycDocuments}
-                                loadingKycDocs={loadingKycDocs} onUpdateDocument={updateDocument} onRemoveDocument={removeDocument}
-                                onAddExtraction={addExtractionField} onUpdateExtraction={updateExtraction} onRemoveExtraction={removeExtraction}
-                            />
-                        ))}
-                      </div>
+                  {(formData.documents || []).length > 0 ? (
+                    <div className="space-y-4 pt-4 border-t">
+                      {(formData.documents || []).map((doc, index) => (
+                        <DocumentCard
+                          key={doc.id || index} doc={doc} docIndex={index} entityOptions={entityOptions} loadingEntities={loadingEntities} kycDocuments={kycDocuments}
+                          loadingKycDocs={loadingKycDocs}
+                          automationTypes={automationTypes}
+                          loadingAutomations={loadingAutomations}
+                          onUpdateDocument={updateDocument} onRemoveDocument={removeDocument}
+                          onAddExtraction={addExtractionField} onUpdateExtraction={updateExtraction} onRemoveExtraction={removeExtraction}
+                        />
+                      ))}
+                    </div>
                   ) : (
-                      <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-white">
-                        <FileText className="h-10 w-10 mx-auto mb-3 text-gray-400" />
-                        <h4 className="font-medium text-gray-700 mb-1">No documents added yet</h4>
-                        <p className="text-sm text-muted-foreground">Add documents that are required for this stage.</p>
-                      </div>
+                    <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-white">
+                      <FileText className="h-10 w-10 mx-auto mb-3 text-gray-400" />
+                      <h4 className="font-medium text-gray-700 mb-1">No documents added yet</h4>
+                      <p className="text-sm text-muted-foreground">Add documents that are required for this stage.</p>
+                    </div>
                   )}
                 </SectionWrapper>
               </TabsContent>
@@ -717,12 +611,12 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
           </Button>
           <Button type="button" onClick={handleSubmit} disabled={saving || !formData.name.trim()} className="bg-blue-600 hover:bg-blue-700">
             {saving ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-muted border-t-current rounded-full animate-spin mr-2"></div>
-                  Saving...
-                </>
-              ) : (
-                'Save Changes'
+              <>
+                <div className="w-4 h-4 border-2 border-muted border-t-current rounded-full animate-spin mr-2"></div>
+                Saving...
+              </>
+            ) : (
+              'Save Changes'
             )}
           </Button>
         </DialogFooter>
@@ -732,201 +626,249 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
 }
 
 function MultiEntityPicker({
-    entities, selectedEntities = [], onSelectionChange, loading = false, placeholder = "Select target entities..."
+  entities, selectedEntities = [], onSelectionChange, loading = false, placeholder = "Select target entities..."
 }: {
-    entities: EntityOption[],
-    selectedEntities: Array<{ entityType: 'subdept' | 'class' | 'subclass', subdept_id: number, class_id?: string | number, subclass_id?: string | number, entityName: string }>,
-    onSelectionChange: (selectedEntities: any[]) => void,
-    loading?: boolean,
-    placeholder?: string
+  entities: EntityOption[],
+  selectedEntities: Array<{ entityType: 'subdept' | 'class' | 'subclass', subdept_id: number, class_id?: string | number, subclass_id?: string | number, entityName: string }>,
+  onSelectionChange: (selectedEntities: any[]) => void,
+  loading?: boolean,
+  placeholder?: string
 }) {
-    const [open, setOpen] = useState(false);
-    const toggleEntity = (entity: EntityOption) => {
-        const entityKey = `${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`;
-        const isSelected = selectedEntities.some(selected => `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}` === entityKey);
-        if (isSelected) {
-            onSelectionChange(selectedEntities.filter(selected => `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}` !== entityKey));
-        } else {
-            const newEntity = { entityType: entity.type, subdept_id: entity.subdept_id!, class_id: entity.class_id, subclass_id: entity.subclass_id, entityName: entity.name.replace(/^→\s*/g, '') };
-            onSelectionChange([...selectedEntities, newEntity]);
-        }
-    };
-    const isEntitySelected = (entity: EntityOption) => {
-        const entityKey = `${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`;
-        return selectedEntities.some(selected => `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}` === entityKey);
-    };
-    const groupedEntities = entities.reduce((acc, entity) => {
-        const subdeptName = entities.find(e => e.type === 'subdept' && e.subdept_id === entity.subdept_id)?.name || 'Unknown';
-        if (!acc[subdeptName]) { acc[subdeptName] = []; }
-        acc[subdeptName].push(entity);
-        return acc;
-    }, {} as Record<string, EntityOption[]>);
+  const [open, setOpen] = useState(false);
+  const toggleEntity = (entity: EntityOption) => {
+    const entityKey = `${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`;
+    const isSelected = selectedEntities.some(selected => `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}` === entityKey);
+    if (isSelected) {
+      onSelectionChange(selectedEntities.filter(selected => `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}` !== entityKey));
+    } else {
+      const newEntity = { entityType: entity.type, subdept_id: entity.subdept_id!, class_id: entity.class_id, subclass_id: entity.subclass_id, entityName: entity.name.replace(/^→\s*/g, '') };
+      onSelectionChange([...selectedEntities, newEntity]);
+    }
+  };
+  const isEntitySelected = (entity: EntityOption) => {
+    const entityKey = `${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`;
+    return selectedEntities.some(selected => `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}` === entityKey);
+  };
+  const groupedEntities = entities.reduce((acc, entity) => {
+    const subdeptName = entities.find(e => e.type === 'subdept' && e.subdept_id === entity.subdept_id)?.name || 'Unknown';
+    if (!acc[subdeptName]) { acc[subdeptName] = []; }
+    acc[subdeptName].push(entity);
+    return acc;
+  }, {} as Record<string, EntityOption[]>);
 
-    return (
-        <div className="space-y-2">
-            <Popover open={open} onOpenChange={setOpen}>
-                <PopoverTrigger asChild>
-                    <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between bg-white" disabled={loading}>
-                        {selectedEntities.length === 0 ? <span className="text-muted-foreground">{loading ? "Loading entities..." : placeholder}</span> : <span>{selectedEntities.length} entit{selectedEntities.length === 1 ? 'y' : 'ies'} selected</span>}
-                        <X className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-96 p-0"><Command><CommandInput placeholder="Search entities..." /><CommandEmpty>No entities found.</CommandEmpty>
-                    <div className="max-h-72 overflow-y-auto">
-                        {Object.entries(groupedEntities).map(([subdeptName, subdeptEntities]) => (
-                            <CommandGroup key={subdeptName} heading={subdeptName}>
-                                {subdeptEntities.sort((a, b) => a.level - b.level).map((entity) => (
-                                    <CommandItem key={`${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`} onSelect={() => toggleEntity(entity)} className="flex items-center gap-2">
-                                        <div className="flex items-center gap-2 flex-1">
-                                            <div className="flex h-4 w-4 items-center justify-center">{isEntitySelected(entity) && <Check className="h-3 w-3 text-blue-600" />}</div>
-                                            <span style={{ marginLeft: `${entity.level * 12}px` }}>{entity.name}</span>
-                                            <Badge variant="outline" className="text-xs">{entity.type}</Badge>
-                                        </div>
-                                    </CommandItem>
-                                ))}
-                            </CommandGroup>
-                        ))}
+  return (
+    <div className="space-y-2">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between bg-white" disabled={loading}>
+            {selectedEntities.length === 0 ? <span className="text-muted-foreground">{loading ? "Loading entities..." : placeholder}</span> : <span>{selectedEntities.length} entit{selectedEntities.length === 1 ? 'y' : 'ies'} selected</span>}
+            <X className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-96 p-0"><Command><CommandInput placeholder="Search entities..." /><CommandEmpty>No entities found.</CommandEmpty>
+          <div className="max-h-72 overflow-y-auto">
+            {Object.entries(groupedEntities).map(([subdeptName, subdeptEntities]) => (
+              <CommandGroup key={subdeptName} heading={subdeptName}>
+                {subdeptEntities.sort((a, b) => a.level - b.level).map((entity) => (
+                  <CommandItem key={`${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`} onSelect={() => toggleEntity(entity)} className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-1">
+                      <div className="flex h-4 w-4 items-center justify-center">{isEntitySelected(entity) && <Check className="h-3 w-3 text-blue-600" />}</div>
+                      <span style={{ marginLeft: `${entity.level * 12}px` }}>{entity.name}</span>
+                      <Badge variant="outline" className="text-xs">{entity.type}</Badge>
                     </div>
-                </Command></PopoverContent>
-            </Popover>
-            {selectedEntities.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-2">
-                    {selectedEntities.map((entity, index) => (
-                        <Badge key={index} variant="secondary" className="flex items-center gap-1 text-xs bg-blue-100 text-blue-800 hover:bg-blue-200">
-                            {entity.entityName}
-                            <Badge variant="outline" className="text-xs ml-1 bg-white">{entity.entityType}</Badge>
-                            <Button variant="ghost" size="icon" className="h-4 w-4 ml-1 p-0 hover:bg-destructive hover:text-destructive-foreground rounded-full" onClick={() => onSelectionChange(selectedEntities.filter((_, i) => i !== index))}>
-                                <X className="h-3 w-3" />
-                            </Button>
-                        </Badge>
-                    ))}
-                </div>
-            )}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ))}
+          </div>
+        </Command></PopoverContent>
+      </Popover>
+      {selectedEntities.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {selectedEntities.map((entity, index) => (
+            <Badge key={index} variant="secondary" className="flex items-center gap-1 text-xs bg-blue-100 text-blue-800 hover:bg-blue-200">
+              {entity.entityName}
+              <Badge variant="outline" className="text-xs ml-1 bg-white">{entity.entityType}</Badge>
+              <Button variant="ghost" size="icon" className="h-4 w-4 ml-1 p-0 hover:bg-destructive hover:text-destructive-foreground rounded-full" onClick={() => onSelectionChange(selectedEntities.filter((_, i) => i !== index))}>
+                <X className="h-3 w-3" />
+              </Button>
+            </Badge>
+          ))}
         </div>
-    );
+      )}
+    </div>
+  );
 }
 
 function DocumentCard({
-    doc, docIndex, entityOptions, loadingEntities, kycDocuments, loadingKycDocs,
-    onUpdateDocument, onRemoveDocument, onAddExtraction, onUpdateExtraction, onRemoveExtraction
+  doc, docIndex, entityOptions, loadingEntities, kycDocuments, loadingKycDocs,
+  automationTypes, loadingAutomations,
+  onUpdateDocument, onRemoveDocument, onAddExtraction, onUpdateExtraction, onRemoveExtraction
 }: {
-    doc: StageDocument, docIndex: number, entityOptions: EntityOption[], loadingEntities: boolean, kycDocuments: KYCDocument[], loadingKycDocs: boolean,
-    onUpdateDocument: (docId: string, updates: Partial<StageDocument>) => void, onRemoveDocument: (docId: string) => void,
-    onAddExtraction: (docId: string) => void, onUpdateExtraction: (docId: string, extractionId: string, updates: Partial<DocumentExtraction>) => void,
-    onRemoveExtraction: (docId: string, extractionId: string) => void
+  doc: StageDocument, docIndex: number, entityOptions: EntityOption[], loadingEntities: boolean, kycDocuments: KYCDocument[], loadingKycDocs: boolean,
+  automationTypes: any[], loadingAutomations: boolean,
+  onUpdateDocument: (docId: string, updates: Partial<StageDocument>) => void, onRemoveDocument: (docId: string) => void,
+  onAddExtraction: (docId: string) => void, onUpdateExtraction: (docId: string, extractionId: string, updates: Partial<DocumentExtraction>) => void,
+  onRemoveExtraction: (docId: string, extractionId: string) => void
 }) {
-    const [documentMode, setDocumentMode] = useState<'new' | 'existing'>(
-        doc.linkedKycDocument ? 'existing' : 'new'
-    );
-    const handleModeChange = (mode: 'new' | 'existing') => {
-        setDocumentMode(mode);
-        if (mode === 'new') {
-            onUpdateDocument(doc.id, { linkedKycDocument: undefined, name: doc.kycId ? doc.name : '', extractionSpecs: doc.kycId ? doc.extractionSpecs : [] });
-        }
-    };
-    const handleKycDocumentSelect = (kycDocId: string) => {
-        const selectedKycDoc = kycDocuments.find(d => d.id === kycDocId);
-        if (selectedKycDoc) {
-            onUpdateDocument(doc.id, {
-                linkedKycDocument: selectedKycDoc.id, 
-                kycId: selectedKycDoc.id, 
-                name: selectedKycDoc.display_name || selectedKycDoc.name,
-                docType: doc.docType || 'normal_doc',
-                extractionSpecs: selectedKycDoc.fields || []
-            });
-        }
-    };
-    const isLinkedDocument = Boolean(doc.linkedKycDocument);
+  const [documentMode, setDocumentMode] = useState<'new' | 'existing'>(
+    doc.linkedKycDocument ? 'existing' : 'new'
+  );
+  const handleModeChange = (mode: 'new' | 'existing') => {
+    setDocumentMode(mode);
+    if (mode === 'new') {
+      onUpdateDocument(doc.id, { linkedKycDocument: undefined, name: doc.kycId ? doc.name : '', extractionSpecs: doc.kycId ? doc.extractionSpecs : [] });
+    }
+  };
+  const handleKycDocumentSelect = (kycDocId: string) => {
+    const selectedKycDoc = kycDocuments.find(d => d.id === kycDocId);
+    if (selectedKycDoc) {
+      onUpdateDocument(doc.id, {
+        linkedKycDocument: selectedKycDoc.id,
+        kycId: selectedKycDoc.id,
+        name: selectedKycDoc.display_name || selectedKycDoc.name,
+        docType: doc.docType || 'normal_doc',
+        extractionSpecs: selectedKycDoc.fields || []
+      });
+    }
+  };
+  const isLinkedDocument = Boolean(doc.linkedKycDocument);
 
-    return (
-        <Card className={`shadow-sm border-slate-200 ${doc.isSpecial ? 'border-amber-300 bg-amber-50/30' : 'bg-white'}`}>
-            <CardHeader className="p-4 bg-slate-50/50 border-b">
-                <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                        <h5 className="font-semibold text-sm text-gray-800 flex items-center gap-2">
-                            {doc.isSpecial && <Star className="h-4 w-4 text-amber-500" />}
-                            Document {docIndex + 1}: {doc.name || 'Untitled'}
-                        </h5>
-                        {isLinkedDocument && <Badge className="text-xs bg-blue-100 text-blue-800 hover:bg-blue-100">Linked</Badge>}
-                    </div>
-                    <Button variant="ghost" size="icon" onClick={() => onRemoveDocument(doc.id)} className="text-muted-foreground hover:text-destructive h-7 w-7"><Trash2 className="h-4 w-4 text-red-500" /></Button>
-                </div>
-            </CardHeader>
-            <CardContent className="space-y-6 p-4">
-                <div className="space-y-3 p-4 bg-slate-100/70 border border-slate-200 rounded-lg">
-                    <Label className="font-medium text-gray-700">Document Source</Label>
-                    <div className="grid grid-cols-2 gap-3">
-                        <Button variant={documentMode === 'new' ? 'default' : 'outline'} size="sm" onClick={() => handleModeChange('new')} className={`justify-start ${documentMode === 'new' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}`}>
-                            <Plus className="h-4 w-4 mr-2" />
-                            {doc.kycId && !doc.linkedKycDocument ? "Edit as New" : "Create New"}
-                        </Button>
-                        <Button variant={documentMode === 'existing' ? 'default' : 'outline'} size="sm" onClick={() => handleModeChange('existing')} className={`justify-start ${documentMode === 'existing' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}`} disabled={loadingKycDocs}>
-                            <FileText className="h-4 w-4 mr-2" /> Link Existing
-                        </Button>
-                    </div>
-                    {documentMode === 'existing' && (
-                        <div className="space-y-2 pt-2">
-                            <Label className="text-sm text-gray-600">Select Existing Document</Label>
-                            <ComboBox
-                                options={kycDocuments.map(d => ({ value: d.id, label: d.display_name || d.name }))}
-                                value={doc.linkedKycDocument || ''} onValueChange={handleKycDocumentSelect}
-                                placeholder={loadingKycDocs ? "Loading..." : "Choose a document"} emptyText="No documents found"
-                                disabled={loadingKycDocs} loading={loadingKycDocs} className="w-full bg-white"
-                            />
-                            {isLinkedDocument && <p className="text-xs text-green-600 flex items-center gap-1"><Check className="h-3 w-3" /> Document linked. Fields are now read-only.</p>}
-                        </div>
-                    )}
-                </div>
+  return (
+    <Card className={`shadow-sm border-slate-200 ${doc.isSpecial ? 'border-amber-300 bg-amber-50/30' : 'bg-white'}`}>
+      <CardHeader className="p-4 bg-slate-50/50 border-b">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <h5 className="font-semibold text-sm text-gray-800 flex items-center gap-2">
+              {doc.isSpecial && <Star className="h-4 w-4 text-amber-500" />}
+              Document {docIndex + 1}: {doc.name || 'Untitled'}
+            </h5>
+            {isLinkedDocument && <Badge className="text-xs bg-blue-100 text-blue-800 hover:bg-blue-100">Linked</Badge>}
+          </div>
+          <Button variant="ghost" size="icon" onClick={() => onRemoveDocument(doc.id)} className="text-muted-foreground hover:text-destructive h-7 w-7"><Trash2 className="h-4 w-4 text-red-500" /></Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-6 p-4">
+        <div className="space-y-3 p-4 bg-slate-100/70 border border-slate-200 rounded-lg">
+          <Label className="font-medium text-gray-700">Document Source</Label>
+          <div className="grid grid-cols-2 gap-3">
+            <Button variant={documentMode === 'new' ? 'default' : 'outline'} size="sm" onClick={() => handleModeChange('new')} className={`justify-start ${documentMode === 'new' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}`}>
+              <Plus className="h-4 w-4 mr-2" />
+              {doc.kycId && !doc.linkedKycDocument ? "Edit as New" : "Create New"}
+            </Button>
+            <Button variant={documentMode === 'existing' ? 'default' : 'outline'} size="sm" onClick={() => handleModeChange('existing')} className={`justify-start ${documentMode === 'existing' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}`} disabled={loadingKycDocs}>
+              <FileText className="h-4 w-4 mr-2" /> Link Existing
+            </Button>
+          </div>
+          {documentMode === 'existing' && (
+            <div className="space-y-2 pt-2">
+              <Label className="text-sm text-gray-600">Select Existing Document</Label>
+              <ComboBox
+                options={kycDocuments.map(d => ({ value: d.id, label: d.display_name || d.name }))}
+                value={doc.linkedKycDocument || ''} onValueChange={handleKycDocumentSelect}
+                placeholder={loadingKycDocs ? "Loading..." : "Choose a document"} emptyText="No documents found"
+                disabled={loadingKycDocs} loading={loadingKycDocs} className="w-full bg-white"
+              />
+              {isLinkedDocument && <p className="text-xs text-green-600 flex items-center gap-1"><Check className="h-3 w-3" /> Document linked. Fields are now read-only.</p>}
+            </div>
+          )}
+        </div>
 
-                {doc.isSpecial && (
-                    <div className="space-y-2 p-4 bg-amber-50 border border-amber-300 rounded-lg">
-                        <Label className="font-medium flex items-center gap-2 text-amber-800"><Star className="h-4 w-4 text-amber-500" />Target Entities</Label>
-                        <MultiEntityPicker entities={entityOptions} selectedEntities={doc.targetEntities || []} onSelectionChange={(selectedEntities) => onUpdateDocument(doc.id, { targetEntities: selectedEntities })} loading={loadingEntities} placeholder="Select which entities need this document..." />
-                    </div>
-                )}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Document Name *</Label><Input value={doc.name || ''} onChange={(e) => onUpdateDocument(doc.id, { name: e.target.value })} placeholder="e.g., Application Form" disabled={isLinkedDocument} /></div>
-                    <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Document Type</Label><Select value={doc.documentType} onValueChange={(value) => onUpdateDocument(doc.id, { documentType: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="upload">Upload Only</SelectItem><SelectItem value="extraction">Data Extraction Only</SelectItem><SelectItem value="both">Upload + Extraction</SelectItem></SelectContent></Select></div>
-                    <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Input Type</Label><Select value={doc.inputType || 'file'} onValueChange={(value) => onUpdateDocument(doc.id, { inputType: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="file">File Upload</SelectItem><SelectItem value="message">Message/Text</SelectItem><SelectItem value="both">Both</SelectItem></SelectContent></Select></div>
-                    <div className="space-y-2">
-                      <Label className="text-xs font-medium text-gray-700">Doc Type</Label>
-                      <Select 
-                        value={doc.docType || 'normal_doc'} 
-                        onValueChange={(value: 'form' | 'normal_doc') => onUpdateDocument(doc.id, { docType: value })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="form">Form</SelectItem>
-                          <SelectItem value="normal_doc">Normal Doc</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                </div>
-                <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Description</Label><Textarea value={doc.description || ''} onChange={(e) => onUpdateDocument(doc.id, { description: e.target.value })} placeholder="Brief description of this document's purpose..." rows={2} /></div>
-                <div className="flex items-center space-x-2"><Checkbox checked={doc.isRequired} onCheckedChange={(checked) => onUpdateDocument(doc.id, { isRequired: checked as boolean })} className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" /><Label className="text-sm font-normal text-gray-700">This document is required for stage completion</Label></div>
+        {doc.isSpecial && (
+          <div className="space-y-2 p-4 bg-amber-50 border border-amber-300 rounded-lg">
+            <Label className="font-medium flex items-center gap-2 text-amber-800"><Star className="h-4 w-4 text-amber-500" />Target Entities</Label>
+            <MultiEntityPicker entities={entityOptions} selectedEntities={doc.targetEntities || []} onSelectionChange={(selectedEntities) => onUpdateDocument(doc.id, { targetEntities: selectedEntities })} loading={loadingEntities} placeholder="Select which entities need this document..." />
+          </div>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Document Name *</Label><Input value={doc.name || ''} onChange={(e) => onUpdateDocument(doc.id, { name: e.target.value })} placeholder="e.g., Application Form" disabled={isLinkedDocument} /></div>
+          <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Document Type</Label><Select value={doc.documentType} onValueChange={(value) => onUpdateDocument(doc.id, { documentType: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="upload">Upload Only</SelectItem><SelectItem value="extraction">Data Extraction Only</SelectItem><SelectItem value="both">Upload + Extraction</SelectItem></SelectContent></Select></div>
+          <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Input Type</Label><Select value={doc.inputType || 'file'} onValueChange={(value) => onUpdateDocument(doc.id, { inputType: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="file">File Upload</SelectItem><SelectItem value="message">Message/Text</SelectItem><SelectItem value="both">Both</SelectItem></SelectContent></Select></div>
+          <div className="space-y-2">
+            <Label className="text-xs font-medium text-gray-700">Doc Type</Label>
+            <Select
+              value={doc.docType || 'normal_doc'}
+              onValueChange={(value: 'form' | 'normal_doc') => onUpdateDocument(doc.id, { docType: value })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="form">Form</SelectItem>
+                <SelectItem value="normal_doc">Normal Doc</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Description</Label><Textarea value={doc.description || ''} onChange={(e) => onUpdateDocument(doc.id, { description: e.target.value })} placeholder="Brief description of this document's purpose..." rows={2} /></div>
+        <div className="flex items-center space-x-2"><Checkbox checked={doc.isRequired} onCheckedChange={(checked) => onUpdateDocument(doc.id, { isRequired: checked as boolean })} className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" /><Label className="text-sm font-normal text-gray-700">This document is required for stage completion</Label></div>
 
-                {(doc.documentType === 'extraction' || doc.documentType === 'both') && (
-                    <div className="space-y-4 border-t pt-4 mt-4">
-                        <div className="flex justify-between items-center">
-                            <div><Label className="text-sm font-semibold text-gray-800">Data Extraction Fields</Label><p className="text-xs text-muted-foreground">{isLinkedDocument ? "Fields from the linked document (read-only)." : "Define what data should be extracted."}</p></div>
-                            {!isLinkedDocument && <Button variant="outline" size="sm" onClick={() => onAddExtraction(doc.id)} className="text-white bg-blue-500 border-blue-300 hover:bg-blue-50"><Plus className="h-4 w-4 mr-2" />Add Field</Button>}
-                        </div>
-                        {doc.extractionSpecs && doc.extractionSpecs.length > 0 ? (
-                            <div className="space-y-3">
-                                {doc.extractionSpecs.map((extraction) => (
-                                    <div key={extraction.id} className={`p-4 rounded-lg border space-y-3 ${isLinkedDocument ? 'bg-blue-50 border-blue-200' : 'bg-slate-100 border-slate-200'}`}>
-                                        {/* Simplified Extraction Field for brevity, can be expanded as in AddStageDialog if needed */}
-                                        <div className="flex justify-between items-center"><span className="font-semibold text-sm">{extraction.fieldName}</span>{!isLinkedDocument && <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => onRemoveExtraction(doc.id, extraction.id)}><X className="h-3 w-3" /></Button>}</div>
-                                        <p className="text-xs text-muted-foreground">{extraction.description}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (<div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg bg-white"><Info className="h-8 w-8 mx-auto mb-2 text-gray-400" /><p className="text-sm">{isLinkedDocument ? "Linked document has no extraction fields." : "No extraction fields defined."}</p></div>)}
-                    </div>
-                )}
-            </CardContent>
-        </Card>
-    );
+        {(doc.documentType === 'extraction' || doc.documentType === 'both') && (
+          <div className="space-y-4 border-t pt-4 mt-4">
+            <div className="flex justify-between items-center">
+              <div><Label className="text-sm font-semibold text-gray-800">Data Extraction Fields</Label><p className="text-xs text-muted-foreground">{isLinkedDocument ? "Fields from the linked document (read-only)." : "Define what data should be extracted."}</p></div>
+              {!isLinkedDocument && <Button variant="outline" size="sm" onClick={() => onAddExtraction(doc.id)} className="text-white bg-blue-500 border-blue-300 hover:bg-blue-50"><Plus className="h-4 w-4 mr-2" />Add Field</Button>}
+            </div>
+            {doc.extractionSpecs && doc.extractionSpecs.length > 0 ? (
+              <div className="space-y-3">
+                {doc.extractionSpecs.map((extraction) => (
+                  <div key={extraction.id} className={`p-4 rounded-lg border space-y-3 ${isLinkedDocument ? 'bg-blue-50 border-blue-200' : 'bg-slate-100 border-slate-200'}`}>
+                    <div className="flex justify-between items-center"><span className="font-semibold text-sm">{extraction.fieldName}</span>{!isLinkedDocument && <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => onRemoveExtraction(doc.id, extraction.id)}><X className="h-3 w-3" /></Button>}</div>
+                    <p className="text-xs text-muted-foreground">{extraction.description}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (<div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg bg-white"><Info className="h-8 w-8 mx-auto mb-2 text-gray-400" /><p className="text-sm">{isLinkedDocument ? "Linked document has no extraction fields." : "No extraction fields defined."}</p></div>)}
+          </div>
+        )}
+        {/* Automation Section */}
+        <Separator className="my-4" />
+        <div className="space-y-4">
+          <div className="flex items-start space-x-3">
+            <Checkbox
+              id={`doc-automation-${doc.id}`}
+              checked={doc.hasAutomation || false}
+              onCheckedChange={(checked) => onUpdateDocument(doc.id, { hasAutomation: !!checked })}
+              className="mt-1 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+            />
+            <div>
+              <Label htmlFor={`doc-automation-${doc.id}`} className="font-medium flex items-center gap-2 text-gray-800">
+                <Zap className="h-4 w-4 text-blue-600" /> Enable Automation
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Link an automation to run for this document.
+              </p>
+            </div>
+          </div>
+          {doc.hasAutomation && (
+            <div className="space-y-4 pl-8 border-l-2 border-blue-100 py-4">
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <Label className="text-xs font-medium text-gray-700">Automation Type</Label>
+                  <ComboBox
+                    options={[
+                      { value: 'none', label: 'No automation' },
+                      ...(automationTypes?.map(automation => ({
+                        value: automation.id,
+                        label: automation.name,
+                        icon: <Webhook className="h-4 w-4 text-blue-500 mr-2" />
+                      })) || [])
+                    ]}
+                    value={doc.automationId || 'none'}
+                    onValueChange={(value) => onUpdateDocument(doc.id, { 
+                      automationId: value === 'none' ? undefined : value 
+                    })}
+                    placeholder="Select an automation"
+                    emptyText="No automations found"
+                    loading={loadingAutomations}
+                    className="w-full"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
 }

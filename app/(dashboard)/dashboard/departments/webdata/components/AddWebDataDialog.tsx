@@ -17,7 +17,34 @@ import { cn } from "@/lib/utils"
 
 // Interfaces remain the same
 export interface WebDataForm {
-  name: string; description: string; isRequired: boolean; masterFieldIds: string[]; masterFields: JobField[]; order: number; variableName: string; efnsDisplayName: string; fieldType: 'text' | 'number' | 'boolean' | 'date' | 'select' | 'array' | 'object'; arrayItems?: Array<{ name: string; variableName: string; type: 'text' | 'number' | 'boolean' | 'date' | 'select' }>
+  name: string; 
+  description: string; 
+  isRequired: boolean; 
+  masterFieldIds: string[]; 
+  masterFields: JobField[]; 
+  order: number; 
+  variableName: string; 
+  efnsDisplayName: string; 
+  fieldType: 'text' | 'number' | 'boolean' | 'date' | 'select' | 'array' | 'object'; 
+  formName?: string;
+  formId?: string;
+  arrayItems?: Array<{ name: string; variableName: string; type: 'text' | 'number' | 'boolean' | 'date' | 'select' }>
+}
+
+interface FormDocument {
+  id: string;
+  name: string;
+  docType: string;
+  kycId: string;
+  isRequired: boolean;
+  isSpecial: boolean;
+  documentType: string;
+  targetEntities: Array<{
+    class_id?: number;
+    entityName: string;
+    entityType: string;
+    subdept_id?: number;
+  }>;
 }
 
 interface JobField {
@@ -42,7 +69,19 @@ interface WebDataGroup {
 }
 
 interface AddWebDataDialogProps {
-  isOpen: boolean; onOpenChange: (open: boolean) => void; onSubmit: (webData: WebDataForm[]) => Promise<void>; isSubmitting: boolean; context: { type: 'subdepartment' | 'class' | 'subclass'; subdepartmentName: string; className?: string; subclassName?: string } | null
+  isOpen: boolean; 
+  onOpenChange: (open: boolean) => void; 
+  onSubmit: (webData: WebDataForm[]) => Promise<void>; 
+  isSubmitting: boolean; 
+  context: { 
+    type: 'subdepartment' | 'class' | 'subclass'; 
+    subdepartmentName: string; 
+    className?: string; 
+    subclassName?: string;
+    availableForms?: Array<{ id: string; name: string }>;
+  } | null;
+  selectedFormIds?: string[];
+  onFormSelect?: (formIds: string[]) => void;
 }
 
 function MasterFieldPicker({ availableFields, onSelect }: { availableFields: JobField[]; onSelect: (field: JobField) => void }) {
@@ -62,22 +101,79 @@ function MasterFieldPicker({ availableFields, onSelect }: { availableFields: Job
 export function AddWebDataDialog({ isOpen, onOpenChange, onSubmit, isSubmitting, context }: AddWebDataDialogProps) {
   const [webDataGroups, setWebDataGroups] = useState<WebDataGroup[]>([])
   const [masterFields, setMasterFields] = useState<JobField[]>([])
+  const [formDocuments, setFormDocuments] = useState<FormDocument[]>([])
   const [loadingMasterFields, setLoadingMasterFields] = useState(false)
+  const [loadingForms, setLoadingForms] = useState(false)
   const [profileSearch, setProfileSearch] = useState('')
   const [companySearch, setCompanySearch] = useState('')
   const [selectedTopLevelFieldIds, setSelectedTopLevelFieldIds] = useState<Set<number>>(new Set())
   const [selectedGroupIdsForMerge, setSelectedGroupIdsForMerge] = useState<Set<string>>(new Set())
+  const [selectedFormId, setSelectedFormId] = useState<string>('')
+  // Fetch forms when dialog opens
+  const fetchFormDocuments = async () => {
+    setLoadingForms(true)
+    try {
+      const { data: departments, error } = await supabase
+        .from('tm_departments')
+        .select('stages')
+
+      if (error) throw error
+
+      // Extract all documents from all stages across all departments
+      const allDocuments: any[] = []
+      
+      departments?.forEach(dept => {
+        if (!dept.stages || !Array.isArray(dept.stages)) return
+        
+        dept.stages.forEach((stage: any) => {
+          if (stage.documents && Array.isArray(stage.documents)) {
+            allDocuments.push(...stage.documents)
+          }
+        })
+      })
+
+      // Filter for documents with docType 'form' and map to our FormDocument interface
+      const forms = allDocuments
+        .filter((doc: any) => doc.docType === 'form')
+        .map((doc: any) => ({
+          id: doc.id,
+          name: doc.name,
+          docType: doc.docType,
+          kycId: doc.kycId,
+          isRequired: doc.isRequired || false,
+          isSpecial: doc.isSpecial || false,
+          documentType: doc.documentType || 'both',
+          targetEntities: Array.isArray(doc.targetEntities) ? doc.targetEntities : []
+        }))
+      
+      // Remove duplicates by document ID
+      const uniqueForms = Array.from(new Map(forms.map(form => [form.id, form])).values())
+      
+      setFormDocuments(uniqueForms)
+    } catch (error) {
+      console.error('Error fetching form documents:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to load form documents',
+        variant: 'destructive'
+      })
+    } finally {
+      setLoadingForms(false)
+    }
+  }
 
   // Reset state when dialog opens/closes
   useEffect(() => {
     if (isOpen) {
       fetchMasterFields()
+      fetchFormDocuments()
       // Reset all selection states when dialog opens
       setSelectedTopLevelFieldIds(new Set())
       setSelectedGroupIdsForMerge(new Set())
       setWebDataGroups([])
       setProfileSearch('')
       setCompanySearch('')
+      setSelectedFormId('')
     }
   }, [isOpen])
 
@@ -124,6 +220,26 @@ export function AddWebDataDialog({ isOpen, onOpenChange, onSubmit, isSubmitting,
         is_required: field.is_required
       }));
 
+      // If we have a selected form, include form details
+      if (selectedFormId) {
+        const selectedForm = formDocuments.find(f => f.id === selectedFormId)
+        return {
+          name: group.efnsDisplayName,
+          efnsDisplayName: group.efnsDisplayName,
+          variableName: group.variableName,
+          description: `Linked to: ${group.linkedMasterFields.map(f => f.label).join(', ')}`,
+          isRequired: group.linkedMasterFields.some(f => f.is_required) || false,
+          order: index,
+          fieldType: group.fieldType,
+          arrayItems: group.arrayItems,
+          masterFields: simplifiedMasterFields,
+          masterFieldIds: group.linkedMasterFields.map(f => f.id.toString()),
+          formName: selectedForm?.name || '',
+          formId: selectedForm?.id
+        };
+      }
+
+      // If no form selected, create a regular entry
       return {
         name: group.efnsDisplayName, 
         efnsDisplayName: group.efnsDisplayName, 
@@ -133,8 +249,8 @@ export function AddWebDataDialog({ isOpen, onOpenChange, onSubmit, isSubmitting,
         order: index, 
         fieldType: group.fieldType, 
         arrayItems: group.arrayItems, 
-        masterFields: simplifiedMasterFields, // Store simplified master field data
-        masterFieldIds: group.linkedMasterFields.map(f => f.id.toString()) // Store just the IDs
+        masterFields: simplifiedMasterFields,
+        masterFieldIds: group.linkedMasterFields.map(f => f.id.toString())
       }
     })
     
@@ -250,6 +366,34 @@ export function AddWebDataDialog({ isOpen, onOpenChange, onSubmit, isSubmitting,
         <DialogHeader>
           <DialogTitle>Add WebData</DialogTitle>
           <DialogDescription>Select master fields to create web data fields. You can merge multiple fields into one later.</DialogDescription>
+          
+          <div className="space-y-2 pt-2">
+            <Label>Select Form (Optional)</Label>
+            <Select
+              value={selectedFormId}
+              onValueChange={setSelectedFormId}
+              disabled={loadingForms}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={
+                  loadingForms ? 'Loading forms...' : 'Select a form (optional)'
+                } />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">No form (global field)</SelectItem>
+                {formDocuments.map(form => (
+                  <SelectItem key={form.id} value={form.id}>
+                    {form.name} {form.isRequired && '(Required)'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {selectedFormId 
+                ? `Selected form: ${formDocuments.find(f => f.id === selectedFormId)?.name}`
+                : 'No form selected - field will be available for all forms'}
+            </p>
+          </div>
           {/* Debug info - remove this once issue is fixed */}
           <div className="text-xs text-gray-500 p-2 bg-gray-50 rounded">
             Debug: Selected IDs: [{Array.from(selectedTopLevelFieldIds).join(', ')}] | 

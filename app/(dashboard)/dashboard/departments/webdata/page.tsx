@@ -83,6 +83,9 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [deleteContext, setDeleteContext] = useState<{ type: string, index: number } | null>(null)
+  const [editingWebData, setEditingWebData] = useState<ApiWebData | null>(null)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingContext, setEditingContext] = useState<EditingContext | null>(null)
   const [newWebData, setNewWebData] = useState<{
     name: string,
@@ -99,7 +102,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     isVisible: true,
     variableName: ''
   }])
-  const [bulkInput, setBulkInput] = useState('')
+  const [addContext, setAddContext] = useState<EditingContext | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editForm, setEditForm] = useState({
@@ -111,46 +114,46 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     variableName: ''
   })
   const [isReady, setIsReady] = useState(false)
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [editingWebData, setEditingWebData] = useState<ApiWebData | null>(null)
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [addContext, setAddContext] = useState<EditingContext | null>(null);
-
-  useEffect(() => {
-    if (departments.length === 0 || isReady) return
-
-    const initialDept = departments[0]?.id || ''
-    setActiveDept(initialDept)
-
-    const initialSubdept = departments[0]?.tm_subdepartments?.[0]
-    if (initialSubdept) {
-      const subdeptId = initialSubdept.id.toString()
-      setActiveSubdept(prev => ({ ...prev, [initialDept]: subdeptId }))
-
-      const initialClass = initialSubdept.classes?.[0]
-      if (initialClass) {
-        const subdeptKey = `${initialDept}-${subdeptId}`
-        // Store class ID instead of name
-        setActiveClass(prev => ({ ...prev, [subdeptKey]: initialClass.id.toString() }))
-
-        const initialSubclass = initialClass.subClasses?.[0]
-        if (initialSubclass) {
-          const classKey = `${subdeptKey}-${initialClass.id}`
-          setActiveSubclass(prev => ({ ...prev, [classKey]: initialSubclass.id.toString() }))
-        }
-      }
-    }
-
-    setIsReady(true)
-  }, [departments, isReady])
-
-  useEffect(() => {
-    setDepartments(initialDepartments)
-  }, [initialDepartments])
+  const [availableForms, setAvailableForms] = useState<Array<{ id: string; name: string }>>([])
 
   const toggleExpanded = (key: string) => {
-    setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))
-  }
+    setExpandedItems(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  useEffect(() => {
+    const fetchForms = async () => {
+      try {
+        const { data: forms, error } = await supabase
+          .from('forms') // Adjust the table name as per your database schema
+          .select('id, name')
+          .order('name');
+        
+        if (error) throw error;
+        
+        setAvailableForms(forms || []);
+      } catch (error) {
+        console.error('Error fetching forms:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to load forms',
+          variant: 'destructive',
+        });
+      }
+    };
+
+    fetchForms();
+  }, []);
+
+  const handleAddClick = (context: EditingContext) => {
+    setAddContext({
+      ...context,
+      availableForms
+    });
+    setIsAddDialogOpen(true);
+  };
 
   const openWebDataDialog = (context: EditingContext) => {
     const dept = departments.find(d => d.id === context.departmentId);
@@ -175,7 +178,8 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       ...context,
       subdepartmentName: subdept?.name || '',
       className,
-      subclassName
+      subclassName,
+      availableForms
     };
 
     setAddContext(enhancedContext)
@@ -339,7 +343,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
           return {
             ...subdept,
             classes,
-            upload_webData: uploadWebData
+            upload_web_data: uploadWebData
           }
         })
 
@@ -481,7 +485,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
 
       switch (context.type) {
         case 'subdepartment':
-          return subdept.upload_webData || [];
+          return subdept.upload_web_data || [];
         case 'class':
           if (!context.classId) return null;
           const targetClass = subdept.classes?.find(c => String(c.id) === String(context.classId));
@@ -752,13 +756,13 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
         <div className="flex flex-col flex-1 min-h-0 space-y-4">
           {currentSubclass ? renderTableSection(
             `Sub-class: ${currentSubclass.name}`, currentSubclass.description, <Layers className="h-5 w-5 text-orange-500" />, currentSubclass.webData,
-            { type: 'subclass', departmentId: currentDept.id, subdepartmentId: currentSubdept.id.toString(), classId: currentClass?.id.toString(), subclassId: currentSubclass.id.toString() }
+            { type: 'subclass', departmentId: currentDept.id, subdepartmentId: currentSubdept.id.toString(), classId: currentClass?.id.toString(), subclassId: currentSubclass.id.toString(), availableForms }
           ) : currentClass ? renderTableSection(
             `Class: ${currentClass.name}`, currentClass.description, <Layers className="h-5 w-5 text-purple-500" />, currentClass.webData,
-            { type: 'class', departmentId: currentDept.id, subdepartmentId: currentSubdept.id.toString(), classId: currentClass.id.toString() }
+            { type: 'class', departmentId: currentDept.id, subdepartmentId: currentSubdept.id.toString(), classId: currentClass.id.toString(), availableForms }
           ) : renderTableSection(
-            "Subdepartment WebData", "", <FileText className="h-5 w-5 text-green-500" />, currentSubdept.upload_webData,
-            { type: 'subdepartment', departmentId: currentDept.id, subdepartmentId: currentSubdept.id.toString() }
+            "Subdepartment WebData", "", <FileText className="h-5 w-5 text-green-500" />, currentSubdept.upload_web_data,
+            { type: 'subdepartment', departmentId: currentDept.id, subdepartmentId: currentSubdept.id.toString(), availableForms }
           )}
         </div>
       </div>
@@ -822,7 +826,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
         onOpenChange={setIsAddDialogOpen}
         onSubmit={handleAddWebData}
         isSubmitting={isSubmitting}
-        context={addContext}
+        context={addContext ? { ...addContext, availableForms } : null}
       />
       <EditWebDataDialog
         isOpen={isEditDialogOpen}
@@ -830,7 +834,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
         webData={editingWebData}
         onSave={handleSaveWebData}
         isSubmitting={isSubmitting}
-        context={editingContext}
+        context={editingContext ? { ...editingContext, availableForms } : null}
       />
     </div>
   )
