@@ -1,6 +1,6 @@
 //@ts-nocheck
 "use client"
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -15,7 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import { Check, Link2, Merge, Plus, X, FileText, Upload, User, Users } from "lucide-react"
+import { Check, Link2, Merge, Plus, X, FileText, Upload, User, Users, AlertTriangle } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 // Enhanced interfaces
@@ -55,10 +55,10 @@ interface FormDocument {
   isRequired: boolean;
   isSpecial: boolean;
   documentType: string;
-  automationId?: string;
+  automationLinks?: Record<string, string>; // Map of entity keys to automation IDs
   targetEntities: Array<{
     class_id?: number;
-    subclass_id?: number; // Assumed field for subclass targeting
+    subclass_id?: number;
     entityName: string;
     entityType: string;
     subdept_id?: number;
@@ -96,8 +96,6 @@ interface WebDataGroup {
 interface AddWebDataDialogProps {
   isOpen: boolean; 
   onOpenChange: (open: boolean) => void; 
-  // MODIFICATION: Added ID fields to the context to enable filtering.
-  // These IDs are assumed to be provided by the parent component.
   context: { 
     type: 'subdepartment' | 'class' | 'subclass'; 
     subdepartmentId: number; 
@@ -116,11 +114,25 @@ function MasterFieldPicker({ availableFields, onSelect }: { availableFields: Job
   const [open, setOpen] = useState(false)
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild><Button variant="outline" size="xs" className="text-xs"><Plus className="mr-1 h-3 w-3" />Add</Button></PopoverTrigger>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="xs" className="text-xs">
+          <Plus className="mr-1 h-3 w-3" />Add
+        </Button>
+      </PopoverTrigger>
       <PopoverContent className="w-[250px] p-0" align="start">
-        <Command><CommandInput placeholder="Search master fields..." /><CommandList><CommandEmpty>No fields found.</CommandEmpty><CommandGroup>
-          {availableFields.map((field) => (<CommandItem key={field.id} onSelect={() => { onSelect(field); setOpen(false) }}>{field.label}</CommandItem>))}
-        </CommandGroup></CommandList></Command>
+        <Command>
+          <CommandInput placeholder="Search master fields..." />
+          <CommandList>
+            <CommandEmpty>No fields found.</CommandEmpty>
+            <CommandGroup>
+              {availableFields.map((field) => (
+                <CommandItem key={field.id} onSelect={() => { onSelect(field); setOpen(false) }}>
+                  {field.label}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
       </PopoverContent>
     </Popover>
   )
@@ -143,8 +155,39 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
   const [selectedGroupIdsForMerge, setSelectedGroupIdsForMerge] = useState<Set<string>>(new Set())
   const [selectedFormId, setSelectedFormId] = useState<string>('')
 
+  // Helper function to get entity key for the current context
+  const getEntityKeyForContext = useCallback(() => {
+    if (!context) return null;
+    
+    switch (context.type) {
+      case 'subdepartment':
+        return `subdept-${context.subdepartmentId}-null-null`;
+      case 'class':
+        return `class-${context.subdepartmentId}-${context.classId || 'null'}-null`;
+      case 'subclass':
+        return `subclass-${context.subdepartmentId}-${context.classId || 'null'}-${context.subclassId || 'null'}`;
+      default:
+        return null;
+    }
+  }, [context]);
+
+  // Get automation ID from the selected form for the current context
+  const getAutomationIdFromForm = useCallback((form: FormDocument | null): string | null => {
+    if (!form || !form.automationLinks) return null;
+    
+    const entityKey = getEntityKeyForContext();
+    if (!entityKey) return null;
+    
+    // Check if there's a specific automation link for this entity
+    const automationId = form.automationLinks[entityKey];
+    if (automationId) return automationId;
+    
+    // If no specific link found, return null (no fallback ID generation)
+    return null;
+  }, [getEntityKeyForContext]);
+
   // Fetch KYC documents
-  const fetchKycDocuments = async () => {
+  const fetchKycDocuments = useCallback(async () => {
     setLoadingKyc(true)
     try {
       const { data, error } = await supabase
@@ -172,9 +215,9 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
     } finally {
       setLoadingKyc(false)
     }
-  }
+  }, []);
 
-  const fetchFormDocuments = async () => {
+  const fetchFormDocuments = useCallback(async () => {
     setLoadingForms(true)
     try {
       const { data: departments, error } = await supabase.from('tm_departments').select('stages')
@@ -197,8 +240,8 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
         kycId: doc.kycId, 
         isRequired: doc.isRequired || false, 
         isSpecial: doc.isSpecial || false, 
-        documentType: doc.documentType || 'both', 
-        automationId: doc.automationId, 
+        documentType: doc.documentType || 'both',
+        automationLinks: doc.automationLinks || {}, // Include automation links
         targetEntities: Array.isArray(doc.targetEntities) ? doc.targetEntities : [] 
       }))
       
@@ -210,26 +253,9 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
     } finally {
       setLoadingForms(false)
     }
-  }
+  }, []);
 
-  useEffect(() => {
-    if (isOpen) {
-      fetchMasterFields();
-      fetchFormDocuments();
-      fetchKycDocuments();
-      setSelectedTopLevelFieldIds(new Set());
-      setSelectedGroupIdsForMerge(new Set());
-      setSelectedKycDocuments(new Map());
-      setWebDataGroups([]);
-      setProfileSearch('');
-      setCompanySearch('');
-      setKycSearch('');
-      setSelectedFormId('');
-      setActiveTab('fields');
-    }
-  }, [isOpen]);
-
-  const fetchMasterFields = async () => {
+  const fetchMasterFields = useCallback(async () => {
     setLoadingMasterFields(true);
     try {
       const { data, error } = await supabase.from('tm_job_fields').select('*').order('label');
@@ -241,7 +267,26 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
     } finally { 
       setLoadingMasterFields(false) 
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchMasterFields();
+      fetchFormDocuments();
+      fetchKycDocuments();
+      
+      // Reset state
+      setSelectedTopLevelFieldIds(new Set());
+      setSelectedGroupIdsForMerge(new Set());
+      setSelectedKycDocuments(new Map());
+      setWebDataGroups([]);
+      setProfileSearch('');
+      setCompanySearch('');
+      setKycSearch('');
+      setSelectedFormId('');
+      setActiveTab('fields');
+    }
+  }, [isOpen, fetchMasterFields, fetchFormDocuments, fetchKycDocuments]);
   
   const allLinkedMasterFieldIds = useMemo(() => new Set(webDataGroups.flatMap(g => g.linkedMasterFields.map(f => f.id))), [webDataGroups]);
   const filteredProfileFields = useMemo(() => masterFields.filter(f => f.sources?.some(s => s.source_type === 'profile' || s.source_type === 'document') && f.label?.toLowerCase().includes(profileSearch.toLowerCase())), [masterFields, profileSearch]);
@@ -295,6 +340,17 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
     });
   }, [formDocuments, context]);
 
+  // Get the selected form details
+  const selectedForm = useMemo(() => {
+    return selectedFormId && selectedFormId !== 'none' 
+      ? formDocuments.find(f => f.id === selectedFormId)
+      : null;
+  }, [selectedFormId, formDocuments]);
+
+  // Get automation ID for the current context
+  const automationIdForContext = useMemo(() => {
+    return getAutomationIdFromForm(selectedForm);
+  }, [selectedForm, getAutomationIdFromForm]);
 
   const handleClose = () => { onOpenChange(false) }
 
@@ -304,13 +360,17 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
       return;
     }
 
-    try {
-      const selectedForm = selectedFormId && selectedFormId !== 'none' 
-        ? formDocuments.find(f => f.id === selectedFormId)
-        : null;
+    // Check if a form is selected but no automation is configured for this context
+    if (selectedForm && !automationIdForContext) {
+      toast({ 
+        title: "No Automation Configured", 
+        description: `The selected form "${selectedForm.name}" does not have an automation configured for this ${context?.type}. Please configure automation links in the stage editor first.`,
+        variant: "destructive"
+      });
+      return;
+    }
 
-      const automationIdToUse = selectedForm?.automationId || `auto_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-      
+    try {
       const webDataArray = [];
 
       const kycDocsUpload = Array.from(selectedKycDocuments.entries()).map(([kycId, entityType]) => {
@@ -352,7 +412,8 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
         }));
 
         const newEntry = {
-          automationId: automationIdToUse,
+          // Only use automation ID if it exists for this context
+          ...(automationIdForContext && { automationId: automationIdForContext }),
           fields: webDataFields,
           documentId: selectedForm?.id || null,
           documentName: selectedForm?.name || (kycDocsUpload.length > 0 ? 'Document Upload Requirements' : 'Custom Fields'),
@@ -430,12 +491,34 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
   }
 
   const removeGroup = (groupId: string) => setWebDataGroups(prev => prev.filter(g => g.id !== groupId))
-  const linkMasterFieldToGroup = (groupId: string, field: JobField) => updateGroup(groupId, 'linkedMasterFields', [...webDataGroups.find(g => g.id === groupId)!.linkedMasterFields, field])
-  const unlinkMasterFieldFromGroup = (groupId: string, fieldId: number) => updateGroup(groupId, 'linkedMasterFields', webDataGroups.find(g => g.id === groupId)!.linkedMasterFields.filter(f => f.id !== fieldId))
-  const toggleGroupSelectionForMerge = (groupId: string) => setSelectedGroupIdsForMerge(prev => { const newSet = new Set(prev); if (newSet.has(groupId)) newSet.delete(groupId); else newSet.add(groupId); return newSet })
+  
+  const linkMasterFieldToGroup = (groupId: string, field: JobField) => {
+    const group = webDataGroups.find(g => g.id === groupId);
+    if (group) {
+      updateGroup(groupId, 'linkedMasterFields', [...group.linkedMasterFields, field]);
+    }
+  }
+  
+  const unlinkMasterFieldFromGroup = (groupId: string, fieldId: number) => {
+    const group = webDataGroups.find(g => g.id === groupId);
+    if (group) {
+      updateGroup(groupId, 'linkedMasterFields', group.linkedMasterFields.filter(f => f.id !== fieldId));
+    }
+  }
+  
+  const toggleGroupSelectionForMerge = (groupId: string) => {
+    setSelectedGroupIdsForMerge(prev => { 
+      const newSet = new Set(prev); 
+      if (newSet.has(groupId)) newSet.delete(groupId); 
+      else newSet.add(groupId); 
+      return newSet 
+    })
+  }
+  
   const handleMerge = () => { 
     const groupsToMerge = webDataGroups.filter(g => selectedGroupIdsForMerge.has(g.id)); 
     if (groupsToMerge.length < 2) return; 
+    
     const firstGroup = groupsToMerge[0]; 
     const combinedMasterFields = groupsToMerge.flatMap(g => g.linkedMasterFields); 
     const newGroup: WebDataGroup = { 
@@ -446,11 +529,17 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
       entityType: firstGroup.entityType,
       linkedMasterFields: combinedMasterFields 
     }; 
+    
     setWebDataGroups(prev => [...prev.filter(g => !selectedGroupIdsForMerge.has(g.id)), newGroup]); 
     setSelectedGroupIdsForMerge(new Set()) 
   }
 
-  const addArrayItem = (groupId: string) => updateGroup(groupId, 'arrayItems', [...(webDataGroups.find(g => g.id === groupId)?.arrayItems || []), { name: '', variableName: '', type: 'text' }])
+  const addArrayItem = (groupId: string) => {
+    const group = webDataGroups.find(g => g.id === groupId);
+    const currentItems = group?.arrayItems || [];
+    updateGroup(groupId, 'arrayItems', [...currentItems, { name: '', variableName: '', type: 'text' }]);
+  }
+  
   const removeArrayItem = (groupId: string, itemIndex: number) => { 
     const g = webDataGroups.find(g => g.id === groupId); 
     if (!g || !g.arrayItems) return; 
@@ -458,6 +547,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
     ni.splice(itemIndex, 1); 
     updateGroup(groupId, 'arrayItems', ni) 
   }
+  
   const handleArrayItemChange = (groupId: string, itemIndex: number, prop: string, value: string) => { 
     const g = webDataGroups.find(g => g.id === groupId); 
     if (!g || !g.arrayItems) return; 
@@ -487,20 +577,67 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">No form</SelectItem>
-                {/* MODIFICATION: Use the filtered `applicableForms` list instead of `formDocuments` */}
-                {applicableForms.map(form => (
-                  <SelectItem key={form.id} value={form.id}>
-                    {form.name} {form.isRequired && '(Required)'}
-                  </SelectItem>
-                ))}
+                {applicableForms.map(form => {
+                  const entityKey = getEntityKeyForContext();
+                  const hasAutomation = entityKey && form.automationLinks?.[entityKey];
+                  
+                  return (
+                    <SelectItem key={form.id} value={form.id}>
+                      <div className="flex items-center justify-between w-full">
+                        <span>{form.name} {form.isRequired && '(Required)'}</span>
+                        {hasAutomation ? (
+                          <Badge variant="outline" className="ml-2 text-xs text-green-600">
+                            <Check className="h-3 w-3 mr-1" />
+                            Automation
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="ml-2 text-xs text-amber-600">
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            No Automation
+                          </Badge>
+                        )}
+                      </div>
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
-            <p className="text-sm text-muted-foreground">
-              {selectedFormId && selectedFormId !== 'none' 
-                ? `Selected form: ${formDocuments.find(f => f.id === selectedFormId)?.name}` 
-                : 'No form selected - fields will be available globally.'
-              }
-            </p>
+            
+            {/* Show automation status for selected form */}
+            {selectedForm && (
+              <div className="p-3 rounded-lg border bg-gray-50">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Selected: {selectedForm.name}</p>
+                    <p className="text-xs text-gray-600">
+                      Entity context: {context.type} 
+                      {context.type === 'class' && ` (ID: ${context.classId})`}
+                      {context.type === 'subclass' && ` (ID: ${context.subclassId})`}
+                    </p>
+                  </div>
+                  
+                  {automationIdForContext ? (
+                    <Badge variant="outline" className="text-green-600 border-green-300">
+                      <Check className="h-3 w-3 mr-1" />
+                      Automation: {automationIdForContext.slice(0, 8)}...
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-amber-600 border-amber-300">
+                      <AlertTriangle className="h-3 w-3 mr-1" />
+                      No Automation
+                    </Badge>
+                  )}
+                </div>
+                
+                {!automationIdForContext && (
+                  <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                    <AlertTriangle className="h-3 w-3 inline mr-1" />
+                    This form doesn't have an automation configured for the current {context.type}. 
+                    Configure automation links in the stage editor to enable form submission automation.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </DialogHeader>
         
@@ -904,9 +1041,29 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
 
         <DialogFooter className="mt-4 pt-4 border-t">
           <div className="flex items-center justify-between w-full">
-            <div className="text-sm text-muted-foreground">
-              {webDataGroups.length} fields + {selectedKycDocuments.size} documents = {webDataGroups.length + selectedKycDocuments.size} total items
+            <div className="flex items-center gap-4">
+              <div className="text-sm text-muted-foreground">
+                {webDataGroups.length} fields + {selectedKycDocuments.size} documents = {webDataGroups.length + selectedKycDocuments.size} total items
+              </div>
+              
+              {/* Show automation status in footer */}
+              {selectedForm && (
+                <div className="flex items-center gap-2">
+                  {automationIdForContext ? (
+                    <Badge variant="outline" className="text-green-600 border-green-300">
+                      <Check className="h-3 w-3 mr-1" />
+                      Automation Ready
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-amber-600 border-amber-300">
+                      <AlertTriangle className="h-3 w-3 mr-1" />
+                      No Automation
+                    </Badge>
+                  )}
+                </div>
+              )}
             </div>
+            
             <div className="flex space-x-2">
               <Button variant="outline" onClick={handleClose} disabled={isSubmitting}>
                 Cancel
@@ -915,6 +1072,12 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                 type="button" 
                 onClick={handleSubmit} 
                 disabled={isSubmitting || (webDataGroups.length === 0 && selectedKycDocuments.size === 0)}
+                className={cn(
+                  "transition-colors",
+                  selectedForm && !automationIdForContext 
+                    ? "bg-amber-600 hover:bg-amber-700" 
+                    : "bg-blue-600 hover:bg-blue-700"
+                )}
               >
                 {isSubmitting ? 'Saving...' : 'Save WebData & Documents'}
               </Button>

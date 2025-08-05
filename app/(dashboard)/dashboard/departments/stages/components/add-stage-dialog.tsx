@@ -43,6 +43,11 @@ const generateId = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,
     return v.toString(16);
 });
 
+const getEntityKey = (entity: any): string | null => {
+  if (!entity) return null;
+  return `${entity.entityType}-${entity.subdept_id}-${entity.class_id || 'null'}-${entity.subclass_id || 'null'}`;
+};
+
 const transformKycFields = (fields: any[]): DocumentExtraction[] => {
     if (!Array.isArray(fields)) return [];
     return fields.map((field: any) => {
@@ -195,7 +200,7 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
         const newDoc: StageDocument = {
             id: generateId(), name: '', description: '', isRequired: false, documentType: 'both', docType: 'normal_doc',
             inputType: 'file', extractionSpecs: [], isSpecial, linkedKycDocument: undefined,
-            ...(isSpecial && { targetEntities: [] })
+            ...(isSpecial && { targetEntities: [], automationLinks: {} })
         };
         updateNewStage(stageId, { documents: [...(newStages.find(s => s.id === stageId)?.documents || []), newDoc] });
     };
@@ -203,7 +208,26 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
     const updateDocument = (stageId: string, docId: string, updates: Partial<StageDocument>) => {
         const stage = newStages.find(s => s.id === stageId);
         if (!stage) return;
-        const updatedDocs = stage.documents.map(doc => doc.id === docId ? { ...doc, ...updates } : doc);
+
+        const updatedDocs = stage.documents.map(doc => {
+            if (doc.id === docId) {
+                const updatedDoc = { ...doc, ...updates };
+                // If targetEntities are updated, clean up any orphaned automationLinks
+                if (updates.targetEntities && updatedDoc.automationLinks) {
+                    const newEntityKeys = new Set(updates.targetEntities.map(getEntityKey));
+                    const newAutomationLinks = { ...updatedDoc.automationLinks };
+                    Object.keys(newAutomationLinks).forEach(key => {
+                        if (!newEntityKeys.has(key)) {
+                            delete newAutomationLinks[key];
+                        }
+                    });
+                    updatedDoc.automationLinks = newAutomationLinks;
+                }
+                return updatedDoc;
+            }
+            return doc;
+        });
+
         updateNewStage(stageId, { documents: updatedDocs });
     };
 
@@ -364,7 +388,6 @@ export function AddStageDialog({ open, onOpenChange, onAddStages, departments = 
     );
 }
 
-// Stage Form Component - AUTOMATION SECTION REMOVED
 function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: Partial<NewStage>) => void }) {
     const addTimeConfig = () => onUpdate({ timeConfigs: [...stage.timeConfigs, { applicationType: '', days: 0, hours: 0, minutes: 0 }] });
     const removeTimeConfig = (index: number) => onUpdate({ timeConfigs: stage.timeConfigs.filter((_, i) => i !== index) });
@@ -405,7 +428,6 @@ function StageForm({ stage, onUpdate }: { stage: NewStage; onUpdate: (updates: P
     );
 }
 
-// Documents Section - PASSES AUTOMATION PROPS DOWN
 function DocumentsSection({ stage, entityOptions, loadingEntities, kycDocuments, loadingKycDocs, automationTypes, loadingAutomations, onAddDocument, onUpdateDocument, onRemoveDocument, onAddExtraction, onUpdateExtraction, onRemoveExtraction }: {
     stage: NewStage; entityOptions: EntityOption[]; loadingEntities: boolean; kycDocuments: KYCDocument[]; loadingKycDocs: boolean;
     automationTypes: AutomationType[]; loadingAutomations: boolean;
@@ -436,7 +458,70 @@ function DocumentsSection({ stage, entityOptions, loadingEntities, kycDocuments,
     );
 }
 
-// Document Card - AUTOMATION SECTION ADDED
+function MultiEntityPicker({ entities, selectedEntities = [], onSelectionChange, loading = false, placeholder = "Select target entities..." }: { entities: EntityOption[], selectedEntities: Array<{ entityType: 'subdept' | 'class' | 'subclass', subdept_id: number, class_id?: string | number, subclass_id?: string | number, entityName: string }>, onSelectionChange: (selectedEntities: any[]) => void, loading?: boolean, placeholder?: string }) {
+    const [open, setOpen] = useState(false);
+    const toggleEntity = (entity: EntityOption) => {
+        const entityKey = getEntityKey(entity);
+        const isSelected = selectedEntities.some(selected => getEntityKey(selected) === entityKey);
+        if (isSelected) {
+            onSelectionChange(selectedEntities.filter(selected => getEntityKey(selected) !== entityKey));
+        } else {
+            const newEntity = { entityType: entity.type, subdept_id: entity.subdept_id!, class_id: entity.class_id, subclass_id: entity.subclass_id, entityName: entity.name.replace(/^→\s*/g, '') };
+            onSelectionChange([...selectedEntities, newEntity]);
+        }
+    };
+    const isEntitySelected = (entity: EntityOption) => selectedEntities.some(selected => getEntityKey(selected) === getEntityKey(entity));
+    const groupedEntities = entities.reduce((acc, entity) => {
+        const subdeptName = entities.find(e => e.type === 'subdept' && e.subdept_id === entity.subdept_id)?.name || 'Unknown';
+        if (!acc[subdeptName]) { acc[subdeptName] = []; }
+        acc[subdeptName].push(entity);
+        return acc;
+    }, {} as Record<string, EntityOption[]>);
+
+    return (
+        <div className="space-y-2">
+            <Popover open={open} onOpenChange={setOpen}>
+                <PopoverTrigger asChild>
+                    <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between bg-white" disabled={loading}>
+                        {selectedEntities.length === 0 ? <span className="text-muted-foreground">{loading ? "Loading entities..." : placeholder}</span> : <span>{selectedEntities.length} entit{selectedEntities.length === 1 ? 'y' : 'ies'} selected</span>}
+                        <X className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-96 p-0"><Command><CommandInput placeholder="Search entities..." /><CommandEmpty>No entities found.</CommandEmpty>
+                    <div className="max-h-72 overflow-y-auto">
+                        {Object.entries(groupedEntities).map(([subdeptName, subdeptEntities]) => (
+                            <CommandGroup key={subdeptName} heading={subdeptName}>
+                                {subdeptEntities.sort((a, b) => a.level - b.level).map((entity) => (
+                                    <CommandItem key={getEntityKey(entity)} onSelect={() => toggleEntity(entity)} className="flex items-center gap-2">
+                                        <div className="flex items-center gap-2 flex-1">
+                                            <div className="flex h-4 w-4 items-center justify-center">{isEntitySelected(entity) && <Check className="h-3 w-3 text-blue-600" />}</div>
+                                            <span style={{ marginLeft: `${entity.level * 12}px` }}>{entity.name}</span>
+                                            <Badge variant="outline" className="text-xs">{entity.type}</Badge>
+                                        </div>
+                                    </CommandItem>
+                                ))}
+                            </CommandGroup>
+                        ))}
+                    </div>
+                </Command></PopoverContent>
+            </Popover>
+            {selectedEntities.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                    {selectedEntities.map((entity, index) => (
+                        <Badge key={index} variant="secondary" className="flex items-center gap-1 text-xs bg-blue-100 text-blue-800 hover:bg-blue-200">
+                            {entity.entityName}
+                            <Badge variant="outline" className="text-xs ml-1 bg-white">{entity.entityType}</Badge>
+                            <Button variant="ghost" size="icon" className="h-4 w-4 ml-1 p-0 hover:bg-destructive hover:text-destructive-foreground rounded-full" onClick={() => onSelectionChange(selectedEntities.filter((_, i) => i !== index))}>
+                                <X className="h-3 w-3" />
+                            </Button>
+                        </Badge>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function DocumentCard({ doc, docIndex, onUpdateDocument, onRemoveDocument, onAddExtraction, onUpdateExtraction, onRemoveExtraction, kycDocuments, loadingKycDocs, entityOptions, loadingEntities, automationTypes, loadingAutomations }: {
     doc: StageDocument; docIndex: number; onUpdateDocument: (docId: string, updates: Partial<StageDocument>) => void;
     onRemoveDocument: (docId: string) => void; onAddExtraction: (docId: string) => void; onUpdateExtraction: (docId: string, extractionId: string, updates: Partial<DocumentExtraction>) => void;
@@ -461,17 +546,60 @@ function DocumentCard({ doc, docIndex, onUpdateDocument, onRemoveDocument, onAdd
                 <div className="space-y-2"><Label>Description</Label><Textarea value={doc.description || ''} onChange={(e) => onUpdateDocument(doc.id, { description: e.target.value })} rows={2} /></div>
                 <div className="flex items-center space-x-2"><Checkbox checked={doc.isRequired} onCheckedChange={(c) => onUpdateDocument(doc.id, { isRequired: !!c })} /><Label>This document is required</Label></div>
 
-                {/* --- NEW AUTOMATION SECTION --- */}
                 <Separator className="my-4" />
                 <div className="space-y-4">
-                    <div className="flex items-start space-x-3"><Checkbox id={`doc-automation-${doc.id}`} checked={doc.hasAutomation || false} onCheckedChange={(c) => onUpdateDocument(doc.id, { hasAutomation: !!c })} className="mt-1 data-[state=checked]:bg-blue-600" /><div className="grid gap-1.5"><Label htmlFor={`doc-automation-${doc.id}`} className="font-medium flex items-center gap-2"><Zap className="h-4 w-4 text-blue-600" />Enable Automation</Label><p className="text-sm text-muted-foreground">Link an automation to this document.</p></div></div>
+                    <div className="flex items-start space-x-3">
+                        <Checkbox id={`doc-automation-${doc.id}`} checked={doc.hasAutomation || false} onCheckedChange={(c) => onUpdateDocument(doc.id, { hasAutomation: !!c, ...(!c && { automationLinks: {} }) })} className="mt-1 data-[state=checked]:bg-blue-600" />
+                        <div>
+                            <Label htmlFor={`doc-automation-${doc.id}`} className="font-medium flex items-center gap-2"><Zap className="h-4 w-4 text-blue-600" /> Enable Automation</Label>
+                            <p className="text-sm text-muted-foreground">Link a specific automation to each target entity for this document.</p>
+                        </div>
+                    </div>
                     {doc.hasAutomation && (
                         <div className="space-y-4 pl-8 border-l-2 border-blue-100 py-4">
-                            <div className="grid grid-cols-1 gap-4">
-                                <div><Label>Automation Type</Label><Select value={doc.automationId || ''} onValueChange={(v) => onUpdateDocument(doc.id, { automationId: v === 'none' ? undefined : v })}><SelectTrigger className="bg-white"><SelectValue placeholder="Select automation" /></SelectTrigger><SelectContent>{loadingAutomations ? <SelectItem value="loading" disabled>Loading...</SelectItem> : <><SelectItem value="none">No automation</SelectItem>{automationTypes.map((a) => <SelectItem key={a.id} value={a.id}><div className="flex items-center gap-2"><Webhook className="h-4 w-4 text-blue-500" />{a.name}</div></SelectItem>)}</>}</SelectContent></Select></div>
-                                <div><Label>Automation URL</Label><Input className="bg-white" placeholder="https://example.com/login" value={doc.automationConfig?.url || ''} onChange={(e) => onUpdateDocument(doc.id, { automationConfig: { ...doc.automationConfig, url: e.target.value } })} /></div>
-                            </div>
-                            <Card className="bg-white shadow-sm"><CardHeader className="p-3 bg-slate-50 border-b"><CardTitle className="text-sm font-semibold">Login Credentials</CardTitle></CardHeader><CardContent className="p-3 grid gap-3"><div><Label className="text-xs">Email / Username</Label><Input className="bg-white" value={doc.automationConfig?.login?.email || ''} onChange={(e) => onUpdateDocument(doc.id, { automationConfig: { ...doc.automationConfig, login: { ...doc.automationConfig?.login, email: e.target.value } } })} /></div><div><Label className="text-xs">ID Number (Optional)</Label><Input className="bg-white" value={doc.automationConfig?.login?.idNumber || ''} onChange={(e) => onUpdateDocument(doc.id, { automationConfig: { ...doc.automationConfig, login: { ...doc.automationConfig?.login, idNumber: e.target.value } } })} /></div><div><Label className="text-xs">Password</Label><Input className="bg-white" type="password" value={doc.automationConfig?.login?.password || ''} onChange={(e) => onUpdateDocument(doc.id, { automationConfig: { ...doc.automationConfig, login: { ...doc.automationConfig?.login, password: e.target.value } } })} /></div></CardContent></Card>
+                            {!doc.isSpecial || !doc.targetEntities || doc.targetEntities.length === 0 ? (
+                                <div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg bg-white">
+                                    <Info className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                                    <p className="text-sm font-medium">No Target Entities Selected</p>
+                                    <p className="text-xs">To link automations, first mark this as a 'Special' document and select its target entities above.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    <Label className="font-semibold text-gray-800">Link Automation per Entity</Label>
+                                    {doc.targetEntities.map((entity) => {
+                                        const entityKey = getEntityKey(entity);
+                                        if (!entityKey) return null;
+                                        return (
+                                            <div key={entityKey} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center p-3 border rounded-lg bg-white shadow-sm">
+                                                <div className="flex items-center gap-2 overflow-hidden">
+                                                    <User className="h-4 w-4 text-slate-500 shrink-0" />
+                                                    <span className="font-medium text-gray-800 truncate" title={entity.entityName}>{entity.entityName}</span>
+                                                    <Badge variant="outline" className="text-xs">{entity.entityType}</Badge>
+                                                </div>
+                                                <div>
+                                                    <ComboBox
+                                                        options={[{ value: 'none', label: 'No automation' }, ...(automationTypes?.map(automation => ({ value: automation.id, label: automation.name, icon: <Webhook className="h-4 w-4 text-blue-500 mr-2" /> })) || [])]}
+                                                        value={doc.automationLinks?.[entityKey] || 'none'}
+                                                        onValueChange={(value) => {
+                                                            const newAutomationLinks = { ...(doc.automationLinks || {}) };
+                                                            if (value === 'none') {
+                                                                delete newAutomationLinks[entityKey];
+                                                            } else {
+                                                                newAutomationLinks[entityKey] = value;
+                                                            }
+                                                            onUpdateDocument(doc.id, { automationLinks: newAutomationLinks });
+                                                        }}
+                                                        placeholder="Select an automation"
+                                                        emptyText="No automations found"
+                                                        loading={loadingAutomations}
+                                                        className="w-full bg-white"
+                                                    />
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -480,150 +608,4 @@ function DocumentCard({ doc, docIndex, onUpdateDocument, onRemoveDocument, onAdd
             </CardContent>
         </Card>
     );
-}
-// Multi-select Entity Picker Component (Kept functionality, updated styling slightly)
-function MultiEntityPicker({
-  entities,
-  selectedEntities = [],
-  onSelectionChange,
-  loading = false,
-  placeholder = "Select target entities..."
-}: {
-  entities: EntityOption[]
-  selectedEntities: Array<{
-    entityType: 'subdept' | 'class' | 'subclass'
-    subdept_id: number
-    class_id?: string | number
-    subclass_id?: string | number
-    entityName: string
-  }>
-  onSelectionChange: (selectedEntities: any[]) => void
-  loading?: boolean
-  placeholder?: string
-}) {
-  const [open, setOpen] = useState(false)
-
-  const toggleEntity = (entity: EntityOption) => {
-    const entityKey = `${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`
-    const isSelected = selectedEntities.some(selected => {
-      const selectedKey = `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}`
-      return selectedKey === entityKey
-    })
-
-    if (isSelected) {
-      onSelectionChange(selectedEntities.filter(selected => {
-        const selectedKey = `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}`
-        return selectedKey !== entityKey
-      }))
-    } else {
-      const newEntity = {
-        entityType: entity.type,
-        subdept_id: entity.subdept_id!,
-        class_id: entity.class_id,
-        subclass_id: entity.subclass_id,
-        entityName: entity.name
-      }
-      onSelectionChange([...selectedEntities, newEntity])
-    }
-  }
-
-  const isEntitySelected = (entity: EntityOption) => {
-    const entityKey = `${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`
-    return selectedEntities.some(selected => {
-      const selectedKey = `${selected.entityType}-${selected.subdept_id}-${selected.class_id}-${selected.subclass_id}`
-      return selectedKey === entityKey
-    })
-  }
-
-  const groupedEntities = entities.reduce((acc, entity) => {
-    const subdeptName = entities.find(e => e.type === 'subdept' && e.subdept_id === entity.subdept_id)?.name || 'Unknown'
-    if (!acc[subdeptName]) {
-      acc[subdeptName] = []
-    }
-    acc[subdeptName].push(entity)
-    return acc
-  }, {} as Record<string, EntityOption[]>)
-
-  return (
-    <div className="space-y-2">
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            role="combobox"
-            aria-expanded={open}
-            className="w-full justify-between bg-white"
-            disabled={loading}
-          >
-            {selectedEntities.length === 0 ? (
-              <span className="text-muted-foreground">{loading ? "Loading entities..." : placeholder}</span>
-            ) : (
-              <span>{selectedEntities.length} entit{selectedEntities.length === 1 ? 'y' : 'ies'} selected</span>
-            )}
-            <X className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-96 p-0">
-          <Command>
-            <CommandInput placeholder="Search entities..." />
-            <CommandEmpty>No entities found.</CommandEmpty>
-            <div className="max-h-72 overflow-y-auto">
-              {Object.entries(groupedEntities).map(([subdeptName, subdeptEntities]) => (
-                <CommandGroup key={subdeptName} heading={subdeptName}>
-                  {subdeptEntities
-                    .sort((a, b) => a.level - b.level)
-                    .map((entity) => (
-                      <CommandItem
-                        key={`${entity.type}-${entity.subdept_id}-${entity.class_id}-${entity.subclass_id}`}
-                        onSelect={() => toggleEntity(entity)}
-                        className="flex items-center gap-2"
-                      >
-                        <div className="flex items-center gap-2 flex-1">
-                          <div className="flex h-4 w-4 items-center justify-center">
-                            {isEntitySelected(entity) && <Check className="h-3 w-3 text-blue-600" />}
-                          </div>
-                          <span style={{ marginLeft: `${entity.level * 12}px` }}>
-                            {entity.name}
-                          </span>
-                          <Badge variant="outline" className="text-xs">
-                            {entity.type}
-                          </Badge>
-                        </div>
-                      </CommandItem>
-                    ))}
-                </CommandGroup>
-              ))}
-            </div>
-          </Command>
-        </PopoverContent>
-      </Popover>
-
-      {selectedEntities.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-2">
-          {selectedEntities.map((entity, index) => (
-            <Badge
-              key={index}
-              variant="secondary"
-              className="flex items-center gap-1 text-xs bg-blue-100 text-blue-800 hover:bg-blue-200"
-            >
-              {entity.entityName}
-              <Badge variant="outline" className="text-xs ml-1 bg-white">
-                {entity.entityType}
-              </Badge>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-4 w-4 ml-1 p-0 hover:bg-destructive hover:text-destructive-foreground rounded-full"
-                onClick={() => {
-                  onSelectionChange(selectedEntities.filter((_, i) => i !== index))
-                }}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </Badge>
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
