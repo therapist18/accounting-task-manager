@@ -10,14 +10,14 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Badge } from "@/components/ui/badge"
-import { FileText, Info, X, Link2, Plus } from "lucide-react"
+import { FileText, Info, X, Link2, Plus, User, Users } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import supabase from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 
-// Updated ApiWebData interface to handle both old and new format
+// Updated ApiWebData interface to handle the new structure
 interface ApiWebData {
-  id: string
+  id?: string
   name: string
   variableName: string
   description: string
@@ -26,14 +26,11 @@ interface ApiWebData {
   isVisible: boolean
   isRequired: boolean
   kycDocumentId?: string
-  // Handle both old single field format and new array format
-  masterField?: any // Legacy single field
-  masterFieldId?: string // Legacy single field ID
-  masterFields?: any[] // New array format
-  masterFieldIds?: string[] // New array format
+  masterFields?: any[]
+  masterFieldIds?: string[]
   fieldType?: 'text' | 'number' | 'boolean' | 'date' | 'select' | 'array' | 'object'
   efnsDisplayName?: string
-  formName?: string
+  entityType?: 'principal' | 'dependant' | 'both'
   arrayItems?: Array<{ name: string; variableName: string; type: 'text' | 'number' | 'boolean' | 'date' | 'select' }>
 }
 
@@ -58,18 +55,21 @@ interface EditWebDataDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
   webData: ApiWebData | null
-  onSave: (updatedWebData: any) => Promise<void> // Updated to handle new structure
+  onSave: (updatedWebData: any) => Promise<void>
   isSubmitting: boolean
   context: { 
     subdepartmentName: string 
-    availableForms?: Array<{ id: string; name: string }> 
+    availableForms?: Array<{ id: string; name: string }>
+    entryContext?: {
+      automationId: string
+      documentId: string | null
+      documentName: string
+    }
   } | null
 }
 
 function MasterFieldPicker({ availableFields, onSelect }: { availableFields: JobField[]; onSelect: (field: JobField) => void }) {
   const [open, setOpen] = useState(false)
-
-  console.log('MasterFieldPicker - Available fields:', availableFields.length, availableFields.map(f => ({ id: f.id, label: f.label })));
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -114,9 +114,6 @@ export function EditWebDataDialog({
 }: EditWebDataDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState<ApiWebData | null>(null)
-  const [kycDocuments, setKycDocuments] = useState<any[]>([])
-  const [loadingKycDocs, setLoadingKycDocs] = useState(false)
-  const [kycDocumentOption, setKycDocumentOption] = useState<'existing' | 'create_new' | 'none'>('none')
   const [allMasterFields, setAllMasterFields] = useState<JobField[]>([])
   const [loadingMasterFields, setLoadingMasterFields] = useState(false)
   const [selectedFormId, setSelectedFormId] = useState<string>('')
@@ -125,74 +122,31 @@ export function EditWebDataDialog({
 
   useEffect(() => {
     if (webData && isOpen) {
-      console.log('EditWebDataDialog - Opening with webData:', JSON.stringify(webData, null, 2));
-
-      // Convert legacy single field format to new array format if needed
-      let masterFields = [];
-      let masterFieldIds = [];
-
-      if (webData.masterFields && Array.isArray(webData.masterFields) && webData.masterFields.length > 0) {
-        // New format with full objects - use as is
-        masterFields = webData.masterFields;
-        masterFieldIds = webData.masterFieldIds || webData.masterFields.map(f => f.id?.toString()).filter(Boolean);
-      } else if (webData.masterFieldIds && Array.isArray(webData.masterFieldIds) && webData.masterFieldIds.length > 0) {
-        // We have IDs but no objects - we'll populate the objects once master fields are loaded
-        masterFieldIds = webData.masterFieldIds;
-        masterFields = []; // Will be populated in the next useEffect
-      } else if (webData.masterField && webData.masterFieldId) {
-        // Legacy format - convert to array
-        masterFields = [webData.masterField];
-        masterFieldIds = [webData.masterFieldId];
-      } else if (webData.masterFieldId) {
-        // Legacy format with only ID - we'll need to fetch the field data
-        masterFieldIds = [webData.masterFieldId];
-        masterFields = []; // Will be populated once we fetch all master fields
-      }
-
-      console.log('EditWebDataDialog - Initial master field setup:', {
-        masterFieldIds,
-        masterFieldsCount: masterFields.length
-      });
-
       setFormData({
         ...webData,
-        kycDocumentId: webData.kycDocumentId || '',
-        masterFields: masterFields,
-        masterFieldIds: masterFieldIds,
+        masterFields: webData.masterFields || [],
+        masterFieldIds: webData.masterFieldIds || [],
         fieldType: webData.fieldType || 'text',
         efnsDisplayName: webData.efnsDisplayName || webData.name,
-        formName: webData.formName || '',
-        arrayItems: webData.arrayItems || []
+        entityType: webData.entityType || 'both',
+        arrayItems: webData.arrayItems || [],
+        isVisible: webData.isVisible !== false, // Default to true
+        isRequired: webData.isRequired !== false // Default to true
       });
 
-      // Set the selected form if it exists - check both formId and formName for backward compatibility
-      const formIdToSelect = webData.formId || 
-                           (webData.formName && availableForms.length > 0 
-                             ? availableForms.find(f => f.name === webData.formName)?.id 
-                             : undefined);
-      setSelectedFormId(formIdToSelect || '');
-      
-      console.log('EditWebDataDialog - Setting selected form:', {
-        webDataFormId: webData.formId,
-        webDataFormName: webData.formName,
-        selectedFormId: formIdToSelect,
-        availableForms: availableForms.map(f => ({ id: f.id, name: f.name }))
-      });
+      if (context?.entryContext?.documentId) {
+        setSelectedFormId(context.entryContext.documentId);
+      } else {
+        setSelectedFormId('');
+      }
 
-      setKycDocumentOption(webData.kycDocumentId ? 'existing' : 'none')
-
-      fetchKycDocuments()
-      fetchMasterFields()
+      fetchMasterFields();
     }
-  }, [webData, isOpen])
+  }, [webData, isOpen, context]);
 
-  // Update master fields in formData once all master fields are loaded
   useEffect(() => {
     if (formData && allMasterFields.length > 0 && formData.masterFieldIds && formData.masterFieldIds.length > 0) {
-      // If we have IDs but no field objects (or empty array), populate them
       if (!formData.masterFields || formData.masterFields.length === 0) {
-        console.log('EditWebDataDialog - Attempting to populate master fields from IDs:', formData.masterFieldIds);
-        console.log('EditWebDataDialog - Available master fields:', allMasterFields.length);
 
         const populatedFields = formData.masterFieldIds
           .map(id => {
@@ -204,18 +158,12 @@ export function EditWebDataDialog({
           })
           .filter(Boolean);
 
-        console.log('EditWebDataDialog - Populated master fields:', populatedFields.map(f => ({ id: f.id, label: f.label })));
-
         if (populatedFields.length > 0) {
           setFormData(prev => prev ? ({
             ...prev,
             masterFields: populatedFields
           }) : null);
-        } else {
-          console.warn('EditWebDataDialog - No master fields could be populated from IDs:', formData.masterFieldIds);
         }
-      } else {
-        console.log('EditWebDataDialog - Master fields already populated:', formData.masterFields.map(f => ({ id: f.id, label: f.label })));
       }
     }
   }, [allMasterFields, formData?.masterFieldIds]);
@@ -226,31 +174,17 @@ export function EditWebDataDialog({
     return allMasterFields.filter(f => !linkedIds.has(f.id));
   }, [allMasterFields, formData?.masterFields]);
 
-  const fetchKycDocuments = async () => {
-    setLoadingKycDocs(true);
-    try {
-      const { data, error } = await supabase.from('acc_portal_kyc').select('id, name, display_name').order('name')
-      if (error) throw error
-      setKycDocuments(data || [])
-    } catch (error) { toast({ title: 'Error', description: 'Failed to load document types', variant: 'destructive' }) }
-    finally { setLoadingKycDocs(false) }
-  }
-
   const fetchMasterFields = async () => {
     setLoadingMasterFields(true);
     try {
       const { data, error } = await supabase.from('tm_job_fields').select('*').order('label')
       if (error) throw error
       setAllMasterFields(data || [])
-    } catch (error) { toast({ title: 'Error', description: 'Failed to load master fields', variant: 'destructive' }) }
-    finally { setLoadingMasterFields(false) }
-  }
-
-  const createNewKycDocument = async (webDataName: string, departmentName: string) => {
-    const { data, error } = await supabase.from('acc_portal_kyc').insert({ name: webDataName, display_name: webDataName, department: departmentName, category: 'application-docs', fields: [], listed: true, created_at: new Date().toISOString() }).select('id').single()
-    if (error) throw error
-    toast({ title: "KYC Document Created", description: `Created new document type: ${webDataName}` })
-    return data.id
+    } catch (error) { 
+      toast({ title: 'Error', description: 'Failed to load master fields', variant: 'destructive' }) 
+    } finally { 
+      setLoadingMasterFields(false) 
+    }
   }
 
   const handleSubmit = async () => {
@@ -259,26 +193,17 @@ export function EditWebDataDialog({
       return
     }
 
+    if (!context?.entryContext) {
+      toast({ title: 'Error', description: 'Missing entry context for update', variant: 'destructive' })
+      return
+    }
+
     setIsSubmitting(true)
     try {
-      const updatedData = { ...formData }
-
-      if (kycDocumentOption === 'create_new') {
-        const departmentName = context?.subdepartmentName?.split(' ')[0] || 'General'
-        const newDocId = await createNewKycDocument(formData.name, departmentName)
-        updatedData.kycDocumentId = newDocId
-        await fetchKycDocuments()
-      } else if (kycDocumentOption === 'none') {
-        updatedData.kycDocumentId = ''
-      }
-
-      // Get the selected form details
       const selectedForm = selectedFormId && availableForms.length 
         ? availableForms.find(f => f.id === selectedFormId)
         : null;
-
-      // Extract only essential master field data for storage
-      const simplifiedMasterFields = (updatedData.masterFields || []).map(field => ({
+      const simplifiedMasterFields = (formData.masterFields || []).map(field => ({
         id: field.id,
         label: field.label,
         field_key: field.field_key,
@@ -286,41 +211,48 @@ export function EditWebDataDialog({
         is_required: field.is_required
       }));
 
-      const automationId = `auto_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-      
-      // Create the field data
-      const fieldData = {
-        ...updatedData,
-        name: updatedData.name.trim(),
-        description: updatedData.description?.trim() || '',
-        kycDocumentId: updatedData.kycDocumentId || undefined,
+      const updatedFieldData = {
+        id: formData.id,
+        name: formData.name.trim(),
+        efnsDisplayName: formData.efnsDisplayName || formData.name.trim(),
+        description: formData.description?.trim() || '',
+        type: formData.type,
+        order: formData.order,
+        isVisible: formData.isVisible,
+        isRequired: formData.isRequired,
+        variableName: formData.variableName,
+        fieldType: formData.fieldType || 'text',
+        entityType: formData.entityType || 'both',
+        arrayItems: formData.arrayItems || [],
         masterFields: simplifiedMasterFields,
-        masterFieldIds: (updatedData.masterFields || []).map(f => f.id.toString()),
-        fieldType: updatedData.fieldType || 'text',
-        efnsDisplayName: updatedData.efnsDisplayName || updatedData.name,
-        arrayItems: updatedData.arrayItems || [],
-        doc_id: selectedForm?.id || null,
-        form_name: selectedForm?.name || null
+        masterFieldIds: (formData.masterFields || []).map(f => f.id.toString()),
+        kycDocumentId: formData.kycDocumentId || null
       };
 
-      // Create the submission structure - wrap with automation_id only
-      const updatedWebData = {
-        [automationId]: {
-          fields: [fieldData]
-        }
-      };
+      const updatedWebData = [{
+        automationId: context.entryContext.automationId,
+        fields: [updatedFieldData],
+        documentId: context.entryContext.documentId,
+        documentName: context.entryContext.documentName,
+        kycDocsUpload: []
+      }];
 
-      console.log('EditWebDataDialog - Submitting webData with master field IDs:', fieldData.masterFieldIds);
+      console.log('EditWebDataDialog - Submitting updated field:', updatedFieldData);
       console.log('EditWebDataDialog - Full webData being submitted:', JSON.stringify(updatedWebData, null, 2));
 
-      await onSave(updatedWebData)
-      toast({ title: 'Success', description: 'WebData updated successfully' })
-      handleClose()
+      await onSave(updatedWebData);
+      toast({ title: 'Success', description: 'WebData updated successfully' });
+      handleClose();
 
     } catch (error) {
-      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to save webData', variant: 'destructive' })
+      console.error('EditWebDataDialog - Error saving:', error);
+      toast({ 
+        title: 'Error', 
+        description: error instanceof Error ? error.message : 'Failed to save webData', 
+        variant: 'destructive' 
+      });
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
   }
 
@@ -367,7 +299,11 @@ export function EditWebDataDialog({
     });
   };
 
-  const handleClose = () => { onOpenChange(false); setFormData(null); }
+  const handleClose = () => { 
+    onOpenChange(false); 
+    setFormData(null); 
+    setSelectedFormId('');
+  }
 
   if (!formData) return null
 
@@ -375,13 +311,20 @@ export function EditWebDataDialog({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Edit WebData</DialogTitle>
-          <DialogDescription>Update the webData details and field associations.</DialogDescription>
+          <DialogTitle>Edit WebData Field</DialogTitle>
+          <DialogDescription>
+            Update the field details and associations.
+            {context?.entryContext && (
+              <span className="block mt-1 text-xs">
+                Document: {context.entryContext.documentName} | Automation ID: {context.entryContext.automationId}
+              </span>
+            )}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>WebData Name (EFNS Display Name) *</Label>
+              <Label>Field Name (EFNS Display Name) *</Label>
               <Input
                 value={formData.efnsDisplayName || formData.name}
                 onChange={(e) => setFormData(prev => ({
@@ -402,7 +345,7 @@ export function EditWebDataDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label>Field Type</Label>
               <Select
@@ -432,6 +375,35 @@ export function EditWebDataDialog({
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-2">
+              <Label>Entity Type</Label>
+              <Select 
+                value={formData.entityType || 'both'} 
+                onValueChange={(value) => setFormData(prev => ({ ...prev, entityType: value }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="both">
+                    <div className="flex items-center space-x-2">
+                      <Users className="h-4 w-4" />
+                      <span>Both (Principal & Dependant)</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="principal">
+                    <div className="flex items-center space-x-2">
+                      <User className="h-4 w-4" />
+                      <span>Principal Only</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="dependant">
+                    <div className="flex items-center space-x-2">
+                      <User className="h-4 w-4" />
+                      <span>Dependant Only</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -442,39 +414,6 @@ export function EditWebDataDialog({
               placeholder="Description (optional)"
             />
           </div>
-
-          {availableForms.length > 0 && (
-            <div className="space-y-2">
-              <Label>Associated Form</Label>
-              <Select
-                value={selectedFormId}
-                onValueChange={(value) => {
-                  setSelectedFormId(value);
-                  setFormData(prev => ({
-                    ...prev!,
-                    formName: value || undefined
-                  }));
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a form*" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None (Available for all forms)</SelectItem>
-                  {availableForms.map(form => (
-                    <SelectItem key={form.id} value={form.id}>
-                      {form.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                {selectedFormId 
-                  ? `Field will only be available for the selected form`
-                  : 'Field will be available for all forms'}
-              </p>
-            </div>
-          )}
 
           {/* Master Field Linking UI */}
           <div className="space-y-3">

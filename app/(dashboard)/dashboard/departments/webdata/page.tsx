@@ -39,6 +39,11 @@ interface EditingContext {
   subclassId?: string
   subclassName?: string
   availableForms?: Array<{ id: string; name: string }>
+  entryContext?: {
+    automationId: string
+    documentId: string | null
+    documentName: string
+  }
 }
 
 // New structure for webData array
@@ -128,7 +133,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
     
     fetchKycDocuments();
   }, []);
-
+  
   const toggleExpanded = (key: string) => {
     setExpandedItems(prev => ({
       ...prev,
@@ -214,39 +219,39 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
 
     try {
       setIsSubmitting(true);
-      
+
       // Get existing webData for the context
       const existingWebData = getCurrentWebDataForContext(addContext) || [];
-      
+
       // Process each new entry
       const updatedWebData = [...existingWebData];
-      
+
       for (const newEntry of webDataArray) {
         // Check if there's an existing entry with the same documentId and automationId
-        const existingEntryIndex = updatedWebData.findIndex(existing => 
-          existing.documentId === newEntry.documentId && 
+        const existingEntryIndex = updatedWebData.findIndex(existing =>
+          existing.documentId === newEntry.documentId &&
           existing.automationId === newEntry.automationId
         );
-        
+
         if (existingEntryIndex !== -1) {
           // Merge with existing entry
           const existingEntry = updatedWebData[existingEntryIndex];
-          
+
           // Merge fields (avoid duplicates by checking field names)
           const existingFieldNames = new Set(existingEntry.fields.map(f => f.efnsDisplayName || f.name));
           const newFields = newEntry.fields.filter(f => !existingFieldNames.has(f.efnsDisplayName || f.name));
-          
+
           // Merge KYC documents (avoid duplicates by checking kycDocumentId)
           const existingKycIds = new Set(existingEntry.kycDocsUpload.map(k => k.kycDocumentId));
           const newKycDocs = newEntry.kycDocsUpload.filter(k => !existingKycIds.has(k.kycDocumentId));
-          
+
           // Update the existing entry
           updatedWebData[existingEntryIndex] = {
             ...existingEntry,
             fields: [...existingEntry.fields, ...newFields],
             kycDocsUpload: [...existingEntry.kycDocsUpload, ...newKycDocs]
           };
-          
+
           toast({
             title: "Merged with Existing",
             description: `Added ${newFields.length} new fields and ${newKycDocs.length} new documents to existing entry`,
@@ -257,7 +262,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
           updatedWebData.push(newEntry);
         }
       }
-      
+
       // Replace the entire webData array
       await replaceWebDataForContext(addContext, updatedWebData);
       await refreshDepartments();
@@ -456,6 +461,32 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
     }
   }
 
+  const handleSaveWebData = async (updatedWebData: any) => {
+    if (!editingContext) return;
+  
+    try {
+      setIsSubmitting(true);
+      await replaceWebDataForContext(editingContext, updatedWebData);
+      await refreshDepartments();
+      setIsEditDialogOpen(false);
+      
+      toast({
+        title: "Success",
+        description: "WebData updated successfully",
+        variant: "default"
+      });
+    } catch (error) {
+      console.error('Error updating webData:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update webData. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   useEffect(() => {
     refreshDepartments()
   }, [])
@@ -472,16 +503,48 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
       classId: activeClass[`${activeDept}-${activeSubdept[activeDept]}`],
       subclassId: activeSubclass[`${activeDept}-${activeSubdept[activeDept]}-${activeClass[`${activeDept}-${activeSubdept[activeDept]}`]}`]
     };
-    
+
     setEditingContext(context as EditingContext);
-    setDeleteContext({ 
-      type: itemType || 'entry', 
+    setDeleteContext({
+      type: itemType || 'entry',
       index: entryIndex,
       itemIndex: itemIndex
     });
     setIsDeleteDialogOpen(true);
   }
 
+  const handleEditClick = (field: ApiWebData, entry: WebDataEntry, context: EditingContext) => {
+    // Create a copy of the field with any necessary defaults
+    const fieldToEdit = {
+      ...field,
+      // Ensure required fields have defaults if not present
+      fieldType: field.fieldType || 'text',
+      entityType: field.entityType || 'both',
+      isVisible: field.isVisible !== false,
+      isRequired: field.isRequired !== false,
+      // Add entry context for the edit dialog
+      entryContext: {
+        automationId: entry.automationId,
+        documentId: entry.documentId,
+        documentName: entry.documentName
+      }
+    };
+  
+    // Set up the editing context with the current field and context
+    const editContext = {
+      ...context,
+      entryContext: {
+        automationId: entry.automationId,
+        documentId: entry.documentId,
+        documentName: entry.documentName
+      }
+    };
+  
+    setEditingWebData(fieldToEdit);
+    setEditingContext(editContext);
+    setIsEditDialogOpen(true);
+  };
+  
   const handleDeleteConfirm = async () => {
     if (!deleteContext || !editingContext) return
 
@@ -637,15 +700,15 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
                             {entry.kycDocsUpload.length} uploads
                           </Badge>
                         )} */}
-                            <Button
+                        <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => toggleDocumentExpansion(entry.automationId)}
                           className="h-6 w-6 p-0"
                         >
                           {expandedDocuments.has(entry.automationId) ?
-                            <Plus className="h-4 w-4" /> :
-                            <Minus className="h-4 w-4" />
+                            <Minus className="h-4 w-4" /> :
+                            <Plus className="h-4 w-4" />
                           }
                         </Button>
                       </div>
@@ -672,14 +735,6 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
                     </TableCell>
                     <TableCell className="border-r">
                       <div className="flex items-center space-x-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => toggleDocumentExpansion(entry.automationId)}
-                        >
-                          <Plus className="h-4 w-4" />
-                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -719,8 +774,8 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
                             </Badge>
                           </TableCell>
                           <TableCell className="border-r">
-                            <Badge 
-                              variant={field.entityType === 'both' ? 'default' : 'secondary'} 
+                            <Badge
+                              variant={field.entityType === 'both' ? 'default' : 'secondary'}
                               className="text-xs"
                             >
                               {field.entityType === 'both' ? (
@@ -743,7 +798,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8"
-                                onClick={() => {/* Handle edit field */}}
+                                onClick={() => handleEditClick(field, entry, context)}
                               >
                                 <Pencil className="h-4 w-4" />
                               </Button>
@@ -790,8 +845,8 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
                             </Badge>
                           </TableCell>
                           <TableCell className="border-r">
-                            <Badge 
-                              variant={kycDoc.entityType === 'both' ? 'default' : 'secondary'} 
+                            <Badge
+                              variant={kycDoc.entityType === 'both' ? 'default' : 'secondary'}
                               className="text-xs"
                             >
                               {kycDoc.entityType === 'both' ? (
@@ -817,7 +872,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8"
-                                onClick={() => {/* Handle edit upload */}}
+                                onClick={() => {/* Handle edit upload */ }}
                               >
                                 <Pencil className="h-4 w-4" />
                               </Button>
@@ -1016,9 +1071,13 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
         isOpen={isEditDialogOpen}
         onOpenChange={setIsEditDialogOpen}
         webData={editingWebData}
-        onSave={() => {/* Handle save */}}
+        onSave={handleSaveWebData}
         isSubmitting={isSubmitting}
-        context={editingContext ? { ...editingContext, availableForms } : null}
+        context={editingContext ? {
+          ...editingContext,
+          availableForms,
+          entryContext: editingContext.entryContext
+        } : null}
       />
     </div>
   )
