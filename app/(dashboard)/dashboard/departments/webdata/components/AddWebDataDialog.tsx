@@ -1,5 +1,3 @@
-// Enhanced AddWebDataDialog with document linking and KYC support
-
 //@ts-nocheck
 "use client"
 import { useEffect, useState, useMemo } from "react"
@@ -128,7 +126,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
   const [masterFields, setMasterFields] = useState<JobField[]>([])
   const [formDocuments, setFormDocuments] = useState<FormDocument[]>([])
   const [kycDocuments, setKycDocuments] = useState<KYCDocument[]>([])
-  const [selectedKycDocuments, setSelectedKycDocuments] = useState<Set<string>>(new Set())
+  const [selectedKycDocuments, setSelectedKycDocuments] = useState<Map<string, 'principal' | 'dependant' | 'both'>>(new Map())
   const [loadingMasterFields, setLoadingMasterFields] = useState(false)
   const [loadingForms, setLoadingForms] = useState(false)
   const [loadingKyc, setLoadingKyc] = useState(false)
@@ -215,7 +213,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
       fetchKycDocuments();
       setSelectedTopLevelFieldIds(new Set());
       setSelectedGroupIdsForMerge(new Set());
-      setSelectedKycDocuments(new Set());
+      setSelectedKycDocuments(new Map());
       setWebDataGroups([]);
       setProfileSearch('');
       setCompanySearch('');
@@ -265,65 +263,63 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
 
       const automationIdToUse = selectedForm?.automationId || `auto_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
       
-      // Transform webDataGroups into fields
-      const webDataFields = webDataGroups.map((group, index) => ({
-        name: group.efnsDisplayName,
-        efnsDisplayName: group.efnsDisplayName,
-        description: `Linked to: ${group.linkedMasterFields.map(f => f.label).join(', ')}`,
-        type: 'standard',
-        order: index,
-        isRequired: group.linkedMasterFields.some(f => f.is_required) || false,
-        variableName: group.variableName,
-        fieldType: group.fieldType,
-        entityType: group.entityType,
-        arrayItems: group.arrayItems || [],
-        masterFieldIds: group.linkedMasterFields.map(f => f.id.toString()),
-        masterFields: group.linkedMasterFields.map(f => ({
-          id: f.id,
-          label: f.label,
-          field_key: f.field_key,
-          type: f.type,
-          is_required: f.is_required
-        })),
-        doc_id: selectedForm?.id || null,
-        form_name: selectedForm?.name || null,
-        kycDocumentId: group.kycDocumentId || null
-      }));
+      // Create the new webData structure as an array
+      const webDataArray = [];
 
-      // Add selected KYC documents as document upload fields
-      const kycDocumentFields = Array.from(selectedKycDocuments).map((kycId, index) => {
+      // Prepare KYC documents array with proper document names
+      const kycDocsUpload = Array.from(selectedKycDocuments.entries()).map(([kycId, entityType]) => {
         const kycDoc = kycDocuments.find(doc => doc.id === kycId);
         if (!kycDoc) return null;
 
         return {
-          name: kycDoc.display_name,
-          efnsDisplayName: kycDoc.display_name,
-          description: kycDoc.description || `Upload ${kycDoc.display_name}`,
-          type: 'document',
-          order: webDataFields.length + index,
-          isRequired: kycDoc.is_required,
-          variableName: kycDoc.display_name.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
-          fieldType: 'file',
-          entityType: kycDoc.entity_type,
           kycDocumentId: kycDoc.id,
+          entityType: entityType,
+          isRequired: kycDoc.is_required,
           documentType: kycDoc.document_type,
           fileExtensions: kycDoc.file_extensions,
-          maxFileSizeMb: kycDoc.max_file_size_mb
+          maxFileSizeMb: kycDoc.max_file_size_mb,
+          description: kycDoc.description
         };
       }).filter(Boolean);
 
-      const allFields = [...webDataFields, ...kycDocumentFields];
+      // Create a single entry with both fields and KYC documents
+      if (webDataGroups.length > 0 || kycDocsUpload.length > 0) {
+        const webDataFields = webDataGroups.map((group, index) => ({
+          name: group.efnsDisplayName,
+          efnsDisplayName: group.efnsDisplayName,
+          description: `Linked to: ${group.linkedMasterFields.map(f => f.label).join(', ')}`,
+          type: 'standard',
+          order: index,
+          isRequired: group.linkedMasterFields.some(f => f.is_required) || false,
+          variableName: group.variableName,
+          fieldType: group.fieldType,
+          entityType: group.entityType,
+          arrayItems: group.arrayItems || [],
+          masterFieldIds: group.linkedMasterFields.map(f => f.id.toString()),
+          masterFields: group.linkedMasterFields.map(f => ({
+            id: f.id,
+            label: f.label,
+            field_key: f.field_key,
+            type: f.type,
+            is_required: f.is_required
+          })),
+          kycDocumentId: group.kycDocumentId || null
+        }));
 
-      const webDataToSubmit = {
-        [automationIdToUse]: {
+        const newEntry = {
           automationId: automationIdToUse,
-          fields: allFields,
-          documentName: selectedForm?.name || 'Custom Fields',
-          documentId: selectedForm?.id || null
-        }
-      };
+          fields: webDataFields,
+          documentId: selectedForm?.id || null,
+          documentName: selectedForm?.name || (kycDocsUpload.length > 0 ? 'Document Upload Requirements' : 'Custom Fields'),
+          kycDocsUpload: kycDocsUpload
+        };
 
-      await onSubmit(webDataToSubmit);
+        // Check if there's an existing entry with the same documentId and automationId
+        // This will be handled by the parent component's handleAddWebData function
+        webDataArray.push(newEntry);
+      }
+
+      await onSubmit(webDataArray);
 
     } catch (error) {
       console.error('Error submitting webData:', error);
@@ -345,12 +341,25 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
     }) 
   }
 
-  const handleKycDocumentToggle = (docId: string, checked: boolean) => {
+  const handleKycDocumentToggle = (docId: string, checked: boolean, entityType?: 'principal' | 'dependant' | 'both') => {
     setSelectedKycDocuments(prev => {
-      const newSet = new Set(prev);
-      if (checked) newSet.add(docId);
-      else newSet.delete(docId);
-      return newSet;
+      const newMap = new Map(prev);
+      if (checked) {
+        newMap.set(docId, entityType || 'both');
+      } else {
+        newMap.delete(docId);
+      }
+      return newMap;
+    });
+  }
+
+  const handleKycEntityTypeChange = (docId: string, entityType: 'principal' | 'dependant' | 'both') => {
+    setSelectedKycDocuments(prev => {
+      const newMap = new Map(prev);
+      if (newMap.has(docId)) {
+        newMap.set(docId, entityType);
+      }
+      return newMap;
     });
   }
 
@@ -764,7 +773,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                   />
                 </div>
               </CardHeader>
-              <CardContent className="flex-1 overflow-y-auto">
+              <CardContent className="flex-1 overflow-y-auto h-[50vh]">
                 {loadingKyc ? (
                   <div className="flex items-center justify-center h-48">
                     <p>Loading KYC documents...</p>
@@ -776,7 +785,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                         <Checkbox
                           id={`kyc-${doc.id}`}
                           checked={selectedKycDocuments.has(doc.id)}
-                          onCheckedChange={(checked) => handleKycDocumentToggle(doc.id, checked)}
+                          onCheckedChange={(checked) => handleKycDocumentToggle(doc.id, checked, 'both')}
                         />
                         <div className="flex-1 space-y-2">
                           <div className="flex items-center justify-between">
@@ -790,18 +799,6 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                               {doc.is_required && (
                                 <Badge variant="destructive" className="text-xs">Required</Badge>
                               )}
-                              <Badge 
-                                variant={doc.entity_type === 'both' ? 'default' : 'secondary'} 
-                                className="text-xs"
-                              >
-                                {doc.entity_type === 'both' ? (
-                                  <><Users className="h-3 w-3 mr-1" />Both</>
-                                ) : doc.entity_type === 'principal' ? (
-                                  <><User className="h-3 w-3 mr-1" />Principal</>
-                                ) : (
-                                  <><User className="h-3 w-3 mr-1" />Dependant</>
-                                )}
-                              </Badge>
                             </div>
                           </div>
                           {doc.description && (
@@ -814,6 +811,39 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
                               <span>Formats: {doc.file_extensions.join(', ')}</span>
                             )}
                           </div>
+                          {selectedKycDocuments.has(doc.id) && (
+                            <div className="mt-2">
+                              <Label className="text-xs font-medium">Entity Type for Upload</Label>
+                              <Select 
+                                value={selectedKycDocuments.get(doc.id) || 'both'} 
+                                onValueChange={(value) => handleKycEntityTypeChange(doc.id, value as 'principal' | 'dependant' | 'both')}
+                              >
+                                <SelectTrigger className="h-8 mt-1">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="both">
+                                    <div className="flex items-center space-x-2">
+                                      <Users className="h-3 w-3" />
+                                      <span>Both (Principal & Dependant)</span>
+                                    </div>
+                                  </SelectItem>
+                                  <SelectItem value="principal">
+                                    <div className="flex items-center space-x-2">
+                                      <User className="h-3 w-3" />
+                                      <span>Principal Only</span>
+                                    </div>
+                                  </SelectItem>
+                                  <SelectItem value="dependant">
+                                    <div className="flex items-center space-x-2">
+                                      <User className="h-3 w-3" />
+                                      <span>Dependant Only</span>
+                                    </div>
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}

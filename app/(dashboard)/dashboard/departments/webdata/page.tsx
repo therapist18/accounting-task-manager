@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
-import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, ChevronUp } from "lucide-react"
+import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, ChevronUp, Upload, User, Users, Minus } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -41,6 +41,24 @@ interface EditingContext {
   availableForms?: Array<{ id: string; name: string }>
 }
 
+// New structure for webData array
+interface WebDataEntry {
+  automationId: string
+  fields: ApiWebData[]
+  documentId: string | null
+  documentName: string
+  kycDocsUpload: Array<{
+    kycDocumentId: string
+    entityType: 'principal' | 'dependant' | 'both'
+    isRequired: boolean
+    documentType: string
+    fileExtensions: string[]
+    maxFileSizeMb: number
+    description?: string
+    documentName?: string
+  }>
+}
+
 interface ApiWebData {
   id?: string
   name: string
@@ -67,68 +85,49 @@ interface ApiWebData {
   maxFileSizeMb?: number
 }
 
-interface WebDataTableEntry extends ApiWebData {
-  tempId?: string
-}
-
-// Function to generate sequential webData IDs
-const generateWebDataId = (index: number, existingWebData: ApiWebData[] = []): string => {
-  if (existingWebData.length === 0) {
-    return index.toString();
-  }
-
-  // Find the highest existing ID
-  const maxId = existingWebData.reduce((max, req) => {
-    const id = parseInt(req.id || '0', 10);
-    return isNaN(id) ? max : Math.max(max, id);
-  }, -1);
-
-  return (maxId + 1 + index).toString();
-}
-
-export default function WebData({ departments: initialDepartments }: WebDataProps) {
+export default function WebData({ departments: initialDepartments }: WebdataProps) {
   const [departments, setDepartments] = useState<Department[]>(initialDepartments)
   const [activeDept, setActiveDept] = useState<string>('')
   const [activeSubdept, setActiveSubdept] = useState<Record<string, string>>({})
   const [activeClass, setActiveClass] = useState<Record<string, string>>({})
   const [activeSubclass, setActiveSubclass] = useState<Record<string, string>>({})
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [deleteContext, setDeleteContext] = useState<{ type: string, index: number } | null>(null)
+  const [deleteContext, setDeleteContext] = useState<{ type: string, index: number, itemIndex?: number } | null>(null)
   const [editingWebData, setEditingWebData] = useState<ApiWebData | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingContext, setEditingContext] = useState<EditingContext | null>(null)
-  const [newWebData, setNewWebData] = useState<{
-    name: string,
-    description: string,
-    type: 'standard' | 'conditional' | 'optional',
-    isRequired: boolean,
-    isVisible: boolean,
-    variableName: string
-  }[]>([{
-    name: '',
-    description: '',
-    type: 'standard',
-    isRequired: true,
-    isVisible: true,
-    variableName: ''
-  }])
   const [addContext, setAddContext] = useState<EditingContext | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [editingIndex, setEditingIndex] = useState<number | null>(null)
-  const [editForm, setEditForm] = useState({
-    name: '',
-    description: '',
-    type: 'standard' as 'standard' | 'conditional' | 'optional',
-    isRequired: true,
-    isVisible: true,
-    variableName: ''
-  })
-  const [isReady, setIsReady] = useState(false)
   const [availableForms, setAvailableForms] = useState<Array<{ id: string; name: string }>>([])
-  const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set());
+  const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
+  const [kycDocuments, setKycDocuments] = useState<Record<string, string>>({})
+
+  // Fetch KYC documents on component mount
+  useEffect(() => {
+    const fetchKycDocuments = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('acc_portal_kyc')
+          .select('id, display_name')
+          
+        if (error) throw error;
+        
+        // Create a map of KYC document IDs to their display names
+        const kycMap = data.reduce((acc, doc) => ({
+          ...acc,
+          [doc.id]: doc.display_name
+        }), {});
+        
+        setKycDocuments(kycMap);
+      } catch (error) {
+        console.error('Error fetching KYC documents:', error);
+      }
+    };
+    
+    fetchKycDocuments();
+  }, []);
 
   const toggleExpanded = (key: string) => {
     setExpandedItems(prev => ({
@@ -140,7 +139,6 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
   useEffect(() => {
     const fetchForms = async () => {
       try {
-        // First, get all departments with their stages (stored as JSONB array)
         const { data: departments, error } = await supabase
           .from('tm_departments')
           .select('id, name, stages')
@@ -148,7 +146,6 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
 
         if (error) throw error;
 
-        // Extract all documents with docType 'form' from all stages
         const forms = departments.flatMap(dept => {
           if (!dept.stages || !Array.isArray(dept.stages)) return [];
 
@@ -166,9 +163,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
           );
         });
 
-        // Remove duplicates by form ID
         const uniqueForms = Array.from(new Map(forms.map(form => [form.id, form])).values());
-
         setAvailableForms(uniqueForms);
       } catch (error) {
         console.error('Error fetching forms:', error);
@@ -182,14 +177,6 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
 
     fetchForms();
   }, []);
-
-  const handleAddClick = (context: EditingContext) => {
-    setAddContext({
-      ...context,
-      availableForms
-    });
-    setIsAddDialogOpen(true);
-  };
 
   const openWebDataDialog = (context: EditingContext) => {
     const dept = departments.find(d => d.id === context.departmentId);
@@ -222,94 +209,63 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     setIsAddDialogOpen(true)
   }
 
-  const handleCloseDialog = () => {
-    setIsDialogOpen(false)
-    setEditingContext(null)
-    setNewWebData([{
-      name: '',
-      description: '',
-      type: 'standard',
-      isRequired: true,
-      isVisible: true,
-      variableName: ''
-    }])
-  }
-  // Updated data handler functions for the main WebData component
-
-  // Add these functions to your main WebData component
-
-  const handleAddWebData = async (webData: any) => {
+  const handleAddWebData = async (webDataArray: WebDataEntry[]) => {
     if (!addContext) return;
 
     try {
       setIsSubmitting(true);
-      const currentWebData = getCurrentWebDataForContext(addContext) || [];
-
-      // Process the new structure with automation IDs
-      let fieldsToAdd = [];
-
-      // Handle the new structure where data is keyed by automation ID
-      const automationKeys = Object.keys(webData).filter(key => key.startsWith('auto_') || key.includes('auto'));
-
-      if (automationKeys.length > 0) {
-        // Process each automation group
-        for (const automationId of automationKeys) {
-          const automationGroup = webData[automationId];
-          if (automationGroup?.fields) {
-            const groupFields = automationGroup.fields.map((field: any) => ({
-              ...field,
-              automationId: automationId,
-              doc_name: automationGroup.documentName,
-              form_name: automationGroup.documentName
-            }));
-            fieldsToAdd.push(...groupFields);
-          }
+      
+      // Get existing webData for the context
+      const existingWebData = getCurrentWebDataForContext(addContext) || [];
+      
+      // Process each new entry
+      const updatedWebData = [...existingWebData];
+      
+      for (const newEntry of webDataArray) {
+        // Check if there's an existing entry with the same documentId and automationId
+        const existingEntryIndex = updatedWebData.findIndex(existing => 
+          existing.documentId === newEntry.documentId && 
+          existing.automationId === newEntry.automationId
+        );
+        
+        if (existingEntryIndex !== -1) {
+          // Merge with existing entry
+          const existingEntry = updatedWebData[existingEntryIndex];
+          
+          // Merge fields (avoid duplicates by checking field names)
+          const existingFieldNames = new Set(existingEntry.fields.map(f => f.efnsDisplayName || f.name));
+          const newFields = newEntry.fields.filter(f => !existingFieldNames.has(f.efnsDisplayName || f.name));
+          
+          // Merge KYC documents (avoid duplicates by checking kycDocumentId)
+          const existingKycIds = new Set(existingEntry.kycDocsUpload.map(k => k.kycDocumentId));
+          const newKycDocs = newEntry.kycDocsUpload.filter(k => !existingKycIds.has(k.kycDocumentId));
+          
+          // Update the existing entry
+          updatedWebData[existingEntryIndex] = {
+            ...existingEntry,
+            fields: [...existingEntry.fields, ...newFields],
+            kycDocsUpload: [...existingEntry.kycDocsUpload, ...newKycDocs]
+          };
+          
+          toast({
+            title: "Merged with Existing",
+            description: `Added ${newFields.length} new fields and ${newKycDocs.length} new documents to existing entry`,
+            variant: "default"
+          });
+        } else {
+          // Add as new entry
+          updatedWebData.push(newEntry);
         }
-      } else if (webData.fields) {
-        // Legacy format - fields directly available
-        fieldsToAdd = webData.fields;
-      } else {
-        // Fallback - assume webData is the fields array
-        fieldsToAdd = Array.isArray(webData) ? webData : [webData];
       }
-
-      if (!fieldsToAdd.length) {
-        console.warn('No fields found in webData:', webData);
-        return;
-      }
-
-      const newWebDataWithIds = fieldsToAdd.map((field, index) => ({
-        id: generateWebDataId(index, currentWebData),
-        name: field.efnsDisplayName || field.name,
-        efnsDisplayName: field.efnsDisplayName || field.name,
-        description: field.description,
-        type: field.type || 'standard',
-        isRequired: field.isRequired,
-        isVisible: true,
-        order: currentWebData.length + index,
-        variableName: field.variableName || '',
-        fieldType: field.fieldType || 'text',
-        entityType: field.entityType || 'both',
-        arrayItems: field.arrayItems || [],
-        masterFieldIds: field.masterFieldIds || [],
-        kycDocumentId: field.kycDocumentId || null,
-        doc_id: field.doc_id || null,
-        form_name: field.form_name || null,
-        doc_name: field.doc_name || null,
-        automationId: field.automationId,
-        documentType: field.documentType,
-        fileExtensions: field.fileExtensions,
-        maxFileSizeMb: field.maxFileSizeMb
-      }));
-
-      const updatedWebData = [...currentWebData, ...newWebDataWithIds];
-      await saveWebDataForContext(addContext, updatedWebData);
+      
+      // Replace the entire webData array
+      await replaceWebDataForContext(addContext, updatedWebData);
       await refreshDepartments();
       setIsAddDialogOpen(false);
 
       toast({
         title: "Success",
-        description: `${newWebDataWithIds.length} webData item(s) added successfully`,
+        description: `WebData added successfully`,
         variant: "default"
       });
 
@@ -325,7 +281,6 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     }
   };
 
-  // Updated refreshDepartments function to handle the new data structure
   const refreshDepartments = async () => {
     try {
       const { data: departmentsData, error } = await supabase
@@ -350,67 +305,10 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
               req.class_id === classId && req.type === 'class'
             )
 
-            // Process the new webData structure
-            let classWebData = [];
-            if (classWebDataRecord?.webData) {
-              // Check if webData is an array (old format) or object with automation IDs (new format)
-              if (Array.isArray(classWebDataRecord.webData)) {
-                // Old format - convert to new structure
-                classWebData = classWebDataRecord.webData.map((r: any, idx: number) => ({
-                  id: r.id?.toString() || generateWebDataId(idx, classWebDataRecord.webData),
-                  name: r.efnsDisplayName || r.name || '',
-                  efnsDisplayName: r.efnsDisplayName || r.name || '',
-                  description: r.description || '',
-                  type: r.type || 'standard',
-                  order: r.order ?? idx,
-                  isVisible: r.isVisible !== false,
-                  isRequired: r.isRequired !== false,
-                  variableName: r.variableName || '',
-                  fieldType: r.fieldType || 'text',
-                  entityType: r.entityType || 'both',
-                  arrayItems: r.arrayItems || [],
-                  masterFieldIds: r.masterFieldIds || [],
-                  kycDocumentId: r.kycDocumentId,
-                  doc_id: r.doc_id,
-                  form_name: r.form_name,
-                  doc_name: r.doc_name,
-                  automationId: r.automationId || 'legacy'
-                }))
-              } else {
-                // New format - flatten automation groups
-                const flattenedData = [];
-                Object.keys(classWebDataRecord.webData).forEach(automationId => {
-                  const group = classWebDataRecord.webData[automationId];
-                  if (group?.fields) {
-                    group.fields.forEach((field: any, idx: number) => {
-                      flattenedData.push({
-                        id: field.id?.toString() || generateWebDataId(idx, group.fields),
-                        name: field.efnsDisplayName || field.name || '',
-                        efnsDisplayName: field.efnsDisplayName || field.name || '',
-                        description: field.description || '',
-                        type: field.type || 'standard',
-                        order: field.order ?? idx,
-                        isVisible: field.isVisible !== false,
-                        isRequired: field.isRequired !== false,
-                        variableName: field.variableName || '',
-                        fieldType: field.fieldType || 'text',
-                        entityType: field.entityType || 'both',
-                        arrayItems: field.arrayItems || [],
-                        masterFieldIds: field.masterFieldIds || [],
-                        kycDocumentId: field.kycDocumentId,
-                        doc_id: field.doc_id,
-                        form_name: field.form_name || group.documentName,
-                        doc_name: field.doc_name || group.documentName,
-                        automationId: automationId,
-                        documentType: field.documentType,
-                        fileExtensions: field.fileExtensions,
-                        maxFileSizeMb: field.maxFileSizeMb
-                      });
-                    });
-                  }
-                });
-                classWebData = flattenedData;
-              }
+            // Process the new webData array structure
+            let classWebData: WebDataEntry[] = [];
+            if (classWebDataRecord?.webData && Array.isArray(classWebDataRecord.webData)) {
+              classWebData = classWebDataRecord.webData;
             }
 
             const subClasses = (cls.subClasses || []).map(subCls => {
@@ -419,64 +317,9 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
                 req.class_id === subClassId && req.type === 'subclass'
               )
 
-              // Process subclass webData with same logic
-              let subClassWebData = [];
-              if (subClassWebDataRecord?.webData) {
-                if (Array.isArray(subClassWebDataRecord.webData)) {
-                  subClassWebData = subClassWebDataRecord.webData.map((r: any, idx: number) => ({
-                    id: r.id?.toString() || generateWebDataId(idx, subClassWebDataRecord.webData),
-                    name: r.efnsDisplayName || r.name || '',
-                    efnsDisplayName: r.efnsDisplayName || r.name || '',
-                    description: r.description || '',
-                    type: r.type || 'standard',
-                    order: r.order ?? idx,
-                    isVisible: r.isVisible !== false,
-                    isRequired: r.isRequired !== false,
-                    variableName: r.variableName || '',
-                    fieldType: r.fieldType || 'text',
-                    entityType: r.entityType || 'both',
-                    arrayItems: r.arrayItems || [],
-                    masterFieldIds: r.masterFieldIds || [],
-                    kycDocumentId: r.kycDocumentId,
-                    doc_id: r.doc_id,
-                    form_name: r.form_name,
-                    doc_name: r.doc_name,
-                    automationId: r.automationId || 'legacy'
-                  }))
-                } else {
-                  const flattenedData = [];
-                  Object.keys(subClassWebDataRecord.webData).forEach(automationId => {
-                    const group = subClassWebDataRecord.webData[automationId];
-                    if (group?.fields) {
-                      group.fields.forEach((field: any, idx: number) => {
-                        flattenedData.push({
-                          id: field.id?.toString() || generateWebDataId(idx, group.fields),
-                          name: field.efnsDisplayName || field.name || '',
-                          efnsDisplayName: field.efnsDisplayName || field.name || '',
-                          description: field.description || '',
-                          type: field.type || 'standard',
-                          order: field.order ?? idx,
-                          isVisible: field.isVisible !== false,
-                          isRequired: field.isRequired !== false,
-                          variableName: field.variableName || '',
-                          fieldType: field.fieldType || 'text',
-                          entityType: field.entityType || 'both',
-                          arrayItems: field.arrayItems || [],
-                          masterFieldIds: field.masterFieldIds || [],
-                          kycDocumentId: field.kycDocumentId,
-                          doc_id: field.doc_id,
-                          form_name: field.form_name || group.documentName,
-                          doc_name: field.doc_name || group.documentName,
-                          automationId: automationId,
-                          documentType: field.documentType,
-                          fileExtensions: field.fileExtensions,
-                          maxFileSizeMb: field.maxFileSizeMb
-                        });
-                      });
-                    }
-                  });
-                  subClassWebData = flattenedData;
-                }
+              let subClassWebData: WebDataEntry[] = [];
+              if (subClassWebDataRecord?.webData && Array.isArray(subClassWebDataRecord.webData)) {
+                subClassWebData = subClassWebDataRecord.webData;
               }
 
               return {
@@ -497,64 +340,9 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
             req.class_id === subdept.id.toString() && req.type === 'subdepartment'
           )
 
-          // Process subdepartment webData with same logic
-          let uploadWebData = [];
-          if (subdeptWebDataRecord?.webData) {
-            if (Array.isArray(subdeptWebDataRecord.webData)) {
-              uploadWebData = subdeptWebDataRecord.webData.map((r: any, idx: number) => ({
-                id: r.id?.toString() || generateWebDataId(idx, subdeptWebDataRecord.webData),
-                name: r.efnsDisplayName || r.name || '',
-                efnsDisplayName: r.efnsDisplayName || r.name || '',
-                description: r.description || '',
-                type: r.type || 'standard',
-                order: r.order ?? idx,
-                isVisible: r.isVisible !== false,
-                isRequired: r.isRequired !== false,
-                variableName: r.variableName || '',
-                fieldType: r.fieldType || 'text',
-                entityType: r.entityType || 'both',
-                arrayItems: r.arrayItems || [],
-                masterFieldIds: r.masterFieldIds || [],
-                kycDocumentId: r.kycDocumentId,
-                doc_id: r.doc_id,
-                form_name: r.form_name,
-                doc_name: r.doc_name,
-                automationId: r.automationId || 'legacy'
-              }))
-            } else {
-              const flattenedData = [];
-              Object.keys(subdeptWebDataRecord.webData).forEach(automationId => {
-                const group = subdeptWebDataRecord.webData[automationId];
-                if (group?.fields) {
-                  group.fields.forEach((field: any, idx: number) => {
-                    flattenedData.push({
-                      id: field.id?.toString() || generateWebDataId(idx, group.fields),
-                      name: field.efnsDisplayName || field.name || '',
-                      efnsDisplayName: field.efnsDisplayName || field.name || '',
-                      description: field.description || '',
-                      type: field.type || 'standard',
-                      order: field.order ?? idx,
-                      isVisible: field.isVisible !== false,
-                      isRequired: field.isRequired !== false,
-                      variableName: field.variableName || '',
-                      fieldType: field.fieldType || 'text',
-                      entityType: field.entityType || 'both',
-                      arrayItems: field.arrayItems || [],
-                      masterFieldIds: field.masterFieldIds || [],
-                      kycDocumentId: field.kycDocumentId,
-                      doc_id: field.doc_id,
-                      form_name: field.form_name || group.documentName,
-                      doc_name: field.doc_name || group.documentName,
-                      automationId: automationId,
-                      documentType: field.documentType,
-                      fileExtensions: field.fileExtensions,
-                      maxFileSizeMb: field.maxFileSizeMb
-                    });
-                  });
-                }
-              });
-              uploadWebData = flattenedData;
-            }
+          let uploadWebData: WebDataEntry[] = [];
+          if (subdeptWebDataRecord?.webData && Array.isArray(subdeptWebDataRecord.webData)) {
+            uploadWebData = subdeptWebDataRecord.webData;
           }
 
           return {
@@ -582,8 +370,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     }
   }
 
-  // Updated saveWebDataForContext to handle the new structure
-  const saveWebDataForContext = async (context: EditingContext, webData: ApiWebData[]) => {
+  const saveWebDataForContext = async (context: EditingContext, webDataArray: WebDataEntry[]) => {
     try {
       let classId = '';
       let webDataType = '';
@@ -608,50 +395,15 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
 
       if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
 
-      // Group webData by automation ID for the new structure
-      const groupedWebData: Record<string, any> = {};
-
-      webData.forEach(field => {
-        const automationId = field.automationId || 'legacy';
-
-        if (!groupedWebData[automationId]) {
-          groupedWebData[automationId] = {
-            automationId: automationId,
-            documentName: field.form_name || field.doc_name || 'Ungrouped Fields',
-            documentId: field.doc_id || null,
-            fields: []
-          };
-        }
-
-        groupedWebData[automationId].fields.push({
-          id: field.id,
-          name: field.name,
-          efnsDisplayName: field.efnsDisplayName || field.name,
-          description: field.description,
-          type: field.type,
-          order: field.order,
-          isVisible: field.isVisible,
-          isRequired: field.isRequired,
-          variableName: field.variableName,
-          fieldType: field.fieldType,
-          entityType: field.entityType,
-          arrayItems: field.arrayItems,
-          masterFieldIds: field.masterFieldIds,
-          kycDocumentId: field.kycDocumentId,
-          doc_id: field.doc_id,
-          form_name: field.form_name,
-          doc_name: field.doc_name,
-          documentType: field.documentType,
-          fileExtensions: field.fileExtensions,
-          maxFileSizeMb: field.maxFileSizeMb
-        });
-      });
+      // Get existing webData array and merge with new data
+      const existingWebData: WebDataEntry[] = existingRecord?.webData || [];
+      const mergedWebData = [...existingWebData, ...webDataArray];
 
       if (existingRecord) {
         const { error: updateError } = await supabase
           .from('tm_class_requirements')
           .update({
-            webData: groupedWebData,
+            webData: mergedWebData,
             updated_at: new Date().toISOString()
           })
           .eq('class_id', classId)
@@ -663,7 +415,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
           .insert({
             class_id: classId,
             type: webDataType,
-            webData: groupedWebData,
+            webData: mergedWebData,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           });
@@ -675,133 +427,8 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
       throw error;
     }
   }
-  const handleSaveWebData = async (updatedWebData: any) => {
-    if (!editingContext) {
-      toast({ title: "Error", description: "No editing context available.", variant: "destructive" });
-      return;
-    }
 
-    try {
-      const currentWebData = getCurrentWebDataForContext(editingContext) || [];
-      let webDataIndex = -1;
-
-      // Extract fields from the automation_id wrapper
-      let fieldsToUpdate = [];
-      const automationKeys = Object.keys(updatedWebData).filter(key => key.startsWith('auto_'));
-
-      if (automationKeys.length > 0) {
-        // Data is wrapped with automation_id
-        const automationId = automationKeys[0];
-        fieldsToUpdate = updatedWebData[automationId]?.fields || [];
-      } else if (updatedWebData.fields) {
-        // Legacy format
-        fieldsToUpdate = updatedWebData.fields;
-      } else {
-        // Single field update
-        fieldsToUpdate = [updatedWebData];
-      }
-
-      if (!fieldsToUpdate.length) {
-        console.warn('No fields found in updatedWebData:', updatedWebData);
-        return;
-      }
-
-      const fieldToUpdate = fieldsToUpdate[0]; // For edit, we expect only one field
-
-      if (editingWebData?.id) {
-        webDataIndex = currentWebData.findIndex(req => String(req.id) === String(editingWebData.id));
-      }
-      if (webDataIndex === -1 && fieldToUpdate.id) {
-        webDataIndex = currentWebData.findIndex(req => String(req.id) === String(fieldToUpdate.id));
-      }
-      if (webDataIndex === -1) {
-        webDataIndex = currentWebData.findIndex(req =>
-          req.name === (editingWebData?.name || fieldToUpdate.name) &&
-          req.order === (editingWebData?.order || fieldToUpdate.order)
-        );
-      }
-
-      if (webDataIndex === -1) {
-        // Adding new webData
-        const newWebDataArray = [
-          ...currentWebData,
-          {
-            ...fieldToUpdate,
-            id: fieldToUpdate.id || Date.now().toString(),
-            order: fieldToUpdate.order ?? currentWebData.length
-          }
-        ];
-        await saveWebDataForContext(editingContext, newWebDataArray);
-      } else {
-        // Updating existing webData
-        const updatedWebDataArray = [...currentWebData];
-        updatedWebDataArray[webDataIndex] = {
-          ...updatedWebDataArray[webDataIndex],
-          ...fieldToUpdate,
-          id: fieldToUpdate.id || updatedWebDataArray[webDataIndex].id,
-          order: fieldToUpdate.order ?? updatedWebDataArray[webDataIndex].order
-        };
-        await saveWebDataForContext(editingContext, updatedWebDataArray);
-      }
-
-      await refreshDepartments();
-      setIsEditDialogOpen(false);
-      setEditingWebData(null);
-      toast({ title: "Success", description: "WebData saved successfully" });
-    } catch (error) {
-      console.error('[handleSaveWebData] Error:', error);
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to save webData.",
-        variant: "destructive"
-      });
-    }
-  };
-  const handleDeleteClick = (type: 'subdepartment' | 'class' | 'subclass', index: number) => {
-    setDeleteContext({ type, index })
-    const context = {
-      type,
-      departmentId: activeDept,
-      subdepartmentId: activeSubdept[activeDept],
-      classId: type === 'class' || type === 'subclass' ? activeClass[`${activeDept}-${activeSubdept[activeDept]}`] : undefined,
-      subclassId: type === 'subclass' ? activeSubclass[`${activeDept}-${activeSubdept[activeDept]}-${activeClass[`${activeDept}-${activeSubdept[activeDept]}`]}`] : undefined
-    };
-    setEditingContext(context);
-    setIsDeleteDialogOpen(true);
-  }
-
-  const handleDeleteConfirm = async () => {
-    if (!deleteContext || !editingContext) return
-
-    try {
-      setIsSubmitting(true)
-      const { index } = deleteContext
-      const currentWebData = getCurrentWebDataForContext(editingContext)
-      if (!currentWebData) return
-
-      const updatedWebData = currentWebData.filter((_, i) => i !== index)
-      await saveWebDataForContext(editingContext, updatedWebData)
-      await refreshDepartments()
-
-      toast({
-        title: "Success",
-        description: "WebData deleted successfully",
-      })
-      setIsDeleteDialogOpen(false)
-      setDeleteContext(null)
-    } catch (error) {
-      console.error('Error deleting webData', error)
-      toast({
-        title: "Error",
-        description: "Failed to delete webData. Please try again.",
-        variant: "destructive"
-      })
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  const getCurrentWebDataForContext = (context: EditingContext): ApiWebData[] | null => {
+  const getCurrentWebDataForContext = (context: EditingContext): WebDataEntry[] | null => {
     try {
       const dept = departments.find(d => String(d.id) === String(context.departmentId));
       if (!dept) return null;
@@ -833,79 +460,129 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     refreshDepartments()
   }, [])
 
+  const handleDeleteClick = (entryIndex: number, itemType?: 'field' | 'upload', itemIndex?: number) => {
+    const context = {
+      type: activeDept && activeSubdept[activeDept] ? (
+        activeClass[`${activeDept}-${activeSubdept[activeDept]}`] ? (
+          activeSubclass[`${activeDept}-${activeSubdept[activeDept]}-${activeClass[`${activeDept}-${activeSubdept[activeDept]}`]}`] ? 'subclass' : 'class'
+        ) : 'subdepartment'
+      ) : null,
+      departmentId: activeDept,
+      subdepartmentId: activeSubdept[activeDept],
+      classId: activeClass[`${activeDept}-${activeSubdept[activeDept]}`],
+      subclassId: activeSubclass[`${activeDept}-${activeSubdept[activeDept]}-${activeClass[`${activeDept}-${activeSubdept[activeDept]}`]}`]
+    };
+    
+    setEditingContext(context as EditingContext);
+    setDeleteContext({ 
+      type: itemType || 'entry', 
+      index: entryIndex,
+      itemIndex: itemIndex
+    });
+    setIsDeleteDialogOpen(true);
+  }
 
-  const handleMove = async (index: number, direction: 'up' | 'down', moveContext: EditingContext) => {
-    if (!moveContext) return;
-
-    const currentWebData = getCurrentWebDataForContext(moveContext);
-    if (!currentWebData || currentWebData.length < 2) return;
-
-    const newWebData = [...currentWebData];
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-
-    if (targetIndex < 0 || targetIndex >= newWebData.length) return;
-
-    [newWebData[index], newWebData[targetIndex]] = [newWebData[targetIndex], newWebData[index]];
-
-    newWebData.forEach((item, idx) => { item.order = idx; });
+  const handleDeleteConfirm = async () => {
+    if (!deleteContext || !editingContext) return
 
     try {
-      await saveWebDataForContext(moveContext, newWebData);
-      await refreshDepartments();
-      toast({ title: "Success", description: "WebData order updated." });
-    } catch (error) {
-      console.error('Error moving webData:', error);
-      toast({ title: "Error", description: "Failed to update order.", variant: "destructive" });
-    }
-  };
+      setIsSubmitting(true)
+      const currentWebData = getCurrentWebDataForContext(editingContext)
+      if (!currentWebData) return
 
-  const handleDeptClick = (deptId: string) => setActiveDept(deptId);
-  const handleSubdeptClick = (deptId: string, subdeptId: string) => {
-    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }))
-    if (activeDept !== deptId) setActiveDept(deptId)
-  };
-  const handleClassClick = (deptId: string, subdeptId: string, classId: string) => {
-    setActiveClass(prev => ({ ...prev, [`${deptId}-${subdeptId}`]: classId }))
-    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }));
-    if (activeDept !== deptId) setActiveDept(deptId)
-  };
-  const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => {
-    const classKey = `${deptId}-${subdeptId}`;
-    setActiveSubclass(prev => ({ ...prev, [`${classKey}-${classId}`]: subclassId }))
-    setActiveClass(prev => ({ ...prev, [classKey]: classId }))
-    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }));
-    if (activeDept !== deptId) setActiveDept(deptId)
-  };
+      let updatedWebData = [...currentWebData];
 
-
-  // Group webData by automation ID (document)
-  const groupWebDataByDocument = useCallback((webData: WebDataTableEntry[]) => {
-    const groups: Record<string, {
-      automationId: string;
-      documentName: string;
-      docId: string | null;
-      fields: WebDataTableEntry[];
-    }> = {};
-
-    webData.forEach(field => {
-      const automationId = field.automationId || 'ungrouped';
-      const documentName = field.form_name || field.doc_name || 'Ungrouped Fields';
-      const docId = field.doc_id || null;
-
-      if (!groups[automationId]) {
-        groups[automationId] = {
-          automationId,
-          documentName,
-          docId,
-          fields: []
-        };
+      if (deleteContext.type === 'entry') {
+        // Delete entire entry
+        updatedWebData = currentWebData.filter((_, i) => i !== deleteContext.index)
+      } else if (deleteContext.type === 'field' && deleteContext.itemIndex !== undefined) {
+        // Delete specific field from entry
+        const entryToUpdate = { ...updatedWebData[deleteContext.index] };
+        entryToUpdate.fields = entryToUpdate.fields.filter((_, i) => i !== deleteContext.itemIndex);
+        updatedWebData[deleteContext.index] = entryToUpdate;
+      } else if (deleteContext.type === 'upload' && deleteContext.itemIndex !== undefined) {
+        // Delete specific upload from entry
+        const entryToUpdate = { ...updatedWebData[deleteContext.index] };
+        entryToUpdate.kycDocsUpload = entryToUpdate.kycDocsUpload.filter((_, i) => i !== deleteContext.itemIndex);
+        updatedWebData[deleteContext.index] = entryToUpdate;
       }
 
-      groups[automationId].fields.push(field);
-    });
+      // Replace the entire webData instead of appending
+      await replaceWebDataForContext(editingContext, updatedWebData)
+      await refreshDepartments()
 
-    return groups;
-  }, []);
+      toast({
+        title: "Success",
+        description: "WebData deleted successfully",
+      })
+      setIsDeleteDialogOpen(false)
+      setDeleteContext(null)
+    } catch (error) {
+      console.error('Error deleting webData', error)
+      toast({
+        title: "Error",
+        description: "Failed to delete webData. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const replaceWebDataForContext = async (context: EditingContext, webDataArray: WebDataEntry[]) => {
+    try {
+      let classId = '';
+      let webDataType = '';
+
+      if (context.type === 'subdepartment') {
+        classId = context.subdepartmentId;
+        webDataType = 'subdepartment';
+      } else if (context.type === 'class') {
+        classId = `${context.subdepartmentId}_${context.classId}`;
+        webDataType = 'class';
+      } else if (context.type === 'subclass') {
+        classId = `${context.subdepartmentId}_${context.classId}_${context.subclassId}`;
+        webDataType = 'subclass';
+      }
+
+      const { data: existingRecord, error: fetchError } = await supabase
+        .from('tm_class_requirements')
+        .select('*')
+        .eq('class_id', classId)
+        .eq('type', webDataType)
+        .single();
+
+      if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
+
+      if (existingRecord) {
+        const { error: updateError } = await supabase
+          .from('tm_class_requirements')
+          .update({
+            webData: webDataArray,
+            updated_at: new Date().toISOString()
+          })
+          .eq('class_id', classId)
+          .eq('type', webDataType);
+        if (updateError) throw updateError;
+      } else {
+        const { error: insertError } = await supabase
+          .from('tm_class_requirements')
+          .insert({
+            class_id: classId,
+            type: webDataType,
+            webData: webDataArray,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        if (insertError) throw insertError;
+      }
+      return true;
+    } catch (error) {
+      console.error('[replaceWebDataForContext] Error:', error);
+      throw error;
+    }
+  }
+
   const toggleDocumentExpansion = useCallback((automationId: string) => {
     setExpandedDocuments(prev => {
       const newSet = new Set(prev);
@@ -918,19 +595,8 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     });
   }, []);
 
-  const handleEditClick = useCallback((req: WebDataTableEntry, context: EditingContext) => {
-    setEditingWebData(req);
-    setEditingContext(context);
-    setIsEditDialogOpen(true);
-  }, []);
-
-  const renderWebData = (webData: WebDataTableEntry[] | null | undefined, context: EditingContext) => {
-    const safeWebData = (webData || []).sort((a, b) => a.order - b.order);
-    const groupedByDocument = groupWebDataByDocument(safeWebData);
-
-    const onEditClick = (req: WebDataTableEntry) => handleEditClick(req, context);
-    const onDeleteClick = (type: 'subdepartment' | 'class' | 'subclass', index: number) => handleDeleteClick(type, index);
-    const onMove = (index: number, direction: 'up' | 'down', moveContext: EditingContext) => handleMove(index, direction, moveContext);
+  const renderWebData = (webDataEntries: WebDataEntry[] | null | undefined, context: EditingContext) => {
+    const safeWebData = webDataEntries || [];
 
     return (
       <div className="relative h-full overflow-y-auto border rounded-lg bg-card">
@@ -939,16 +605,17 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
             <TableRow>
               <TableHead className="w-[60px] text-white border-r">#</TableHead>
               <TableHead className="text-white border-r">Document/Field Name</TableHead>
-              <TableHead className="w-[200px] text-white border-r">Automation Variable</TableHead>
+              <TableHead className="w-[200px] text-white border-r">Automation ID</TableHead>
               <TableHead className="w-[120px] text-white border-r">Type</TableHead>
+              <TableHead className="w-[120px] text-white border-r">Entity Type</TableHead>
               <TableHead className="text-white border-r">Description</TableHead>
               <TableHead className="w-[160px] text-white">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {Object.keys(groupedByDocument).length > 0 ? (
-              Object.entries(groupedByDocument).map(([automationId, group], groupIndex) => (
-                <React.Fragment key={automationId}>
+            {safeWebData.length > 0 ? (
+              safeWebData.map((entry, entryIndex) => (
+                <React.Fragment key={entry.automationId}>
                   {/* Document Header Row */}
                   <TableRow className="bg-muted/30 border-b-2">
                     <TableCell className="font-medium border-r">
@@ -958,29 +625,34 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
                     </TableCell>
                     <TableCell className="border-r">
                       <div className="flex items-center space-x-2">
-                        <Button
+                        <span className="font-medium text-card-foreground">
+                          {entry.documentName}
+                        </span>
+                        {/* <Badge variant="secondary" className="text-xs">
+                          {entry.fields.length} fields
+                        </Badge>
+                        {entry.kycDocsUpload.length > 0 && (
+                          <Badge variant="outline" className="text-xs">
+                            <Upload className="h-3 w-3 mr-1" />
+                            {entry.kycDocsUpload.length} uploads
+                          </Badge>
+                        )} */}
+                            <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => toggleDocumentExpansion(automationId)}
+                          onClick={() => toggleDocumentExpansion(entry.automationId)}
                           className="h-6 w-6 p-0"
                         >
-                          {expandedDocuments.has(automationId) ?
-                            <ChevronDown className="h-4 w-4" /> :
-                            <ChevronRight className="h-4 w-4" />
+                          {expandedDocuments.has(entry.automationId) ?
+                            <Plus className="h-4 w-4" /> :
+                            <Minus className="h-4 w-4" />
                           }
                         </Button>
-                        <FileText className="h-4 w-4 text-blue-500" />
-                        <span className="font-medium text-card-foreground">
-                          {group.documentName}
-                        </span>
-                        <Badge variant="secondary" className="text-xs">
-                          {group.fields.length} fields
-                        </Badge>
                       </div>
                     </TableCell>
                     <TableCell className="border-r">
                       <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
-                        {automationId}
+                        {entry.automationId}
                       </code>
                     </TableCell>
                     <TableCell className="border-r">
@@ -988,8 +660,15 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
                         Document
                       </Badge>
                     </TableCell>
+                    <TableCell className="border-r">
+                      <Badge variant="secondary" className="text-xs">
+                        <Users className="h-3 w-3 mr-1" />
+                        Mixed
+                      </Badge>
+                    </TableCell>
                     <TableCell className="text-muted-foreground border-r">
-                      Form with {group.fields.length} field{group.fields.length !== 1 ? 's' : ''}
+                      Form with {entry.fields.length} field{entry.fields.length !== 1 ? 's' : ''}
+                      {entry.kycDocsUpload.length > 0 && ` + ${entry.kycDocsUpload.length} upload${entry.kycDocsUpload.length !== 1 ? 's' : ''}`}
                     </TableCell>
                     <TableCell className="border-r">
                       <div className="flex items-center space-x-1">
@@ -997,91 +676,170 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8"
-                          onClick={() => toggleDocumentExpansion(automationId)}
+                          onClick={() => toggleDocumentExpansion(entry.automationId)}
                         >
                           <Plus className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          onClick={() => handleDeleteClick(entryIndex)}
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </TableCell>
                   </TableRow>
 
                   {/* Field Rows (shown when expanded) */}
-                  {expandedDocuments.has(automationId) && group.fields.map((field, fieldIndex) => (
-                    <TableRow key={field.id || field.tempId || `${automationId}-${fieldIndex}`} className="group hover:bg-muted/50 pl-8">
-                      <TableCell className="font-medium border-r pl-8">
-                        <div className="flex items-center space-x-2">
-                          <div className="w-4 h-px bg-muted-foreground"></div>
-                          <span className="text-sm">{field.order + 1}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="border-r pl-8">
-                        <div className="flex items-center space-x-2">
-                          <div className="w-4 h-px bg-muted-foreground"></div>
-                          <div className="font-medium text-card-foreground">{field.efnsDisplayName || field.name}</div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="border-r">
-                        <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
-                          {field.variableName || '-'}
-                        </code>
-                      </TableCell>
-                      <TableCell className="border-r">
-                        <Badge variant="secondary" className="capitalize">
-                          {field.fieldType || 'text'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground border-r">
-                        <span className={!field.description ? 'italic' : ''}>
-                          {field.description || 'No description'}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right border-r">
-                        <div className="flex items-center space-x-1">
-                          <div className="flex-col">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => handleMove(field.order, 'up', context)}
-                              disabled={field.order === 0}
+                  {expandedDocuments.has(entry.automationId) && (
+                    <>
+                      {entry.fields.map((field, fieldIndex) => (
+                        <TableRow key={`${entry.automationId}-field-${fieldIndex}`} className="group hover:bg-muted/50">
+                          <TableCell className="font-medium border-r pl-8">
+                            <div className="flex items-center space-x-2">
+                              <span className="text-sm">F{fieldIndex + 1}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="border-r pl-8">
+                            <div className="flex items-center space-x-2">
+                              <FileText className="h-3 w-3 text-green-500" />
+                              <div className="font-medium text-card-foreground">{field.efnsDisplayName || field.name}</div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="border-r">
+                            <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
+                              {field.variableName || '-'}
+                            </code>
+                          </TableCell>
+                          <TableCell className="border-r">
+                            <Badge variant="secondary" className="capitalize">
+                              {field.fieldType || 'text'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="border-r">
+                            <Badge 
+                              variant={field.entityType === 'both' ? 'default' : 'secondary'} 
+                              className="text-xs"
                             >
-                              <ChevronUp className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => handleMove(field.order, 'down', context)}
-                              disabled={field.order === safeWebData.length - 1}
+                              {field.entityType === 'both' ? (
+                                <><Users className="h-3 w-3 mr-1" />Both</>
+                              ) : field.entityType === 'principal' ? (
+                                <><User className="h-3 w-3 mr-1" />Principal</>
+                              ) : (
+                                <><User className="h-3 w-3 mr-1" />Dependant</>
+                              )}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground border-r">
+                            <span className={!field.description ? 'italic' : ''}>
+                              {field.description || 'No description'}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right border-r">
+                            <div className="flex items-center space-x-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => {/* Handle edit field */}}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                onClick={() => handleDeleteClick(entryIndex, 'field', fieldIndex)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+
+                      {/* KYC Upload Rows */}
+                      {entry.kycDocsUpload.map((kycDoc, kycIndex) => (
+                        <TableRow key={`${entry.automationId}-kyc-${kycIndex}`} className="group hover:bg-muted/50">
+                          <TableCell className="font-medium border-r pl-8">
+                            <div className="flex items-center space-x-2">
+                              <span className="text-sm">U{kycIndex + 1}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="border-r pl-8">
+                            <div className="flex items-center space-x-2">
+                              <Upload className="h-3 w-3 text-orange-500" />
+                              <div className="font-medium text-card-foreground">
+                                {kycDocuments[kycDoc.kycDocumentId] || kycDoc.documentName || entry.documentName}
+                              </div>
+                              {kycDoc.isRequired && (
+                                <Badge variant="destructive" className="text-xs">Required</Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="border-r">
+                            <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
+                              {kycDoc.kycDocumentId}
+                            </code>
+                          </TableCell>
+                          <TableCell className="border-r">
+                            <Badge variant="outline" className="capitalize">
+                              {kycDoc.documentType}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="border-r">
+                            <Badge 
+                              variant={kycDoc.entityType === 'both' ? 'default' : 'secondary'} 
+                              className="text-xs"
                             >
-                              <ChevronDown className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => handleEditClick(field)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-destructive hover:text-destructive"
-                            onClick={() => handleDeleteClick(context.type, field.order)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                              {kycDoc.entityType === 'both' ? (
+                                <><Users className="h-3 w-3 mr-1" />Both</>
+                              ) : kycDoc.entityType === 'principal' ? (
+                                <><User className="h-3 w-3 mr-1" />Principal</>
+                              ) : (
+                                <><User className="h-3 w-3 mr-1" />Dependant</>
+                              )}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground border-r">
+                            <div className="space-y-1 text-xs">
+                              <div>{kycDoc.description || 'Document upload'}</div>
+                              <div className="text-muted-foreground">
+                                Max: {kycDoc.maxFileSizeMb}MB | {kycDoc.fileExtensions.join(', ')}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right border-r">
+                            <div className="flex items-center space-x-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => {/* Handle edit upload */}}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                onClick={() => handleDeleteClick(entryIndex, 'upload', kycIndex)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </>
+                  )}
                 </React.Fragment>
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={6} className="h-48 text-center text-muted-foreground">
+                <TableCell colSpan={7} className="h-48 text-center text-muted-foreground">
                   <div className="flex flex-col items-center space-y-2">
                     <FileText className="h-8 w-8" />
                     <p className="font-medium">No WebData Yet</p>
@@ -1177,6 +935,24 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
     );
   }
 
+  const handleDeptClick = (deptId: string) => setActiveDept(deptId);
+  const handleSubdeptClick = (deptId: string, subdeptId: string) => {
+    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }))
+    if (activeDept !== deptId) setActiveDept(deptId)
+  };
+  const handleClassClick = (deptId: string, subdeptId: string, classId: string) => {
+    setActiveClass(prev => ({ ...prev, [`${deptId}-${subdeptId}`]: classId }))
+    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }));
+    if (activeDept !== deptId) setActiveDept(deptId)
+  };
+  const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => {
+    const classKey = `${deptId}-${subdeptId}`;
+    setActiveSubclass(prev => ({ ...prev, [`${classKey}-${classId}`]: subclassId }))
+    setActiveClass(prev => ({ ...prev, [classKey]: classId }))
+    setActiveSubdept(prev => ({ ...prev, [deptId]: subdeptId }));
+    if (activeDept !== deptId) setActiveDept(deptId)
+  };
+
   if (!departments || departments.length === 0) {
     return (
       <div className="flex items-center justify-center p-8 h-full">
@@ -1240,7 +1016,7 @@ export default function WebData({ departments: initialDepartments }: WebDataProp
         isOpen={isEditDialogOpen}
         onOpenChange={setIsEditDialogOpen}
         webData={editingWebData}
-        onSave={handleSaveWebData}
+        onSave={() => {/* Handle save */}}
         isSubmitting={isSubmitting}
         context={editingContext ? { ...editingContext, availableForms } : null}
       />
