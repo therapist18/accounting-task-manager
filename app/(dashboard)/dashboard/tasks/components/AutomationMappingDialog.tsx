@@ -37,6 +37,8 @@ interface AutomationMappingDialogProps {
   task?: any;
   individualId?: string;
   stageDocuments?: any[]; // Add stage documents to get automation links
+  allDocuments?: any[]; // Add allDocuments to access linked documents
+  stage?: any; // Add stage to get linked document for this specific stage
 }
 
 interface AutomationDetails {
@@ -58,6 +60,33 @@ interface EntityAutomationMapping {
   automationId: string;
   automation?: AutomationDetails;
 }
+
+// Helper function to get LINKED document for a stage (same as EditableStageCell)
+const getLinkedDocumentForStage = (task: any, stage: any, allDocuments: any[]): any | null => {
+  const linkedDocumentData = task.source_document_id?.[stage.id];
+
+  if (linkedDocumentData) {
+    const documentId = typeof linkedDocumentData === 'string'
+      ? linkedDocumentData
+      : linkedDocumentData.id;
+    // Find the document instance from allDocuments by its unique ID
+    const linkedDoc = allDocuments.find(doc => doc.id === documentId);
+    return linkedDoc || null;
+  }
+  return null;
+};
+
+// Helper function to build file URL (same pattern as EditableStageCell)
+const buildFileUrl = (linkedDoc: any): string | null => {
+  if (!linkedDoc?.file_path) return null;
+
+  const bucketName = 'kyc-documents';
+  const filePath = linkedDoc.file_path?.startsWith(bucketName)
+    ? linkedDoc.file_path
+    : `${bucketName}/${linkedDoc.file_path}`;
+
+  return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+};
 
 // Helper function to parse JSON field paths properly
 const parseJsonValue = (data: any, path: string): any => {
@@ -144,7 +173,9 @@ export const AutomationMappingDialog = ({
   subclassId = '',
   task,
   individualId,
-  stageDocuments = []
+  stageDocuments = [],
+  allDocuments = [], // Add allDocuments prop
+  stage // Add stage prop
 }: AutomationMappingDialogProps) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
@@ -169,6 +200,33 @@ export const AutomationMappingDialog = ({
   };
 
   const [currentIndividualId, setCurrentIndividualId] = useState(getIndividualId());
+
+  // Enhanced function to get document URL for automation payload
+  const getDocumentUrlForAutomation = useCallback((): string | null => {
+    if (!stage || !task || !allDocuments?.length) {
+      console.log('Missing required data for document URL:', { stage: !!stage, task: !!task, allDocuments: allDocuments?.length });
+      return null;
+    }
+
+    // Get the linked document for this stage (same logic as EditableStageCell)
+    const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
+    
+    if (!linkedDoc) {
+      console.log('No linked document found for stage:', stage.id);
+      return null;
+    }
+
+    // Build file URL using the same pattern as EditableStageCell
+    const fileUrl = buildFileUrl(linkedDoc);
+    
+    console.log('Built document URL for automation:', {
+      documentId: linkedDoc.id,
+      filePath: linkedDoc.file_path,
+      fileUrl
+    });
+
+    return fileUrl;
+  }, [stage, task, allDocuments]);
 
   // Extract automation mappings from stage documents
   const extractAutomationMappings = async (stageDocuments: any[]) => {
@@ -716,6 +774,7 @@ export const AutomationMappingDialog = ({
     return dateValue;
   };
 
+  // Enhanced handleRunAutomation with dynamic document URL
   const handleRunAutomation = async () => {
     if (!currentIndividualId) {
       toast({ 
@@ -754,33 +813,35 @@ export const AutomationMappingDialog = ({
 
       const formData = prepareFormData();
       
-      // Get the document URL from the webDataItem or use the provided URL
-      const documentUrl = webDataItem.documentUrl || "https://zyszsqgdlrpnunkegipk.supabase.co/storage/v1/object/public/kyc-documents/individual-documents/amit_singh_rawat/passport_foreign_frontview/9.AMIT%20RAWAT%20SINGH%20-%20PP%20-%2010.08.2017.jpeg";
+      // Get the document URL dynamically from the linked document (same as EditableStageCell)
+      const documentUrl = getDocumentUrlForAutomation();
+      
+      if (!documentUrl) {
+        console.warn('No document URL found for automation. This may be expected if no document is linked.');
+        // Continue with automation even if no document URL (some automations may not require documents)
+      }
 
       const payload = {
         url: "https://fns.immigration.go.ke/account/login.html",
-        login: automation.login || {
-          email: "edwinnyakundi91@gmail.com",
-          idNumber: "30247621",
-          password: "Nyakundi298"
-        },
+        login: automation.login,
         formData: formData,
         taskId: taskId,
         individualId: currentIndividualId,
         classId: classId,
         requirementId: getRequirementId(),
-        documentUrl: documentUrl,  // Add document URL to the payload
+        photoUrl: documentUrl, // Use dynamic document URL instead of hardcoded
         webDataItem: {
           documentId: webDataItem.documentId,
           documentName: webDataItem.documentName,
           fields: webDataItem.fields?.length || 0,
           kycDocsUpload: webDataItem.kycDocsUpload?.length || 0,
-          documentUrl: documentUrl  // Also include in webDataItem for backward compatibility
+          photoUrl: documentUrl // Also include in webDataItem for backward compatibility
         }
       };
 
       console.log('Sending automation request with payload:', payload);
       console.log('Using webhook URL:', automation.webhook_url);
+      console.log('Document URL from linked document:', documentUrl);
       console.log('WebData item:', webDataItem);
 
       const response = await fetch(automation.webhook_url, {
@@ -1078,6 +1139,14 @@ export const AutomationMappingDialog = ({
                     </div>
                   </div>
                 )}
+
+                {/* Show Document URL being used */}
+                <div className="md:col-span-2">
+                  <Label className="text-sm font-medium text-gray-700">Document URL</Label>
+                  <div className="p-2 bg-gray-50 rounded border text-xs font-mono text-gray-600 break-all">
+                    {getDocumentUrlForAutomation() || 'No document linked for this stage'}
+                  </div>
+                </div>
               </div>
             )}
           </CardContent>
@@ -1460,7 +1529,7 @@ export const AutomationMappingDialog = ({
                 })}
               />
             </div>
-            <DialogFooter className="p-6 pt-0 border-t">
+            <div className="p-6 pt-0 border-t">
               <div className="flex items-center justify-between w-full">
                 <div className="text-sm text-gray-500">
                   Document ID: {previewDocument.file.document_id} | 
@@ -1471,7 +1540,7 @@ export const AutomationMappingDialog = ({
                   Close Preview
                 </Button>
               </div>
-            </DialogFooter>
+            </div>
           </DialogContent>
         </Dialog>
       )}
