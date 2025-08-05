@@ -108,6 +108,10 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
   const [availableForms, setAvailableForms] = useState<Array<{ id: string; name: string }>>([])
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [kycDocuments, setKycDocuments] = useState<Record<string, string>>({})
+  
+  // --- [CHANGE #1] Add state to hold the full data object for the item being edited ---
+  const [currentWebDataForEdit, setCurrentWebDataForEdit] = useState<WebDataEntry[] | null>(null);
+
 
   // Fetch KYC documents on component mount
   useEffect(() => {
@@ -220,32 +224,22 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
     try {
       setIsSubmitting(true);
 
-      // Get existing webData for the context
       const existingWebData = getCurrentWebDataForContext(addContext) || [];
-
-      // Process each new entry
       const updatedWebData = [...existingWebData];
 
       for (const newEntry of webDataArray) {
-        // Check if there's an existing entry with the same documentId and automationId
         const existingEntryIndex = updatedWebData.findIndex(existing =>
           existing.documentId === newEntry.documentId &&
           existing.automationId === newEntry.automationId
         );
 
         if (existingEntryIndex !== -1) {
-          // Merge with existing entry
           const existingEntry = updatedWebData[existingEntryIndex];
-
-          // Merge fields (avoid duplicates by checking field names)
           const existingFieldNames = new Set(existingEntry.fields.map(f => f.efnsDisplayName || f.name));
           const newFields = newEntry.fields.filter(f => !existingFieldNames.has(f.efnsDisplayName || f.name));
-
-          // Merge KYC documents (avoid duplicates by checking kycDocumentId)
           const existingKycIds = new Set(existingEntry.kycDocsUpload.map(k => k.kycDocumentId));
           const newKycDocs = newEntry.kycDocsUpload.filter(k => !existingKycIds.has(k.kycDocumentId));
 
-          // Update the existing entry
           updatedWebData[existingEntryIndex] = {
             ...existingEntry,
             fields: [...existingEntry.fields, ...newFields],
@@ -258,12 +252,10 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
             variant: "default"
           });
         } else {
-          // Add as new entry
           updatedWebData.push(newEntry);
         }
       }
 
-      // Replace the entire webData array
       await replaceWebDataForContext(addContext, updatedWebData);
       await refreshDepartments();
       setIsAddDialogOpen(false);
@@ -310,7 +302,6 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
               req.class_id === classId && req.type === 'class'
             )
 
-            // Process the new webData array structure
             let classWebData: WebDataEntry[] = [];
             if (classWebDataRecord?.webData && Array.isArray(classWebDataRecord.webData)) {
               classWebData = classWebDataRecord.webData;
@@ -372,64 +363,6 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
         description: "Failed to refresh departments. Please try again.",
         variant: "destructive"
       })
-    }
-  }
-
-  const saveWebDataForContext = async (context: EditingContext, webDataArray: WebDataEntry[]) => {
-    try {
-      let classId = '';
-      let webDataType = '';
-
-      if (context.type === 'subdepartment') {
-        classId = context.subdepartmentId;
-        webDataType = 'subdepartment';
-      } else if (context.type === 'class') {
-        classId = `${context.subdepartmentId}_${context.classId}`;
-        webDataType = 'class';
-      } else if (context.type === 'subclass') {
-        classId = `${context.subdepartmentId}_${context.classId}_${context.subclassId}`;
-        webDataType = 'subclass';
-      }
-
-      const { data: existingRecord, error: fetchError } = await supabase
-        .from('tm_class_requirements')
-        .select('*')
-        .eq('class_id', classId)
-        .eq('type', webDataType)
-        .single();
-
-      if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
-
-      // Get existing webData array and merge with new data
-      const existingWebData: WebDataEntry[] = existingRecord?.webData || [];
-      const mergedWebData = [...existingWebData, ...webDataArray];
-
-      if (existingRecord) {
-        const { error: updateError } = await supabase
-          .from('tm_class_requirements')
-          .update({
-            webData: mergedWebData,
-            updated_at: new Date().toISOString()
-          })
-          .eq('class_id', classId)
-          .eq('type', webDataType);
-        if (updateError) throw updateError;
-      } else {
-        const { error: insertError } = await supabase
-          .from('tm_class_requirements')
-          .insert({
-            class_id: classId,
-            type: webDataType,
-            webData: mergedWebData,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-        if (insertError) throw insertError;
-      }
-      return true;
-    } catch (error) {
-      console.error('[saveWebDataForContext] Error:', error);
-      throw error;
     }
   }
 
@@ -513,24 +446,22 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
     setIsDeleteDialogOpen(true);
   }
 
+  // --- [CHANGE #2] Modify handleEditClick to populate the new state ---
   const handleEditClick = (field: ApiWebData, entry: WebDataEntry, context: EditingContext) => {
-    // Create a copy of the field with any necessary defaults
+    // Get the full data array for the current context (subdepartment, class, etc.)
+    const fullWebDataForContext = getCurrentWebDataForContext(context);
+    setCurrentWebDataForEdit(fullWebDataForContext); // Store it in our new state
+
+    // Create a copy of the field with necessary defaults
     const fieldToEdit = {
       ...field,
-      // Ensure required fields have defaults if not present
       fieldType: field.fieldType || 'text',
       entityType: field.entityType || 'both',
       isVisible: field.isVisible !== false,
       isRequired: field.isRequired !== false,
-      // Add entry context for the edit dialog
-      entryContext: {
-        automationId: entry.automationId,
-        documentId: entry.documentId,
-        documentName: entry.documentName
-      }
     };
   
-    // Set up the editing context with the current field and context
+    // Set up the context for the dialog, including which entry we're editing
     const editContext = {
       ...context,
       entryContext: {
@@ -556,21 +487,17 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
       let updatedWebData = [...currentWebData];
 
       if (deleteContext.type === 'entry') {
-        // Delete entire entry
         updatedWebData = currentWebData.filter((_, i) => i !== deleteContext.index)
       } else if (deleteContext.type === 'field' && deleteContext.itemIndex !== undefined) {
-        // Delete specific field from entry
         const entryToUpdate = { ...updatedWebData[deleteContext.index] };
         entryToUpdate.fields = entryToUpdate.fields.filter((_, i) => i !== deleteContext.itemIndex);
         updatedWebData[deleteContext.index] = entryToUpdate;
       } else if (deleteContext.type === 'upload' && deleteContext.itemIndex !== undefined) {
-        // Delete specific upload from entry
         const entryToUpdate = { ...updatedWebData[deleteContext.index] };
         entryToUpdate.kycDocsUpload = entryToUpdate.kycDocsUpload.filter((_, i) => i !== deleteContext.itemIndex);
         updatedWebData[deleteContext.index] = entryToUpdate;
       }
 
-      // Replace the entire webData instead of appending
       await replaceWebDataForContext(editingContext, updatedWebData)
       await refreshDepartments()
 
@@ -691,15 +618,6 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
                         <span className="font-medium text-card-foreground">
                           {entry.documentName}
                         </span>
-                        {/* <Badge variant="secondary" className="text-xs">
-                          {entry.fields.length} fields
-                        </Badge>
-                        {entry.kycDocsUpload.length > 0 && (
-                          <Badge variant="outline" className="text-xs">
-                            <Upload className="h-3 w-3 mr-1" />
-                            {entry.kycDocsUpload.length} uploads
-                          </Badge>
-                        )} */}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -872,6 +790,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8"
+                                disabled // Edit for KYC uploads can be implemented here
                                 onClick={() => {/* Handle edit upload */ }}
                               >
                                 <Pencil className="h-4 w-4" />
@@ -1067,10 +986,20 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
         isSubmitting={isSubmitting}
         context={addContext ? { ...addContext, availableForms } : null}
       />
+      {/* --- [CHANGE #3] Pass the new state to the dialog and add cleanup --- */}
       <EditWebDataDialog
         isOpen={isEditDialogOpen}
-        onOpenChange={setIsEditDialogOpen}
+        onOpenChange={(isOpen) => {
+          setIsEditDialogOpen(isOpen);
+          if (!isOpen) {
+            // Clean up state when dialog closes
+            setEditingWebData(null);
+            setEditingContext(null);
+            setCurrentWebDataForEdit(null);
+          }
+        }}
         webData={editingWebData}
+        allAutomationData={currentWebDataForEdit || []}
         onSave={handleSaveWebData}
         isSubmitting={isSubmitting}
         context={editingContext ? {

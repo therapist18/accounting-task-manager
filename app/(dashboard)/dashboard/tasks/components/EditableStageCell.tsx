@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import ExtractionPreview from "@/components/ExtractionPreview"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Upload, Calendar, Check, X, Clock, CheckCircle, FileText, Eye, AlertTriangle, Zap } from "lucide-react"
+import { Upload, Calendar, Check, X, Clock, CheckCircle, FileText, Eye, AlertTriangle, Zap, Loader2 } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
@@ -27,6 +27,9 @@ interface EditableStageCellProps {
   onShowDocuments?: (task: any, stage: any) => void
   getKycFields?: (documentConfig: any) => Promise<any[]>
   allDocuments?: any[]
+  isDocumentRow?: boolean
+  documentData?: any
+  onAutomationClick?: (e: React.MouseEvent, documentData?: any) => void
 }
 
 // Helper function to check if document is older than task creation
@@ -56,6 +59,98 @@ const getLinkedDocumentForStage = (task: any, stage: any, allDocuments: any[]): 
   return null;
 };
 
+// Helper function to check if a document is applicable to the current task
+const isDocumentApplicable = (doc: any, task: any): boolean => {
+  if (!doc.isSpecial) return true;
+
+  if (doc.targetEntities && Array.isArray(doc.targetEntities) && doc.targetEntities.length > 0) {
+    return doc.targetEntities.some((entity: any) => {
+      const classMatch = entity.class_id ? entity.class_id.toString() === task.class_id?.toString() : true;
+      const subdeptMatch = entity.subdept_id ? entity.subdept_id.toString() === task.subdepartment?.id?.toString() : true;
+      return classMatch && subdeptMatch;
+    });
+  }
+
+  const taskClassId = task.class_id?.toString();
+  const taskSubdeptId = task.subdepartment?.id?.toString();
+
+  if (doc.entityType === 'class' && doc.class_id) {
+    const classMatch = taskClassId === doc.class_id.toString();
+    if (doc.subdept_id) {
+      return classMatch && taskSubdeptId === doc.subdept_id.toString();
+    }
+    return classMatch;
+  }
+
+  if (doc.entityType === 'subdept' && doc.subdept_id) {
+    return taskSubdeptId === doc.subdept_id?.toString();
+  }
+
+  if (doc.entityType === 'subclass' && doc.subclass_id && doc.class_id && doc.subdept_id) {
+    return (
+      taskSubdeptId === doc.subdept_id?.toString() &&
+      taskClassId === doc.class_id?.toString() &&
+      task.subclass_id?.toString() === doc.subclass_id?.toString()
+    );
+  }
+
+  if (doc.class_id && doc.subdept_id) {
+    return (
+      taskSubdeptId === doc.subdept_id?.toString() &&
+      taskClassId === doc.class_id?.toString()
+    );
+  }
+
+  if (doc.subdept_id && !doc.class_id) {
+    return taskSubdeptId === doc.subdept_id?.toString();
+  }
+
+  return false;
+};
+
+// Helper function to check if a stage is applicable to the current task
+const isStageApplicableToTask = (stage: any, task: any, departments: any[] = []): boolean => {
+  try {
+    if (!task) return false;
+    
+    if (!departments.length) return true;
+
+    const dept = departments.find(d => d?.id === task.department?.id || d?.id === task.department);
+    if (!dept) return false;
+
+    const subdept = dept.tm_subdepartments?.find((s: any) => 
+      s?.id === task.subdepartment?.id || s?.id === task.subdepartment
+    );
+    
+    if (task.subdepartment && !subdept) return false;
+    
+    if (!task.subdepartment) {
+      const deptStage = dept.stages?.find((s: any) => s.stage_id === stage.id);
+      return deptStage ? deptStage.applicable !== false : true;
+    }
+
+    const subdeptStage = subdept.stages?.find((s: any) => s.stage_id === stage.id);
+    if (subdeptStage && subdeptStage.applicable === false) return false;
+
+    if (task.class_id) {
+      const cls = subdept.classes?.find((c: any) => 
+        c?.id?.toString() === task.class_id?.toString() || 
+        c?.id === task.class_id
+      );
+      
+      if (cls) {
+        const classStage = cls.stages?.find((s: any) => s.stage_id === stage.id);
+        if (classStage && classStage.applicable === false) return false;
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error in isStageApplicableToTask:', error);
+    return false;
+  }
+};
+
 export default function EditableStageCell({
   stage,
   task,
@@ -64,7 +159,10 @@ export default function EditableStageCell({
   onDocumentUpload,
   onShowDocuments,
   getKycFields,
-  allDocuments = []
+  allDocuments = [],
+  isDocumentRow = false,
+  documentData = null,
+  onAutomationClick
 }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
@@ -80,6 +178,7 @@ export default function EditableStageCell({
   const inputRef = useRef<HTMLInputElement>(null);
   const requiresUpload = stage.documents && stage.documents.length > 0;
 
+  // Enhanced function to fetch KYC document data with fields
   const fetchKycDocumentData = useCallback(async (kycId: string) => {
     try {
       const { data, error } = await supabase
@@ -99,6 +198,143 @@ export default function EditableStageCell({
     }
   }, []);
 
+  // Enhanced function to transform KYC fields to ExtractionPreview format
+  const transformKycFieldsToPreviewFormat = useCallback((kycFields: any[]): any[] => {
+    if (!Array.isArray(kycFields)) return [];
+
+    return kycFields.map((field: any) => {
+      const isArray = field.type === 'array' || field.isArray === true;
+
+      const transformedField: any = {
+        id: field.id || field.fieldName || field.name,
+        name: field.fieldName || field.name || field.id,
+        type: isArray ? 'array' : (field.fieldType || field.type || 'text'),
+        isArray: isArray,
+        required: field.isRequired !== false,
+        description: field.description || ''
+      };
+
+      if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
+        transformedField.arrayConfig = {
+          maxItems: field.arrayConfig.maxItems || 10,
+          fields: field.arrayConfig.fields.map((subField: any) => ({
+            id: subField.id || subField.fieldName || subField.name,
+            name: subField.fieldName || subField.name || subField.id,
+            type: subField.fieldType || subField.type || 'text',
+            required: subField.isRequired !== false
+          }))
+        };
+      }
+
+      return transformedField;
+    });
+  }, []);
+
+  // Enhanced function to build preview document data
+  const buildPreviewDocumentData = useCallback(async () => {
+    const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
+
+    if (!linkedDoc) {
+      toast({
+        title: 'No Linked Document',
+        description: 'No document has been linked for this stage yet.',
+        variant: 'default',
+      });
+      return null;
+    }
+
+    // Check if document has indicator
+    if (linkedDoc.indicator === true) {
+      toast({
+        title: 'Preview not available',
+        description: 'Document preview is not available for this document.',
+        variant: 'default',
+      });
+      return null;
+    }
+
+    // Check if document is older than task creation
+    const isOldDoc = task.created_at &&
+      isDocumentOlderThanTask(linkedDoc.created_at, task.created_at);
+
+    if (isOldDoc) {
+      toast({
+        title: 'Preview not available',
+        description: 'Document is older than task creation - preview disabled.',
+        variant: 'default',
+      });
+      return null;
+    }
+
+    // Get the KYC document data using the document_id
+    const kycId = linkedDoc.document_id;
+    if (!kycId) {
+      toast({
+        title: 'Error',
+        description: 'No KYC document ID found.',
+        variant: 'destructive',
+      });
+      return null;
+    }
+
+    // Fetch KYC document data with fields
+    const kycData = await fetchKycDocumentData(kycId);
+    if (!kycData) {
+      toast({
+        title: 'Error',
+        description: 'Failed to load document configuration.',
+        variant: 'destructive',
+      });
+      return null;
+    }
+
+    // Transform KYC fields to the format expected by ExtractionPreview
+    const fields = transformKycFieldsToPreviewFormat(kycData.fields || []);
+
+    // Get document name from KYC data
+    const documentName = kycData.display_name || kycData.name || 'Document';
+
+    // Build file URL
+    const bucketName = 'kyc-documents';
+    const filePath = linkedDoc.file_path?.startsWith(bucketName)
+      ? linkedDoc.file_path
+      : `${bucketName}/${linkedDoc.file_path}`;
+
+    const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+    const fileName = linkedDoc.file_path?.split('/').pop() || documentName;
+
+    // Prepare extracted data from the linked document
+    const rawExtractedData = linkedDoc.extracted_details || {};
+    
+    // Ensure all fields have values in extractedData
+    const extractedData = { ...rawExtractedData };
+    fields.forEach((field: any) => {
+      if (extractedData[field.id] === undefined && extractedData[field.name] === undefined) {
+        extractedData[field.id] = field.isArray ? [] : '';
+        extractedData[field.name] = field.isArray ? [] : '';
+      }
+    });
+
+    const previewData = {
+      documentId: linkedDoc.id,
+      documentName,
+      fileUrl,
+      fileName,
+      extractedData,
+      fields,
+      type: kycData.document_type || 'document',
+      file: {
+        name: fileName,
+        type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
+        url: fileUrl
+      }
+    };
+
+    console.log('Enhanced preview data being prepared:', previewData);
+    return previewData;
+  }, [task, stage, allDocuments, fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
+
+  // Process extracted data to handle arrays and nested fields
   const processExtractedData = (data: any, fields: any[]): any => {
     if (!data || typeof data !== 'object') return data;
 
@@ -122,155 +358,21 @@ export default function EditableStageCell({
     return result;
   };
 
+  // Enhanced useEffect for preview preparation
   useEffect(() => {
     if (!isPreviewOpen) return;
 
-    const buildPreviewDocument = async () => {
-      const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
-
-      if (!linkedDoc) {
+    const preparePreview = async () => {
+      const previewData = await buildPreviewDocumentData();
+      if (previewData) {
+        setPreviewDocument(previewData);
+      } else {
         setIsPreviewOpen(false);
-        toast({
-          title: 'No Linked Document',
-          description: 'No document has been linked for this stage yet.',
-          variant: 'default',
-        });
-        return null;
       }
-
-      // Check if document has indicator - if so, don't show preview
-      if (linkedDoc.indicator === true) {
-        toast({
-          title: 'Preview not available',
-          description: 'Document preview is not available for this document.',
-          variant: 'default',
-        });
-        setIsPreviewOpen(false);
-        return null;
-      }
-
-      // Check if document is older than task creation - if so, don't show preview
-      const isOldDoc = task.created_at &&
-        isDocumentOlderThanTask(linkedDoc.created_at, task.created_at);
-
-      if (isOldDoc) {
-        toast({
-          title: 'Preview not available',
-          description: 'Document is older than task creation - preview disabled.',
-          variant: 'default',
-        });
-        setIsPreviewOpen(false);
-        return null;
-      }
-
-      // Get the KYC document data using the document_id (which should match kycId)
-      const kycId = linkedDoc.document_id;
-      if (!kycId) {
-        return null;
-      }
-
-      // Fetch KYC document data
-      const kycData = await fetchKycDocumentData(kycId);
-      if (!kycData) {
-        console.log('No KYC data found');
-        return null;
-      }
-
-      console.log('KYC Data:', kycData);
-      console.log('Raw document data:', linkedDoc);
-
-      // Use KYC document display_name or name, not stage document name
-      const documentName = kycData.display_name || kycData.name || 'Document';
-
-      // Format the file path and URL
-      const bucketName = 'kyc-documents';
-      const filePath = linkedDoc.file_path?.startsWith(bucketName)
-        ? linkedDoc.file_path
-        : `${bucketName}/${linkedDoc.file_path}`;
-
-      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
-      const fileName = linkedDoc.file_path?.split('/').pop() || documentName;
-      const fileType = fileName.split('.').pop()?.toLowerCase() || 'pdf';
-
-      // Get KYC fields from the KYC document data (not from stage documents)
-      const kycFields = kycData.fields || [];
-
-      // Transform KYC fields to the expected format
-      const transformKycFields = (fields: any[]): any[] => {
-        if (!Array.isArray(fields)) return [];
-
-        return fields.map((field: any) => {
-          const isArray = field.type === 'array' || field.isArray === true;
-
-          const transformedField: any = {
-            id: field.id || field.fieldName || '',
-            fieldName: field.name || field.fieldName || '',
-            description: field.description || '',
-            isRequired: field.isRequired !== false,
-            fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
-            parentField: field.parentField,
-            isArray: isArray,
-            fields: field.fields ? transformKycFields(field.fields) : undefined,
-          };
-
-          if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
-            transformedField.arrayConfig = {
-              maxItems: field.arrayConfig.maxItems,
-              fields: transformKycFields(field.arrayConfig.fields)
-            };
-          }
-
-          return transformedField;
-        });
-      };
-
-      // Map KYC fields to the expected format
-      const fields = transformKycFields(kycFields).map((field: any) => ({
-        id: field.id || field.fieldName,
-        name: field.fieldName,
-        type: field.fieldType,
-        required: field.isRequired,
-        description: field.description,
-        isArray: field.isArray,
-        arrayConfig: field.arrayConfig,
-        fields: field.fields || []
-      }));
-
-      // Prepare extracted data
-      const rawExtractedData = linkedDoc.extracted_details || {};
-
-      // Process the extracted data to handle arrays and nested fields
-      const processedExtractedData = processExtractedData(rawExtractedData, fields);
-
-      // Ensure all fields have values, using empty strings for missing ones
-      const extractedData = { ...processedExtractedData };
-      fields.forEach((field: any) => {
-        if (extractedData[field.id] === undefined) {
-          extractedData[field.id] = field.isArray ? [] : '';
-        }
-      });
-
-      const previewData = {
-        documentId: linkedDoc.id,
-        documentName: documentName,
-        fileUrl,
-        fileName,
-        extractedData,
-        fields,
-        type: kycData.documentType || 'document',
-        file: {
-          name: fileName,
-          type: fileType,
-          url: fileUrl
-        }
-      };
-
-      console.log('Final preview data being passed to ExtractionPreview:', previewData);
-      setPreviewDocument(previewData);
     };
 
-    buildPreviewDocument();
-  }, [isPreviewOpen, task, stage, allDocuments, fetchKycDocumentData]);
+    preparePreview();
+  }, [isPreviewOpen, buildPreviewDocumentData]);
 
   // Reset preview document when dialog closes
   useEffect(() => {
@@ -279,7 +381,7 @@ export default function EditableStageCell({
     }
   }, [isPreviewOpen]);
 
-  // UPDATED: Initialize documents using LINKED documents only
+  // Initialize documents using LINKED documents only
   useEffect(() => {
     const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
 
@@ -376,15 +478,12 @@ export default function EditableStageCell({
 
     const [year, month, day] = dateString.split('-').map(Number);
 
-    // Validate date components
     if (year < 1000 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) {
       return null;
     }
 
-    // Create date in local timezone to avoid UTC conversion issues
     const date = new Date(year, month - 1, day);
 
-    // Verify the date is valid and matches what we expected
     if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
       return null;
     }
@@ -395,13 +494,11 @@ export default function EditableStageCell({
   const formatDateDisplay = (dateStr: string): string => {
     if (!dateStr) return '';
 
-    // Try to parse various date formats
     const date = parse(dateStr, 'dd/MM/yyyy', new Date());
     if (isValid(date)) {
       return format(date, 'dd/MM/yyyy');
     }
 
-    // Try ISO format
     const isoDate = parse(dateStr, 'yyyy-MM-dd', new Date());
     if (isValid(isoDate)) {
       return format(isoDate, 'dd/MM/yyyy');
@@ -416,15 +513,11 @@ export default function EditableStageCell({
 
     const [current, ...rest] = path;
 
-    // If we're at the target path, update the value
     if (rest.length === 0) {
       return { ...obj, [current]: value };
     }
 
-    // Handle arrays
     if (Array.isArray(obj[current])) {
-      // For array fields, we'll update the first item by default
-      // You might want to enhance this to handle specific array indices
       const updatedArray = [...obj[current]];
       if (updatedArray.length > 0) {
         updatedArray[0] = updateDateInNestedObject(updatedArray[0], rest, value);
@@ -432,7 +525,6 @@ export default function EditableStageCell({
       return { ...obj, [current]: updatedArray };
     }
 
-    // Handle nested objects
     if (obj[current] && typeof obj[current] === 'object') {
       return {
         ...obj,
@@ -472,22 +564,18 @@ export default function EditableStageCell({
 
       const formattedDate = format(dateObj, 'dd/MM/yyyy');
 
-      // UPDATED: Find the LINKED document to update
       const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
 
       let updatedExtractedDetails = {};
 
       if (linkedDoc) {
         const currentDetails = linkedDoc.extracted_details || {};
-
-        // Try to find where the date was originally stored
         const dateFields = [
           'application_date', 'date', 'upload_date', 'created_date',
           'date_generated', 'invoice_date_and_time', 'With_Effect_From',
           'Expiry_Date', 'Date_of_Issue'
         ];
 
-        // Find the field that contains the date
         let dateFieldPath: string[] = [];
 
         const findDateField = (obj: any, path: string[] = []): boolean => {
@@ -505,7 +593,6 @@ export default function EditableStageCell({
                 return true;
               }
             } else if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object') {
-              // Check first item in array
               if (findDateField(value[0], [...currentPath, '0'])) {
                 return true;
               }
@@ -516,7 +603,6 @@ export default function EditableStageCell({
 
         findDateField(currentDetails);
 
-        // Update the date in the appropriate location
         if (dateFieldPath.length > 0) {
           updatedExtractedDetails = updateDateInNestedObject(
             currentDetails,
@@ -524,7 +610,6 @@ export default function EditableStageCell({
             formattedDate
           );
         } else {
-          // If we couldn't find the original field, just update the first date field
           updatedExtractedDetails = { ...currentDetails };
           dateFields.some(field => {
             if (updatedExtractedDetails[field] !== undefined) {
@@ -605,10 +690,11 @@ export default function EditableStageCell({
     e.stopPropagation();
     setAutomationDialogOpen(true);
   };
-  const handleViewDocument = useCallback((e?: React.MouseEvent) => {
+
+  // Enhanced handleViewDocument function with proper KYC field mapping
+  const handleViewDocument = useCallback(async (e?: React.MouseEvent) => {
     e?.stopPropagation();
 
-    // UPDATED: Get LINKED document only
     const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
 
     if (!linkedDoc) {
@@ -642,7 +728,10 @@ export default function EditableStageCell({
       });
       return;
     }
+
     setIsPreviewOpen(true);
+    
+    // Extract date from linked document for stage date
     const dateFields = ['application_date', 'date', 'upload_date', 'created_date'];
     for (const field of dateFields) {
       if (linkedDoc.extracted_details && linkedDoc.extracted_details[field]) {
@@ -712,52 +801,140 @@ export default function EditableStageCell({
   }
 
   const renderCellContent = () => {
-    // FIXED: Check for automation using the correct field names
+    // For document rows, check if document is applicable to this task
+    if (isDocumentRow && documentData) {
+      const isApplicable = isDocumentApplicable(documentData, task);
+      if (!isApplicable) {
+        return <span className="text-gray-400">N/A</span>;
+      }
+    }
+
+    // Check for automation - either at stage level or document level
+    const automationData = isDocumentRow ? documentData?.automation : stage?.automation;
     const hasAutomation = !!(
-      (stage?.web_automation?.automationId || stage?.web_automation?.id) &&
-      stage?.web_automation?.isActive !== false
+      (automationData?.automationId || 
+       automationData?.id || 
+       (isDocumentRow && (documentData?.automationId || documentData?.hasAutomation))) &&
+      automationData?.isActive !== false
     );
 
+    // Get automation name for tooltip
+    const automationName = automationData?.name || 
+                         automationData?.automationName || 
+                         (documentData?.automationId ? 'Document Automation' : null);
+
+    if (isDocumentRow) {
+      // For document rows, show automation icon only if status is 'Not Linked'
+      const docValue = typeof value === 'object' ? value : { hasDocument: false, status: value };
+      const isNotLinked = docValue.status === 'Not Linked' || docValue.status === 'Not linked';
+      
+      return (
+        <div className="flex items-center gap-2 justify-center">
+          <span className="text-sm">
+            {docValue.status}
+          </span>
+          <div className="flex items-center">
+            {docValue.hasDocument && !docValue.hasIndicator && !docValue.isOldDocument ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-green-600 hover:bg-green-100"
+                onClick={handleViewDocument}
+              >
+                <Eye className="h-3 w-3" />
+              </Button>
+            ) : isNotLinked && hasAutomation ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-amber-500 hover:bg-amber-100"
+                title={`Automation: ${automationName}`}
+                onClick={handleTriggerAutomation}
+              >
+                <Zap className="h-3 w-3" />
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+
+    // For stage rows
     if (requiresUpload) {
+      // Ensure we have a valid stage with documents
+      if (!stage?.documents?.length) {
+        return <span className="text-gray-400">No documents configured</span>;
+      }
+
+      // Get all applicable documents for this stage and task
+      const applicableDocuments = stage.documents.filter((doc: any) => {
+        // If document has targetEntities, check if it applies to this task
+        if (doc.targetEntities?.length > 0) {
+          return isDocumentApplicable(doc, task);
+        }
+        // If document has entityType, check if it applies to this task
+        if (doc.entityType) {
+          return isDocumentApplicable(doc, task);
+        }
+        // If no specific targeting, check if document is applicable to task
+        return isDocumentApplicable(doc, task);
+      });
+
+      if (applicableDocuments.length === 0) {
+        return <span className="text-gray-400">N/A</span>;
+      }
+
+      // Check if we have any linked documents for this stage
+      const hasAnyLinkedDocument = applicableDocuments.some(doc => {
+        const linkedDoc = getLinkedDocumentForStage(task, { ...stage, documents: [doc] }, allDocuments || []);
+        return !!linkedDoc;
+      });
+
+      // Check if any linked document is old
+      const hasOldDocument = applicableDocuments.some(doc => {
+        const linkedDoc = getLinkedDocumentForStage(task, { ...stage, documents: [doc] }, allDocuments || []);
+        return linkedDoc && task.created_at && isDocumentOlderThanTask(linkedDoc.created_at, task.created_at);
+      });
+
+      // Only show automation icon if there are applicable documents with automationId AND no document is linked yet
+      const shouldShowAutomationIcon = !hasAnyLinkedDocument && applicableDocuments.some(
+        (doc: any) => doc.automationId || doc.automation?.id
+      );
+
       return (
         <div className="flex flex-col items-center gap-1 p-1">
           <div className="flex gap-1">
-            {/* Trigger Automation Button - Always show if stage has an automation */}
-            {hasAutomation && (
+            {/* Trigger Automation Button */}
+            {shouldShowAutomationIcon && (
               <Button
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8 text-amber-500 hover:bg-amber-100"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleTriggerAutomation(e);
-                }}
-                title={`View automation for ${stage.web_automation?.automationName || 'this stage'}`}
+                onClick={handleTriggerAutomation}
+                title="Run automation"
               >
                 <Zap className="h-4 w-4" />
               </Button>
             )}
 
+            {/* Upload Button */}
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-blue-600 hover:bg-blue-100"
+              className={`h-8 w-8 ${hasAnyLinkedDocument ? 'text-blue-400' : 'text-blue-600'} hover:bg-blue-100`}
               onClick={handleDocumentUpload}
-              title="Upload document"
+              title={hasAnyLinkedDocument ? 'Upload new document' : 'Upload document'}
             >
               <Upload className="h-4 w-4" />
             </Button>
 
-            {/* Only show Eye button if document is LINKED, has no indicator, and is not old */}
-            {hasLinkedDocument && !isOldDocument && (
+            {/* Enhanced View Button with proper document preview */}
+            {hasAnyLinkedDocument && !hasOldDocument && (
               <Button
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8 text-green-600 hover:bg-green-100"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleViewDocument(e);
-                }}
+                onClick={handleViewDocument}
                 title="View linked document"
               >
                 <Eye className="h-4 w-4" />
@@ -765,7 +942,7 @@ export default function EditableStageCell({
             )}
 
             {/* Show warning icon for old documents */}
-            {isOldDocument && (
+            {hasOldDocument && (
               <div className="h-8 w-8 flex items-center justify-center">
                 <AlertTriangle
                   className="h-4 w-4 text-orange-500"
@@ -775,30 +952,29 @@ export default function EditableStageCell({
             )}
           </div>
 
-          {/* Show date only if document is LINKED, not old and has no indicator */}
-          {hasLinkedDocument && !isOldDocument && stageDate && (
+          {/* Show date if we have a stage date */}
+          {stageDate && (
             <div className="text-xs text-gray-600 text-center mt-1">
               {formatDateDisplay(stageDate)}
             </div>
           )}
 
-          {/* Show "Old Document" message for old documents */}
-          {isOldDocument && (
-            <div className="text-xs text-orange-600 text-center mt-1">
-              Old Document
-            </div>
-          )}
-
-          {/* Show "No Linked Document" message when no document is linked */}
-          {!hasLinkedDocument && !isOldDocument && (
-            <div className="text-xs text-slate-500 text-center mt-1">
-              No Linked Document
-            </div>
-          )}
+          {/* Show status message */}
+          <div className={`text-xs text-center mt-1 ${
+            hasOldDocument ? 'text-orange-600' : 
+            hasAnyLinkedDocument ? 'text-green-600' : 
+            'text-slate-500'
+          }`}>
+            {hasOldDocument ? 'Old Document' : 
+             hasAnyLinkedDocument ? 'Document Ready' : 
+             'No Document Linked'}
+          </div>
         </div>
       );
     } else {
       // For non-upload stages, add automation button here too if needed
+      const hasAutomation = !!(stage?.automation?.automationId || stage?.automation?.id || stage?.web_automation?.automationId);
+      
       return (
         <div className="flex items-center gap-2">
           {/* Show automation button for non-upload stages too */}
@@ -807,12 +983,9 @@ export default function EditableStageCell({
               variant="ghost"
               size="icon"
               className="h-6 w-6 text-amber-500 hover:bg-amber-100"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleTriggerAutomation(e);
-              }}
+              onClick={handleTriggerAutomation}
               disabled={isAutomationRunning}
-              title={`Run ${stage.web_automation?.automationName || 'automation'}`}
+              title={`Run ${stage.automation?.name || stage.automation?.automationName || 'automation'}`}
             >
               {isAutomationRunning ? (
                 <Clock className="h-3 w-3 animate-spin" />
@@ -844,43 +1017,51 @@ export default function EditableStageCell({
     }
   }
 
-  // Get automation ID if it exists
-  const automationId = stage?.web_automation?.automationId || stage?.web_automation?.id;
+  // Get automation ID if it exists - check both stage and document level
+  const automationId = isDocumentRow 
+    ? documentData?.automation?.automationId || documentData?.automation?.id
+    : stage?.web_automation?.automationId || stage?.web_automation?.id;
 
   return (
     <>
       {/* Automation Mapping Dialog */}
       <AutomationMappingDialog
-      isOpen={automationDialogOpen}
-      onClose={() => setAutomationDialogOpen(false)}
-      classId={task.class_id}
-      requirementId={stage.id}
-      taskId={task.id}
-      automationId={automationId}
-      task={task} // Pass the entire task object
-      subDeptId={task.subdepartment?.id?.toString() || task.subdepartment_id?.toString() || task.sub_dept_id?.toString()}
-      isSubclass={!!task.subclass_id}
-      subclassId={task.subclass_id?.toString()}
-    />
+        isOpen={automationDialogOpen}
+        onClose={() => setAutomationDialogOpen(false)}
+        classId={task.class_id}
+        requirementId={stage.id}
+        taskId={task.id}
+        automationId={automationId}
+        task={task}
+        subDeptId={task.subdepartment?.id?.toString() || task.subdepartment_id?.toString() || task.sub_dept_id?.toString()}
+        isSubclass={!!task.subclass_id}
+        subclassId={task.subclass_id?.toString()}
+      />
+      
       <div
-        className={`flex items-center justify-center min-h-[32px] cursor-pointer hover:bg-gray-50 rounded p-1 ${requiresUpload ? 'hover:bg-blue-50' : 'hover:bg-gray-50'
-          }`}
+        className={`flex items-center justify-center min-h-[32px] cursor-pointer hover:bg-gray-50 rounded p-1 ${
+          requiresUpload ? 'hover:bg-blue-50' : 'hover:bg-gray-50'
+        }`}
         onClick={handleClick}
       >
         {renderCellContent()}
       </div>
 
+      {/* Enhanced Document Preview Dialog */}
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="max-w-7xl w-[95vw] h-[95vh] p-0 flex flex-col">
           {previewDocument ? (
             <div className="flex flex-col h-full">
               <DialogHeader className="p-6 pb-2">
-                <DialogTitle className="text-xl">{previewDocument.documentName}</DialogTitle>
+                <DialogTitle className="text-xl flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  {previewDocument.documentName}
+                </DialogTitle>
                 <DialogDescription>
-                  Review extracted details for {task.applicant_name || 'this document'}
+                  Review extracted details for {task.applicant_name || 'this document'} - Stage: {stage.name}
                 </DialogDescription>
               </DialogHeader>
-              <div className="flex-1 overflow-y-auto p-6 pt-2">
+              <div className="flex-1 overflow-hidden p-6 pt-2">
                 <ExtractionPreview
                   documentName={previewDocument.documentName}
                   fileUrl={previewDocument.fileUrl}
@@ -888,14 +1069,23 @@ export default function EditableStageCell({
                   extractedData={previewDocument.extractedData || {}}
                   fields={previewDocument.fields || []}
                   viewMode={true}
+                  showSaveButton={false}
                   file={previewDocument.file}
                   type={previewDocument.type}
+                  documentId={previewDocument.documentId}
                   onDataChange={(fieldName, value) => {
+                    // Handle data changes if needed
+                    console.log('Document field changed:', fieldName, value);
                   }}
-                  onSave={() => {
+                  onSave={(updatedData) => {
+                    console.log('Document data saved:', updatedData);
                     setIsPreviewOpen(false);
-                    toast({ title: "Success", description: "Document details saved." });
+                    toast({ 
+                      title: "Success", 
+                      description: "Document details saved successfully." 
+                    });
                   }}
+                  onClose={() => setIsPreviewOpen(false)}
                   getStylesByType={(type) => ({
                     getBgColor: () => 'bg-primary',
                     getTextColor: () => 'text-primary-foreground',
@@ -907,7 +1097,10 @@ export default function EditableStageCell({
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center">
-              <p className="text-muted-foreground">No document data available</p>
+              <div className="text-center">
+                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+                <p className="text-muted-foreground">Loading document preview...</p>
+              </div>
             </div>
           )}
         </DialogContent>

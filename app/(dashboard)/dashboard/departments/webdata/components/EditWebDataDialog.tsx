@@ -55,6 +55,7 @@ interface EditWebDataDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
   webData: ApiWebData | null
+  allAutomationData: any[] // <-- ADDED: The full data structure
   onSave: (updatedWebData: any) => Promise<void>
   isSubmitting: boolean
   context: { 
@@ -108,6 +109,7 @@ export function EditWebDataDialog({
   isOpen,
   onOpenChange,
   webData,
+  allAutomationData, // <-- ADDED: Destructure the new prop
   onSave,
   isSubmitting: propIsSubmitting,
   context
@@ -187,6 +189,7 @@ export function EditWebDataDialog({
     }
   }
 
+  // --- [START] REVISED handleSubmit FUNCTION ---
   const handleSubmit = async () => {
     if (!formData || !formData.name.trim()) {
       toast({ title: 'Error', description: 'WebData name is required', variant: 'destructive' })
@@ -200,9 +203,6 @@ export function EditWebDataDialog({
 
     setIsSubmitting(true)
     try {
-      const selectedForm = selectedFormId && availableForms.length 
-        ? availableForms.find(f => f.id === selectedFormId)
-        : null;
       const simplifiedMasterFields = (formData.masterFields || []).map(field => ({
         id: field.id,
         label: field.label,
@@ -211,6 +211,7 @@ export function EditWebDataDialog({
         is_required: field.is_required
       }));
 
+      // This object contains all the updated details for the single field being edited
       const updatedFieldData = {
         id: formData.id,
         name: formData.name.trim(),
@@ -228,19 +229,58 @@ export function EditWebDataDialog({
         masterFieldIds: (formData.masterFields || []).map(f => f.id.toString()),
         kycDocumentId: formData.kycDocumentId || null
       };
+      
+      // Create a deep copy of the full data structure to avoid mutating the parent state
+      const automationDataCopy = JSON.parse(JSON.stringify(allAutomationData || []));
+      
+      // Find the document within the copied data structure
+      const documentIndex = automationDataCopy.findIndex(
+        doc => doc.documentId === context.entryContext.documentId
+      );
+      
+      let targetDocument;
 
-      const updatedWebData = [{
-        automationId: context.entryContext.automationId,
-        fields: [updatedFieldData],
-        documentId: context.entryContext.documentId,
-        documentName: context.entryContext.documentName,
-        kycDocsUpload: []
-      }];
+      if (documentIndex > -1) {
+        // If the document exists, get a reference to it
+        targetDocument = automationDataCopy[documentIndex];
+      } else {
+        // If the document doesn't exist, create it (preserves fallback logic)
+        targetDocument = {
+            automationId: context.entryContext.automationId,
+            documentId: context.entryContext.documentId,
+            documentName: context.entryContext.documentName,
+            fields: [],
+            kycDocsUpload: [] // You might want to populate this from props if needed
+        };
+        automationDataCopy.push(targetDocument);
+      }
+      
+      // Ensure the 'fields' array exists on the target document
+      if (!targetDocument.fields) {
+        targetDocument.fields = [];
+      }
+      
+      // Find the specific field to update within the document's 'fields' array
+      const fieldIndex = targetDocument.fields.findIndex(f => f.id === updatedFieldData.id);
+      
+      if (fieldIndex > -1) {
+        // If the field exists, update it by merging with existing data
+        // This preserves any properties not edited by the dialog (e.g., 'value')
+        targetDocument.fields[fieldIndex] = {
+          ...targetDocument.fields[fieldIndex],
+          ...updatedFieldData
+        };
+      } else {
+        // If the field is new to this document, add it
+        targetDocument.fields.push(updatedFieldData);
+      }
+      
+      const finalUpdatedData = automationDataCopy;
 
       console.log('EditWebDataDialog - Submitting updated field:', updatedFieldData);
-      console.log('EditWebDataDialog - Full webData being submitted:', JSON.stringify(updatedWebData, null, 2));
+      console.log('EditWebDataDialog - Full webData being submitted:', JSON.stringify(finalUpdatedData, null, 2));
 
-      await onSave(updatedWebData);
+      await onSave(finalUpdatedData);
       toast({ title: 'Success', description: 'WebData updated successfully' });
       handleClose();
 
@@ -255,6 +295,7 @@ export function EditWebDataDialog({
       setIsSubmitting(false);
     }
   }
+  // --- [END] REVISED handleSubmit FUNCTION ---
 
   const linkMasterField = (fieldToAdd: JobField) => {
     console.log('EditWebDataDialog - Linking master field:', { id: fieldToAdd.id, label: fieldToAdd.label });
