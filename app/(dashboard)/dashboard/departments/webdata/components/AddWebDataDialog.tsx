@@ -58,6 +58,7 @@ interface FormDocument {
   automationId?: string;
   targetEntities: Array<{
     class_id?: number;
+    subclass_id?: number; // Assumed field for subclass targeting
     entityName: string;
     entityType: string;
     subdept_id?: number;
@@ -95,10 +96,15 @@ interface WebDataGroup {
 interface AddWebDataDialogProps {
   isOpen: boolean; 
   onOpenChange: (open: boolean) => void; 
+  // MODIFICATION: Added ID fields to the context to enable filtering.
+  // These IDs are assumed to be provided by the parent component.
   context: { 
     type: 'subdepartment' | 'class' | 'subclass'; 
+    subdepartmentId: number; 
     subdepartmentName: string; 
+    classId?: number; 
     className?: string; 
+    subclassId?: number; 
     subclassName?: string;
     availableForms?: Array<{ id: string; name: string }>;
   } | null;
@@ -248,6 +254,48 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
   );
   const availableForPicking = useMemo(() => masterFields.filter(f => !allLinkedMasterFieldIds.has(f.id)), [masterFields, allLinkedMasterFieldIds]);
 
+  // Filter forms based on the current context (subdepartment, class, or subclass)
+  const applicableForms = useMemo(() => {
+    if (!context) return [];
+    if (!formDocuments.length) return [];
+
+    return formDocuments.filter(form => {
+      // If no target entities, don't show the form
+      if (!form.targetEntities || form.targetEntities.length === 0) {
+        return false;
+      }
+
+      // Check if any of the form's targets match the current context
+      return form.targetEntities.some(target => {
+        if (!target.entityType) return false;
+
+        // For subdepartment context
+        if (context.type === 'subdepartment' && 
+            target.entityType === 'subdepartment' && 
+            target.subdept_id === context.subdepartmentId) {
+          return true;
+        }
+
+        // For class context
+        if (context.type === 'class' && 
+            target.entityType === 'class' && 
+            target.class_id?.toString() === context.classId?.toString()) {
+          return true;
+        }
+
+        // For subclass context
+        if (context.type === 'subclass' && 
+            target.entityType === 'subclass' && 
+            target.subclass_id === context.subclassId) {
+          return true;
+        }
+        
+        return false;
+      });
+    });
+  }, [formDocuments, context]);
+
+
   const handleClose = () => { onOpenChange(false) }
 
   const handleSubmit = async () => {
@@ -263,10 +311,8 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
 
       const automationIdToUse = selectedForm?.automationId || `auto_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
       
-      // Create the new webData structure as an array
       const webDataArray = [];
 
-      // Prepare KYC documents array with proper document names
       const kycDocsUpload = Array.from(selectedKycDocuments.entries()).map(([kycId, entityType]) => {
         const kycDoc = kycDocuments.find(doc => doc.id === kycId);
         if (!kycDoc) return null;
@@ -282,7 +328,6 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
         };
       }).filter(Boolean);
 
-      // Create a single entry with both fields and KYC documents
       if (webDataGroups.length > 0 || kycDocsUpload.length > 0) {
         const webDataFields = webDataGroups.map((group, index) => ({
           name: group.efnsDisplayName,
@@ -313,9 +358,7 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
           documentName: selectedForm?.name || (kycDocsUpload.length > 0 ? 'Document Upload Requirements' : 'Custom Fields'),
           kycDocsUpload: kycDocsUpload
         };
-
-        // Check if there's an existing entry with the same documentId and automationId
-        // This will be handled by the parent component's handleAddWebData function
+        
         webDataArray.push(newEntry);
       }
 
@@ -436,23 +479,23 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
             {context.subclassName && ` → ${context.subclassName}`}
           </DialogDescription>
           
-          {/* Form Selection */}
           <div className="space-y-2 pt-2">
-            <Label>Select Form (Optional)</Label>
+            <Label>Select Form*</Label>
             <Select value={selectedFormId} onValueChange={setSelectedFormId} disabled={loadingForms}>
               <SelectTrigger>
-                <SelectValue placeholder={loadingForms ? 'Loading forms...' : 'Select a form (optional)'} />
+                <SelectValue placeholder={loadingForms ? 'Loading forms...' : 'Select an applicable form'} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">No form (global fields)</SelectItem>
-                {formDocuments.map(form => (
+                <SelectItem value="none">No form</SelectItem>
+                {/* MODIFICATION: Use the filtered `applicableForms` list instead of `formDocuments` */}
+                {applicableForms.map(form => (
                   <SelectItem key={form.id} value={form.id}>
                     {form.name} {form.isRequired && '(Required)'}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               {selectedFormId && selectedFormId !== 'none' 
                 ? `Selected form: ${formDocuments.find(f => f.id === selectedFormId)?.name}` 
                 : 'No form selected - fields will be available globally.'
@@ -474,7 +517,6 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
           </TabsList>
 
           <TabsContent value="fields" className="flex-1 flex flex-col space-y-4">
-            {/* Master Fields Selection */}
             <Card>
               <CardHeader>
                 <CardTitle>Select Master Fields</CardTitle>
@@ -550,7 +592,6 @@ export function AddWebDataDialog({ isOpen, onOpenChange, context, onSubmit, isSu
               </CardContent>
             </Card>
 
-            {/* Web Data Fields Configuration */}
             <Card className="flex-1">
               <CardHeader>
                 <div className="flex justify-between items-center">

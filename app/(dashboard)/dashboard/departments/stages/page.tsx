@@ -12,7 +12,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { supabase } from "@/lib/supabase/client"
 import { AddStageDialog } from "./components/add-stage-dialog"
 import { EditStageDialog } from "./components/edit-stage-dialog"
-import { AutomationDialog } from "./components/AutomationDialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import type { Department, Stage, DepartmentOption } from "./stagesdb"
@@ -93,8 +92,7 @@ export default function Stages() {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false)
   const [isTransposed, setIsTransposed] = useState(false)
-  const [isAutomationDialogOpen, setIsAutomationDialogOpen] = useState(false)
-  const [currentAutomation, setCurrentAutomation] = useState<any>(null)
+
   const [allKycDocuments, setAllKycDocuments] = useState<Map<string, any>>(new Map())
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map())
   const [kycDocumentsLoading, setKycDocumentsLoading] = useState(false)
@@ -2629,7 +2627,7 @@ export default function Stages() {
                             onClick={() => moveStage(stage.id, "up")}
                             disabled={stage.order_num === 1}
                           >
-                            <ChevronUp className="h-3 w-3 text-white" />
+                            <ChevronLeft className="h-3 w-3 text-white" />
                           </Button>
                           <Button
                             variant="ghost"
@@ -2638,7 +2636,7 @@ export default function Stages() {
                             onClick={() => moveStage(stage.id, "down")}
                             disabled={stage.order_num === currentDept.stages.length}
                           >
-                            <ChevronDown className="h-3 w-3 text-white" />
+                            <ChevronRight className="h-3 w-3 text-white" />
                           </Button>
                           <Button
                             variant="ghost"
@@ -3346,17 +3344,7 @@ export default function Stages() {
               }
             />
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setCurrentAutomation(null)
-                setIsAutomationDialogOpen(true)
-              }}
-            >
-              <Settings className="mr-2 h-4 w-4" />
-              Automation Settings
-            </Button>
+
             <Button
               variant="outline"
               size="sm"
@@ -3426,13 +3414,6 @@ export default function Stages() {
           }}
           stage={editingStage}
           onSave={handleUpdateStage}
-        />
-
-        <AutomationDialog
-          isOpen={isAutomationDialogOpen}
-          onOpenChange={setIsAutomationDialogOpen}
-          onSave={handleSaveAutomation}
-          initialData={currentAutomation}
         />
       </div>
     </div>
