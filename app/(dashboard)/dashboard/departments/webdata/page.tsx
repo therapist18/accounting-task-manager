@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
-import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, ChevronUp, Upload, User, Users, Minus } from "lucide-react"
+import { Pencil, Trash2, ArrowUp, ArrowDown, Plus, X, Check, PanelLeft, LayoutGrid, ChevronRight, ChevronDown, FileText, Layers, AlertTriangle, Eye, EyeOff, ChevronUp, Upload, User, Users, Minus, Search } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -109,6 +109,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [kycDocuments, setKycDocuments] = useState<Record<string, string>>({});
   const [jobFields, setJobFields] = useState<Record<string, { id: string; field_key: string; label: string }>>({});
+  const [searchQuery, setSearchQuery] = useState('');
   
   // --- [CHANGE #1] Add state to hold the full data object for the item being edited ---
   const [currentWebDataForEdit, setCurrentWebDataForEdit] = useState<WebDataEntry[] | null>(null);
@@ -610,10 +611,98 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
     });
   }, []);
 
+  const filterWebData = (entries: WebDataEntry[]): WebDataEntry[] => {
+    if (!searchQuery.trim()) return entries;
+    
+    const query = searchQuery.toLowerCase();
+    return entries.map(entry => {
+      // Check if document name matches
+      const docMatches = entry.documentName.toLowerCase().includes(query);
+      
+      // Filter fields that match the search
+      const filteredFields = entry.fields.filter(field => 
+        (field.efnsDisplayName?.toLowerCase().includes(query) || 
+         field.name.toLowerCase().includes(query) ||
+         field.description?.toLowerCase().includes(query) ||
+         field.variableName?.toLowerCase().includes(query))
+      );
+      
+      // Filter KYC uploads that match the search
+      const filteredKyc = entry.kycDocsUpload.filter(kyc => 
+        (kyc.documentName?.toLowerCase().includes(query) ||
+         kyc.documentType?.toLowerCase().includes(query) ||
+         kyc.description?.toLowerCase().includes(query) ||
+         kyc.kycDocumentId.toLowerCase().includes(query))
+      );
+      
+      // If document name matches, include all fields and KYC
+      if (docMatches) {
+        return entry;
+      }
+      
+      // If no fields or KYC match, exclude this entry
+      if (filteredFields.length === 0 && filteredKyc.length === 0) {
+        return null;
+      }
+      
+      // Otherwise, return entry with filtered fields and KYC
+      return {
+        ...entry,
+        fields: filteredFields,
+        kycDocsUpload: filteredKyc
+      };
+    }).filter(Boolean) as WebDataEntry[];
+  };
+
+  const highlightText = (text: string, query: string) => {
+    if (!query || !text) return text;
+    
+    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    const parts = text.split(regex);
+    
+    return parts.map((part, i) => 
+      regex.test(part) ? (
+        <mark key={i} className="bg-yellow-200 dark:bg-yellow-800">
+          {part}
+        </mark>
+      ) : (
+        part
+      )
+    );
+  };
+
   const renderWebData = (webDataEntries: WebDataEntry[] | null | undefined, context: EditingContext) => {
-    const safeWebData = webDataEntries || [];
+    const safeWebData = filterWebData(webDataEntries || []);
 
     return (
+      <>
+       <div className="sticky top-0 z-20 bg-card p-4 border-b">
+          <div className="relative max-w-md">
+            <Input
+              type="text"
+              placeholder="Search fields, documents, descriptions..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 pr-4 py-2 w-full"
+            />
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            {searchQuery && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1 h-6 w-6"
+                onClick={() => setSearchQuery('')}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+          {searchQuery && (
+            <p className="text-sm text-muted-foreground mt-2">
+              {safeWebData.length} document{safeWebData.length !== 1 ? 's' : ''} found
+            </p>
+          )}
+        </div>
       <div className="relative h-full overflow-y-auto border rounded-lg bg-card">
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-blue-500 dark:bg-blue-800 backdrop-blur-sm border-b">
@@ -897,6 +986,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
           </TableBody>
         </Table>
       </div>
+      </>
     );
   };
 

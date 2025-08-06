@@ -142,9 +142,9 @@ export function EditStageDialog({ open, onOpenChange, stage, onSave, departmentN
     setLoadingKycDocs(true);
     try {
       let query = supabase.from('acc_portal_kyc').select('id, name, display_name, department, category, fields, document_type').order('name');
-      if (targetDepartmentName) {
-        query = query.eq('department', targetDepartmentName);
-      }
+      // if (targetDepartmentName) {
+      //   query = query.eq('department', targetDepartmentName);
+      // }
       const { data, error } = await query;
       if (error) throw error;
       const transformedDocs: KYCDocument[] = (data || []).map(doc => ({
@@ -550,8 +550,8 @@ const docsWithKyc = await Promise.all(
               <TabsContent value="documents" className="mt-6 space-y-6">
                 <SectionWrapper title="Stage Documents" icon={<FileText />} actionButton={
                   <div className="flex gap-2">
-                    <Button onClick={() => addDocument(false)} size="sm" variant="outline" className="text-white bg-blue-600 border-blue-300 hover:bg-blue-50"><Plus className="h-4 w-4 mr-2" />Add Regular</Button>
-                    <Button onClick={() => addDocument(true)} size="sm" variant="outline" disabled={!entityOptions.length && !loadingEntities} title={!entityOptions.length ? "Loading entities..." : ""} className="text-white bg-amber-600 border-amber-300 hover:bg-amber-50"><Star className="h-4 w-4 mr-2" />Add Special</Button>
+                    <Button type="button" onClick={() => addDocument(false)} size="sm" variant="outline" className="text-white bg-blue-600 border-blue-300 hover:bg-blue-50"><Plus className="h-4 w-4 mr-2" />Add Regular</Button>
+                    <Button type="button" onClick={() => addDocument(true)} size="sm" variant="outline" disabled={!entityOptions.length && !loadingEntities} title={!entityOptions.length ? "Loading entities..." : ""} className="text-white bg-amber-600 border-amber-300 hover:bg-amber-50"><Star className="h-4 w-4 mr-2" />Add Special</Button>
                   </div>
                 }>
                   <p className="text-sm text-muted-foreground -mt-2">Define documents for this stage. New documents will be added to the KYC system under the <span className="font-semibold text-blue-700">{getTargetDepartmentName()}</span> department.</p>
@@ -608,7 +608,7 @@ function MultiEntityPicker({ entities, selectedEntities = [], onSelectionChange,
     <div className="space-y-2">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between bg-white" disabled={loading}>
+          <Button type="button" variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between bg-white" disabled={loading}>
             {selectedEntities.length === 0 ? <span className="text-muted-foreground">{loading ? "Loading entities..." : placeholder}</span> : <span>{selectedEntities.length} entit{selectedEntities.length === 1 ? 'y' : 'ies'} selected</span>}
             <X className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
@@ -637,7 +637,7 @@ function MultiEntityPicker({ entities, selectedEntities = [], onSelectionChange,
             <Badge key={index} variant="secondary" className="flex items-center gap-1 text-xs bg-blue-100 text-blue-800 hover:bg-blue-200">
               {entity.entityName}
               <Badge variant="outline" className="text-xs ml-1 bg-white">{entity.entityType}</Badge>
-              <Button variant="ghost" size="icon" className="h-4 w-4 ml-1 p-0 hover:bg-destructive hover:text-destructive-foreground rounded-full" onClick={() => onSelectionChange(selectedEntities.filter((_, i) => i !== index))}>
+              <Button type="button" variant="ghost" size="icon" className="h-4 w-4 ml-1 p-0 hover:bg-destructive hover:text-destructive-foreground rounded-full" onClick={() => onSelectionChange(selectedEntities.filter((_, i) => i !== index))}>
                 <X className="h-3 w-3" />
               </Button>
             </Badge>
@@ -675,15 +675,15 @@ function DocumentCard({ doc, docIndex, entityOptions, loadingEntities, kycDocume
             </h5>
             {isLinkedDocument && <Badge className="text-xs bg-blue-100 text-blue-800 hover:bg-blue-100">Linked</Badge>}
           </div>
-          <Button variant="ghost" size="icon" onClick={() => onRemoveDocument(doc.id)} className="text-muted-foreground hover:text-destructive h-7 w-7"><Trash2 className="h-4 w-4 text-red-500" /></Button>
+          <Button type="button" variant="ghost" size="icon" onClick={() => onRemoveDocument(doc.id)} className="text-muted-foreground hover:text-destructive h-7 w-7"><Trash2 className="h-4 w-4 text-red-500" /></Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-6 p-4">
         <div className="space-y-3 p-4 bg-slate-100/70 border border-slate-200 rounded-lg">
           <Label className="font-medium text-gray-700">Document Source</Label>
           <div className="grid grid-cols-2 gap-3">
-            <Button variant={documentMode === 'new' ? 'default' : 'outline'} size="sm" onClick={() => handleModeChange('new')} className={`justify-start ${documentMode === 'new' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}`}><Plus className="h-4 w-4 mr-2" />{doc.kycId && !doc.linkedKycDocument ? "Edit as New" : "Create New"}</Button>
-            <Button variant={documentMode === 'existing' ? 'default' : 'outline'} size="sm" onClick={() => handleModeChange('existing')} className={`justify-start ${documentMode === 'existing' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}`} disabled={loadingKycDocs}><FileText className="h-4 w-4 mr-2" /> Link Existing</Button>
+            <Button type="button" variant={documentMode === 'new' ? 'default' : 'outline'} size="sm" onClick={() => handleModeChange('new')} className={`justify-start ${documentMode === 'new' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}`}><Plus className="h-4 w-4 mr-2" />{doc.kycId && !doc.linkedKycDocument ? "Edit as New" : "Create New"}</Button>
+            <Button type="button" variant={documentMode === 'existing' ? 'default' : 'outline'} size="sm" onClick={() => handleModeChange('existing')} className={`justify-start ${documentMode === 'existing' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}`} disabled={loadingKycDocs}><FileText className="h-4 w-4 mr-2" /> Link Existing</Button>
           </div>
           {documentMode === 'existing' && (<div className="space-y-2 pt-2"><Label className="text-sm text-gray-600">Select Existing Document</Label><ComboBox options={kycDocuments.map(d => ({ value: d.id, label: d.display_name || d.name }))} value={doc.linkedKycDocument || ''} onValueChange={handleKycDocumentSelect} placeholder={loadingKycDocs ? "Loading..." : "Choose a document"} emptyText="No documents found" disabled={loadingKycDocs} loading={loadingKycDocs} className="w-full bg-white" /><p className="text-xs text-green-600 flex items-center gap-1"><Check className="h-3 w-3" /> Document linked. Fields are now read-only.</p></div>)}
         </div>
@@ -697,7 +697,7 @@ function DocumentCard({ doc, docIndex, entityOptions, loadingEntities, kycDocume
         <div className="space-y-2"><Label className="text-xs font-medium text-gray-700">Description</Label><Textarea value={doc.description || ''} onChange={(e) => onUpdateDocument(doc.id, { description: e.target.value })} placeholder="Brief description of this document's purpose..." rows={2} /></div>
         <div className="flex items-center space-x-2"><Checkbox checked={doc.isRequired} onCheckedChange={(checked) => onUpdateDocument(doc.id, { isRequired: checked as boolean })} className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600" /><Label className="text-sm font-normal text-gray-700">This document is required for stage completion</Label></div>
 
-        {(doc.documentType === 'extraction' || doc.documentType === 'both') && (<div className="space-y-4 border-t pt-4 mt-4"><div className="flex justify-between items-center"><div><Label className="text-sm font-semibold text-gray-800">Data Extraction Fields</Label><p className="text-xs text-muted-foreground">{isLinkedDocument ? "Fields from the linked document (read-only)." : "Define what data should be extracted."}</p></div>{!isLinkedDocument && <Button variant="outline" size="sm" onClick={() => onAddExtraction(doc.id)} className="text-white bg-blue-500 border-blue-300 hover:bg-blue-50"><Plus className="h-4 w-4 mr-2" />Add Field</Button>}</div>{doc.extractionSpecs && doc.extractionSpecs.length > 0 ? (<div className="space-y-3">{doc.extractionSpecs.map((extraction) => (<div key={extraction.id} className={`p-4 rounded-lg border space-y-3 ${isLinkedDocument ? 'bg-blue-50 border-blue-200' : 'bg-slate-100 border-slate-200'}`}><div className="flex justify-between items-center"><span className="font-semibold text-sm">{extraction.fieldName}</span>{!isLinkedDocument && <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => onRemoveExtraction(doc.id, extraction.id)}><X className="h-3 w-3" /></Button>}</div><p className="text-xs text-muted-foreground">{extraction.description}</p></div>))}</div>) : (<div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg bg-white"><Info className="h-8 w-8 mx-auto mb-2 text-gray-400" /><p className="text-sm">{isLinkedDocument ? "Linked document has no extraction fields." : "No extraction fields defined."}</p></div>)}</div>)}
+        {(doc.documentType === 'extraction' || doc.documentType === 'both') && (<div className="space-y-4 border-t pt-4 mt-4"><div className="flex justify-between items-center"><div><Label className="text-sm font-semibold text-gray-800">Data Extraction Fields</Label><p className="text-xs text-muted-foreground">{isLinkedDocument ? "Fields from the linked document (read-only)." : "Define what data should be extracted."}</p></div>{!isLinkedDocument && <Button type="button" variant="outline" size="sm" onClick={() => onAddExtraction(doc.id)} className="text-white bg-blue-500 border-blue-300 hover:bg-blue-50"><Plus className="h-4 w-4 mr-2" />Add Field</Button>}</div>{doc.extractionSpecs && doc.extractionSpecs.length > 0 ? (<div className="space-y-3">{doc.extractionSpecs.map((extraction) => (<div key={extraction.id} className={`p-4 rounded-lg border space-y-3 ${isLinkedDocument ? 'bg-blue-50 border-blue-200' : 'bg-slate-100 border-slate-200'}`}><div className="flex justify-between items-center"><span className="font-semibold text-sm">{extraction.fieldName}</span>{!isLinkedDocument && <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => onRemoveExtraction(doc.id, extraction.id)}><X className="h-3 w-3" /></Button>}</div><p className="text-xs text-muted-foreground">{extraction.description}</p></div>))}</div>) : (<div className="text-center py-6 text-muted-foreground border border-dashed rounded-lg bg-white"><Info className="h-8 w-8 mx-auto mb-2 text-gray-400" /><p className="text-sm">{isLinkedDocument ? "Linked document has no extraction fields." : "No extraction fields defined."}</p></div>)}</div>)}
         <Separator className="my-4" />
         <div className="space-y-4">
           <div className="flex items-start space-x-3">
