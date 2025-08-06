@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -25,7 +25,6 @@ export default function JobFieldsPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [typeFilter, setTypeFilter] = useState<string>("all")
   const [requiredFilter, setRequiredFilter] = useState<string>("all")
-  const [currentPage, setCurrentPage] = useState(1)
   const [selectedField, setSelectedField] = useState<JobField | null>(null)
   const [dialogStates, setDialogStates] = useState({
     add: false,
@@ -33,8 +32,17 @@ export default function JobFieldsPage() {
     delete: false,
     linkSources: false,
   })
-
-  const itemsPerPage = 10
+  const [allFields, setAllFields] = useState<JobField[]>([])
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage] = useState(10)
+  
+  // Sorting state
+  const [sortConfig, setSortConfig] = useState<{ key: keyof JobField; direction: 'asc' | 'desc' } | null>({
+    key: 'created_at',
+    direction: 'desc'
+  })
 
   useEffect(() => {
     fetchFields()
@@ -82,7 +90,6 @@ export default function JobFieldsPage() {
     }
 
     setFilteredFields(filtered)
-    setCurrentPage(1)
   }
 
   const handleDeleteField = async (fieldId: string) => {
@@ -131,9 +138,51 @@ export default function JobFieldsPage() {
     setSelectedField(null)
   }
 
-  const paginatedFields = filteredFields.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
-
-  const totalPages = Math.ceil(filteredFields.length / itemsPerPage)
+  // Apply sorting to filtered fields
+  const sortedFields = React.useMemo(() => {
+    const sortableItems = [...filteredFields]
+    if (sortConfig !== null) {
+      sortableItems.sort((a, b) => {
+        let aValue = a[sortConfig.key]
+        let bValue = b[sortConfig.key]
+        
+        // Handle undefined or null values
+        if (aValue === undefined || aValue === null) return sortConfig.direction === 'asc' ? -1 : 1
+        if (bValue === undefined || bValue === null) return sortConfig.direction === 'asc' ? 1 : -1
+        
+        // Convert dates to timestamps for comparison
+        if (sortConfig.key === 'created_at' || sortConfig.key === 'updated_at') {
+          aValue = new Date(aValue).getTime()
+          bValue = new Date(bValue).getTime()
+        }
+        
+        // Compare values
+        if (aValue < bValue) {
+          return sortConfig.direction === 'asc' ? -1 : 1
+        }
+        if (aValue > bValue) {
+          return sortConfig.direction === 'asc' ? 1 : -1
+        }
+        return 0
+      })
+    }
+    return sortableItems
+  }, [filteredFields, sortConfig])
+  
+  // Handle sort request
+  const requestSort = (key: keyof JobField) => {
+    let direction: 'asc' | 'desc' = 'asc'
+    if (sortConfig?.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc'
+    }
+    setSortConfig({ key, direction })
+  }
+  
+  // Sort indicator
+  const getSortIndicator = (key: keyof JobField) => {
+    if (sortConfig?.key !== key) return null
+    return sortConfig.direction === 'asc' ? ' ↑' : ' ↓'
+  }
 
   if (loading) {
     return (
@@ -207,29 +256,56 @@ export default function JobFieldsPage() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader className="bg-blue-500 dark:bg-blue-800">
+            <div className="overflow-x-auto max-h-[calc(100vh-300px)]">
+              <Table className="relative">
+                <TableHeader className="bg-blue-500 dark:bg-blue-800 sticky top-0 z-10">
                   <TableRow className="border-slate-200 dark:border-slate-800">
-                    <TableHead className="py-4 px-6 text-white border-r">#</TableHead>
-                    <TableHead className="py-4 px-6 text-white border-r">Field Key</TableHead>
-                    <TableHead className="py-4 px-6 text-white border-r">Label</TableHead>
-                    <TableHead className="py-4 px-6 text-white border-r">Type</TableHead>
-                    <TableHead className="py-4 px-6 text-white border-r">Required</TableHead>
-                    <TableHead className="py-4 px-6 text-white border-r">Sources</TableHead>
-                    <TableHead className="py-4 px-6 text-white border-r">Last Updated</TableHead>
-                    <TableHead className="py-4 px-6 text-right text-white border-r">Actions</TableHead>
+                    <TableHead className="py-4 px-6 text-white border-r w-16">#</TableHead>
+                    <TableHead 
+                      className="py-4 px-6 text-white border-r cursor-pointer hover:bg-blue-600 transition-colors"
+                      onClick={() => requestSort('field_key')}
+                    >
+                      Field Key{getSortIndicator('field_key')}
+                    </TableHead>
+                    <TableHead 
+                      className="py-4 px-6 text-white border-r cursor-pointer hover:bg-blue-600 transition-colors"
+                      onClick={() => requestSort('label')}
+                    >
+                      Label{getSortIndicator('label')}
+                    </TableHead>
+                    <TableHead 
+                      className="py-4 px-6 text-white border-r cursor-pointer hover:bg-blue-600 transition-colors"
+                      onClick={() => requestSort('type')}
+                    >
+                      Type{getSortIndicator('type')}
+                    </TableHead>
+                    <TableHead 
+                      className="py-4 px-6 text-white border-r cursor-pointer hover:bg-blue-600 transition-colors"
+                      onClick={() => requestSort('is_required')}
+                    >
+                      Required{getSortIndicator('is_required')}
+                    </TableHead>
+                    <TableHead className="py-4 px-6 text-white border-r">
+                      Sources
+                    </TableHead>
+                    <TableHead 
+                      className="py-4 px-6 text-white border-r cursor-pointer hover:bg-blue-600 transition-colors"
+                      onClick={() => requestSort('updated_at')}
+                    >
+                      Last Updated{getSortIndicator('updated_at')}
+                    </TableHead>
+                    <TableHead className="py-4 px-6 text-right text-white border-r w-40">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginatedFields.length > 0 ? (
-                    paginatedFields.map((field, index) => (
+                  {sortedFields.length > 0 ? (
+                    sortedFields.map((field, index) => (
                       <TableRow
                         key={field.id}
                         className="border-b-slate-200 dark:border-b-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-800/50"
                       >
                         <TableCell className="p-6 font-medium border-r">
-                          {(currentPage - 1) * itemsPerPage + index + 1}
+                          {index + 1}
                         </TableCell>
                         <TableCell className="p-6 font-mono text-sm border-r">
                           {field.field_key}
@@ -312,33 +388,7 @@ export default function JobFieldsPage() {
                 </TableBody>
               </Table>
             </div>
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between p-4 border-t border-slate-200 dark:border-slate-800">
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Page {currentPage} of {totalPages}
-                </p>
-                <div className="flex space-x-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                    disabled={currentPage === 1}
-                    className="bg-white dark:bg-slate-800"
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                    disabled={currentPage === totalPages}
-                    className="bg-white dark:bg-slate-800"
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            )}
+
           </CardContent>
         </Card>
 
@@ -349,6 +399,7 @@ export default function JobFieldsPage() {
           onOpenChange={() => closeDialog("edit")}
           field={selectedField}
           onSuccess={fetchFields}
+          availableFields={allFields}
         />
         <DeleteFieldDialog
           open={dialogStates.delete}

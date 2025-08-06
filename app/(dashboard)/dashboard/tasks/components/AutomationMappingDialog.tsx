@@ -6,24 +6,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, Zap, User, Database, FileText, Eye, Image as ImageIcon, Settings, Link } from 'lucide-react';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { toast } from '@/hooks/use-toast';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { toast } from "@/hooks/use-toast"
+import { Database, Edit2, FileText, Loader2, Settings, User, X, Zap, Check } from "lucide-react";
 import supabase from '@/lib/supabase/client';
 import ExtractionPreview from '@/components/ExtractionPreview';
 
-// Enhanced interfaces
 interface AutomationMappingDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -220,6 +212,13 @@ export const AutomationMappingDialog = ({
   const [entityAutomationMappings, setEntityAutomationMappings] = useState<EntityAutomationMapping[]>([]);
   const [selectedAutomationId, setSelectedAutomationId] = useState<string>('');
   const [previewDocument, setPreviewDocument] = useState<any>(null);
+  const [editingState, setEditingState] = useState<{
+    fieldIndex: number;
+    sourceIndex: number;
+    table: string;
+    path: string;
+    value: string;
+  } | null>(null);
   const [editingCell, setEditingCell] = useState<any>(null);
   const [editValue, setEditValue] = useState('');
 
@@ -1367,7 +1366,7 @@ export const AutomationMappingDialog = ({
     }
   
     const fields = webData[0].fields;
-  
+    
     return (
       <div className="rounded-md border">
         <Table className="max-w-6xl max-h-[60vh] flex flex-col overflow-y-auto">
@@ -1375,164 +1374,149 @@ export const AutomationMappingDialog = ({
             <TableRow>
               <TableHead className="w-[50px] border-r text-white">#</TableHead>
               <TableHead className="w-1/4 border-r text-white">WebData Field</TableHead>
-              <TableHead className="w-1/4 border-r text-white">Source Path(s)</TableHead>
-              <TableHead className="w-1/4 border-r text-white">Current Data</TableHead>
+              <TableHead className="w-1/4 border-r text-white">Source Path</TableHead>
+              <TableHead className="w-1/4 border-r text-white">Current Value</TableHead>
+              <TableHead className="w-[150px] border-r text-white">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {fields.map((field, index) => {
+            {fields.flatMap((field, fieldIndex) => {
               const { sources, hasData } = getSourceInfo(field.masterFieldIds || []);
-  
-              return (
-                <TableRow key={field.variableName || index}>
-                  <TableCell className="align-top border-r w-[50px]">{index + 1}</TableCell>
-                  <TableCell className="align-top border-r w-1/4">
-                    <div className="text-sm font-medium text-gray-900">
-                      {field.efnsDisplayName || field.name}
-                      {field.isRequired && <span className="ml-1 text-red-500">*</span>}
-                    </div>
-                    <div className="text-xs text-gray-500 font-mono mt-1">
-                      {field.variableName}
-                    </div>
-                    <div className="flex items-center gap-1 mt-1">
-                      <Badge variant="outline" className="text-xs">
-                        {field.fieldType}
-                      </Badge>
-                      {sources.length > 1 && (
-                        <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
-                          Multi-Source ({sources.length})
-                        </Badge>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="align-top border-r w-1/4">
-                    {hasData ? (
-                      <div className="space-y-2">
-                        {sources.map((sourceInfo, idx) => (
-                          <div key={idx} className="font-mono text-xs">
-                            <span className="font-semibold text-gray-800">{sourceInfo.fieldLabel}</span>
-                            <span className="text-gray-400 mx-1">→</span>
-                            <span className="text-blue-600">{sourceInfo.source}</span>
-                          </div>
-                        ))}
-                        {sources.length > 1 && (
-                          <div className="text-xs text-purple-600 font-medium italic mt-2 p-1 bg-purple-50 rounded">
-                            ↗ Values will be merged: "{sources.map(s => s.fieldLabel).join(' + ')}"
-                          </div>
-                        )}
+              
+              if (sources.length === 0) {
+                return (
+                  <TableRow key={`${field.variableName || fieldIndex}-empty`}>
+                    <TableCell className="align-top border-r">{fieldIndex + 1}</TableCell>
+                    <TableCell className="align-top border-r">
+                      <div className="text-sm font-medium text-gray-900">
+                        {field.efnsDisplayName || field.name}
+                        {field.isRequired && <span className="ml-1 text-red-500">*</span>}
                       </div>
-                    ) : (
-                      <span className="text-xs text-gray-400">No source linked</span>
-                    )}
-                  </TableCell>
-                  <TableCell    
-                    className="align-top border-r cursor-pointer hover:bg-gray-50 w-1/4"
-                    onClick={() => {
-                      if (currentIndividualId && hasData) {
-                        // For multi-source fields, we'll edit the merged value
-                        if (sources.length > 1) {
-                          const mergedValue = getSourceValueMerged(sources);
-                          startEditing(index, 0, sources[0].table, sources[0].path, mergedValue);
-                        } else {
-                          const sourceInfo = sources[0];
-                          const currentValue = getSourceValue(sourceInfo.table, sourceInfo.path);
-                          startEditing(index, 0, sourceInfo.table, sourceInfo.path, currentValue);
-                        }
-                      }
-                    }}
+                      <div className="text-xs text-gray-500 font-mono mt-1">
+                        {field.variableName}
+                      </div>
+                    </TableCell>
+                    <TableCell colSpan={3} className="text-center text-gray-400">
+                      No source mapping
+                    </TableCell>
+                  </TableRow>
+                );
+              }
+              
+              return sources.map((source, sourceIndex) => {
+                const isEditing = editingState?.fieldIndex === fieldIndex && 
+                                editingState?.sourceIndex === sourceIndex;
+                const value = getSourceValue(source.table, source.path);
+                const displayValue = typeof value === 'string' && value !== 'Missing' 
+                  ? value 
+                  : <span className="text-red-600 italic">Missing</span>;
+                
+                return (
+                  <TableRow 
+                    key={`${field.variableName || fieldIndex}-${sourceIndex}`}
+                    className={sourceIndex > 0 ? 'bg-gray-50' : ''}
                   >
-                    {editingCell?.rowIndex === index ? (
-                      <div className="flex items-center space-x-2">
-                        <Input
-                          autoFocus
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          onKeyDown={handleKeyDown}
-                          onBlur={saveEdit}
-                          className="h-8 text-sm"
-                          placeholder={sources.length > 1 ? "Merged value from multiple sources" : "Single source value"}
-                        />
+                    {sourceIndex === 0 && (
+                      <TableCell 
+                        rowSpan={sources.length} 
+                        className="align-top border-r"
+                      >
+                        {fieldIndex + 1}
+                      </TableCell>
+                    )}
+                    {sourceIndex === 0 && (
+                      <TableCell 
+                        rowSpan={sources.length} 
+                        className="align-top border-r"
+                      >
+                        <div className="text-sm font-medium text-gray-900">
+                          {field.efnsDisplayName || field.name}
+                          {field.isRequired && <span className="ml-1 text-red-500">*</span>}
+                        </div>
+                        <div className="text-xs text-gray-500 font-mono mt-1">
+                          {field.variableName}
+                        </div>
+                        {sources.length > 1 && sourceIndex === 0 && (
+                          <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700 mt-1">
+                            {sources.length} sources
+                          </Badge>
+                        )}
+                      </TableCell>
+                    )}
+                    <TableCell className="align-top border-r">
+                      <div className="font-mono text-xs">
+                        <div className="font-medium text-gray-800">{source.fieldLabel}</div>
+                        <div className="text-blue-600 break-all">{source.source}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell className="align-top border-r">
+                      {isEditing ? (
+                        <div className="flex items-center space-x-2">
+                          <Input
+                            autoFocus
+                            value={editingState?.value || ''}
+                            onChange={(e) => setEditingState({
+                              ...editingState!,
+                              value: e.target.value
+                            })}
+                            onKeyDown={handleKeyDown}
+                            onBlur={saveEdit}
+                            className="h-8 text-sm"
+                            placeholder="Enter value"
+                          />
+                        </div>
+                      ) : (
+                        <div 
+                          className={`p-1 rounded ${currentIndividualId ? 'cursor-pointer hover:bg-gray-100' : ''}`}
+                          onClick={() => {
+                            if (currentIndividualId) {
+                              startEditing(fieldIndex, sourceIndex, source.table, source.path, value === 'Missing' ? '' : value);
+                            }
+                          }}
+                        >
+                          {displayValue}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell className="align-top border-r">
+                      {!isEditing && currentIndividualId && (
                         <Button 
                           variant="ghost" 
                           size="sm" 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            saveEdit();
+                          onClick={() => {
+                            startEditing(fieldIndex, sourceIndex, source.table, source.path, value === 'Missing' ? '' : value);
                           }}
+                          className="h-8 px-2 text-xs"
                         >
-                          Save
+                          <Edit2 className="h-3.5 w-3.5 mr-1" />
+                          Edit
                         </Button>
-                      </div>
-                    ) : currentIndividualId ? (
-                      hasData ? (
-                        sources.length === 1 ? (
-                          // Single source - show normally
-                          <div className="space-y-2 text-sm">
-                            {sources.map((sourceInfo, idx) => {
-                              const value = getSourceValue(sourceInfo.table, sourceInfo.path);
-                              return (
-                                <div 
-                                  key={idx} 
-                                  className="p-1 rounded hover:bg-gray-100"
-                                  title="Click to edit"
-                                >
-                                  {typeof value === 'string' && value !== 'Missing' ? (
-                                    <span className="text-green-700 font-medium">{value}</span>
-                                  ) : (
-                                    <span className="text-red-600 italic">Missing</span>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          // Multi-source - show individual values and merged result
-                          <div className="space-y-2 text-sm">
-                            <div className="border border-purple-200 bg-purple-50 p-2 rounded">
-                              <div className="text-xs font-medium text-purple-800 mb-1">Merged Value:</div>
-                              {(() => {
-                                const mergedValue = getSourceValueMerged(sources);
-                                return (
-                                  <div className="font-medium text-purple-900">
-                                    {mergedValue !== 'Missing' ? (
-                                      <span className="text-purple-700">{mergedValue}</span>
-                                    ) : (
-                                      <span className="text-red-600 italic">No valid data</span>
-                                    )}
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                            <div className="space-y-1">
-                              <div className="text-xs font-medium text-gray-600">Individual Sources:</div>
-                              {sources.map((sourceInfo, idx) => {
-                                const value = getSourceValue(sourceInfo.table, sourceInfo.path);
-                                return (
-                                  <div 
-                                    key={idx} 
-                                    className="text-xs p-1 rounded bg-gray-50"
-                                  >
-                                    <span className="font-medium text-gray-700">{sourceInfo.fieldLabel}:</span>
-                                    {typeof value === 'string' && value !== 'Missing' ? (
-                                      <span className="ml-1 text-green-700">{value}</span>
-                                    ) : (
-                                      <span className="ml-1 text-red-600 italic">Missing</span>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )
-                      ) : (
-                        <span className="text-xs text-gray-400">No mapping</span>
-                      )
-                    ) : (
-                      <span className="text-xs text-gray-400">Enter ID</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              );
+                      )}
+                      {isEditing && (
+                        <div className="flex space-x-2">
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={saveEdit}
+                            className="h-8 px-2 text-xs"
+                          >
+                            <Check className="h-3.5 w-3.5 mr-1" />
+                            Save
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => setEditingState(null)}
+                            className="h-8 px-2 text-xs"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              });
             })}
           </TableBody>
         </Table>
