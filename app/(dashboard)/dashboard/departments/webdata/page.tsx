@@ -107,11 +107,36 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [availableForms, setAvailableForms] = useState<Array<{ id: string; name: string }>>([])
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
-  const [kycDocuments, setKycDocuments] = useState<Record<string, string>>({})
+  const [kycDocuments, setKycDocuments] = useState<Record<string, string>>({});
+  const [jobFields, setJobFields] = useState<Record<string, { id: string; field_key: string; label: string }>>({});
   
   // --- [CHANGE #1] Add state to hold the full data object for the item being edited ---
   const [currentWebDataForEdit, setCurrentWebDataForEdit] = useState<WebDataEntry[] | null>(null);
 
+
+  // Fetch job fields on component mount
+  useEffect(() => {
+    const fetchJobFields = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('tm_job_fields')
+          .select('id, field_key, label');
+          
+        if (error) throw error;
+        
+        const fieldsMap = data.reduce((acc, field) => ({
+          ...acc,
+          [field.id]: field
+        }), {});
+        
+        setJobFields(fieldsMap);
+      } catch (error) {
+        console.error('Error fetching job fields:', error);
+      }
+    };
+    
+    fetchJobFields();
+  }, []);
 
   // Fetch KYC documents on component mount
   useEffect(() => {
@@ -599,6 +624,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
               <TableHead className="w-[120px] text-white border-r">Type</TableHead>
               <TableHead className="w-[120px] text-white border-r">Entity Type</TableHead>
               <TableHead className="text-white border-r">Description</TableHead>
+              <TableHead className="w-[200px] text-white border-r">Master Field</TableHead>
               <TableHead className="w-[160px] text-white">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -650,6 +676,8 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
                     <TableCell className="text-muted-foreground border-r">
                       Form with {entry.fields.length} field{entry.fields.length !== 1 ? 's' : ''}
                       {entry.kycDocsUpload.length > 0 && ` + ${entry.kycDocsUpload.length} upload${entry.kycDocsUpload.length !== 1 ? 's' : ''}`}
+                    </TableCell>
+                    <TableCell className="border-r">
                     </TableCell>
                     <TableCell className="border-r">
                       <div className="flex items-center space-x-1">
@@ -709,6 +737,47 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
                             <span className={!field.description ? 'italic' : ''}>
                               {field.description || 'No description'}
                             </span>
+                          </TableCell>
+                          <TableCell className="border-r">
+                            {field.masterFields && field.masterFields.length > 0 ? (
+                              <div className="flex flex-col space-y-1">
+                                {field.masterFields.map((masterField, index) => {
+                                  const jobField = jobFields[masterField.id];
+                                  return jobField ? (
+                                    <div key={`${masterField.id}-${index}`} className="flex items-center space-x-1">
+                                      <span className="text-sm font-medium">{jobField.label}</span>
+                                      <Badge variant="outline" className="text-xs">
+                                        {jobField.field_key}
+                                      </Badge>
+                                    </div>
+                                  ) : (
+                                    <code key={`${masterField.id}-${index}`} className="bg-muted px-2 py-1 rounded text-xs font-mono">
+                                      {masterField.id}
+                                    </code>
+                                  );
+                                })}
+                              </div>
+                            ) : field.masterFieldIds && field.masterFieldIds.length > 0 ? (
+                              <div className="flex flex-col space-y-1">
+                                {field.masterFieldIds.map((id) => {
+                                  const jobField = jobFields[id];
+                                  return jobField ? (
+                                    <div key={id} className="flex items-center space-x-1">
+                                      <span className="text-sm font-medium">{jobField.label}</span>
+                                      <Badge variant="outline" className="text-xs">
+                                        {jobField.field_key}
+                                      </Badge>
+                                    </div>
+                                  ) : (
+                                    <code key={id} className="bg-muted px-2 py-1 rounded text-xs font-mono">
+                                      {id}
+                                    </code>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground text-sm">-</span>
+                            )}
                           </TableCell>
                           <TableCell className="text-right border-r">
                             <div className="flex items-center space-x-1">
@@ -784,6 +853,9 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
                               </div>
                             </div>
                           </TableCell>
+                          <TableCell className="border-r">
+                            <span className="text-muted-foreground text-sm">-</span>
+                          </TableCell>
                           <TableCell className="text-right border-r">
                             <div className="flex items-center space-x-1">
                               <Button
@@ -813,7 +885,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={7} className="h-48 text-center text-muted-foreground">
+                <TableCell colSpan={8} className="h-48 text-center text-muted-foreground">
                   <div className="flex flex-col items-center space-y-2">
                     <FileText className="h-8 w-8" />
                     <p className="font-medium">No WebData Yet</p>
