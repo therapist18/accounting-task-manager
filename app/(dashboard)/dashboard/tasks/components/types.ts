@@ -93,4 +93,5 @@ export interface DepartmentTasksManagerProps {
   handleStageStatusSave?: (stageId: string, taskId: string, date: string) => Promise<any>
   onTaskUpdate?: (updatedTask: Task) => void
   getCurrentRequirements?: () => any[]
+  allDocuments: any[];
 }

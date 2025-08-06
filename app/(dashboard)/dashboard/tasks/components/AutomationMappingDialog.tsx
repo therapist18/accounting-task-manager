@@ -63,29 +63,60 @@ interface EntityAutomationMapping {
 
 // Helper function to get LINKED document for a stage (same as EditableStageCell)
 const getLinkedDocumentForStage = (task: any, stage: any, allDocuments: any[]): any | null => {
-  const linkedDocumentData = task.source_document_id?.[stage.id];
+  if (!task?.source_document_id || !stage?.id || !allDocuments?.length) {
+    console.log('Missing data for getLinkedDocumentForStage:', {
+      hasSourceDocumentId: !!task?.source_document_id,
+      stageId: stage?.id,
+      allDocumentsLength: allDocuments?.length || 0
+    });
+    return null;
+  }
+
+  const linkedDocumentData = task.source_document_id[stage.id];
 
   if (linkedDocumentData) {
     const documentId = typeof linkedDocumentData === 'string'
       ? linkedDocumentData
       : linkedDocumentData.id;
+    
     // Find the document instance from allDocuments by its unique ID
     const linkedDoc = allDocuments.find(doc => doc.id === documentId);
+    
+    console.log('Found linked document:', {
+      stageId: stage.id,
+      documentId: documentId,
+      foundDoc: !!linkedDoc,
+      docPath: linkedDoc?.file_path
+    });
+    
     return linkedDoc || null;
   }
+  
+  console.log('No linked document data for stage:', stage.id);
   return null;
 };
 
 // Helper function to build file URL (same pattern as EditableStageCell)
 const buildFileUrl = (linkedDoc: any): string | null => {
-  if (!linkedDoc?.file_path) return null;
+  if (!linkedDoc?.file_path) {
+    console.log('No file path in linked document:', linkedDoc);
+    return null;
+  }
 
   const bucketName = 'kyc-documents';
   const filePath = linkedDoc.file_path?.startsWith(bucketName)
     ? linkedDoc.file_path
     : `${bucketName}/${linkedDoc.file_path}`;
 
-  return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+  const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+  
+  console.log('Built file URL:', {
+    originalPath: linkedDoc.file_path,
+    finalPath: filePath,
+    fileUrl: fileUrl
+  });
+
+  return fileUrl;
 };
 
 // Helper function to parse JSON field paths properly
@@ -201,32 +232,205 @@ export const AutomationMappingDialog = ({
 
   const [currentIndividualId, setCurrentIndividualId] = useState(getIndividualId());
 
-  // Enhanced function to get document URL for automation payload
+  // Enhanced function to get document URL for automation payload with comprehensive fallback strategies
   const getDocumentUrlForAutomation = useCallback((): string | null => {
-    if (!stage || !task || !allDocuments?.length) {
-      console.log('Missing required data for document URL:', { stage: !!stage, task: !!task, allDocuments: allDocuments?.length });
-      return null;
-    }
-
-    // Get the linked document for this stage (same logic as EditableStageCell)
-    const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
-    
-    if (!linkedDoc) {
-      console.log('No linked document found for stage:', stage.id);
-      return null;
-    }
-
-    // Build file URL using the same pattern as EditableStageCell
-    const fileUrl = buildFileUrl(linkedDoc);
-    
-    console.log('Built document URL for automation:', {
-      documentId: linkedDoc.id,
-      filePath: linkedDoc.file_path,
-      fileUrl
+    console.log('🔍 Getting document URL for automation...', {
+      hasStage: !!stage,
+      stageId: stage?.id,
+      hasTask: !!task,
+      taskId: task?.id,
+      individualId: task?.individual_id,
+      allDocumentsLength: allDocuments?.length || 0,
+      documentFilesLength: documentFiles.length,
+      hasSourceDocumentId: !!task?.source_document_id,
+      sourceDocumentIdKeys: task?.source_document_id ? Object.keys(task.source_document_id) : []
     });
 
-    return fileUrl;
-  }, [stage, task, allDocuments]);
+    if (!task?.individual_id) {
+      console.log('❌ Missing individual ID');
+      return null;
+    }
+
+    // Strategy 1: Try the intended stage if provided
+    if (stage && task?.source_document_id?.[stage.id]) {
+      console.log('🎯 Strategy 1: Using intended stage link...');
+      const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
+      if (linkedDoc) {
+        const fileUrl = buildFileUrl(linkedDoc);
+        console.log('✅ Strategy 1 succeeded:', { stageId: stage.id, fileUrl });
+        return fileUrl;
+      }
+    }
+
+    // Strategy 2: Try any stage that has a linked document
+    if (task?.source_document_id && typeof task.source_document_id === 'object') {
+      console.log('🔄 Strategy 2: Trying any linked stage...');
+      
+      for (const [stageId, docData] of Object.entries(task.source_document_id)) {
+        const documentId = typeof docData === 'string' ? docData : (docData as any)?.id;
+        const linkedDoc = allDocuments.find(doc => doc.id === documentId);
+        
+        if (linkedDoc && linkedDoc.file_path) {
+          const fileUrl = buildFileUrl(linkedDoc);
+          console.log('✅ Strategy 2 succeeded:', { usedStageId: stageId, fileUrl });
+          return fileUrl;
+        }
+      }
+    }
+
+    // Strategy 3: Use the already-fetched documents that match webData requirements
+    if (documentFiles.length > 0) {
+      console.log('🔄 Strategy 3: Using fetched documents from webData requirements...');
+      
+      // Find documents that match the webData KYC document IDs
+      const webDataKycIds = webData.flatMap(item => 
+        (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
+      ).filter(Boolean);
+      
+      console.log('WebData KYC IDs:', webDataKycIds);
+      console.log('Available document files:', documentFiles.map(f => ({
+        id: f.id,
+        document_id: f.document_id,
+        file_path: f.file_path
+      })));
+      
+      // Prefer documents that match the webData requirements
+      const matchingDoc = documentFiles.find(doc => 
+        webDataKycIds.includes(doc.document_id) && 
+        doc.file_path && 
+        doc.status !== 'deleted'
+      );
+
+      if (matchingDoc) {
+        const fileUrl = buildFileUrl(matchingDoc);
+        console.log('✅ Strategy 3 succeeded with webData document:', { 
+          documentId: matchingDoc.id,
+          kycId: matchingDoc.document_id,
+          fileUrl,
+          note: 'Using document from webData requirements'
+        });
+        return fileUrl;
+      }
+    }
+
+    // Strategy 4: Find any document for this individual that matches stage requirements
+    if (stage?.documents?.length > 0 && allDocuments?.length > 0) {
+      console.log('🔄 Strategy 4: Finding documents matching stage requirements...');
+      
+      const individualDocs = allDocuments.filter(doc => 
+        (doc.director_id === task.individual_id || 
+         doc.director_id?.toString() === task.individual_id?.toString()) &&
+        doc.file_path && 
+        doc.status !== 'deleted'
+      );
+
+      console.log(`Found ${individualDocs.length} documents for individual ${task.individual_id}`);
+
+      for (const stageDoc of stage.documents) {
+        const matchingDoc = individualDocs.find(doc => 
+          doc.document_id === stageDoc.kycId
+        );
+
+        if (matchingDoc) {
+          const fileUrl = buildFileUrl(matchingDoc);
+          console.log('✅ Strategy 4 succeeded:', { 
+            kycId: stageDoc.kycId, 
+            documentId: matchingDoc.id,
+            fileUrl,
+            note: 'Document exists but not linked to stage'
+          });
+          return fileUrl;
+        }
+      }
+    }
+
+    // Strategy 5: Use any valid document for this individual
+    if (allDocuments?.length > 0) {
+      console.log('🔄 Strategy 5: Using any available document for individual...');
+      
+      const individualDocs = allDocuments.filter(doc => 
+        (doc.director_id === task.individual_id || 
+         doc.director_id?.toString() === task.individual_id?.toString()) &&
+        doc.file_path && 
+        doc.status !== 'deleted' &&
+        !doc.indicator // Avoid indicator documents
+      );
+
+      console.log(`Found ${individualDocs.length} valid documents for individual ${task.individual_id}`);
+
+      if (individualDocs.length > 0) {
+        // Prefer newer documents
+        const sortedDocs = individualDocs.sort((a, b) => 
+          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+        );
+        
+        const firstDoc = sortedDocs[0];
+        const fileUrl = buildFileUrl(firstDoc);
+        console.log('✅ Strategy 5 succeeded:', {
+          documentId: firstDoc.id,
+          filePath: firstDoc.file_path,
+          fileUrl,
+          note: 'Using most recent available document (may not be stage-specific)'
+        });
+        return fileUrl;
+      }
+    }
+
+    console.log('❌ All strategies failed - no document URL available');
+    console.log('💡 Suggestions:');
+    console.log('   1. Upload documents for this individual');
+    console.log('   2. Link existing documents to stages');
+    console.log('   3. Check document status (not deleted/indicator)');
+    
+    return null;
+  }, [stage, task, allDocuments, documentFiles, webData]);
+
+  // Function to find the appropriate stage for document URL
+  const findStageForDocument = useCallback((): any | null => {
+    if (stage) {
+      console.log('Using provided stage:', stage.name, stage.id);
+      return stage;
+    }
+
+    // If no stage provided, try to find an appropriate stage from the task
+    if (task?.stage_id) {
+      console.log('Using task stage_id:', task.stage_id);
+      return { id: task.stage_id, name: 'Current Stage' };
+    }
+
+    // Look for stages that have documents and might have linked documents
+    if (task?.source_document_id && typeof task.source_document_id === 'object') {
+      const stageIds = Object.keys(task.source_document_id);
+      if (stageIds.length > 0) {
+        const firstStageId = stageIds[0];
+        console.log('Using first available stage with documents:', firstStageId);
+        return { id: firstStageId, name: 'Document Stage' };
+      }
+    }
+
+    console.log('❌ No suitable stage found for document URL');
+    return null;
+  }, [stage, task]);
+
+  // Enhanced document URL function that tries to find a suitable stage if none provided
+  const getDocumentUrlWithFallback = useCallback((): string | null => {
+    // First try with the provided stage
+    if (stage) {
+      return getDocumentUrlForAutomation();
+    }
+
+    // If no stage provided, try to find one
+    const foundStage = findStageForDocument();
+    if (foundStage && task && allDocuments?.length) {
+      const linkedDoc = getLinkedDocumentForStage(task, foundStage, allDocuments);
+      if (linkedDoc) {
+        return buildFileUrl(linkedDoc);
+      }
+    }
+
+    console.log('❌ Could not find document URL with any available stage');
+    return null;
+  }, [getDocumentUrlForAutomation, findStageForDocument, task, allDocuments]);
 
   // Extract automation mappings from stage documents
   const extractAutomationMappings = async (stageDocuments: any[]) => {
@@ -594,7 +798,9 @@ export const AutomationMappingDialog = ({
   }, [jobFields, webData]); // Only trigger when these are populated
 
   const getSourceInfo = (masterFieldIds: string[]) => {
-    if (!masterFieldIds || masterFieldIds.length === 0) return { sources: [], hasData: false };
+    if (!masterFieldIds || masterFieldIds.length === 0) {
+      return { sources: [], hasData: false };
+    }
     
     const sources = masterFieldIds.map(fieldId => {
       const field = jobFields[fieldId];
@@ -602,6 +808,7 @@ export const AutomationMappingDialog = ({
       
       const source = field.sources[0];
       return {
+        fieldId: fieldId,
         fieldLabel: field.label,
         source: `${source.table}.${source.path}`,
         table: source.table,
@@ -609,7 +816,51 @@ export const AutomationMappingDialog = ({
       };
     }).filter(Boolean);
     
+    // Log multi-source fields for debugging
+    if (sources.length > 1) {
+      console.log(`🔗 Multi-source field detected:`, {
+        masterFieldIds,
+        sources: sources.map(s => ({
+          label: s.fieldLabel,
+          path: s.source
+        }))
+      });
+    }
+    
     return { sources, hasData: sources.length > 0 };
+  };
+  
+  const getSourceValueMerged = (sources: any[]): string => {
+    if (sources.length === 0) return "Missing";
+    
+    if (sources.length === 1) {
+      // Single source - return normally
+      const sourceInfo = sources[0];
+      return getSourceValue(sourceInfo.table, sourceInfo.path);
+    }
+    
+    // Multiple sources - merge them
+    const validValues: string[] = [];
+    
+    sources.forEach(sourceInfo => {
+      const value = getSourceValue(sourceInfo.table, sourceInfo.path);
+      
+      if (typeof value === 'string' && value !== 'Missing' && value.trim() !== '') {
+        const trimmedValue = value.trim();
+        
+        // Avoid duplicate values
+        if (!validValues.some(existing => 
+          existing.toLowerCase() === trimmedValue.toLowerCase()
+        )) {
+          validValues.push(trimmedValue);
+        }
+      }
+    });
+    
+    if (validValues.length === 0) return "Missing";
+    
+    // Join with spaces and clean up multiple spaces
+    return validValues.join(' ').replace(/\s+/g, ' ').trim();
   };
 
   const getSourceValue = (table: string, path: string) => {
@@ -711,11 +962,18 @@ export const AutomationMappingDialog = ({
 
   const prepareFormData = () => {
     const formData: Record<string, any> = {};
-
+  
     webData.forEach(item => {
       item.fields?.forEach(field => {
         const { sources } = getSourceInfo(field.masterFieldIds || []);
-        if (sources.length > 0) {
+        
+        if (sources.length === 0) {
+          // No sources mapped, skip this field
+          return;
+        }
+  
+        if (sources.length === 1) {
+          // Single source - handle normally
           const sourceInfo = sources[0];
           const value = getSourceValue(sourceInfo.table, sourceInfo.path);
           
@@ -736,45 +994,252 @@ export const AutomationMappingDialog = ({
               formData[field.variableName] = value;
             }
           }
+        } else {
+          // Multiple sources - merge them
+          const allValues: string[] = [];
+          let hasValidValue = false;
+  
+          sources.forEach(sourceInfo => {
+            const value = getSourceValue(sourceInfo.table, sourceInfo.path);
+            if (typeof value === 'string' && value !== 'Missing' && value.trim() !== '') {
+              allValues.push(value.trim());
+              hasValidValue = true;
+            }
+          });
+  
+          if (hasValidValue) {
+            // Merge all values into one string
+            const mergedValue = allValues.join(' ').trim();
+            
+            console.log(`🔗 Merging multiple sources for field "${field.variableName}":`, {
+              fieldName: field.efnsDisplayName || field.name,
+              variableName: field.variableName,
+              sourceLabels: sources.map(s => s.fieldLabel),
+              individualValues: allValues,
+              mergedValue: mergedValue
+            });
+  
+            // Handle date parsing if field has array items with date components
+            if (field.arrayItems && field.arrayItems.length > 0) {
+              const hasDateComponents = field.arrayItems.some((item: any) => 
+                ['day', 'month', 'year'].includes(item.variableName)
+              );
+              
+              if (hasDateComponents) {
+                const parsedDate = parseDateToComponents(mergedValue);
+                formData[field.variableName] = parsedDate;
+              } else {
+                formData[field.variableName] = mergedValue;
+              }
+            } else {
+              formData[field.variableName] = mergedValue;
+            }
+          } else {
+            console.log(`⚠️ No valid values found for multi-source field "${field.variableName}"`);
+          }
         }
       });
     });
-
+  
+    console.log('📝 Final prepared form data:', formData);
     return formData;
+  };
+  
+  // Helper function to merge source values with better logic
+  const mergeSourceValues = (sources: any[], fieldName: string): string | null => {
+    const validValues: string[] = [];
+    
+    sources.forEach((sourceInfo, index) => {
+      const value = getSourceValue(sourceInfo.table, sourceInfo.path);
+      
+      if (typeof value === 'string' && value !== 'Missing' && value.trim() !== '') {
+        const trimmedValue = value.trim();
+        
+        // Avoid duplicating values (in case same data appears in multiple sources)
+        if (!validValues.some(existingValue => 
+          existingValue.toLowerCase() === trimmedValue.toLowerCase()
+        )) {
+          validValues.push(trimmedValue);
+        }
+        
+        console.log(`  Source ${index + 1} (${sourceInfo.fieldLabel}): "${trimmedValue}"`);
+      } else {
+        console.log(`  Source ${index + 1} (${sourceInfo.fieldLabel}): Missing or empty`);
+      }
+    });
+  
+    if (validValues.length === 0) {
+      return null;
+    }
+  
+    // Join all valid values with spaces
+    const merged = validValues.join(' ');
+    
+    console.log(`🔗 Merged result for "${fieldName}": "${merged}"`);
+    return merged;
+  };
+  
+  // Alternative helper function for more sophisticated merging (if needed)
+  const mergeSourceValuesAdvanced = (sources: any[], fieldName: string): string | null => {
+    const sourceData: { label: string; value: string }[] = [];
+    
+    sources.forEach(sourceInfo => {
+      const value = getSourceValue(sourceInfo.table, sourceInfo.path);
+      
+      if (typeof value === 'string' && value !== 'Missing' && value.trim() !== '') {
+        sourceData.push({
+          label: sourceInfo.fieldLabel,
+          value: value.trim()
+        });
+      }
+    });
+  
+    if (sourceData.length === 0) {
+      return null;
+    }
+  
+    // Special handling for name fields
+    if (fieldName.toLowerCase().includes('name')) {
+      // For names, join with spaces and remove extra spaces
+      const merged = sourceData.map(s => s.value).join(' ').replace(/\s+/g, ' ').trim();
+      
+      console.log(`👤 Name field "${fieldName}" merged:`, {
+        sources: sourceData,
+        result: merged
+      });
+      
+      return merged;
+    }
+  
+    // For other fields, simple space-separated join
+    const merged = sourceData.map(s => s.value).join(' ').trim();
+    
+    console.log(`📄 Field "${fieldName}" merged:`, {
+      sources: sourceData,
+      result: merged
+    });
+    
+    return merged;
   };
 
   const parseDateToComponents = (dateValue: string): { day: string; month: string; year: string } | string => {
     if (!dateValue) return dateValue;
-
+  
+    // Month name to number mapping
+    const monthNames: Record<string, string> = {
+      'Jan': '01', 'January': '01',
+      'Feb': '02', 'February': '02',
+      'Mar': '03', 'March': '03',
+      'Apr': '04', 'April': '04',
+      'May': '05', 'May': '05',
+      'Jun': '06', 'June': '06',
+      'Jul': '07', 'July': '07',
+      'Aug': '08', 'August': '08',
+      'Sep': '09', 'September': '09',
+      'Oct': '10', 'October': '10',
+      'Nov': '11', 'November': '11',
+      'Dec': '12', 'December': '12'
+    };
+  
+    // Month number to short name mapping (for output)
+    const monthNumberToName: Record<string, string> = {
+      '01': 'Jan', '02': 'Feb', '03': 'Mar', '04': 'Apr',
+      '05': 'May', '06': 'Jun', '07': 'Jul', '08': 'Aug',
+      '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dec'
+    };
+  
     const formats = [
+      // Numeric formats
       /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/, // DD/MM/YYYY
       /^(\d{4})-(\d{1,2})-(\d{1,2})$/, // YYYY-MM-DD
       /^(\d{1,2})-(\d{1,2})-(\d{4})$/, // DD-MM-YYYY
+      
+      // Month name formats
+      /^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/, // DD Month YYYY (e.g., "15 Jan 2024")
+      /^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/, // Month DD, YYYY (e.g., "Jan 15, 2024" or "Jan 15 2024")
+      /^(\d{1,2})[-\/]([A-Za-z]+)[-\/](\d{4})$/, // DD-Month-YYYY or DD/Month/YYYY
+      /^([A-Za-z]+)[-\/](\d{1,2})[-\/](\d{4})$/, // Month-DD-YYYY or Month/DD/YYYY
     ];
-
-    for (const format of formats) {
+  
+    for (let i = 0; i < formats.length; i++) {
+      const format = formats[i];
       const match = dateValue.match(format);
+      
       if (match) {
         let day, month, year;
         
-        if (format === formats[1]) { // YYYY-MM-DD
-          [, year, month, day] = match;
-        } else { // DD/MM/YYYY or DD-MM-YYYY
+        if (i === 0 || i === 2) { // DD/MM/YYYY or DD-MM-YYYY
           [, day, month, year] = match;
+          // Convert numeric month to month name
+          month = monthNumberToName[month.padStart(2, '0')] || month.padStart(2, '0');
+        } else if (i === 1) { // YYYY-MM-DD
+          [, year, month, day] = match;
+          // Convert numeric month to month name
+          month = monthNumberToName[month.padStart(2, '0')] || month.padStart(2, '0');
+        } else if (i === 3) { // DD Month YYYY
+          [, day, month, year] = match;
+          // Month is already a name, convert to short form if needed
+          month = getShortMonthName(month, monthNames);
+        } else if (i === 4) { // Month DD, YYYY
+          [, month, day, year] = match;
+          // Month is already a name, convert to short form if needed
+          month = getShortMonthName(month, monthNames);
+        } else if (i === 5) { // DD-Month-YYYY
+          [, day, month, year] = match;
+          // Month is already a name, convert to short form if needed
+          month = getShortMonthName(month, monthNames);
+        } else if (i === 6) { // Month-DD-YYYY
+          [, month, day, year] = match;
+          // Month is already a name, convert to short form if needed
+          month = getShortMonthName(month, monthNames);
         }
-
+  
         return {
           day: day.padStart(2, '0'),
-          month: month.padStart(2, '0'),
+          month: month, // Return month name (e.g., "Jan", "Feb", etc.)
           year: year
         };
       }
     }
-
+  
+    // If no format matches, return the original value
     return dateValue;
   };
+  
+  // Helper function to get short month name
+  const getShortMonthName = (monthInput: string, monthNames: Record<string, string>): string => {
+    const monthInputLower = monthInput.toLowerCase();
+    
+    // Check if it's already a short month name
+    for (const [shortName] of Object.entries(monthNames)) {
+      if (shortName.toLowerCase() === monthInputLower) {
+        return shortName;
+      }
+    }
+    
+    // Check if it's a full month name
+    for (const [shortName] of Object.entries(monthNames)) {
+      const fullName = getFullMonthName(shortName);
+      if (fullName.toLowerCase() === monthInputLower) {
+        return shortName;
+      }
+    }
+    
+    // If not found, return the first 3 characters capitalized
+    return monthInput.charAt(0).toUpperCase() + monthInput.slice(1, 3).toLowerCase();
+  };
+  
+  // Helper function to get full month name from short name
+  const getFullMonthName = (shortName: string): string => {
+    const fullNames: Record<string, string> = {
+      'Jan': 'January', 'Feb': 'February', 'Mar': 'March', 'Apr': 'April',
+      'May': 'May', 'Jun': 'June', 'Jul': 'July', 'Aug': 'August',
+      'Sep': 'September', 'Oct': 'October', 'Nov': 'November', 'Dec': 'December'
+    };
+    return fullNames[shortName] || shortName;
+  };
 
-  // Enhanced handleRunAutomation with dynamic document URL
+  // Enhanced handleRunAutomation with improved document URL handling
   const handleRunAutomation = async () => {
     if (!currentIndividualId) {
       toast({ 
@@ -813,36 +1278,42 @@ export const AutomationMappingDialog = ({
 
       const formData = prepareFormData();
       
-      // Get the document URL dynamically from the linked document (same as EditableStageCell)
-      const documentUrl = getDocumentUrlForAutomation();
+      // Enhanced document URL retrieval with better error handling
+      const documentUrl = getDocumentUrlWithFallback();
       
       if (!documentUrl) {
-        console.warn('No document URL found for automation. This may be expected if no document is linked.');
-        // Continue with automation even if no document URL (some automations may not require documents)
+        console.warn('⚠️ No document URL found for automation. This may be expected if no document is linked to any stage.');
+        // Show user-friendly message but continue with automation
+        toast({
+          title: 'No Document Linked',
+          description: 'No document is linked to this stage. Automation will run without document data.',
+          variant: 'default',
+        });
       }
 
       const payload = {
-        url: "https://fns.immigration.go.ke/account/login.html",
+        url: automation.webhook_url,
         login: automation.login,
         formData: formData,
         taskId: taskId,
         individualId: currentIndividualId,
         classId: classId,
-        requirementId: getRequirementId(),
-        photoUrl: documentUrl, // Use dynamic document URL instead of hardcoded
-        webDataItem: {
-          documentId: webDataItem.documentId,
-          documentName: webDataItem.documentName,
-          fields: webDataItem.fields?.length || 0,
-          kycDocsUpload: webDataItem.kycDocsUpload?.length || 0,
-          photoUrl: documentUrl // Also include in webDataItem for backward compatibility
-        }
+        // requirementId: getRequirementId(),
+        photoUrl: documentUrl, // Use dynamic document URL
+        // webDataItem: {
+        //   documentId: webDataItem.documentId,
+        //   documentName: webDataItem.documentName,
+        //   automationId: webDataItem.automationId,
+        //   fields: webDataItem.fields?.length || 0,
+        //   kycDocsUpload: webDataItem.kycDocsUpload?.length || 0,
+        //   photoUrl: documentUrl // Also include in webDataItem for backward compatibility
+        // },
       };
 
-      console.log('Sending automation request with payload:', payload);
-      console.log('Using webhook URL:', automation.webhook_url);
-      console.log('Document URL from linked document:', documentUrl);
-      console.log('WebData item:', webDataItem);
+      console.log('🚀 Sending automation request with payload:', payload);
+      console.log('📡 Using webhook URL:', automation.webhook_url);
+      console.log('📄 Document URL from linked document:', documentUrl);
+      console.log('🗃️ WebData item:', webDataItem);
 
       const response = await fetch(automation.webhook_url, {
         method: automation.webhook_method || 'POST',
@@ -865,7 +1336,7 @@ export const AutomationMappingDialog = ({
       });
 
     } catch (error) {
-      console.error('Error triggering automation:', error);
+      console.error('❌ Error triggering automation:', error);
 
       if (error instanceof TypeError && error.message.includes('fetch')) {
         toast({ 
@@ -894,9 +1365,9 @@ export const AutomationMappingDialog = ({
         </div>
       );
     }
-
+  
     const fields = webData[0].fields;
-
+  
     return (
       <div className="rounded-md border">
         <Table className="max-w-6xl max-h-[90vh] flex flex-col overflow-y-auto">
@@ -904,14 +1375,14 @@ export const AutomationMappingDialog = ({
             <TableRow>
               <TableHead className="w-[50px] border-r text-white">#</TableHead>
               <TableHead className="w-1/4 border-r text-white">WebData Field</TableHead>
-              <TableHead className="w-1/4 border-r text-white">Source Path</TableHead>
+              <TableHead className="w-1/4 border-r text-white">Source Path(s)</TableHead>
               <TableHead className="w-1/4 border-r text-white">Current Data</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {fields.map((field, index) => {
               const { sources, hasData } = getSourceInfo(field.masterFieldIds || []);
-
+  
               return (
                 <TableRow key={field.variableName || index}>
                   <TableCell className="align-top border-r w-[50px]">{index + 1}</TableCell>
@@ -923,9 +1394,16 @@ export const AutomationMappingDialog = ({
                     <div className="text-xs text-gray-500 font-mono mt-1">
                       {field.variableName}
                     </div>
-                    <Badge variant="outline" className="mt-1 text-xs">
-                      {field.fieldType}
-                    </Badge>
+                    <div className="flex items-center gap-1 mt-1">
+                      <Badge variant="outline" className="text-xs">
+                        {field.fieldType}
+                      </Badge>
+                      {sources.length > 1 && (
+                        <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
+                          Multi-Source ({sources.length})
+                        </Badge>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="align-top border-r w-1/4">
                     {hasData ? (
@@ -937,6 +1415,11 @@ export const AutomationMappingDialog = ({
                             <span className="text-blue-600">{sourceInfo.source}</span>
                           </div>
                         ))}
+                        {sources.length > 1 && (
+                          <div className="text-xs text-purple-600 font-medium italic mt-2 p-1 bg-purple-50 rounded">
+                            ↗ Values will be merged: "{sources.map(s => s.fieldLabel).join(' + ')}"
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <span className="text-xs text-gray-400">No source linked</span>
@@ -946,9 +1429,15 @@ export const AutomationMappingDialog = ({
                     className="align-top border-r cursor-pointer hover:bg-gray-50 w-1/4"
                     onClick={() => {
                       if (currentIndividualId && hasData) {
-                        const sourceInfo = sources[0];
-                        const currentValue = getSourceValue(sourceInfo.table, sourceInfo.path);
-                        startEditing(index, 0, sourceInfo.table, sourceInfo.path, currentValue);
+                        // For multi-source fields, we'll edit the merged value
+                        if (sources.length > 1) {
+                          const mergedValue = getSourceValueMerged(sources);
+                          startEditing(index, 0, sources[0].table, sources[0].path, mergedValue);
+                        } else {
+                          const sourceInfo = sources[0];
+                          const currentValue = getSourceValue(sourceInfo.table, sourceInfo.path);
+                          startEditing(index, 0, sourceInfo.table, sourceInfo.path, currentValue);
+                        }
                       }
                     }}
                   >
@@ -961,6 +1450,7 @@ export const AutomationMappingDialog = ({
                           onKeyDown={handleKeyDown}
                           onBlur={saveEdit}
                           className="h-8 text-sm"
+                          placeholder={sources.length > 1 ? "Merged value from multiple sources" : "Single source value"}
                         />
                         <Button 
                           variant="ghost" 
@@ -975,24 +1465,65 @@ export const AutomationMappingDialog = ({
                       </div>
                     ) : currentIndividualId ? (
                       hasData ? (
-                        <div className="space-y-2 text-sm">
-                          {sources.map((sourceInfo, idx) => {
-                            const value = getSourceValue(sourceInfo.table, sourceInfo.path);
-                            return (
-                              <div 
-                                key={idx} 
-                                className="p-1 rounded hover:bg-gray-100"
-                                title="Click to edit"
-                              >
-                                {typeof value === 'string' && value !== 'Missing' ? (
-                                  <span className="text-green-700 font-medium">{value}</span>
-                                ) : (
-                                  <span className="text-red-600 italic">Missing</span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
+                        sources.length === 1 ? (
+                          // Single source - show normally
+                          <div className="space-y-2 text-sm">
+                            {sources.map((sourceInfo, idx) => {
+                              const value = getSourceValue(sourceInfo.table, sourceInfo.path);
+                              return (
+                                <div 
+                                  key={idx} 
+                                  className="p-1 rounded hover:bg-gray-100"
+                                  title="Click to edit"
+                                >
+                                  {typeof value === 'string' && value !== 'Missing' ? (
+                                    <span className="text-green-700 font-medium">{value}</span>
+                                  ) : (
+                                    <span className="text-red-600 italic">Missing</span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          // Multi-source - show individual values and merged result
+                          <div className="space-y-2 text-sm">
+                            <div className="border border-purple-200 bg-purple-50 p-2 rounded">
+                              <div className="text-xs font-medium text-purple-800 mb-1">Merged Value:</div>
+                              {(() => {
+                                const mergedValue = getSourceValueMerged(sources);
+                                return (
+                                  <div className="font-medium text-purple-900">
+                                    {mergedValue !== 'Missing' ? (
+                                      <span className="text-purple-700">{mergedValue}</span>
+                                    ) : (
+                                      <span className="text-red-600 italic">No valid data</span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                            <div className="space-y-1">
+                              <div className="text-xs font-medium text-gray-600">Individual Sources:</div>
+                              {sources.map((sourceInfo, idx) => {
+                                const value = getSourceValue(sourceInfo.table, sourceInfo.path);
+                                return (
+                                  <div 
+                                    key={idx} 
+                                    className="text-xs p-1 rounded bg-gray-50"
+                                  >
+                                    <span className="font-medium text-gray-700">{sourceInfo.fieldLabel}:</span>
+                                    {typeof value === 'string' && value !== 'Missing' ? (
+                                      <span className="ml-1 text-green-700">{value}</span>
+                                    ) : (
+                                      <span className="ml-1 text-red-600 italic">Missing</span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )
                       ) : (
                         <span className="text-xs text-gray-400">No mapping</span>
                       )
@@ -1140,11 +1671,60 @@ export const AutomationMappingDialog = ({
                   </div>
                 )}
 
-                {/* Show Document URL being used */}
+                {/* Enhanced Document URL Display */}
                 <div className="md:col-span-2">
                   <Label className="text-sm font-medium text-gray-700">Document URL</Label>
-                  <div className="p-2 bg-gray-50 rounded border text-xs font-mono text-gray-600 break-all">
-                    {getDocumentUrlForAutomation() || 'No document linked for this stage'}
+                  <div className="p-2 bg-gray-50 rounded border">
+                    {(() => {
+                      const documentUrl = getDocumentUrlWithFallback();
+                      if (documentUrl) {
+                        // Check which document is being used
+                        const usedDocument = documentFiles.find(doc => {
+                          const testUrl = buildFileUrl(doc);
+                          return testUrl === documentUrl;
+                        });
+
+                        return (
+                          <div className="space-y-2">
+                            <div className="text-xs font-mono text-gray-600 break-all">{documentUrl}</div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge variant="default" className="text-xs">
+                                Document Available
+                              </Badge>
+                              {usedDocument && (
+                                <Badge variant="outline" className="text-xs">
+                                  KYC ID: {usedDocument.document_id}
+                                </Badge>
+                              )}
+                              {stage && (
+                                <span className="text-xs text-gray-500">
+                                  Target stage: {stage.name || stage.id}
+                                </span>
+                              )}
+                            </div>
+                            {usedDocument && (
+                              <div className="text-xs text-blue-600">
+                                Using: {usedDocument.file_name || usedDocument.file_path?.split('/').pop()}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div className="space-y-1">
+                            <div className="text-xs text-gray-500 italic">No document available for automation</div>
+                            <Badge variant="outline" className="text-xs">
+                              No Document
+                            </Badge>
+                            <div className="text-xs text-amber-600 mt-1">
+                              Upload documents matching KYC ID: {webData.flatMap(item => 
+                                (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
+                              ).filter(Boolean).join(', ')}
+                            </div>
+                          </div>
+                        );
+                      }
+                    })()}
                   </div>
                 </div>
               </div>
@@ -1254,114 +1834,242 @@ export const AutomationMappingDialog = ({
     }
 
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {documentFiles.map((file) => {
-          const kycDocConfig = webData.flatMap(item => item.kycDocsUpload || [])
-            .find(doc => doc.kycDocumentId === file.document_id);
+      <div className="space-y-4">
+        {/* Show which documents are being used */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <h4 className="font-medium text-blue-800 mb-2">Documents for WebData Requirements</h4>
+          <p className="text-sm text-blue-700">
+            Showing documents that match the KYC requirements for this automation: 
+            {webData.flatMap(item => 
+              (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
+            ).filter(Boolean).join(', ')}
+          </p>
+        </div>
 
-          return (
-            <Card key={file.id} className="cursor-pointer hover:shadow-md transition-shadow">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {file.mime_type?.startsWith('image/') ? (
-                      <ImageIcon className="h-4 w-4" />
-                    ) : (
-                      <FileText className="h-4 w-4" />
-                    )}
-                    <CardTitle className="text-sm font-medium truncate">
-                      {file.file_name || 'Untitled Document'}
-                    </CardTitle>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {documentFiles.map((file) => {
+            const kycDocConfig = webData.flatMap(item => item.kycDocsUpload || [])
+              .find(doc => doc.kycDocumentId === file.document_id);
+
+            // Check if this document will be used for automation
+            const isAutomationDocument = webData.flatMap(item => 
+              (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
+            ).includes(file.document_id);
+
+            return (
+              <Card key={file.id} className={`cursor-pointer hover:shadow-md transition-shadow ${
+                isAutomationDocument ? 'ring-2 ring-blue-500 bg-blue-50' : ''
+              }`}>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {file.mime_type?.startsWith('image/') ? (
+                        <ImageIcon className="h-4 w-4" />
+                      ) : (
+                        <FileText className="h-4 w-4" />
+                      )}
+                      <CardTitle className="text-sm font-medium truncate">
+                        {file.file_name || 'Untitled Document'}
+                      </CardTitle>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Badge variant="outline" className="text-xs">
+                        {file.mime_type?.split('/')[1]?.toUpperCase() || 'FILE'}
+                      </Badge>
+                      {isAutomationDocument && (
+                        <Badge variant="default" className="text-xs bg-blue-600">
+                          Automation Doc
+                        </Badge>
+                      )}
+                    </div>
                   </div>
-                  <Badge variant="outline" className="text-xs">
-                    {file.mime_type?.split('/')[1]?.toUpperCase() || 'FILE'}
-                  </Badge>
-                </div>
-                <CardDescription className="text-xs">
-                  {kycDocConfig?.entityType || 'Document'} • {Math.round(file.file_size / 1024)} KB
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs text-gray-500">
-                    Uploaded: {new Date(file.uploaded_at).toLocaleDateString()}
+                  <CardDescription className="text-xs">
+                    KYC ID: {file.document_id}
+                    <br />
+                    {kycDocConfig?.entityType || 'Document'} • {Math.round((file.file_size || 0) / 1024)} KB
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs text-gray-500">
+                      Uploaded: {new Date(file.uploaded_at || file.created_at).toLocaleDateString()}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDocumentPreview(file)}
+                      className="gap-1"
+                    >
+                      <Eye className="h-3 w-3" />
+                      Preview
+                    </Button>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDocumentPreview(file)}
-                    className="gap-1"
-                  >
-                    <Eye className="h-3 w-3" />
-                    Preview
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
       </div>
     );
   };
 
   const handleDocumentPreview = async (file: any) => {
     try {
-      const fileUrl = supabase.storage.from('kyc-documents').getPublicUrl(file.file_path).data.publicUrl;
-
-      const kycDocConfig = webData.flatMap(item => item.kycDocsUpload || [])
-        .find(doc => doc.kycDocumentId === file.document_id);
-
-      if (!kycDocConfig) {
-        toast({ title: 'Error', description: 'Document configuration not found', variant: 'destructive' });
-        return;
-      }
-
+      // Build the file URL directly from the file data
+      const bucketName = 'kyc-documents';
+      const filePath = file.file_path?.startsWith(bucketName)
+        ? file.file_path
+        : `${bucketName}/${file.file_path}`;
+      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+  
+      console.log('Previewing document:', {
+        fileId: file.id,
+        documentId: file.document_id,
+        filePath: file.file_path,
+        fileUrl,
+        mimeType: file.mime_type,
+        fileName: file.file_name
+      });
+  
+      // Get KYC document configuration
       const { data: kycDocument, error: kycError } = await supabase
         .from('acc_portal_kyc')
         .select('*')
         .eq('id', file.document_id)
         .single();
-
+  
       if (kycError || !kycDocument) {
-        toast({ title: 'Error', description: 'Failed to load document configuration', variant: 'destructive' });
+        console.error('Failed to load KYC document:', kycError);
+        toast({ 
+          title: 'Error', 
+          description: 'Failed to load document configuration', 
+          variant: 'destructive' 
+        });
         return;
       }
-
+  
+      console.log('KYC Document loaded:', {
+        id: kycDocument.id,
+        name: kycDocument.name,
+        display_name: kycDocument.display_name,
+        fields: kycDocument.fields,
+        document_type: kycDocument.document_type
+      });
+  
+      // Transform KYC fields to ExtractionPreview format
       const kycFields = kycDocument.fields || [];
       const documentFields = kycFields.map((field: any) => ({
-        id: field.id || field.fieldName || field.name,
-        name: field.fieldName || field.name || field.id,
+        id: field.id || field.fieldName || field.name || `field_${Math.random()}`,
+        name: field.fieldName || field.name || field.id || `field_${Math.random()}`,
         type: field.fieldType || field.type || 'text',
-        isArray: field.isArray || field.type === 'array',
-        required: field.isRequired || false,
+        isArray: field.isArray || field.type === 'array' || false,
+        required: field.isRequired || field.required || false,
         arrayConfig: field.arrayConfig ? {
           fields: (field.arrayConfig.fields || []).map((subField: any) => ({
-            id: subField.id || subField.fieldName || subField.name,
-            name: subField.fieldName || subField.name || subField.id,
-            type: subField.fieldType || subField.type || 'text'
+            id: subField.id || subField.fieldName || subField.name || `subfield_${Math.random()}`,
+            name: subField.fieldName || subField.name || subField.id || `subfield_${Math.random()}`,
+            type: subField.fieldType || subField.type || 'text',
+            required: subField.isRequired || subField.required || false
           })),
           maxItems: field.arrayConfig.maxItems || 10
         } : undefined
       }));
-
-      const extractedData = file.extracted_details || {};
-
+  
+      console.log('Transformed document fields:', documentFields);
+  
+      // Use extracted data from the file, with fallbacks
+      let extractedData = {};
+      
+      // Try multiple possible sources for extracted data
+      if (file.extracted_details && typeof file.extracted_details === 'object') {
+        extractedData = { ...file.extracted_details };
+      } else if (file.extracted_data && typeof file.extracted_data === 'object') {
+        extractedData = { ...file.extracted_data };
+      } else if (file.extraction_result && typeof file.extraction_result === 'object') {
+        extractedData = { ...file.extraction_result };
+      }
+  
+      console.log('Initial extracted data:', extractedData);
+  
+      // Ensure all fields have values in extractedData
       documentFields.forEach((field: any) => {
-        if (extractedData[field.id] === undefined && extractedData[field.name] === undefined) {
-          extractedData[field.id] = field.isArray ? [] : '';
-          extractedData[field.name] = field.isArray ? [] : '';
+        const fieldName = field.name;
+        const fieldId = field.id;
+        
+        // Check if data exists for this field (by name or id)
+        if (extractedData[fieldName] === undefined && extractedData[fieldId] === undefined) {
+          // Initialize with appropriate default value
+          const defaultValue = field.isArray ? [] : '';
+          extractedData[fieldName] = defaultValue;
+          extractedData[fieldId] = defaultValue;
+        } else if (extractedData[fieldName] === undefined && extractedData[fieldId] !== undefined) {
+          // Copy from ID to name
+          extractedData[fieldName] = extractedData[fieldId];
+        } else if (extractedData[fieldId] === undefined && extractedData[fieldName] !== undefined) {
+          // Copy from name to ID
+          extractedData[fieldId] = extractedData[fieldName];
         }
       });
-
-      setPreviewDocument({
-        file,
-        fileUrl,
-        fields: documentFields,
-        extractedData
+  
+      console.log('Final extracted data:', extractedData);
+  
+      const documentName = kycDocument.display_name || kycDocument.name || 'Document';
+      const fileName = file.file_name || file.file_path?.split('/').pop() || documentName;
+  
+      // Determine file type for proper preview
+      const getFileType = (fileName: string, mimeType?: string) => {
+        if (mimeType) {
+          if (mimeType.startsWith('image/')) return 'image';
+          if (mimeType === 'application/pdf') return 'pdf';
+        }
+        
+        if (fileName) {
+          const extension = fileName.toLowerCase().split('.').pop();
+          if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) return 'image';
+          if (extension === 'pdf') return 'pdf';
+        }
+        
+        return 'unknown';
+      };
+  
+      const fileType = getFileType(fileName, file.mime_type);
+  
+      console.log('File type determined:', {
+        fileName,
+        mimeType: file.mime_type,
+        fileType
       });
+  
+      setPreviewDocument({
+        file: {
+          ...file,
+          name: fileName,
+          type: fileType,
+          url: fileUrl
+        },
+        fileUrl,
+        fileName,
+        documentName,
+        fields: documentFields,
+        extractedData,
+        type: kycDocument.document_type || 'document'
+      });
+  
+      console.log('Document preview prepared:', {
+        documentName,
+        fieldsCount: documentFields.length,
+        extractedDataKeys: Object.keys(extractedData),
+        fileType,
+        hasFileUrl: !!fileUrl
+      });
+  
     } catch (error) {
       console.error('Error preparing document preview:', error);
-      toast({ title: 'Error', description: 'Failed to prepare document preview', variant: 'destructive' });
+      toast({ 
+        title: 'Error', 
+        description: 'Failed to prepare document preview: ' + (error?.message || 'Unknown error'), 
+        variant: 'destructive' 
+      });
     }
   };
 
