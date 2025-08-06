@@ -1370,7 +1370,7 @@ export const AutomationMappingDialog = ({
   
     return (
       <div className="rounded-md border">
-        <Table className="max-w-6xl max-h-[90vh] flex flex-col overflow-y-auto">
+        <Table className="max-w-6xl max-h-[60vh] flex flex-col overflow-y-auto">
           <TableHeader className="bg-blue-500">
             <TableRow>
               <TableHead className="w-[50px] border-r text-white">#</TableHead>
@@ -2128,7 +2128,7 @@ export const AutomationMappingDialog = ({
                 {error}
               </div>
             ) : (
-              <Tabs defaultValue="automation" className="h-full flex flex-col">
+              <Tabs defaultValue="automation" className="max-h-[100vh] flex flex-col">
                 <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="automation" className="gap-2">
                     <Settings className="h-4 w-4" />
