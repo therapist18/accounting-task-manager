@@ -2,20 +2,28 @@
 "use client"
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { toast } from "@/hooks/use-toast"
-import { Database, Edit2, FileText, Loader2, Settings, User, X, Zap, Check } from "lucide-react";
+import { Loader2, Zap, User, Database, FileText, Eye, Image as ImageIcon, Settings, Link } from 'lucide-react';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from '@/hooks/use-toast';
 import supabase from '@/lib/supabase/client';
 import ExtractionPreview from '@/components/ExtractionPreview';
 
+// Enhanced interfaces
 interface AutomationMappingDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -200,7 +208,8 @@ export const AutomationMappingDialog = ({
   allDocuments = [], // Add allDocuments prop
   stage // Add stage prop
 }: AutomationMappingDialogProps) => {
-  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false);
@@ -212,13 +221,6 @@ export const AutomationMappingDialog = ({
   const [entityAutomationMappings, setEntityAutomationMappings] = useState<EntityAutomationMapping[]>([]);
   const [selectedAutomationId, setSelectedAutomationId] = useState<string>('');
   const [previewDocument, setPreviewDocument] = useState<any>(null);
-  const [editingState, setEditingState] = useState<{
-    fieldIndex: number;
-    sourceIndex: number;
-    table: string;
-    path: string;
-    value: string;
-  } | null>(null);
   const [editingCell, setEditingCell] = useState<any>(null);
   const [editValue, setEditValue] = useState('');
 
@@ -552,32 +554,56 @@ export const AutomationMappingDialog = ({
 
   const fetchDocumentFiles = useCallback(async (individualId: string) => {
     if (!individualId || !webData.length) return;
-
+  
     // Prevent multiple simultaneous calls
     if (isLoadingDocuments) return;
-
+  
     setIsLoadingDocuments(true);
     try {
+      // Get all KYC document IDs from webData requirements
       const allKycDocumentIds = webData.flatMap(item => 
         (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
       ).filter(Boolean);
-
+  
       if (allKycDocumentIds.length === 0) {
+        console.log('No KYC document IDs found in webData requirements');
         setDocumentFiles([]);
         return;
       }
-
+  
+      console.log('Fetching documents for individual:', individualId, 'with KYC IDs:', allKycDocumentIds);
+  
+      // Fetch documents that match both the individual and the required KYC document types
       const { data, error } = await supabase
         .from('acc_portal_directors_documents')
-        .select('*')
+        .select(`
+          *,
+          kyc_document:acc_portal_kyc!document_id(
+            id,
+            name,
+            display_name,
+            document_type,
+            fields
+          )
+        `)
         .eq('director_id', individualId)
-        .in('document_id', allKycDocumentIds);
-
+        .in('document_id', allKycDocumentIds)
+        .neq('status', 'deleted'); // Exclude deleted documents
+  
       if (error) {
         console.error('Error fetching documents:', error);
         setDocumentFiles([]);
       } else {
-        setDocumentFiles(data || []);
+        console.log('Fetched documents:', data);
+        // Only include documents that have valid file paths and match our requirements
+        const validDocuments = (data || []).filter(doc => 
+          doc.file_path && 
+          doc.status !== 'deleted' &&
+          allKycDocumentIds.includes(doc.document_id)
+        );
+        
+        console.log('Valid documents after filtering:', validDocuments);
+        setDocumentFiles(validDocuments);
       }
     } catch (error) {
       console.error('Error fetching documents:', error);
@@ -891,22 +917,22 @@ export const AutomationMappingDialog = ({
 
   const saveEdit = async () => {
     if (!editingCell || !currentIndividualId) return;
-
+  
     const { table, path } = editingCell;
     setIsLoadingData(true);
-
+  
     try {
       const queryField = table === 'acc_portal_directors_documents' ? 'director_id' : 'id';
-
+  
       // Get current record
       const { data: existingData, error: fetchError } = await supabase
         .from(table)
         .select('*')
         .eq(queryField, currentIndividualId)
         .maybeSingle();
-
+  
       const updateData = updateJsonValue(existingData || {}, path, editValue);
-
+  
       if (fetchError && !existingData) {
         // Create new record
         const { error: insertError } = await supabase
@@ -931,18 +957,20 @@ export const AutomationMappingDialog = ({
         
         if (updateError) throw updateError;
       }
-
+  
+      // Refresh data after successful update
       await fetchSourceData(currentIndividualId);
+      
       toast({
         title: 'Success',
-        description: 'Field updated successfully',
+        description: `Field "${editingCell.path}" updated successfully`,
         variant: 'default',
       });
     } catch (error) {
       console.error('Error updating field:', error);
       toast({
         title: 'Error',
-        description: 'Failed to update field: ' + (error?.message || 'Unknown error'),
+        description: error instanceof Error ? error.message : 'Failed to update field',
         variant: 'destructive',
       });
     } finally {
@@ -1355,174 +1383,213 @@ export const AutomationMappingDialog = ({
     }
   };
 
-  const renderFieldsTable = () => {
-    if (!webData.length || !webData[0].fields) {
-      return (
-        <div className="text-center p-8 text-gray-500 h-full flex flex-col items-center justify-center">
-          <Database className="h-10 w-10 mb-2 text-gray-300" />
-          <p>No web data fields found for this requirement.</p>
-        </div>
-      );
-    }
-  
-    const fields = webData[0].fields;
-    
+const renderFieldsTable = () => {
+  if (!webData.length || !webData[0].fields) {
     return (
-      <div className="rounded-md border">
-        <Table className="max-w-6xl max-h-[60vh] flex flex-col overflow-y-auto">
-          <TableHeader className="bg-blue-500">
-            <TableRow>
-              <TableHead className="w-[50px] border-r text-white">#</TableHead>
-              <TableHead className="w-1/4 border-r text-white">WebData Field</TableHead>
-              <TableHead className="w-1/4 border-r text-white">Source Path</TableHead>
-              <TableHead className="w-1/4 border-r text-white">Current Value</TableHead>
-              <TableHead className="w-[150px] border-r text-white">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {fields.flatMap((field, fieldIndex) => {
-              const { sources, hasData } = getSourceInfo(field.masterFieldIds || []);
-              
-              if (sources.length === 0) {
-                return (
-                  <TableRow key={`${field.variableName || fieldIndex}-empty`}>
-                    <TableCell className="align-top border-r">{fieldIndex + 1}</TableCell>
-                    <TableCell className="align-top border-r">
-                      <div className="text-sm font-medium text-gray-900">
-                        {field.efnsDisplayName || field.name}
-                        {field.isRequired && <span className="ml-1 text-red-500">*</span>}
-                      </div>
-                      <div className="text-xs text-gray-500 font-mono mt-1">
-                        {field.variableName}
-                      </div>
-                    </TableCell>
-                    <TableCell colSpan={3} className="text-center text-gray-400">
-                      No source mapping
-                    </TableCell>
-                  </TableRow>
-                );
-              }
-              
-              return sources.map((source, sourceIndex) => {
-                const isEditing = editingState?.fieldIndex === fieldIndex && 
-                                editingState?.sourceIndex === sourceIndex;
-                const value = getSourceValue(source.table, source.path);
-                const displayValue = typeof value === 'string' && value !== 'Missing' 
-                  ? value 
-                  : <span className="text-red-600 italic">Missing</span>;
-                
-                return (
-                  <TableRow 
-                    key={`${field.variableName || fieldIndex}-${sourceIndex}`}
-                    className={sourceIndex > 0 ? 'bg-gray-50' : ''}
-                  >
-                    {sourceIndex === 0 && (
-                      <TableCell 
-                        rowSpan={sources.length} 
-                        className="align-top border-r"
-                      >
-                        {fieldIndex + 1}
-                      </TableCell>
-                    )}
-                    {sourceIndex === 0 && (
-                      <TableCell 
-                        rowSpan={sources.length} 
-                        className="align-top border-r"
-                      >
-                        <div className="text-sm font-medium text-gray-900">
-                          {field.efnsDisplayName || field.name}
-                          {field.isRequired && <span className="ml-1 text-red-500">*</span>}
-                        </div>
-                        <div className="text-xs text-gray-500 font-mono mt-1">
-                          {field.variableName}
-                        </div>
-                        {sources.length > 1 && sourceIndex === 0 && (
-                          <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700 mt-1">
-                            {sources.length} sources
-                          </Badge>
-                        )}
-                      </TableCell>
-                    )}
-                    <TableCell className="align-top border-r">
-                      <div className="font-mono text-xs">
-                        <div className="font-medium text-gray-800">{source.fieldLabel}</div>
-                        <div className="text-blue-600 break-all">{source.source}</div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="align-top border-r">
-                      {isEditing ? (
-                        <div className="flex items-center space-x-2">
-                          <Input
-                            autoFocus
-                            value={editingState?.value || ''}
-                            onChange={(e) => setEditingState({
-                              ...editingState!,
-                              value: e.target.value
-                            })}
-                            onKeyDown={handleKeyDown}
-                            onBlur={saveEdit}
-                            className="h-8 text-sm"
-                            placeholder="Enter value"
-                          />
-                        </div>
-                      ) : (
-                        <div 
-                          className={`p-1 rounded ${currentIndividualId ? 'cursor-pointer hover:bg-gray-100' : ''}`}
-                          onClick={() => {
-                            if (currentIndividualId) {
-                              startEditing(fieldIndex, sourceIndex, source.table, source.path, value === 'Missing' ? '' : value);
-                            }
-                          }}
-                        >
-                          {displayValue}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="align-top border-r">
-                      {!isEditing && currentIndividualId && (
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => {
-                            startEditing(fieldIndex, sourceIndex, source.table, source.path, value === 'Missing' ? '' : value);
-                          }}
-                          className="h-8 px-2 text-xs"
-                        >
-                          <Edit2 className="h-3.5 w-3.5 mr-1" />
-                          Edit
-                        </Button>
-                      )}
-                      {isEditing && (
-                        <div className="flex space-x-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            onClick={saveEdit}
-                            className="h-8 px-2 text-xs"
-                          >
-                            <Check className="h-3.5 w-3.5 mr-1" />
-                            Save
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={() => setEditingState(null)}
-                            className="h-8 px-2 text-xs"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              });
-            })}
-          </TableBody>
-        </Table>
+      <div className="text-center p-8 text-gray-500 h-full flex flex-col items-center justify-center">
+        <Database className="h-10 w-10 mb-2 text-gray-300" />
+        <p>No web data fields found for this requirement.</p>
       </div>
     );
-  };
+  }
+
+  const fields = webData[0].fields;
+
+  return (
+    <div className="rounded-md border">
+      <Table className="max-w-6xl max-h-[60vh] flex flex-col overflow-y-auto">
+        <TableHeader className="bg-blue-500">
+          <TableRow>
+            <TableHead className="w-[50px] border-r text-white">#</TableHead>
+            <TableHead className="w-1/4 border-r text-white">WebData Field</TableHead>
+            <TableHead className="w-1/4 border-r text-white">Source Path(s)</TableHead>
+            <TableHead className="w-1/4 border-r text-white">Current Data</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {fields.map((field, index) => {
+            const { sources, hasData } = getSourceInfo(field.masterFieldIds || []);
+
+            return (
+              <TableRow key={field.variableName || index}>
+                <TableCell className="align-top border-r w-[50px]">{index + 1}</TableCell>
+                <TableCell className="align-top border-r w-1/4">
+                  <div className="text-sm font-medium text-gray-900">
+                    {field.efnsDisplayName || field.name}
+                    {field.isRequired && <span className="ml-1 text-red-500">*</span>}
+                  </div>
+                  <div className="text-xs text-gray-500 font-mono mt-1">
+                    {field.variableName}
+                  </div>
+                  <div className="flex items-center gap-1 mt-1">
+                    <Badge variant="outline" className="text-xs">
+                      {field.fieldType}
+                    </Badge>
+                    {sources.length > 1 && (
+                      <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
+                        Multi-Source ({sources.length})
+                      </Badge>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell className="align-top border-r w-1/4">
+                  {hasData ? (
+                    <div className="space-y-2">
+                      {sources.map((sourceInfo, idx) => (
+                        <div key={idx} className="font-mono text-xs">
+                          <span className="font-semibold text-gray-800">{sourceInfo.fieldLabel}</span>
+                          <span className="text-gray-400 mx-1">→</span>
+                          <span className="text-blue-600">{sourceInfo.source}</span>
+                        </div>
+                      ))}
+                      {sources.length > 1 && (
+                        <div className="text-xs text-purple-600 font-medium italic mt-2 p-1 bg-purple-50 rounded">
+                          ↗ Values will be merged: "{sources.map(s => s.fieldLabel).join(' + ')}"
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-400">No source linked</span>
+                  )}
+                </TableCell>
+                <TableCell className="align-top border-r w-1/4">
+                  {currentIndividualId ? (
+                    hasData ? (
+                      sources.length === 1 ? (
+                        // Single source - show normally with inline editing
+                        <div className="space-y-2 text-sm">
+                          {sources.map((sourceInfo, idx) => {
+                            const value = getSourceValue(sourceInfo.table, sourceInfo.path);
+                            const isEditing = editingCell?.rowIndex === index && editingCell?.sourceIndex === idx;
+                            
+                            return (
+                              <div key={idx} className="p-1 rounded hover:bg-gray-100">
+                                {isEditing ? (
+                                  <div className="flex items-center space-x-2">
+                                    <Input
+                                      autoFocus
+                                      value={editValue}
+                                      onChange={(e) => setEditValue(e.target.value)}
+                                      onKeyDown={handleKeyDown}
+                                      onBlur={saveEdit}
+                                      className="h-8 text-sm"
+                                      placeholder={sourceInfo.fieldLabel}
+                                    />
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        saveEdit();
+                                      }}
+                                    >
+                                      Save
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <div 
+                                    className="cursor-pointer"
+                                    onClick={() => startEditing(index, idx, sourceInfo.table, sourceInfo.path, value)}
+                                    title="Click to edit"
+                                  >
+                                    {typeof value === 'string' && value !== 'Missing' ? (
+                                      <span className="text-green-700 font-medium">{value}</span>
+                                    ) : (
+                                      <span className="text-red-600 italic">Missing</span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        // Multi-source - show individual values with separate editing
+                        <div className="space-y-2 text-sm">
+                          {/* Show merged value at top */}
+                          <div className="border border-purple-200 bg-purple-50 p-2 rounded">
+                            <div className="text-xs font-medium text-purple-800 mb-1">Merged Value:</div>
+                            {(() => {
+                              const mergedValue = getSourceValueMerged(sources);
+                              return (
+                                <div className="font-medium text-purple-900">
+                                  {mergedValue !== 'Missing' ? (
+                                    <span className="text-purple-700">{mergedValue}</span>
+                                  ) : (
+                                    <span className="text-red-600 italic">No valid data</span>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                          
+                          {/* Show individual sources with separate editing */}
+                          <div className="space-y-1">
+                            <div className="text-xs font-medium text-gray-600">Individual Sources (click to edit):</div>
+                            {sources.map((sourceInfo, idx) => {
+                              const value = getSourceValue(sourceInfo.table, sourceInfo.path);
+                              const isEditing = editingCell?.rowIndex === index && editingCell?.sourceIndex === idx;
+                              
+                              return (
+                                <div key={idx} className="text-xs p-1 rounded bg-gray-50 hover:bg-gray-100">
+                                  <span className="font-medium text-gray-700">{sourceInfo.fieldLabel}:</span>
+                                  {isEditing ? (
+                                    <div className="flex items-center space-x-2 mt-1">
+                                      <Input
+                                        autoFocus
+                                        value={editValue}
+                                        onChange={(e) => setEditValue(e.target.value)}
+                                        onKeyDown={handleKeyDown}
+                                        onBlur={saveEdit}
+                                        className="h-7 text-xs"
+                                        placeholder={sourceInfo.fieldLabel}
+                                      />
+                                      <Button 
+                                        variant="ghost" 
+                                        size="sm" 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          saveEdit();
+                                        }}
+                                        className="h-7 px-2 text-xs"
+                                      >
+                                        Save
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <div
+                                      className="ml-1 cursor-pointer inline-block"
+                                      onClick={() => startEditing(index, idx, sourceInfo.table, sourceInfo.path, value)}
+                                      title={`Click to edit ${sourceInfo.fieldLabel}`}
+                                    >
+                                      {typeof value === 'string' && value !== 'Missing' ? (
+                                        <span className="text-green-700 hover:bg-green-100 px-1 rounded">{value}</span>
+                                      ) : (
+                                        <span className="text-red-600 italic hover:bg-red-100 px-1 rounded">Missing</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )
+                    ) : (
+                      <span className="text-xs text-gray-400">No mapping</span>
+                    )
+                  ) : (
+                    <span className="text-xs text-gray-400">Enter ID</span>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+};
 
   const renderAutomationConfig = () => {
     if (entityAutomationMappings.length === 0) {
@@ -1546,10 +1613,7 @@ export const AutomationMappingDialog = ({
               <Link className="h-5 w-5 text-blue-600" />
               WebData Automation Configuration
             </CardTitle>
-            <CardDescription>
-              Select which automation to run from the configured webData items.
-            </CardDescription>
-          </CardHeader>
+                      </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -1595,37 +1659,6 @@ export const AutomationMappingDialog = ({
                     {selectedMapping.automation.webhook_url}
                   </div>
                 </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-700">Method</Label>
-                  <div className="p-2 bg-gray-50 rounded border text-sm">
-                    <Badge variant="outline">
-                      {selectedMapping.automation.webhook_method || 'POST'}
-                    </Badge>
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-700">Type</Label>
-                  <div className="p-2 bg-gray-50 rounded border text-sm">
-                    <Badge variant="outline">
-                      {selectedMapping.automation.webhook_type || 'Standard'}
-                    </Badge>
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-700">Status</Label>
-                  <div className="p-2 bg-gray-50 rounded border text-sm">
-                    <Badge variant={selectedMapping.automation.is_active ? "default" : "destructive"}>
-                      {selectedMapping.automation.is_active ? 'Active' : 'Inactive'}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="md:col-span-2">
-                  <Label className="text-sm font-medium text-gray-700">Description</Label>
-                  <div className="p-2 bg-gray-50 rounded border text-sm text-gray-600">
-                    {selectedMapping.automation.description || 'No description available'}
-                  </div>
-                </div>
-                
                 {/* Login Configuration if available */}
                 {selectedMapping.automation.login && (
                   <div className="md:col-span-2">
@@ -1655,63 +1688,7 @@ export const AutomationMappingDialog = ({
                   </div>
                 )}
 
-                {/* Enhanced Document URL Display */}
-                <div className="md:col-span-2">
-                  <Label className="text-sm font-medium text-gray-700">Document URL</Label>
-                  <div className="p-2 bg-gray-50 rounded border">
-                    {(() => {
-                      const documentUrl = getDocumentUrlWithFallback();
-                      if (documentUrl) {
-                        // Check which document is being used
-                        const usedDocument = documentFiles.find(doc => {
-                          const testUrl = buildFileUrl(doc);
-                          return testUrl === documentUrl;
-                        });
-
-                        return (
-                          <div className="space-y-2">
-                            <div className="text-xs font-mono text-gray-600 break-all">{documentUrl}</div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <Badge variant="default" className="text-xs">
-                                Document Available
-                              </Badge>
-                              {usedDocument && (
-                                <Badge variant="outline" className="text-xs">
-                                  KYC ID: {usedDocument.document_id}
-                                </Badge>
-                              )}
-                              {stage && (
-                                <span className="text-xs text-gray-500">
-                                  Target stage: {stage.name || stage.id}
-                                </span>
-                              )}
                             </div>
-                            {usedDocument && (
-                              <div className="text-xs text-blue-600">
-                                Using: {usedDocument.file_name || usedDocument.file_path?.split('/').pop()}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      } else {
-                        return (
-                          <div className="space-y-1">
-                            <div className="text-xs text-gray-500 italic">No document available for automation</div>
-                            <Badge variant="outline" className="text-xs">
-                              No Document
-                            </Badge>
-                            <div className="text-xs text-amber-600 mt-1">
-                              Upload documents matching KYC ID: {webData.flatMap(item => 
-                                (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
-                              ).filter(Boolean).join(', ')}
-                            </div>
-                          </div>
-                        );
-                      }
-                    })()}
-                  </div>
-                </div>
-              </div>
             )}
           </CardContent>
         </Card>
@@ -1804,145 +1781,167 @@ export const AutomationMappingDialog = ({
         </div>
       );
     }
-
+  
     if (!documentFiles.length) {
+      const requiredKycIds = webData.flatMap(item => 
+        (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
+      ).filter(Boolean);
+  
       return (
         <div className="text-center p-8 text-gray-500">
           <FileText className="h-10 w-10 mb-2 text-gray-300 mx-auto" />
           <p>No documents found for this individual.</p>
-          {!currentIndividualId && (
+          {!currentIndividualId ? (
             <p className="text-sm mt-1">Enter an Individual ID to view documents.</p>
+          ) : (
+            <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg text-left">
+              <p className="text-sm font-medium text-amber-800 mb-2">Required Documents:</p>
+              <div className="space-y-1">
+                {requiredKycIds.map(kycId => {
+                  const webDataDoc = webData.flatMap(item => item.kycDocsUpload || [])
+                    .find(doc => doc.kycDocumentId === kycId);
+                  return (
+                    <div key={kycId} className="text-xs text-amber-700">
+                      • KYC ID: {kycId} ({webDataDoc?.entityType || 'Document'})
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-amber-600 mt-2">
+                Upload documents with these KYC IDs for individual {currentIndividualId}
+              </p>
+            </div>
           )}
         </div>
       );
     }
-
+  
     return (
       <div className="space-y-4">
-        {/* Show which documents are being used */}
+        {/* Header info */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h4 className="font-medium text-blue-800 mb-2">Documents for WebData Requirements</h4>
+          <h4 className="font-medium text-blue-800 mb-2 flex items-center gap-2">
+            <Database className="h-4 w-4" />
+            Documents for Individual {currentIndividualId}
+          </h4>
           <p className="text-sm text-blue-700">
-            Showing documents that match the KYC requirements for this automation: 
-            {webData.flatMap(item => 
-              (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
-            ).filter(Boolean).join(', ')}
+            Showing {documentFiles.length} document{documentFiles.length !== 1 ? 's' : ''} matching WebData requirements
           </p>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {webData.flatMap(item => item.kycDocsUpload || []).map(doc => (
+              <Badge key={doc.kycDocumentId} variant="outline" className="text-xs">
+                {doc.entityType}: {doc.kycDocumentId.slice(0, 8)}...
+              </Badge>
+            ))}
+          </div>
         </div>
+  
+         {/* Enhanced Document URL Display */}
+         <div className="md:col-span-2">
+                  <Label className="text-sm font-medium text-gray-700">Document URL</Label>
+                  <div className="p-2 bg-gray-50 rounded border">
+                    {(() => {
+                      const documentUrl = getDocumentUrlWithFallback();
+                      if (documentUrl) {
+                        // Check which document is being used
+                        const usedDocument = documentFiles.find(doc => {
+                          const testUrl = buildFileUrl(doc);
+                          return testUrl === documentUrl;
+                        });
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {documentFiles.map((file) => {
-            const kycDocConfig = webData.flatMap(item => item.kycDocsUpload || [])
-              .find(doc => doc.kycDocumentId === file.document_id);
-
-            // Check if this document will be used for automation
-            const isAutomationDocument = webData.flatMap(item => 
-              (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
-            ).includes(file.document_id);
-
-            return (
-              <Card key={file.id} className={`cursor-pointer hover:shadow-md transition-shadow ${
-                isAutomationDocument ? 'ring-2 ring-blue-500 bg-blue-50' : ''
-              }`}>
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {file.mime_type?.startsWith('image/') ? (
-                        <ImageIcon className="h-4 w-4" />
-                      ) : (
-                        <FileText className="h-4 w-4" />
-                      )}
-                      <CardTitle className="text-sm font-medium truncate">
-                        {file.file_name || 'Untitled Document'}
-                      </CardTitle>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <Badge variant="outline" className="text-xs">
-                        {file.mime_type?.split('/')[1]?.toUpperCase() || 'FILE'}
-                      </Badge>
-                      {isAutomationDocument && (
-                        <Badge variant="default" className="text-xs bg-blue-600">
-                          Automation Doc
-                        </Badge>
-                      )}
-                    </div>
+                        return (
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-start gap-2">
+                              <div className="text-xs font-mono text-gray-600 break-all flex-1">{documentUrl}</div>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="shrink-0"
+                                onClick={() => setPreviewDocument({
+                                  file_name: usedDocument.file_name || usedDocument.file_path?.split('/').pop() || 'Document',
+                                  fileUrl: documentUrl,
+                                  extractedData: {}
+                                })}
+                              >
+                                <Eye className="h-4 w-4 mr-1" />
+                                Preview
+                              </Button>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge variant="default" className="text-xs">
+                                Document Available
+                              </Badge>
+                              {usedDocument && (
+                                <Badge variant="outline" className="text-xs">
+                                  KYC ID: {usedDocument.document_id}
+                                </Badge>
+                              )}
+                              {stage && (
+                                <span className="text-xs text-gray-500">
+                                  Target stage: {stage.name || stage.id}
+                                </span>
+                              )}
+                            </div>
+                            {usedDocument && (
+                              <div className="text-xs text-blue-600">
+                                Using: {usedDocument.file_name || usedDocument.file_path?.split('/').pop()}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div className="space-y-1">
+                            <div className="text-xs text-gray-500 italic">No document available for automation</div>
+                            <Badge variant="outline" className="text-xs">
+                              No Document
+                            </Badge>
+                            <div className="text-xs text-amber-600 mt-1">
+                              Upload documents matching KYC ID: {webData.flatMap(item => 
+                                (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
+                              ).filter(Boolean).join(', ')}
+                            </div>
+                          </div>
+                        );
+                      }
+                    })()}
                   </div>
-                  <CardDescription className="text-xs">
-                    KYC ID: {file.document_id}
-                    <br />
-                    {kycDocConfig?.entityType || 'Document'} • {Math.round((file.file_size || 0) / 1024)} KB
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs text-gray-500">
-                      Uploaded: {new Date(file.uploaded_at || file.created_at).toLocaleDateString()}
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDocumentPreview(file)}
-                      className="gap-1"
-                    >
-                      <Eye className="h-3 w-3" />
-                      Preview
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                </div>
       </div>
     );
   };
 
-  const handleDocumentPreview = async (file: any) => {
+  const handleDocumentPreview = (file: any) => {
     try {
-      // Build the file URL directly from the file data
-      const bucketName = 'kyc-documents';
-      const filePath = file.file_path?.startsWith(bucketName)
-        ? file.file_path
-        : `${bucketName}/${file.file_path}`;
-      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+      const kycDocument = file.kyc_document;
   
-      console.log('Previewing document:', {
-        fileId: file.id,
-        documentId: file.document_id,
-        filePath: file.file_path,
-        fileUrl,
-        mimeType: file.mime_type,
-        fileName: file.file_name
-      });
-  
-      // Get KYC document configuration
-      const { data: kycDocument, error: kycError } = await supabase
-        .from('acc_portal_kyc')
-        .select('*')
-        .eq('id', file.document_id)
-        .single();
-  
-      if (kycError || !kycDocument) {
-        console.error('Failed to load KYC document:', kycError);
-        toast({ 
-          title: 'Error', 
-          description: 'Failed to load document configuration', 
-          variant: 'destructive' 
+      if (!kycDocument || !file.file_path) {
+        console.error('Error preparing preview: Missing kyc_document or file_path in the provided file object.', file);
+        toast({
+          title: 'Preview Error',
+          description: 'Cannot preview the document because essential configuration or file path is missing.',
+          variant: 'destructive',
         });
         return;
       }
   
-      console.log('KYC Document loaded:', {
-        id: kycDocument.id,
-        name: kycDocument.name,
-        display_name: kycDocument.display_name,
-        fields: kycDocument.fields,
-        document_type: kycDocument.document_type
+      // Build the file URL directly from the file data
+      const bucketName = 'kyc-documents';
+      const filePath = file.file_path.startsWith(bucketName)
+        ? file.file_path
+        : `${bucketName}/${file.file_path}`;
+      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+  
+      console.log('Previewing document with pre-fetched data:', {
+        fileId: file.id,
+        documentId: file.document_id,
+        filePath: file.file_path,
+        fileUrl,
+        kycDocumentId: kycDocument.id,
       });
   
       // Transform KYC fields to ExtractionPreview format
-      const kycFields = kycDocument.fields || [];
-      const documentFields = kycFields.map((field: any) => ({
+      const documentFields = (kycDocument.fields || []).map((field: any) => ({
         id: field.id || field.fieldName || field.name || `field_${Math.random()}`,
         name: field.fieldName || field.name || field.id || `field_${Math.random()}`,
         type: field.fieldType || field.type || 'text',
@@ -1953,18 +1952,14 @@ export const AutomationMappingDialog = ({
             id: subField.id || subField.fieldName || subField.name || `subfield_${Math.random()}`,
             name: subField.fieldName || subField.name || subField.id || `subfield_${Math.random()}`,
             type: subField.fieldType || subField.type || 'text',
-            required: subField.isRequired || subField.required || false
+            required: subField.isRequired || subField.required || false,
           })),
-          maxItems: field.arrayConfig.maxItems || 10
-        } : undefined
+          maxItems: field.arrayConfig.maxItems || 10,
+        } : undefined,
       }));
-  
-      console.log('Transformed document fields:', documentFields);
   
       // Use extracted data from the file, with fallbacks
       let extractedData = {};
-      
-      // Try multiple possible sources for extracted data
       if (file.extracted_details && typeof file.extracted_details === 'object') {
         extractedData = { ...file.extracted_details };
       } else if (file.extracted_data && typeof file.extracted_data === 'object') {
@@ -1973,29 +1968,13 @@ export const AutomationMappingDialog = ({
         extractedData = { ...file.extraction_result };
       }
   
-      console.log('Initial extracted data:', extractedData);
-  
-      // Ensure all fields have values in extractedData
+      // Ensure all fields have values in extractedData for the form
       documentFields.forEach((field: any) => {
         const fieldName = field.name;
-        const fieldId = field.id;
-        
-        // Check if data exists for this field (by name or id)
-        if (extractedData[fieldName] === undefined && extractedData[fieldId] === undefined) {
-          // Initialize with appropriate default value
-          const defaultValue = field.isArray ? [] : '';
-          extractedData[fieldName] = defaultValue;
-          extractedData[fieldId] = defaultValue;
-        } else if (extractedData[fieldName] === undefined && extractedData[fieldId] !== undefined) {
-          // Copy from ID to name
-          extractedData[fieldName] = extractedData[fieldId];
-        } else if (extractedData[fieldId] === undefined && extractedData[fieldName] !== undefined) {
-          // Copy from name to ID
-          extractedData[fieldId] = extractedData[fieldName];
+        if (extractedData[fieldName] === undefined) {
+          extractedData[fieldName] = field.isArray ? [] : '';
         }
       });
-  
-      console.log('Final extracted data:', extractedData);
   
       const documentName = kycDocument.display_name || kycDocument.name || 'Document';
       const fileName = file.file_name || file.file_path?.split('/').pop() || documentName;
@@ -2006,53 +1985,29 @@ export const AutomationMappingDialog = ({
           if (mimeType.startsWith('image/')) return 'image';
           if (mimeType === 'application/pdf') return 'pdf';
         }
-        
-        if (fileName) {
-          const extension = fileName.toLowerCase().split('.').pop();
-          if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) return 'image';
-          if (extension === 'pdf') return 'pdf';
-        }
-        
+        const extension = fileName.toLowerCase().split('.').pop();
+        if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) return 'image';
+        if (extension === 'pdf') return 'pdf';
         return 'unknown';
       };
-  
       const fileType = getFileType(fileName, file.mime_type);
   
-      console.log('File type determined:', {
-        fileName,
-        mimeType: file.mime_type,
-        fileType
-      });
-  
       setPreviewDocument({
-        file: {
-          ...file,
-          name: fileName,
-          type: fileType,
-          url: fileUrl
-        },
+        file: { ...file, name: fileName, type: fileType, url: fileUrl },
         fileUrl,
         fileName,
         documentName,
         fields: documentFields,
         extractedData,
-        type: kycDocument.document_type || 'document'
-      });
-  
-      console.log('Document preview prepared:', {
-        documentName,
-        fieldsCount: documentFields.length,
-        extractedDataKeys: Object.keys(extractedData),
-        fileType,
-        hasFileUrl: !!fileUrl
+        type: kycDocument.document_type || 'document',
       });
   
     } catch (error) {
       console.error('Error preparing document preview:', error);
-      toast({ 
-        title: 'Error', 
-        description: 'Failed to prepare document preview: ' + (error?.message || 'Unknown error'), 
-        variant: 'destructive' 
+      toast({
+        title: 'Error',
+        description: 'Failed to prepare document preview: ' + (error?.message || 'Unknown error'),
+        variant: 'destructive',
       });
     }
   };
@@ -2172,70 +2127,32 @@ export const AutomationMappingDialog = ({
       </Dialog>
 
       {/* Document Preview Dialog */}
-      {previewDocument && (
-        <Dialog open={!!previewDocument} onOpenChange={() => setPreviewDocument(null)}>
-          <DialogContent className="max-w-[95vw] max-h-[95vh] w-full h-full p-0">
-            <DialogHeader className="p-6 pb-0">
-              <DialogTitle className="flex items-center gap-2">
-                {previewDocument.file.mime_type?.startsWith('image/') ? (
-                  <ImageIcon className="h-4 w-4" />
-                ) : (
-                  <FileText className="h-4 w-4" />
-                )}
-                {previewDocument.file.file_name || 'Document Preview'}
-                <Badge variant="outline" className="ml-2">
-                  {previewDocument.file.mime_type?.split('/')[1]?.toUpperCase() || 'FILE'}
-                </Badge>
-              </DialogTitle>
-              <DialogDescription>
-                Review the document and its extracted data (Individual ID: {currentIndividualId})
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex-1 overflow-hidden p-6 pt-2">
-              <ExtractionPreview  
-                documentName={previewDocument.file.file_name || 'Document'}
-                extractedData={previewDocument.extractedData}
-                fields={previewDocument.fields}
+      <Dialog open={!!previewDocument} onOpenChange={(open) => !open && setPreviewDocument(null)}>
+        <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Document Preview</DialogTitle>
+            <DialogDescription>
+              {previewDocument?.file_name || 'Document'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 overflow-auto">
+            {previewDocument && (
+              <ExtractionPreview
+                documentName={previewDocument.file_name}
+                extractedData={previewDocument.extractedData || {}}
                 fileUrl={previewDocument.fileUrl}
-                fileName={previewDocument.file.file_name}
+                fileName={previewDocument.file_name}
                 viewMode={true}
-                showSaveButton={false}
-                documentId={previewDocument.file.id}
-                onClose={() => setPreviewDocument(null)}
-                onDataChange={(fieldName, value) => {
-                  console.log('Field changed in preview:', fieldName, value);
-                }}
-                onSave={(updatedData) => {
-                  console.log('Document data saved:', updatedData);
-                  setPreviewDocument(null);
-                  toast({ 
-                    title: "Success", 
-                    description: "Document details updated successfully." 
-                  });
-                }}
-                getStylesByType={(type) => ({
-                  getBgColor: () => 'bg-primary',
-                  getTextColor: () => 'text-primary-foreground',
-                  getBorderColor: () => 'border-primary',
-                  getButtonStyle: () => 'bg-primary hover:bg-primary/90 text-primary-foreground'
-                })}
               />
-            </div>
-            <div className="p-6 pt-0 border-t">
-              <div className="flex items-center justify-between w-full">
-                <div className="text-sm text-gray-500">
-                  Document ID: {previewDocument.file.document_id} | 
-                  Size: {Math.round(previewDocument.file.file_size / 1024)} KB |
-                  Uploaded: {new Date(previewDocument.file.uploaded_at).toLocaleDateString()}
-                </div>
-                <Button variant="outline" onClick={() => setPreviewDocument(null)}>
-                  Close Preview
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreviewDocument(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };
