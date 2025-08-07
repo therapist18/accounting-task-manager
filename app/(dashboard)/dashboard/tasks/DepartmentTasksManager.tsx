@@ -2522,7 +2522,6 @@ export default function DepartmentTasksManager({
                             enhancedTasksData={enhancedTasksData}
                             getCellContent={getCellContentWrapper}
                             getSortedTasks={getSortedTasks}
-                            isStageApplicableToTask={isStageApplicableToTask}
                             getDocumentForTaskStage={getDocumentForTaskStage}
                             getTaskHierarchy={getTaskHierarchy}
                             getStaffName={getStaffName}

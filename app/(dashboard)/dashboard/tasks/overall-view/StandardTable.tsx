@@ -33,7 +33,6 @@ interface StandardTableProps {
   enhancedTasksData: Map<string, any>
   getCellContent: (task: any, headerId: string) => any
   getSortedTasks: (tasks: any[]) => any[]
-  isStageApplicableToTask: (stage: any, task: any) => boolean
   getDocumentForTaskStage: (task: any, stage: any) => any
   getTaskHierarchy: (task: any) => any
   getStaffName: (userId: any) => string
@@ -72,7 +71,6 @@ export const StandardTable: React.FC<StandardTableProps> = ({
   enhancedTasksData,
   getCellContent,
   getSortedTasks,
-  isStageApplicableToTask,
   getDocumentForTaskStage,
   getTaskHierarchy,
   getStaffName,
@@ -113,9 +111,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
   );
 
   const totalStageColumns = visibleStages.reduce((total, stage) => {
-    if (!isStageApplicableToTask(stage, tasks[0])) {
-      return total + 1;
-    }
+    // Simple count - let EditableStageCell handle applicability
     if (expandedStages.has(stage.id) && stage.documents && stage.documents.length > 0) {
       return total + stage.documents.reduce((docTotal, doc) => {
         if (expandedDocuments.has(doc.id) && doc.kycId && kycFieldsMap.has(doc.kycId)) {
@@ -141,6 +137,57 @@ export const StandardTable: React.FC<StandardTableProps> = ({
       </TableHead>
     )
   }
+
+  // Enhanced renderStageCell function that mirrors EnhancedTable's approach
+  const renderStageCell = useCallback((stage: any, task: any, isExpanded = false, document = null, field = null) => {
+    if (field) {
+      // Field-level rendering
+      const linkedDocumentForType = getDocumentForTaskStage(task, { ...stage, documents: [document] });
+      const isOldDoc = linkedDocumentForType && task.created_at && isDocumentOlderThanTask(linkedDocumentForType.created_at, task.created_at);
+
+      return (
+        <TableCell key={`${field.id || field.fieldName}`} className="border-b border-r border-slate-200 p-1 align-middle">
+          <DocumentFieldCell document={linkedDocumentForType} field={field} isOldDocument={isOldDoc} />
+        </TableCell>
+      )
+    }
+
+    if (document && !isExpanded) {
+      // Document-level rendering (not expanded to fields)
+      return (
+        <TableCell key={`${document.id}`} className="border-b border-r border-slate-200 p-1 align-middle">
+          <EditableStageCell 
+            stage={{ ...stage, documents: [document] }} 
+            task={task} 
+            value={task.stages?.[stage.id]} 
+            allDocuments={allDocuments} 
+            onDocumentUpload={handleStageDocumentUpload} 
+            onShowDocuments={handleViewDocument} 
+            getKycFields={getKycFields} 
+            onSave={enhancedHandleStageStatusSave}
+            isDocumentRow={true}
+            documentData={document}
+          />
+        </TableCell>
+      )
+    }
+
+    // Stage-level rendering (no documents or collapsed)
+    return (
+      <TableCell key={stage.id} className="border-b border-r border-slate-200 p-1 align-middle">
+        <EditableStageCell
+          stage={stage}
+          task={task}
+          value={task.stages?.[stage.id]}
+          allDocuments={allDocuments}
+          onDocumentUpload={handleStageDocumentUpload}
+          onShowDocuments={handleViewDocument}
+          getKycFields={getKycFields}
+          onSave={enhancedHandleStageStatusSave}
+        />
+      </TableCell>
+    )
+  }, [allDocuments, handleStageDocumentUpload, handleViewDocument, getKycFields, enhancedHandleStageStatusSave, getDocumentForTaskStage]);
 
   return (
     <div className="border border-slate-300 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 200px)' }}>
@@ -182,10 +229,8 @@ export const StandardTable: React.FC<StandardTableProps> = ({
               return stage.documents.map(doc => {
                 const kycData = kycDocuments.get(doc.kycId);
                 const docDisplayName = kycData?.display_name || kycData?.name || doc.display_name || 'Document';
-                const isOldDoc = false;
-                const hasIndicator = false;
 
-                if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0 || hasIndicator || isOldDoc) {
+                if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0) {
                   return <TableHead key={`subhead-doc-${doc.id}`} className={subHeaderBaseClasses}><div className="flex items-center justify-center gap-1">{docDisplayName} <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-blue-100 hover:bg-blue-600" onClick={() => toggleDocumentExpansion(doc.id)}><Plus className="h-3 w-3" /></Button></div></TableHead>
                 }
 
@@ -223,41 +268,31 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                         </TableCell>
                       );
                     })}
-                    {/* STAGE CELLS - ALWAYS USE EditableStageCell */}
+                    
+                    {/* STAGE CELLS - Enhanced to match EnhancedTable logic */}
                     {visibleStages.map(stage => {
-                      if (!isStageApplicableToTask(stage, task)) {
-                        return <TableCell key={`${stage.id}-na`} className="border-b border-r border-slate-200 text-center text-slate-400 italic text-sm align-middle">N/A</TableCell>
-                      }
-
                       if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
-                        return (
-                          <TableCell key={stage.id} className="border-b border-r border-slate-200 p-1 align-middle">
-                            <EditableStageCell stage={stage} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={handleViewDocument} getKycFields={getKycFields} onSave={enhancedHandleStageStatusSave}/>
-                          </TableCell>
-                        )
+                        // Simple stage cell - let EditableStageCell handle applicability
+                        return renderStageCell(stage, task);
                       }
 
+                      // Expanded stage with documents
                       return stage.documents.map(doc => {
                         const linkedDocumentForType = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
                         const isOldDoc = linkedDocumentForType && task.created_at && isDocumentOlderThanTask(linkedDocumentForType.created_at, task.created_at);
                         const hasIndicator = linkedDocumentForType?.indicator === true;
 
                         if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0 || hasIndicator || isOldDoc) {
-                          return (
-                            <TableCell key={`${doc.id}`} className="border-b border-r border-slate-200 p-1 align-middle">
-                              <EditableStageCell stage={{ ...stage, documents: [doc] }} task={task} value={task.stages?.[stage.id]} allDocuments={allDocuments} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={handleViewDocument} getKycFields={getKycFields} onSave={enhancedHandleStageStatusSave}/>
-                            </TableCell>
-                          )
+                          // Document-level cell
+                          return renderStageCell(stage, task, false, doc);
                         } else {
+                          // Field-level cells
                           const kycFields = kycFieldsMap.get(doc.kycId) || [];
-                          return kycFields.map(field => (
-                            <TableCell key={`${field.id || field.fieldName}`} className="border-b border-r border-slate-200 p-1 align-middle">
-                              <DocumentFieldCell document={linkedDocumentForType} field={field} isOldDocument={isOldDoc} />
-                            </TableCell>
-                          ))
+                          return kycFields.map(field => renderStageCell(stage, task, true, doc, field));
                         }
-                      }).flat()
+                      }).flat();
                     })}
+
                     {/* ACTIONS CELL */}
                     <TableCell className="text-center text-sm p-2 align-middle sticky right-0 bg-white group-hover:bg-slate-50/70 border-b border-l border-slate-200 transition-colors duration-150">
                       <div className="flex items-center justify-center gap-1">
@@ -314,22 +349,34 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                             </TableCell>
                           );
                         })}
-                        {/* STAGE CELLS FOR DEPENDANTS - Show N/A */}
+                        
+                        {/* STAGE CELLS FOR DEPENDANTS - Show N/A or use EditableStageCell to handle logic */}
                         {visibleStages.map(stage => {
                           if (!expandedStages.has(stage.id) || !stage.documents || stage.documents.length === 0) {
-                            return <TableCell key={`${stage.id}-dep-na`} className="border-b border-r border-slate-200 text-center text-slate-400 italic text-sm align-middle">N/A</TableCell>
+                            return (
+                              <TableCell key={`${stage.id}-dep-na`} className="border-b border-r border-slate-200 text-center text-slate-400 italic text-sm align-middle">
+                                N/A
+                              </TableCell>
+                            );
                           }
                           return stage.documents.map(doc => {
                             if (!expandedDocuments.has(doc.id) || !doc.kycId || !kycFieldsMap.has(doc.kycId) || kycFieldsMap.get(doc.kycId).length === 0) {
-                              return <TableCell key={`${doc.id}-dep-na`} className="border-b border-r border-slate-200 text-center text-slate-400 italic text-sm align-middle">N/A</TableCell>
+                              return (
+                                <TableCell key={`${doc.id}-dep-na`} className="border-b border-r border-slate-200 text-center text-slate-400 italic text-sm align-middle">
+                                  N/A
+                                </TableCell>
+                              );
                             } else {
                               const kycFields = kycFieldsMap.get(doc.kycId) || [];
                               return kycFields.map(field => (
-                                <TableCell key={`${field.id || field.fieldName}-dep-na`} className="border-b border-r border-slate-200 text-center text-slate-400 italic text-sm align-middle">N/A</TableCell>
+                                <TableCell key={`${field.id || field.fieldName}-dep-na`} className="border-b border-r border-slate-200 text-center text-slate-400 italic text-sm align-middle">
+                                  N/A
+                                </TableCell>
                               ))
                             }
                           }).flat()
                         })}
+                        
                         {/* ACTIONS CELL FOR DEPENDANTS */}
                         <TableCell className="text-center text-sm p-2 align-middle sticky right-0 bg-blue-50/40 group-hover:bg-blue-50/80 border-b border-l border-slate-200">
                           <span className="text-xs text-blue-700">Dependant</span>

@@ -703,8 +703,8 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
             </p>
           )}
         </div>
-      <div className="relative h-full overflow-y-auto border rounded-lg bg-card">
-        <Table>
+      <div className="relative max-h-[62vh] overflow-y-auto border rounded-lg bg-card">
+        <Table className="">
           <TableHeader className="sticky top-0 z-10 bg-blue-500 dark:bg-blue-800 backdrop-blur-sm border-b">
             <TableRow>
               <TableHead className="w-[60px] text-white border-r">#</TableHead>
