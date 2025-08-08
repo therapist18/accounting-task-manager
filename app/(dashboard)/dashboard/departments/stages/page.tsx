@@ -2154,30 +2154,6 @@ export default function Stages() {
               <TableRow className="border-b-0">
                 <TableCell className="sticky bg-slate-100 border-r-2 border-slate-300 z-10" rowSpan={2} colSpan={2}></TableCell>
               </TableRow>
-              {/* Automation Name Row */}
-              <TableRow className="border-b-0">
-                {leafEntities.map((entity) => {
-                  const stage = currentDept.stages.find(s => s.id === entity.id);
-                  const automationName = stage?.web_automation?.automationName || '';
-
-                  return (
-                    <TableHead
-                      key={`automation-${entity.id}`}
-                      colSpan={2} // Span both Applicable and Display columns
-                      className="border-r border-blue-300 text-center text-xs font-medium text-blue-800 bg-blue-100 p-1"
-                    >
-                      {automationName ? (
-                        <div className="flex items-center justify-center gap-1">
-                          <Zap className="h-3 w-3 text-amber-500" />
-                          <span className="truncate max-w-[120px]" title={automationName}>
-                            {automationName}
-                          </span>
-                        </div>
-                      ) : '-'}
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
               {/* Applicable/Display Controls Header Row */}
               {columnVisibility.controls && (
                 <TableRow className="border-b-0">

@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { User, Users, Phone, Mail, MapPin, Building2, Loader2, Info, FileText, Briefcase, UserPlus, UserCheck } from "lucide-react"
+import { User, Users, Phone, Mail, MapPin, Building2, Loader2, Info, FileText, Briefcase, UserPlus, UserCheck, Shield } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
 import { fetchDepartments } from "../../departments/departments/database"
@@ -48,9 +48,20 @@ interface EnquiryDialogProps {
     open: boolean
     onOpenChange: (open: boolean) => void
     onEnquiryCreated: (enquiry: any) => void
+    // Add staff props similar to EditTaskDialog
+    departments: any[]
+    users: any[]
+    officers: any[]
 }
 
-export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryDialogProps) {
+export function EnquiryDialog({
+    open,
+    onOpenChange,
+    onEnquiryCreated,
+    departments: propDepartments = [],
+    users = [],
+    officers = []
+}: EnquiryDialogProps) {
     const [applicantType, setApplicantType] = useState<'principal' | 'dependant'>('principal')
     const [individuals, setIndividuals] = useState<Individual[]>([])
     // Use a ref to maintain the selected individual across re-renders
@@ -62,7 +73,13 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         selectedIndividualRef.current = individual;
         setSelectedIndividualState(individual);
     }, []);
-    const [departments, setDepartments] = useState<any[]>([])
+
+    const [departments, setDepartments] = useState<any[]>(propDepartments || [])
+    // ADD: Local state for users and officers with fallback loading
+    const [localUsers, setLocalUsers] = useState<any[]>(users || [])
+    const [localOfficers, setLocalOfficers] = useState<any[]>(officers || [])
+    const [loadingStaff, setLoadingStaff] = useState(false)
+    
     const [loading, setLoading] = useState(false)
     const [searchLoading, setSearchLoading] = useState(false)
     const [taskType, setTaskType] = useState<'new' | 'renewal'>('new')
@@ -79,44 +96,16 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
     const [loadingCompanies, setLoadingCompanies] = useState(false)
     const [loadingUnderstudies, setLoadingUnderstudies] = useState(false)
     const [principalForDependant, setPrincipalForDependant] = useState<Individual | null>(null);
-    const [subdepartments, setSubdepartments] = useState<Array<Subdepartment & {
-        taskManager?: {
-            id: string;
-            name: string | null;
-            email: string | null;
-            phone_number?: string | null;
-            start_date?: string;
-            end_date?: string | null;
-        } | null;
-        taskAssistant?: {
-            id: string;
-            name: string | null;
-            email: string | null;
-            phone_number?: string | null;
-            start_date?: string;
-            end_date?: string | null;
-        } | null;
-        task_manager?: {
-            id: number;
-            start_date?: string;
-            end_date?: string | null;
-        } | null;
-        task_assistant?: {
-            id: number;
-            start_date?: string;
-            end_date?: string | null;
-        } | null;
-        classes?: Array<{
-            name: string;
-            description: string | null;
-            requirements: Array<{
-                name: string;
-                description: string | null;
-                is_required?: boolean;
-            }>;
-        }>;
-    }>>([]);
-    // Form data
+
+    // Staff Assignment States (similar to EditTaskDialog)
+    const [availableOfficers, setAvailableOfficers] = useState([])
+    const [availableManagers, setAvailableManagers] = useState([])
+    const [availableAssistants, setAvailableAssistants] = useState([])
+
+    // Refs to prevent cascading effects on initial load
+    const isInitialLoad = useRef(true);
+
+    // Form data - enhanced with staff fields
     const [formData, setFormData] = useState({
         // Individual details (for new individuals)
         full_name: '',
@@ -135,9 +124,15 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         // Principal member (for dependants)
         principal_member_id: '',
 
+        // Staff assignments
+        officer_id: '',
+        task_manager_id: '',
+        task_assistant_id: '',
+
         // Enquiry date
         enquiry_date: new Date().toISOString().split('T')[0]
     })
+
     const handleChange = useCallback((field: keyof FormData, value: any) => {
         setFormData(prev => {
             if (field === 'department_id') {
@@ -147,17 +142,168 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
                     subdepartment_id: '',
                     class_id: '',
                     subclass_id: '',
+                    // Reset staff assignments when department changes
+                    officer_id: '',
+                    task_manager_id: '',
+                    task_assistant_id: ''
                 };
             }
             if (field === 'subdepartment_id') {
-                return { ...prev, subdepartment_id: value, class_id: '', subclass_id: '' };
+                return {
+                    ...prev,
+                    subdepartment_id: value,
+                    class_id: '',
+                    subclass_id: '',
+                    // Reset staff assignments when subdepartment changes
+                    officer_id: '',
+                    task_manager_id: '',
+                    task_assistant_id: ''
+                };
             }
             if (field === 'class_id') {
                 return { ...prev, class_id: value, subclass_id: '' };
             }
+            // Handle manager selection - reset assistant if manager changes
+            if (field === 'task_manager_id') {
+                return {
+                    ...prev,
+                    task_manager_id: value,
+                    // Reset assistant when manager changes
+                    task_assistant_id: value ? '' : prev.task_assistant_id
+                };
+            }
             return { ...prev, [field]: value };
         });
     }, []);
+
+    // ADD: Function to load staff data if not provided via props
+    const loadStaffData = useCallback(async () => {
+        if ((users && users.length > 0) && (officers && officers.length > 0)) {
+            // Use prop data if available
+            setLocalUsers(users);
+            setLocalOfficers(officers);
+            return;
+        }
+
+        setLoadingStaff(true);
+        try {
+            // Fetch users and officers from the database
+            const [usersResult, officersResult] = await Promise.all([
+                supabase.from('tm_users').select('*').order('name'),
+                supabase.from('tm_users').select('*').eq('role', 'officer').order('name')
+            ]);
+
+            if (usersResult.error) throw usersResult.error;
+            if (officersResult.error) throw officersResult.error;
+
+            setLocalUsers(usersResult.data || []);
+            setLocalOfficers(officersResult.data || []);
+            
+            console.log('📦 Loaded staff data:', {
+                users: usersResult.data?.length || 0,
+                officers: officersResult.data?.length || 0
+            });
+        } catch (error) {
+            console.error('Error loading staff data:', error);
+            toast({
+                title: "Error",
+                description: "Failed to load staff data",
+                variant: "destructive"
+            });
+        } finally {
+            setLoadingStaff(false);
+        }
+    }, [users, officers]);
+
+    // Load staff data when dialog opens
+    useEffect(() => {
+        if (open) {
+            loadStaffData();
+        }
+    }, [open, loadStaffData]);
+
+    // Update local state when props change
+    useEffect(() => {
+        if (users && users.length > 0) {
+            setLocalUsers(users);
+        }
+        if (officers && officers.length > 0) {
+            setLocalOfficers(officers);
+        }
+    }, [users, officers]);
+
+    // Staff filtering logic (copied from EditTaskDialog)
+    const findActiveStaffForSubdept = useCallback((subdept, allUsers, allOfficers) => {
+        console.log('🔍 findActiveStaffForSubdept called with:');
+        console.log('Subdept:', subdept);
+        console.log('AllUsers count:', allUsers?.length || 0);
+        console.log('AllOfficers count:', allOfficers?.length || 0);
+
+        if (!subdept || !allUsers || !allOfficers) {
+            console.log('❌ Missing required data for staff filtering');
+            return { officers: [], managers: [], assistants: [] };
+        }
+
+        // Check if history fields exist
+        const hasOfficerHistory = subdept.officer_history && Array.isArray(subdept.officer_history);
+        const hasManagerHistory = subdept.manager_history && Array.isArray(subdept.manager_history);
+        const hasAssistantHistory = subdept.assistant_history && Array.isArray(subdept.assistant_history);
+
+        console.log('History fields present:', {
+            officer_history: hasOfficerHistory,
+            manager_history: hasManagerHistory,
+            assistant_history: hasAssistantHistory
+        });
+
+        if (!hasOfficerHistory && !hasManagerHistory && !hasAssistantHistory) {
+            console.log('⚠️ No history fields found - using fallback to all available staff');
+            return {
+                officers: allOfficers,
+                managers: allUsers.filter(u => u.role === 'user' || u.role === 'admin'),
+                assistants: allUsers.filter(u => u.role === 'user')
+            };
+        }
+
+        // Helper to get active user IDs from a history array
+        const getActiveUserIds = (historyArray) => {
+            if (!historyArray || !Array.isArray(historyArray)) return [];
+            return historyArray
+                .filter(item => item && !item.end_date) // Active if no end date
+                .map(item => item.id) // Use 'id' instead of 'user_id'
+                .filter(Boolean); // Remove null/undefined IDs
+        };
+
+        const activeOfficerIds = getActiveUserIds(subdept.officer_history);
+        const activeManagerIds = getActiveUserIds(subdept.manager_history);
+        const activeAssistantIds = getActiveUserIds(subdept.assistant_history);
+
+        console.log('Active staff IDs found:', {
+            officers: activeOfficerIds,
+            managers: activeManagerIds,
+            assistants: activeAssistantIds
+        });
+
+        const hasSpecificAssignments = activeOfficerIds.length > 0 || activeManagerIds.length > 0 || activeAssistantIds.length > 0;
+
+        if (!hasSpecificAssignments) {
+            console.log(`⚠️ No specific staff assignments for subdept "${subdept.name}". Using fallback roles.`);
+            return {
+                officers: allOfficers,
+                managers: allUsers.filter(u => u.role === 'user' || u.role === 'admin'),
+                assistants: allUsers.filter(u => u.role === 'user')
+            };
+        }
+
+        const staff = {
+            officers: allOfficers.filter(o => activeOfficerIds.includes(o.id)),
+            managers: allUsers.filter(u => activeManagerIds.includes(u.id)),
+            assistants: allUsers.filter(u => activeAssistantIds.includes(u.id)),
+        };
+
+        console.log(`✅ Found filtered staff for subdept "${subdept.name}":`, staff);
+        return staff;
+    }, []);
+
     // Function to update form data with department/subdepartment/class IDs and names
     const updateTaskFields = useCallback(async (taskData: any) => {
         if (!taskData) return;
@@ -169,7 +315,10 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             subdepartment_id: taskData.subdepartment_id?.toString() || '',
             class_id: taskData.class_id?.toString() || '',
             subclass_id: taskData.subclass_id?.toString() || '',
-            job_description: taskData.job_description || ''
+            job_description: taskData.job_description || '',
+            officer_id: taskData.officer_id || '',
+            task_manager_id: taskData.task_manager_id || '',
+            task_assistant_id: taskData.task_assistant_id || ''
         }));
 
         // Fetch department, subdepartment, and class names
@@ -214,21 +363,170 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         }
     }, [handleChange])
 
-    // Load departments on mount
+    // Load departments on mount - FIXED to prevent multiple calls
     useEffect(() => {
         const loadDepartments = async () => {
             try {
-                const depts = await fetchDepartments()
-                setDepartments(depts)
+                // Use prop departments if available, otherwise fetch
+                if (propDepartments && propDepartments.length > 0) {
+                    console.log('📦 Using prop departments:', propDepartments.length);
+                    setDepartments(propDepartments);
+                } else {
+                    console.log('🔄 Fetching departments from API...');
+                    const depts = await fetchDepartments()
+                    setDepartments(depts)
+                }
             } catch (error) {
                 console.error('Error loading departments:', error)
             }
         }
 
-        if (open) {
+        // Only load departments if we don't have them yet and dialog is open
+        if (open && departments.length === 0) {
             loadDepartments()
         }
-    }, [open])
+    }, [open]) // Removed propDepartments from dependencies to prevent multiple calls
+
+    // Staff filtering effects (similar to EditTaskDialog)
+
+    // EFFECT: Handle Subdepartment changes and staff filtering
+    useEffect(() => {
+        if (isInitialLoad.current || !formData.subdepartment_id) return;
+
+        console.log('🔄 Subdepartment changed by user:', formData.subdepartment_id);
+        console.log('📊 Available props:', {
+            departmentsCount: departments.length,
+            usersCount: localUsers.length,
+            officersCount: localOfficers.length,
+            users: localUsers,
+            officers: localOfficers
+        });
+        
+        // FIX: Convert formData.department_id to number for comparison
+        const dept = departments.find(d => d.id.toString() === formData.department_id);
+        console.log('Department found:', dept);
+
+        // FIX: Convert formData.subdepartment_id to number for comparison
+        const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
+        console.log('Subdepartment found:', subdept);
+
+        if (subdept) {
+            // Check if we have any users or officers data
+            if (!localUsers || !localOfficers || localUsers.length === 0 || localOfficers.length === 0) {
+                console.log('⚠️ No users/officers data available - users:', localUsers, 'officers:', localOfficers);
+                
+                // Show a warning message about missing staff data
+                toast({
+                    title: "Info",
+                    description: "Staff data not loaded. Please ensure users and officers are properly passed to the component.",
+                    variant: "default"
+                });
+                
+                // Set empty arrays but don't return - still allow form to work
+                setAvailableOfficers([]);
+                setAvailableManagers([]);
+                setAvailableAssistants([]);
+            } else {
+                console.log('🔍 Finding active staff for changed subdepartment...');
+                const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
+                console.log('Staff filtering result:', activeStaff);
+
+                setAvailableOfficers(activeStaff.officers);
+                setAvailableManagers(activeStaff.managers);
+                setAvailableAssistants(activeStaff.assistants);
+            }
+        }
+
+        // Reset staff assignments when subdepartment changes
+        handleChange('officer_id', '');
+        handleChange('task_manager_id', '');
+        handleChange('task_assistant_id', '');
+    }, [formData.subdepartment_id, departments, localUsers, localOfficers, findActiveStaffForSubdept, handleChange]);
+
+    // EFFECT: Handle Manager changes - filter assistants based on manager-assistant relationships
+    useEffect(() => {
+        if (isInitialLoad.current) return;
+
+        const filterAssistants = async () => {
+            if (!formData.task_manager_id) {
+                // If no manager selected, show all available assistants
+                const dept = departments.find(d => d.id.toString() === formData.department_id);
+                const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
+
+                if (subdept && localUsers) {
+                    const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
+                    setAvailableAssistants(activeStaff.assistants);
+                }
+                return;
+            }
+
+            try {
+                // Get all tasks where this manager is assigned
+                const { data: managerTasks, error } = await supabase
+                    .from('tm_tasks')
+                    .select('task_assistant_id')
+                    .eq('task_manager_id', formData.task_manager_id)
+                    .not('task_assistant_id', 'is', null);
+
+                if (error) throw error;
+
+                // Get unique assistant IDs
+                const assistantIds = [...new Set(
+                    managerTasks.map(task => task.task_assistant_id?.toString())
+                )].filter(Boolean);
+
+                // Filter available assistants to only those linked with the manager
+                const dept = departments.find(d => d.id.toString() === formData.department_id);
+                const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
+
+                if (subdept && localUsers) {
+                    const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
+                    const linkedAssistants = activeStaff.assistants.filter(assistant =>
+                        assistantIds.includes(assistant.id?.toString())
+                    );
+
+                    setAvailableAssistants(linkedAssistants.length > 0 ? linkedAssistants : activeStaff.assistants);
+                }
+            } catch (error) {
+                console.error('Error fetching manager-assistant relationships:', error);
+                // Fallback to showing all assistants
+                const dept = departments.find(d => d.id.toString() === formData.department_id);
+                const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
+
+                if (subdept && localUsers) {
+                    const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
+                    setAvailableAssistants(activeStaff.assistants);
+                }
+            }
+        };
+
+        filterAssistants();
+    }, [formData.task_manager_id, formData.department_id, formData.subdepartment_id, departments, localUsers, localOfficers, findActiveStaffForSubdept]);
+
+    // Initial load effect when dialog opens
+    useEffect(() => {
+        if (open && formData.department_id && formData.subdepartment_id) {
+            isInitialLoad.current = true;
+
+            // Populate staff lists on initial load
+            const dept = departments.find(d => d.id.toString() === formData.department_id);
+            const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
+
+            if (subdept && localUsers && localOfficers && localUsers.length > 0 && localOfficers.length > 0) {
+                console.log('Initial load - populating staff for subdepartment:', subdept.name);
+                const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
+
+                setAvailableOfficers(activeStaff.officers);
+                setAvailableManagers(activeStaff.managers);
+                setAvailableAssistants(activeStaff.assistants);
+            }
+
+            // Mark initial load complete
+            Promise.resolve().then(() => {
+                isInitialLoad.current = false;
+            });
+        }
+    }, [open, formData.department_id, formData.subdepartment_id, departments, localUsers, localOfficers, findActiveStaffForSubdept]);
 
     // Search for individuals based on applicant type
     const searchIndividuals = useCallback(async (type: 'principal' | 'dependant') => {
@@ -580,7 +878,10 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             setSelectedUnderstudy('');
             setFormData(prev => ({
                 ...prev,
-                principal_member_id: ''
+                principal_member_id: '',
+                officer_id: '',
+                task_manager_id: '',
+                task_assistant_id: ''
             }));
             // Clear references and dependants when dialog opens
             setIncludeReferences(false);
@@ -589,6 +890,10 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             setIncludeDependants(false);
             setAvailableDependants([]);
             setSelectedDependants([]);
+            // Clear staff assignments
+            setAvailableOfficers([]);
+            setAvailableManagers([]);
+            setAvailableAssistants([]);
         }
     }, [applicantType, open, searchIndividuals]);
 
@@ -605,14 +910,14 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
     // Get available subdepartments
     const availableSubdepartments = useMemo(() => {
         if (!formData.department_id) return []
-        const dept = departments.find(d => d.id === formData.department_id)
+        const dept = departments.find(d => d.id.toString() === formData.department_id)
         return dept?.tm_subdepartments || []
     }, [departments, formData.department_id])
 
     // Get available classes
     const availableClasses = useMemo(() => {
         if (!formData.subdepartment_id) return []
-        const subdept = availableSubdepartments.find(s => s.id === formData.subdepartment_id)
+        const subdept = availableSubdepartments.find(s => s.id.toString() === formData.subdepartment_id)
         return subdept?.classes || []
     }, [availableSubdepartments, formData.subdepartment_id])
 
@@ -623,7 +928,7 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
         return cls?.subClasses || []
     }, [availableClasses, formData.class_id])
 
-    // Handle form submission
+    // Handle form submission - updated to include staff assignments
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
@@ -632,7 +937,6 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             const individualToUse = selectedIndividualRef.current;
 
             if (!individualToUse) {
-                // Logic to handle newly created individual can be added here if needed
                 throw new Error('No individual selected. Please select an individual from the dropdown.');
             }
 
@@ -642,16 +946,16 @@ export function EnquiryDialog({ open, onOpenChange, onEnquiryCreated }: EnquiryD
             }
 
             // Prepare dependant and reference data with full details
-const dependantsToSave = includeDependants
-? selectedDependants.map(id => {
-    const dependant = availableDependants.find(d => d.id.toString() === id);
-    return dependant ? {
-        id: dependant.id,
-        relationship: dependant.relationship_type === 'Principal Member' ? 'Principal' : (dependant.relationship_type || 'Family Member')
-    } : null;
-}).filter(Boolean)
-.filter(dependant => dependant.relationship !== 'Principal') // Exclude principal member
-: [];
+            const dependantsToSave = includeDependants
+                ? selectedDependants.map(id => {
+                    const dependant = availableDependants.find(d => d.id.toString() === id);
+                    return dependant ? {
+                        id: dependant.id,
+                        relationship: dependant.relationship_type === 'Principal Member' ? 'Principal' : (dependant.relationship_type || 'Family Member')
+                    } : null;
+                }).filter(Boolean)
+                    .filter(dependant => dependant.relationship !== 'Principal') // Exclude principal member
+                : [];
 
             const referencesToSave = includeReferences
                 ? selectedReferences.map(id => {
@@ -675,7 +979,7 @@ const dependantsToSave = includeDependants
                 },
             };
 
-            // Prepare the task data
+            // Prepare the task data - enhanced with staff assignments
             const taskData: any = {
                 job_description: formData.job_description || '',
                 status: 'enquiry',
@@ -692,6 +996,10 @@ const dependantsToSave = includeDependants
                 references: referencesToSave,
                 understudy: selectedUnderstudy || null,
                 company_id: selectedCompany || null,
+                // Add staff assignments
+                officer_id: formData.officer_id && formData.officer_id !== 'none' ? formData.officer_id : null,
+                task_manager_id: formData.task_manager_id && formData.task_manager_id !== 'none' ? formData.task_manager_id : null,
+                task_assistant_id: formData.task_assistant_id && formData.task_assistant_id !== 'none' ? formData.task_assistant_id : null,
             };
 
             // Assign principal member based on applicant type
@@ -704,6 +1012,12 @@ const dependantsToSave = includeDependants
                 }
                 taskData.principal_member = principalId;
             }
+
+            console.log('Creating enquiry with staff assignments:', {
+                officer_id: taskData.officer_id,
+                task_manager_id: taskData.task_manager_id,
+                task_assistant_id: taskData.task_assistant_id
+            });
 
             // Insert the task into the database
             const { data, error } = await supabase
@@ -727,7 +1041,7 @@ const dependantsToSave = includeDependants
 
             toast({
                 title: 'Success',
-                description: 'Enquiry created successfully',
+                description: 'Enquiry created successfully with staff assignments',
             });
         } catch (error) {
             console.error('Error creating enquiry:', error);
@@ -750,7 +1064,13 @@ const dependantsToSave = includeDependants
             subdepartment_id: '',
             class_id: '',
             subclass_id: '',
+            department_name: '',
+            subdepartment_name: '',
+            class_name: '',
             principal_member_id: '',
+            officer_id: '',
+            task_manager_id: '',
+            task_assistant_id: '',
             enquiry_date: new Date().toISOString().split('T')[0]
         })
         setSelectedIndividual(null)
@@ -767,6 +1087,9 @@ const dependantsToSave = includeDependants
         setSelectedUnderstudy('')
         setCompanies([])
         setUnderstudies([])
+        setAvailableOfficers([])
+        setAvailableManagers([])
+        setAvailableAssistants([])
     }
 
     const handleFormChange = (field: string, value: any) => {
@@ -775,6 +1098,7 @@ const dependantsToSave = includeDependants
             [field]: value
         }))
     }
+
     const handleIndividualSelect = async (individual: Individual) => {
         setSelectedIndividual(individual);
         setPrincipalForDependant(null);
@@ -788,20 +1112,20 @@ const dependantsToSave = includeDependants
         setAvailableReferences([]);
         setSelectedReferences([]);
         setIncludeReferences(false);
-    
+
         const primaryPhone = individual.contact_details?.phone?.kenyan?.primary || '';
         const formUpdate: any = {
             full_name: individual.full_name,
             mobile_number: primaryPhone,
             principal_member_id: ''
         };
-    
+
         const references = await fetchReferences(individual.id);
         setAvailableReferences(references);
-    
+
         // Fetch family members for the selected individual
         const familyMembers = await fetchDependants(individual.id);
-    
+
         if (individual.individual_type === 'principal') {
             setAvailableDependants(familyMembers);
             // Fetch companies for this principal
@@ -810,39 +1134,39 @@ const dependantsToSave = includeDependants
             const principalRelation = individual.relationships?.find(
                 (rel: any) => rel.isPrincipal === 'Yes' || ['principal', 'spouse', 'husband', 'wife'].includes(rel.relationship?.toLowerCase())
             );
-    
+
             if (principalRelation && principalRelation.individual_id) {
                 const principalId = principalRelation.individual_id;
                 formUpdate.principal_member_id = principalId.toString();
-    
+
                 // Fetch principal details
                 const principalResult = await supabase
                     .from('registry_individuals')
                     .select('id, full_name')
                     .eq('id', principalId)
                     .single();
-    
+
                 if (principalResult.error) {
                     console.error("Error fetching principal details:", principalResult.error);
                     toast({ title: "Error", description: "Could not load principal member's details.", variant: "destructive" });
                     return;
                 }
-    
+
                 const principalData = principalResult.data;
                 setPrincipalForDependant(principalData);
-    
+
                 // Fetch companies for the principal (this will set companies state internally)
                 await fetchCompanies(principalId);
-    
+
                 // Check if principal is already in family members list and handle accordingly
                 const principalIndex = familyMembers.findIndex(fm => fm.id === principalId);
                 let allFamilyForSelection;
-    
+
                 if (principalIndex !== -1) {
                     // Principal is already in family members, update their relationship type
                     allFamilyForSelection = familyMembers
                         .filter(fm => fm.id !== individual.id) // Exclude the selected dependant
-                        .map(fm => fm.id === principalId 
+                        .map(fm => fm.id === principalId
                             ? { ...fm, relationship_type: 'Principal Member' }
                             : fm
                         );
@@ -853,9 +1177,9 @@ const dependantsToSave = includeDependants
                         ...familyMembers.filter(fm => fm.id !== individual.id)
                     ];
                 }
-    
+
                 setAvailableDependants(allFamilyForSelection);
-    
+
                 // Auto-select the principal member
                 setIncludeDependants(true);
                 setSelectedDependants([principalData.id.toString()]);
@@ -863,7 +1187,7 @@ const dependantsToSave = includeDependants
                 toast({ title: "Info", description: "No principal member found for this dependant.", variant: "default" });
             }
         }
-    
+
         setFormData(prev => ({ ...prev, ...formUpdate }));
     };
 
@@ -938,8 +1262,8 @@ const dependantsToSave = includeDependants
                                                 >
                                                     {selectedIndividual
                                                         ? individuals.find(
-                                                              (individual) => individual.id === selectedIndividual.id
-                                                          )?.full_name
+                                                            (individual) => individual.id === selectedIndividual.id
+                                                        )?.full_name
                                                         : `Select ${applicantType}...`}
                                                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                                 </Button>
@@ -973,8 +1297,6 @@ const dependantsToSave = includeDependants
                                             </PopoverContent>
                                         </Popover>
                                     )}
-
-                                    {/* OR Create New section remains for manual entry */}
                                 </CardContent>
                             </Card>
 
@@ -1234,9 +1556,7 @@ const dependantsToSave = includeDependants
                             <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
                                 <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
                                     <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
-                                        <Button className="bg-blue-600 hover:bg-blue-700 text-white">
-                                            <Building2 className="h-4 w-4" />
-                                        </Button>
+                                        <Building2 className="h-4 w-4" />
                                         Department & Classification
                                     </CardTitle>
                                 </CardHeader>
@@ -1249,7 +1569,7 @@ const dependantsToSave = includeDependants
                                             <Select className="w-full"
                                                 value={formData.department_id}
                                                 onValueChange={(value) => {
-                                                    const selectedDept = departments.find(d => d.id === value);
+                                                    const selectedDept = departments.find(d => d.id.toString() === value);
                                                     if (selectedDept) {
                                                         handleChange('department_id', value);
                                                         handleChange('department_name', selectedDept.name);
@@ -1269,7 +1589,7 @@ const dependantsToSave = includeDependants
                                                 </SelectTrigger>
                                                 <SelectContent>
                                                     {departments.map((dept) => (
-                                                        <SelectItem key={dept.id} value={dept.id}>
+                                                        <SelectItem key={dept.id} value={dept.id.toString()}>
                                                             {dept.name}
                                                         </SelectItem>
                                                     ))}
@@ -1284,7 +1604,7 @@ const dependantsToSave = includeDependants
                                             <Select className="w-full"
                                                 value={formData.subdepartment_id}
                                                 onValueChange={(value) => {
-                                                    const selectedSubdept = availableSubdepartments.find(sd => sd.id === value);
+                                                    const selectedSubdept = availableSubdepartments.find(sd => sd.id.toString() === value);
                                                     if (selectedSubdept) {
                                                         handleChange('subdepartment_id', value);
                                                         handleChange('subdepartment_name', selectedSubdept.name);
@@ -1305,7 +1625,7 @@ const dependantsToSave = includeDependants
                                                 </SelectTrigger>
                                                 <SelectContent>
                                                     {availableSubdepartments.map((subdept) => (
-                                                        <SelectItem key={subdept.id} value={subdept.id}>
+                                                        <SelectItem key={subdept.id} value={subdept.id.toString()}>
                                                             {subdept.name}
                                                         </SelectItem>
                                                     ))}
@@ -1322,7 +1642,7 @@ const dependantsToSave = includeDependants
                                             <Select className="w-full"
                                                 value={formData.class_id}
                                                 onValueChange={(value) => {
-                                                    const selectedClass = availableClasses.find(c => c.id === value);
+                                                    const selectedClass = availableClasses.find(c => c.id.toString() === value);
                                                     if (selectedClass) {
                                                         handleChange('class_id', value);
                                                         handleChange('class_name', selectedClass.name);
@@ -1343,7 +1663,7 @@ const dependantsToSave = includeDependants
                                                 </SelectTrigger>
                                                 <SelectContent>
                                                     {availableClasses.map((cls) => (
-                                                        <SelectItem key={cls.id} value={cls.id}>
+                                                        <SelectItem key={cls.id} value={cls.id.toString()}>
                                                             {cls.name}
                                                         </SelectItem>
                                                     ))}
@@ -1358,7 +1678,7 @@ const dependantsToSave = includeDependants
                                             <Select className="w-full"
                                                 value={formData.subclass_id}
                                                 onValueChange={(value) => {
-                                                    const selectedSubclass = availableSubclasses.find(sc => sc.id === value);
+                                                    const selectedSubclass = availableSubclasses.find(sc => sc.id.toString() === value);
                                                     if (selectedSubclass) {
                                                         handleChange('subclass_id', value);
                                                         handleChange('subclass_name', selectedSubclass.name);
@@ -1379,7 +1699,7 @@ const dependantsToSave = includeDependants
                                                 </SelectTrigger>
                                                 <SelectContent>
                                                     {availableSubclasses.map((subclass) => (
-                                                        <SelectItem key={subclass.id} value={subclass.id}>
+                                                        <SelectItem key={subclass.id} value={subclass.id.toString()}>
                                                             {subclass.name}
                                                         </SelectItem>
                                                     ))}
@@ -1389,8 +1709,133 @@ const dependantsToSave = includeDependants
                                     </div>
                                 </CardContent>
                             </Card>
+
+                            {/* Staff Assignment Section - NEW */}
+                            <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
+                                <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
+                                    <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
+                                        <Shield className="h-4 w-4" />
+                                        Staff Assignment
+                                    </CardTitle>
+                                    <CardDescription className="text-blue-600 text-xs">
+                                        Staff are filtered based on subdepartment assignments. Select a subdepartment first.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    {/* Debug Info - Remove in production */}
+                                    {formData.subdepartment_id && (
+                                        <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
+                                            <strong>Debug Info:</strong><br/>
+                                            Props - Users: {users.length}, Officers: {officers.length}<br/>
+                                            Local - Users: {localUsers.length}, Officers: {localOfficers.length}<br/>
+                                            Available Staff: O:{availableOfficers.length}, M:{availableManagers.length}, A:{availableAssistants.length}<br/>
+                                            {loadingStaff && <span className="text-blue-600">Loading staff data...</span>}
+                                        </div>
+                                    )}
+
+                                    {/* Officer Selection */}
+                                    <div className="space-y-2">
+                                        <Label className="text-xs font-medium flex items-center">
+                                            <Shield className="w-3 h-3 mr-1" />
+                                            Officer
+                                            <span className="ml-2 text-xs text-slate-500">({availableOfficers.length} available)</span>
+                                        </Label>
+                                        <Select
+                                            value={formData.officer_id}
+                                            onValueChange={(value) => handleChange('officer_id', value)}
+                                            disabled={!formData.subdepartment_id}
+                                        >
+                                            <SelectTrigger className="w-full h-8 text-xs">
+                                                <SelectValue placeholder="Select officer" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="none">No Officer</SelectItem>
+                                                {availableOfficers.map((user) => (
+                                                    <SelectItem key={user.id} value={user.id.toString()}>
+                                                        <span className="text-xs">{user.name || user.email} ({user.role})</span>
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        {formData.subdepartment_id && availableOfficers.length === 0 && (
+                                            <p className="text-xs text-amber-600">No officers assigned to this subdepartment.</p>
+                                        )}
+                                    </div>
+
+                                    {/* Task Manager Selection */}
+                                    <div className="space-y-2">
+                                        <Label className="text-xs font-medium flex items-center">
+                                            <User className="w-3 h-3 mr-1" />
+                                            Task Manager
+                                            <span className="ml-2 text-xs text-slate-500">({availableManagers.length} available)</span>
+                                        </Label>
+                                        <Select
+                                            value={formData.task_manager_id}
+                                            onValueChange={(value) => handleChange('task_manager_id', value)}
+                                            disabled={!formData.subdepartment_id}
+                                        >
+                                            <SelectTrigger className="w-full h-8 text-xs">
+                                                <SelectValue placeholder="Select task manager" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="none">No Task Manager</SelectItem>
+                                                {availableManagers.map((user) => (
+                                                    <SelectItem key={user.id} value={user.id.toString()}>
+                                                        <span className="text-xs">{user.name || user.email} ({user.role})</span>
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        {formData.subdepartment_id && availableManagers.length === 0 && (
+                                            <p className="text-xs text-amber-600">No managers assigned to this subdepartment.</p>
+                                        )}
+                                    </div>
+
+                                    {/* Task Assistant Selection */}
+                                    <div className="space-y-2">
+                                        <Label className="text-xs font-medium flex items-center">
+                                            <UserCheck className="w-3 h-3 mr-1" />
+                                            Task Assistant
+                                            <span className="ml-2 text-xs text-slate-500">
+                                                ({availableAssistants.length} available{formData.task_manager_id ? ' for selected manager' : ''})
+                                            </span>
+                                        </Label>
+                                        <Select
+                                            value={formData.task_assistant_id}
+                                            onValueChange={(value) => handleChange('task_assistant_id', value)}
+                                            disabled={!formData.subdepartment_id || (formData.task_manager_id && availableAssistants.length === 0)}
+                                        >
+                                            <SelectTrigger className="w-full h-8 text-xs">
+                                                <SelectValue placeholder={
+                                                    formData.task_manager_id && availableAssistants.length === 0
+                                                        ? "No assistants linked to this manager"
+                                                        : "Select task assistant"
+                                                } />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="none">No Task Assistant</SelectItem>
+                                                {availableAssistants.map((user) => (
+                                                    <SelectItem key={user.id} value={user.id.toString()}>
+                                                        <span className="text-xs">{user.name || user.email} ({user.role})</span>
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        {formData.task_manager_id && availableAssistants.length === 0 ? (
+                                            <p className="text-xs text-amber-600">
+                                                No assistants are currently linked to the selected manager.
+                                            </p>
+                                        ) : formData.subdepartment_id && availableAssistants.length === 0 ? (
+                                            <p className="text-xs text-amber-600">
+                                                No assistants assigned to this subdepartment.
+                                            </p>
+                                        ) : null}
+                                    </div>
+                                </CardContent>
+                            </Card>
                         </div>
                     </div>
+
                     {/* Form Actions */}
                     <DialogFooter className="border-t border-gray-200/50 pt-4 bg-white/50 flex flex-col sm:flex-row sm:justify-between gap-3 flex-end">
                         <div className="flex flex-col sm:flex-row sm:justify-between gap-3">

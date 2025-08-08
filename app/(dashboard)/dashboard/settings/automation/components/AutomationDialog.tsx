@@ -147,6 +147,7 @@ export function AutomationDialog({
         id: automationId,
         // Ensure login credentials are properly structured
         login: data.login ? {
+          url: data.login.url,
           email: data.login.email,
           idNumber: data.login.idNumber,
           password: data.login.password
