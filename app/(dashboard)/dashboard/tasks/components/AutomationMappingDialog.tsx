@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, Zap, User, Database, FileText, Eye, Image as ImageIcon, Settings, Link } from 'lucide-react';
+import { Loader2, Zap, User, Database, FileText, Eye, Image as ImageIcon, Settings, Link, Upload, Download, RefreshCw, AlertTriangle, CheckCircle, XCircle, Clock, Plus } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -36,9 +36,9 @@ interface AutomationMappingDialogProps {
   subclassId?: string;
   task?: any;
   individualId?: string;
-  stageDocuments?: any[]; // Add stage documents to get automation links
-  allDocuments?: any[]; // Add allDocuments to access linked documents
-  stage?: any; // Add stage to get linked document for this specific stage
+  stageDocuments?: any[];
+  allDocuments?: any[];
+  stage?: any;
 }
 
 interface AutomationDetails {
@@ -61,6 +61,17 @@ interface EntityAutomationMapping {
   automation?: AutomationDetails;
 }
 
+interface DocumentStatus {
+  hasDocument: boolean;
+  status: 'Ready' | 'Not Linked' | 'Missing' | 'Old Document' | 'Uploading' | 'Processing';
+  documentId?: string;
+  filePath?: string;
+  kycId?: string;
+  canPreview: boolean;
+  canUpload: boolean;
+  statusColor: 'green' | 'red' | 'yellow' | 'blue' | 'gray';
+}
+
 // Helper function to get LINKED document for a stage (same as EditableStageCell)
 const getLinkedDocumentForStage = (task: any, stage: any, allDocuments: any[]): any | null => {
   if (!task?.source_document_id || !stage?.id || !allDocuments?.length) {
@@ -79,7 +90,6 @@ const getLinkedDocumentForStage = (task: any, stage: any, allDocuments: any[]): 
       ? linkedDocumentData
       : linkedDocumentData.id;
 
-    // Find the document instance from allDocuments by its unique ID
     const linkedDoc = allDocuments.find(doc => doc.id === documentId);
 
     console.log('Found linked document:', {
@@ -118,6 +128,18 @@ const buildFileUrl = (linkedDoc: any): string | null => {
 
   return fileUrl;
 };
+
+// Helper function to check if document is older than task creation
+const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolean => {
+  try {
+    const docDate = new Date(documentDate)
+    const tskDate = new Date(taskDate)
+    return docDate < tskDate
+  } catch (error) {
+    console.error('Error comparing dates:', error)
+    return false
+  }
+}
 
 // Helper function to parse JSON field paths properly
 const parseJsonValue = (data: any, path: string): any => {
@@ -205,14 +227,15 @@ export const AutomationMappingDialog = ({
   task,
   individualId,
   stageDocuments = [],
-  allDocuments = [], // Add allDocuments prop
-  stage // Add stage prop
+  allDocuments = [],
+  stage
 }: AutomationMappingDialogProps) => {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [webData, setWebData] = useState<any[]>([]);
   const [jobFields, setJobFields] = useState<Record<string, any>>({});
@@ -223,6 +246,7 @@ export const AutomationMappingDialog = ({
   const [previewDocument, setPreviewDocument] = useState<any>(null);
   const [editingCell, setEditingCell] = useState<any>(null);
   const [editValue, setEditValue] = useState('');
+  const [documentStatuses, setDocumentStatuses] = useState<Record<string, DocumentStatus>>({});
 
   const getIndividualId = () => {
     if (individualId) return individualId;
@@ -233,7 +257,74 @@ export const AutomationMappingDialog = ({
 
   const [currentIndividualId, setCurrentIndividualId] = useState(getIndividualId());
 
-  // Enhanced function to get document URL for automation payload with comprehensive fallback strategies
+  // Enhanced document status calculation
+  const calculateDocumentStatus = useCallback((kycId: string): DocumentStatus => {
+    const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
+    const hasMatchingDoc = documentFiles.some(doc => doc.document_id === kycId);
+    
+    if (linkedDoc && linkedDoc.document_id === kycId) {
+      const isOld = task?.created_at && isDocumentOlderThanTask(linkedDoc.created_at, task.created_at);
+      const hasIndicator = linkedDoc.indicator === true;
+      
+      if (isOld) {
+        return {
+          hasDocument: true,
+          status: 'Old Document',
+          documentId: linkedDoc.id,
+          filePath: linkedDoc.file_path,
+          kycId,
+          canPreview: false,
+          canUpload: true,
+          statusColor: 'yellow'
+        };
+      }
+      
+      if (hasIndicator) {
+        return {
+          hasDocument: true,
+          status: 'Not Linked',
+          documentId: linkedDoc.id,
+          kycId,
+          canPreview: false,
+          canUpload: true,
+          statusColor: 'yellow'
+        };
+      }
+      
+      return {
+        hasDocument: true,
+        status: 'Ready',
+        documentId: linkedDoc.id,
+        filePath: linkedDoc.file_path,
+        kycId,
+        canPreview: true,
+        canUpload: true,
+        statusColor: 'green'
+      };
+    }
+    
+    if (hasMatchingDoc) {
+      return {
+        hasDocument: true,
+        status: 'Not Linked',
+        kycId,
+        canPreview: false,
+        canUpload: true,
+        statusColor: 'yellow'
+      };
+    }
+    
+      return {
+      hasDocument: false,
+      status: 'Missing',
+      kycId,
+      canPreview: false,
+      canUpload: true,
+      statusColor: 'red'
+    };
+  }, [task, stage, allDocuments, documentFiles]);
+
+  // Enhanced function to get document URL for automation payload
   const getDocumentUrlForAutomation = useCallback((): string | null => {
     console.log('🔍 Getting document URL for automation...', {
       hasStage: !!stage,
@@ -243,8 +334,7 @@ export const AutomationMappingDialog = ({
       individualId: task?.individual_id,
       allDocumentsLength: allDocuments?.length || 0,
       documentFilesLength: documentFiles.length,
-      hasSourceDocumentId: !!task?.source_document_id,
-      sourceDocumentIdKeys: task?.source_document_id ? Object.keys(task.source_document_id) : []
+      hasSourceDocumentId: !!task?.source_document_id
     });
 
     if (!task?.individual_id) {
@@ -283,19 +373,10 @@ export const AutomationMappingDialog = ({
     if (documentFiles.length > 0) {
       console.log('🔄 Strategy 3: Using fetched documents from webData requirements...');
 
-      // Find documents that match the webData KYC document IDs
       const webDataKycIds = webData.flatMap(item =>
         (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
       ).filter(Boolean);
 
-      console.log('WebData KYC IDs:', webDataKycIds);
-      console.log('Available document files:', documentFiles.map(f => ({
-        id: f.id,
-        document_id: f.document_id,
-        file_path: f.file_path
-      })));
-
-      // Prefer documents that match the webData requirements
       const matchingDoc = documentFiles.find(doc =>
         webDataKycIds.includes(doc.document_id) &&
         doc.file_path &&
@@ -307,211 +388,20 @@ export const AutomationMappingDialog = ({
         console.log('✅ Strategy 3 succeeded with webData document:', {
           documentId: matchingDoc.id,
           kycId: matchingDoc.document_id,
-          fileUrl,
-          note: 'Using document from webData requirements'
-        });
-        return fileUrl;
-      }
-    }
-
-    // Strategy 4: Find any document for this individual that matches stage requirements
-    if (stage?.documents?.length > 0 && allDocuments?.length > 0) {
-      console.log('🔄 Strategy 4: Finding documents matching stage requirements...');
-
-      const individualDocs = allDocuments.filter(doc =>
-        (doc.director_id === task.individual_id ||
-          doc.director_id?.toString() === task.individual_id?.toString()) &&
-        doc.file_path &&
-        doc.status !== 'deleted'
-      );
-
-      console.log(`Found ${individualDocs.length} documents for individual ${task.individual_id}`);
-
-      for (const stageDoc of stage.documents) {
-        const matchingDoc = individualDocs.find(doc =>
-          doc.document_id === stageDoc.kycId
-        );
-
-        if (matchingDoc) {
-          const fileUrl = buildFileUrl(matchingDoc);
-          console.log('✅ Strategy 4 succeeded:', {
-            kycId: stageDoc.kycId,
-            documentId: matchingDoc.id,
-            fileUrl,
-            note: 'Document exists but not linked to stage'
-          });
-          return fileUrl;
-        }
-      }
-    }
-
-    // Strategy 5: Use any valid document for this individual
-    if (allDocuments?.length > 0) {
-      console.log('🔄 Strategy 5: Using any available document for individual...');
-
-      const individualDocs = allDocuments.filter(doc =>
-        (doc.director_id === task.individual_id ||
-          doc.director_id?.toString() === task.individual_id?.toString()) &&
-        doc.file_path &&
-        doc.status !== 'deleted' &&
-        !doc.indicator // Avoid indicator documents
-      );
-
-      console.log(`Found ${individualDocs.length} valid documents for individual ${task.individual_id}`);
-
-      if (individualDocs.length > 0) {
-        // Prefer newer documents
-        const sortedDocs = individualDocs.sort((a, b) =>
-          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
-        );
-
-        const firstDoc = sortedDocs[0];
-        const fileUrl = buildFileUrl(firstDoc);
-        console.log('✅ Strategy 5 succeeded:', {
-          documentId: firstDoc.id,
-          filePath: firstDoc.file_path,
-          fileUrl,
-          note: 'Using most recent available document (may not be stage-specific)'
+          fileUrl
         });
         return fileUrl;
       }
     }
 
     console.log('❌ All strategies failed - no document URL available');
-    console.log('💡 Suggestions:');
-    console.log('   1. Upload documents for this individual');
-    console.log('   2. Link existing documents to stages');
-    console.log('   3. Check document status (not deleted/indicator)');
-
     return null;
   }, [stage, task, allDocuments, documentFiles, webData]);
 
-  // Function to find the appropriate stage for document URL
-  const findStageForDocument = useCallback((): any | null => {
-    if (stage) {
-      console.log('Using provided stage:', stage.name, stage.id);
-      return stage;
-    }
-
-    // If no stage provided, try to find an appropriate stage from the task
-    if (task?.stage_id) {
-      console.log('Using task stage_id:', task.stage_id);
-      return { id: task.stage_id, name: 'Current Stage' };
-    }
-
-    // Look for stages that have documents and might have linked documents
-    if (task?.source_document_id && typeof task.source_document_id === 'object') {
-      const stageIds = Object.keys(task.source_document_id);
-      if (stageIds.length > 0) {
-        const firstStageId = stageIds[0];
-        console.log('Using first available stage with documents:', firstStageId);
-        return { id: firstStageId, name: 'Document Stage' };
-      }
-    }
-
-    console.log('❌ No suitable stage found for document URL');
-    return null;
-  }, [stage, task]);
-
-  // Enhanced document URL function that tries to find a suitable stage if none provided
-  const getDocumentUrlWithFallback = useCallback((): string | null => {
-    // First try with the provided stage
-    if (stage) {
-      return getDocumentUrlForAutomation();
-    }
-
-    // If no stage provided, try to find one
-    const foundStage = findStageForDocument();
-    if (foundStage && task && allDocuments?.length) {
-      const linkedDoc = getLinkedDocumentForStage(task, foundStage, allDocuments);
-      if (linkedDoc) {
-        return buildFileUrl(linkedDoc);
-      }
-    }
-
-    console.log('❌ Could not find document URL with any available stage');
-    return null;
-  }, [getDocumentUrlForAutomation, findStageForDocument, task, allDocuments]);
-
-  // Extract automation mappings from stage documents
-  const extractAutomationMappings = async (stageDocuments: any[]) => {
-    try {
-      const mappings: EntityAutomationMapping[] = [];
-      const automationIds = new Set<string>();
-
-      // Collect all automation links from stage documents
-      stageDocuments.forEach(doc => {
-        if (doc.automationLinks && typeof doc.automationLinks === 'object') {
-          Object.entries(doc.automationLinks).forEach(([entityKey, automationId]) => {
-            if (typeof automationId === 'string') {
-              automationIds.add(automationId);
-
-              // Parse entity key to get entity details
-              const parts = entityKey.split('-');
-              const entityType = parts[0]; // 'class', 'subclass', etc.
-              const entityName = `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} ${parts.slice(1).join('-')}`;
-
-              mappings.push({
-                entityKey,
-                entityName,
-                entityType,
-                automationId: automationId
-              });
-            }
-          });
-        }
-      });
-
-      // Fetch automation details for all unique automation IDs
-      if (automationIds.size > 0) {
-        const { data: automations, error } = await supabase
-          .from('tm_automations')
-          .select('*')
-          .in('id', Array.from(automationIds));
-
-        if (!error && automations) {
-          // Map automation details to mappings
-          mappings.forEach(mapping => {
-            const automation = automations.find(a => a.id === mapping.automationId);
-            if (automation) {
-              mapping.automation = automation;
-            }
-          });
-        }
-      }
-
-      setEntityAutomationMappings(mappings);
-
-      // Set the first automation as selected by default
-      if (mappings.length > 0 && mappings[0].automationId && !selectedAutomationId) {
-        setSelectedAutomationId(mappings[0].automationId);
-      }
-    } catch (error) {
-      console.error('Error extracting automation mappings:', error);
-    }
-  };
-
-  const getRequirementId = useCallback(() => {
-    let effectiveSubDeptId = subDeptId;
-    if (!effectiveSubDeptId && task) {
-      if (task.subdepartment?.id) effectiveSubDeptId = task.subdepartment.id.toString();
-      else if (task.subdepartment_id) effectiveSubDeptId = task.subdepartment_id.toString();
-      else if (task.sub_dept_id) effectiveSubDeptId = task.sub_dept_id.toString();
-    }
-
-    if (!effectiveSubDeptId) {
-      if (isSubclass && subclassId) return classId;
-      return classId;
-    }
-
-    if (isSubclass && subclassId) return `${effectiveSubDeptId}_${classId}_${subclassId}`;
-    return `${effectiveSubDeptId}_${classId}`;
-  }, [subDeptId, task, isSubclass, subclassId, classId]);
-
+    // Enhanced fetchSourceData with tm_tasks exception
   const fetchSourceData = useCallback(async (individualId: string) => {
     if (!individualId || !jobFields || Object.keys(jobFields).length === 0) return;
 
-    // Prevent multiple simultaneous calls
     if (isLoadingData) return;
 
     setIsLoadingData(true);
@@ -520,14 +410,31 @@ export const AutomationMappingDialog = ({
       const allSources = Object.values(jobFields).flatMap(field => field.sources || []);
       const uniqueTables = [...new Set(allSources.map(source => source.table))];
 
-      // Process tables sequentially to avoid overwhelming the API
       for (const table of uniqueTables) {
         try {
-          const queryField = table === 'acc_portal_directors_documents' ? 'director_id' : 'id';
-          const { data, error } = await supabase.from(table).select('*').eq(queryField, individualId).maybeSingle();
+          let queryField = 'id';
+          let queryValue = individualId;
+
+          // Special handling for tm_tasks table
+          if (table === 'tm_tasks') {
+            queryField = 'task_id';
+            queryValue = taskId || individualId;
+          } else if (table === 'acc_portal_directors_documents') {
+            queryField = 'director_id';
+          }
+
+          const { data, error } = await supabase
+            .from(table)
+            .select('*')
+            .eq(queryField, queryValue)
+            .maybeSingle();
 
           if (error) {
-            const { data: multipleData, error: multipleError } = await supabase.from(table).select('*').eq(queryField, individualId);
+            const { data: multipleData, error: multipleError } = await supabase
+              .from(table)
+              .select('*')
+              .eq(queryField, queryValue);
+            
             if (multipleError) {
               console.warn(`Failed to fetch from ${table}:`, multipleError);
               sourceDataMap[table] = {};
@@ -546,34 +453,32 @@ export const AutomationMappingDialog = ({
       setSourceData(sourceDataMap);
     } catch (error) {
       console.error('Error fetching source data:', error);
-      toast({ title: 'Warning', description: 'Could not fetch all source data', variant: 'destructive' });
+      toast({ 
+        title: 'Warning', 
+        description: 'Could not fetch all source data', 
+        variant: 'destructive' 
+      });
     } finally {
       setIsLoadingData(false);
     }
-  }, [jobFields, isLoadingData]);
+  }, [jobFields, isLoadingData, taskId]);
 
   const fetchDocumentFiles = useCallback(async (individualId: string) => {
     if (!individualId || !webData.length) return;
 
-    // Prevent multiple simultaneous calls
     if (isLoadingDocuments) return;
 
     setIsLoadingDocuments(true);
     try {
-      // Get all KYC document IDs from webData requirements
       const allKycDocumentIds = webData.flatMap(item =>
         (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
       ).filter(Boolean);
 
       if (allKycDocumentIds.length === 0) {
-        console.log('No KYC document IDs found in webData requirements');
         setDocumentFiles([]);
         return;
       }
 
-      console.log('Fetching documents for individual:', individualId, 'with KYC IDs:', allKycDocumentIds);
-
-      // Fetch documents that match both the individual and the required KYC document types
       const { data, error } = await supabase
         .from('acc_portal_directors_documents')
         .select(`
@@ -588,22 +493,26 @@ export const AutomationMappingDialog = ({
         `)
         .eq('director_id', individualId)
         .in('document_id', allKycDocumentIds)
-        .neq('status', 'deleted'); // Exclude deleted documents
+        .neq('status', 'deleted');
 
       if (error) {
         console.error('Error fetching documents:', error);
         setDocumentFiles([]);
       } else {
-        console.log('Fetched documents:', data);
-        // Only include documents that have valid file paths and match our requirements
         const validDocuments = (data || []).filter(doc =>
           doc.file_path &&
           doc.status !== 'deleted' &&
           allKycDocumentIds.includes(doc.document_id)
         );
 
-        console.log('Valid documents after filtering:', validDocuments);
         setDocumentFiles(validDocuments);
+        
+        // Update document statuses
+        const newStatuses: Record<string, DocumentStatus> = {};
+        allKycDocumentIds.forEach(kycId => {
+          newStatuses[kycId] = calculateDocumentStatus(kycId);
+        });
+        setDocumentStatuses(newStatuses);
       }
     } catch (error) {
       console.error('Error fetching documents:', error);
@@ -611,7 +520,575 @@ export const AutomationMappingDialog = ({
     } finally {
       setIsLoadingDocuments(false);
     }
-  }, [webData, isLoadingDocuments]);
+  }, [webData, isLoadingDocuments, calculateDocumentStatus]);
+
+ // Function to handle document upload
+ const handleDocumentUpload = useCallback(async (kycId: string, file: File) => {
+  if (!currentIndividualId || !file) return;
+
+  setIsUploading(true);
+  
+  try {
+    // Update document status to uploading
+    setDocumentStatuses(prev => ({
+      ...prev,
+      [kycId]: { ...prev[kycId], status: 'Uploading', statusColor: 'blue' }
+    }));
+
+    // Create form data
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('director_id', currentIndividualId);
+    formData.append('document_id', kycId);
+
+    // Upload file to your upload endpoint
+    const uploadResponse = await fetch('/api/documents/upload', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!uploadResponse.ok) {
+      throw new Error('Failed to upload document');
+    }
+
+    const uploadResult = await uploadResponse.json();
+
+    // Update document status to processing
+    setDocumentStatuses(prev => ({
+      ...prev,
+      [kycId]: { ...prev[kycId], status: 'Processing', statusColor: 'blue' }
+    }));
+
+    // Trigger extraction if available
+    if (uploadResult.documentId) {
+      try {
+        const extractResponse = await fetch('/api/documents/extract', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            documentId: uploadResult.documentId,
+            kycId: kycId,
+          }),
+        });
+
+        if (extractResponse.ok) {
+          const extractResult = await extractResponse.json();
+          console.log('Extraction completed:', extractResult);
+        }
+      } catch (extractError) {
+        console.error('Extraction failed:', extractError);
+      }
+    }
+
+    // Refresh data
+    await fetchDocumentFiles(currentIndividualId);
+    
+    toast({
+      title: 'Success',
+      description: 'Document uploaded and processed successfully',
+      variant: 'default'
+    });
+
+  } catch (error) {
+    console.error('Document upload error:', error);
+    toast({
+      title: 'Error',
+      description: error instanceof Error ? error.message : 'Failed to upload document',
+      variant: 'destructive'
+    });
+    
+    // Reset status on error
+    setDocumentStatuses(prev => ({
+      ...prev,
+      [kycId]: calculateDocumentStatus(kycId)
+    }));
+  } finally {
+    setIsUploading(false);
+  }
+}, [currentIndividualId, fetchDocumentFiles, calculateDocumentStatus]);
+
+  const renderDocumentsSection = () => {
+    if (isLoadingDocuments) {
+      return (
+        <div className="flex flex-col items-center justify-center p-12 space-y-4 text-center">
+          <Loader2 className="h-10 w-10 animate-spin text-primary" />
+          <div>
+            <h4 className="font-medium text-gray-700">Loading Documents</h4>
+            <p className="text-sm text-gray-500 mt-1">Fetching document information...</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (!currentIndividualId) {
+      return (
+        <div className="text-center p-8">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-blue-50">
+            <User className="h-8 w-8 text-blue-500" />
+          </div>
+          <h3 className="mt-4 text-lg font-medium text-gray-900">Individual ID Required</h3>
+          <p className="mt-2 text-gray-600">Please enter an Individual ID to view document status</p>
+        </div>
+      );
+    }
+
+    const requiredKycIds = webData.flatMap(item =>
+      (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
+    ).filter(Boolean);
+
+    if (requiredKycIds.length === 0) {
+      return (
+        <div className="text-center p-8">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-gray-50">
+            <FileText className="h-8 w-8 text-gray-400" />
+          </div>
+          <h3 className="mt-4 text-lg font-medium text-gray-900">No Document Requirements</h3>
+          <p className="mt-2 text-gray-600">No document requirements found for this automation</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* Enhanced Document Summary Card */}
+        <div className="rounded-lg border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 shadow-sm overflow-hidden">
+          <div className="px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-blue-600">
+                  <Database className="h-6 w-6" />
+                </div>
+                <div className="ml-4">
+                  <h3 className="text-xl font-semibold text-gray-900">Document Status</h3>
+                  <p className="text-sm text-gray-600">
+                    Individual: <span className="font-mono font-medium text-blue-700">{currentIndividualId}</span>
+                    {task?.applicant_name && (
+                      <span className="ml-2">({task.applicant_name})</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-bold text-blue-800">
+                  {requiredKycIds.filter(kycId => documentStatuses[kycId]?.hasDocument).length}/{requiredKycIds.length}
+                </div>
+                <div className="text-xs text-blue-600">Documents Available</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Enhanced Document Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {requiredKycIds.map((kycId) => {
+            const status = documentStatuses[kycId] || { 
+              status: 'Missing', 
+              hasDocument: false, 
+              canPreview: false, 
+              canUpload: true, 
+              statusColor: 'red' 
+            };
+            
+            const webDataDoc = webData.flatMap(item => item.kycDocsUpload || [])
+              .find(doc => doc.kycDocumentId === kycId);
+            
+            const documentName = webDataDoc?.entityType || `Document ${kycId.slice(-4)}`;
+
+            return (
+              <Card key={kycId} className="relative overflow-hidden border-l-4 border-l-blue-400">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1 min-w-0">
+                      <CardTitle className="text-base font-medium text-gray-900 truncate">
+                        {documentName}
+                      </CardTitle>
+                      <CardDescription className="text-xs font-mono text-gray-500 mt-1">
+                        KYC ID: {kycId}
+                      </CardDescription>
+                    </div>
+                    <StatusBadge status={status} />
+                  </div>
+                </CardHeader>
+                
+                <CardContent className="pt-0">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      {status.canPreview && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDocumentPreview(kycId)}
+                          className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          Preview
+                        </Button>
+                      )}
+                      
+                      {status.canUpload && (
+                        <div className="relative">
+                          <input
+                            type="file"
+                            id={`upload-${kycId}`}
+                            className="hidden"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                handleDocumentUpload(kycId, file);
+                              }
+                            }}
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => document.getElementById(`upload-${kycId}`)?.click()}
+                            disabled={isUploading}
+                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          >
+                            {isUploading ? (
+                              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                            ) : (
+                              <Upload className="h-4 w-4 mr-1" />
+                            )}
+                            {status.hasDocument ? 'Replace' : 'Upload'}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {status.filePath && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => window.open(buildFileUrl({ file_path: status.filePath }), '_blank')}
+                        className="text-gray-500 hover:text-gray-700"
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Progress indicator for uploading/processing */}
+                  {(status.status === 'Uploading' || status.status === 'Processing') && (
+                    <div className="mt-3 space-y-2">
+                      <div className="flex items-center text-xs text-gray-600">
+                        <Clock className="h-3 w-3 mr-1 animate-spin" />
+                        {status.status}...
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-1.5">
+                        <div className="bg-blue-600 h-1.5 rounded-full w-1/2 animate-pulse"></div>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+
+        {/* Document Summary Stats */}
+        <Card className="bg-gray-50">
+          <CardContent className="pt-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-green-600">
+                  {requiredKycIds.filter(kycId => documentStatuses[kycId]?.status === 'Ready').length}
+                </div>
+                <div className="text-xs text-gray-600">Ready</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-yellow-600">
+                  {requiredKycIds.filter(kycId => ['Not Linked', 'Old Document'].includes(documentStatuses[kycId]?.status)).length}
+                </div>
+                <div className="text-xs text-gray-600">Needs Attention</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-red-600">
+                  {requiredKycIds.filter(kycId => documentStatuses[kycId]?.status === 'Missing').length}
+                </div>
+                <div className="text-xs text-gray-600">Missing</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-blue-600">
+                  {requiredKycIds.filter(kycId => ['Uploading', 'Processing'].includes(documentStatuses[kycId]?.status)).length}
+                </div>
+                <div className="text-xs text-gray-600">Processing</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
+  // Enhanced document preview handler
+  const handleDocumentPreview = useCallback(async (kycId: string) => {
+    try {
+      const status = documentStatuses[kycId];
+      if (!status?.canPreview) {
+        toast({
+          title: 'Preview Unavailable',
+          description: 'This document cannot be previewed in its current state',
+          variant: 'default'
+        });
+        return;
+      }
+
+      // Find the document
+      const document = documentFiles.find(doc => doc.document_id === kycId);
+      if (!document) {
+        // Try linked document
+        const linkedDoc = getLinkedDocumentForStage(task, stage, allDocuments);
+        if (linkedDoc && linkedDoc.document_id === kycId) {
+          await prepareDocumentPreview(linkedDoc);
+        } else {
+          toast({
+            title: 'Document Not Found',
+            description: 'Could not locate the document for preview',
+            variant: 'destructive'
+          });
+        }
+        return;
+      }
+
+      await prepareDocumentPreview(document);
+    } catch (error) {
+      console.error('Error preparing document preview:', error);
+      toast({
+        title: 'Preview Error',
+        description: 'Failed to prepare document preview',
+        variant: 'destructive'
+      });
+    }
+  }, [documentStatuses, documentFiles, task, stage, allDocuments]);
+
+  // Enhanced document preview preparation
+  const prepareDocumentPreview = useCallback(async (document: any) => {
+    try {
+      const kycDocument = document.kyc_document;
+      
+      if (!kycDocument || !document.file_path) {
+        throw new Error('Missing document configuration or file path');
+      }
+
+      const fileUrl = buildFileUrl(document);
+      if (!fileUrl) {
+        throw new Error('Could not build document URL');
+      }
+
+      // Transform KYC fields to ExtractionPreview format
+      const documentFields = (kycDocument.fields || []).map((field: any) => ({
+        id: field.id || field.fieldName || field.name || `field_${Math.random()}`,
+        name: field.fieldName || field.name || field.id || `field_${Math.random()}`,
+        type: field.fieldType || field.type || 'text',
+        isArray: field.isArray || field.type === 'array' || false,
+        required: field.isRequired || field.required || false,
+        arrayConfig: field.arrayConfig ? {
+          fields: (field.arrayConfig.fields || []).map((subField: any) => ({
+            id: subField.id || subField.fieldName || subField.name || `subfield_${Math.random()}`,
+            name: subField.fieldName || subField.name || subField.id || `subfield_${Math.random()}`,
+            type: subField.fieldType || subField.type || 'text',
+            required: subField.isRequired || subField.required || false,
+          })),
+          maxItems: field.arrayConfig.maxItems || 10,
+        } : undefined,
+      }));
+
+      // Use extracted data from the document
+      let extractedData = {};
+      if (document.extracted_details && typeof document.extracted_details === 'object') {
+        extractedData = { ...document.extracted_details };
+      } else if (document.extracted_data && typeof document.extracted_data === 'object') {
+        extractedData = { ...document.extracted_data };
+      }
+
+      // Ensure all fields have values in extractedData
+      documentFields.forEach((field: any) => {
+        const fieldName = field.name;
+        if (extractedData[fieldName] === undefined) {
+          extractedData[fieldName] = field.isArray ? [] : '';
+        }
+      });
+
+      const fileName = document.file_name || document.file_path?.split('/').pop() || 'Document';
+      const documentName = kycDocument.display_name || kycDocument.name || 'Document';
+
+      // Determine file type
+      const getFileType = (fileName: string, mimeType?: string) => {
+        if (mimeType) {
+          if (mimeType.startsWith('image/')) return 'image';
+          if (mimeType === 'application/pdf') return 'pdf';
+        }
+        const extension = fileName.toLowerCase().split('.').pop();
+        if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) return 'image';
+        if (extension === 'pdf') return 'pdf';
+        return 'unknown';
+      };
+      
+      const fileType = getFileType(fileName, document.mime_type);
+
+      setPreviewDocument({
+        file: { ...document, name: fileName, type: fileType, url: fileUrl },
+        fileUrl,
+        fileName,
+        documentName,
+        fields: documentFields,
+        extractedData,
+        type: kycDocument.document_type || 'document',
+      });
+
+    } catch (error) {
+      console.error('Error preparing document preview:', error);
+      throw error;
+    }
+  }, []);
+
+  // Status Badge Component
+  const StatusBadge = ({ status }: { status: DocumentStatus }) => {
+    const icons = {
+      'Ready': <CheckCircle className="h-3 w-3" />,
+      'Not Linked': <AlertTriangle className="h-3 w-3" />,
+      'Missing': <XCircle className="h-3 w-3" />,
+      'Old Document': <Clock className="h-3 w-3" />,
+      'Uploading': <Loader2 className="h-3 w-3 animate-spin" />,
+      'Processing': <RefreshCw className="h-3 w-3 animate-spin" />
+    };
+
+    const colors = {
+      green: 'bg-green-100 text-green-800 border-green-200',
+      yellow: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+      red: 'bg-red-100 text-red-800 border-red-200',
+      blue: 'bg-blue-100 text-blue-800 border-blue-200',
+      gray: 'bg-gray-100 text-gray-800 border-gray-200'
+    };
+
+    return (
+      <Badge 
+        variant="outline" 
+        className={`${colors[status.statusColor]} flex items-center gap-1 text-xs font-medium`}
+      >
+        {icons[status.status]}
+        {status.status}
+      </Badge>
+    );
+  };
+
+  // Rest of the component implementation...
+  const getRequirementId = useCallback(() => {
+    let effectiveSubDeptId = subDeptId;
+    if (!effectiveSubDeptId && task) {
+      if (task.subdepartment?.id) effectiveSubDeptId = task.subdepartment.id.toString();
+      else if (task.subdepartment_id) effectiveSubDeptId = task.subdepartment_id.toString();
+      else if (task.sub_dept_id) effectiveSubDeptId = task.sub_dept_id.toString();
+    }
+
+    if (!effectiveSubDeptId) {
+      if (isSubclass && subclassId) return classId;
+      return classId;
+    }
+
+    if (isSubclass && subclassId) return `${effectiveSubDeptId}_${classId}_${subclassId}`;
+    return `${effectiveSubDeptId}_${classId}`;
+  }, [subDeptId, task, isSubclass, subclassId, classId]);
+
+  // Extract automation mappings from stage documents
+  const extractAutomationMappings = async (stageDocuments: any[]) => {
+    try {
+      const mappings: EntityAutomationMapping[] = [];
+      const automationIds = new Set<string>();
+
+      stageDocuments.forEach(doc => {
+        if (doc.automationLinks && typeof doc.automationLinks === 'object') {
+          Object.entries(doc.automationLinks).forEach(([entityKey, automationId]) => {
+            if (typeof automationId === 'string') {
+              automationIds.add(automationId);
+
+              const parts = entityKey.split('-');
+              const entityType = parts[0];
+              const entityName = `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} ${parts.slice(1).join('-')}`;
+
+              mappings.push({
+                entityKey,
+                entityName,
+                entityType,
+                automationId: automationId
+              });
+            }
+          });
+        }
+      });
+
+      if (automationIds.size > 0) {
+        const { data: automations, error } = await supabase
+          .from('tm_automations')
+          .select('*')
+          .in('id', Array.from(automationIds));
+
+        if (!error && automations) {
+          mappings.forEach(mapping => {
+            const automation = automations.find(a => a.id === mapping.automationId);
+            if (automation) {
+              mapping.automation = automation;
+            }
+          });
+        }
+      }
+
+      setEntityAutomationMappings(mappings);
+
+      if (mappings.length > 0 && mappings[0].automationId && !selectedAutomationId) {
+        setSelectedAutomationId(mappings[0].automationId);
+      }
+    } catch (error) {
+      console.error('Error extracting automation mappings:', error);
+    }
+  };
+
+  const fetchAutomationFromWebData = useCallback(async (webDataItems: any[]) => {
+    try {
+      const automationIds = new Set<string>();
+      const mappings: EntityAutomationMapping[] = [];
+  
+      webDataItems.forEach((item, index) => {
+        if (item.automationId) {
+          automationIds.add(item.automationId);
+          mappings.push({
+            entityKey: `webdata-${index}`,
+            entityName: item.documentName || `WebData Item ${index + 1}`,
+            entityType: 'webdata',
+            automationId: item.automationId
+          });
+        }
+      });
+  
+      if (automationIds.size > 0) {
+        const { data: automations, error } = await supabase
+          .from('tm_automations')
+          .select('*')
+          .in('id', Array.from(automationIds));
+  
+        if (!error && automations) {
+          mappings.forEach(mapping => {
+            const automation = automations.find(a => a.id === mapping.automationId);
+            if (automation) {
+              mapping.automation = automation;
+            }
+          });
+        }
+      }
+  
+      setEntityAutomationMappings(mappings);
+  
+      if (mappings.length > 0 && mappings[0].automationId && !selectedAutomationId) {
+        setSelectedAutomationId(mappings[0].automationId);
+      }
+    } catch (error) {
+      console.error('Error fetching automation from webData:', error);
+    }
+  }, [selectedAutomationId])
 
   useEffect(() => {
     if (!isOpen) {
@@ -622,6 +1099,7 @@ export const AutomationMappingDialog = ({
       setDocumentFiles([]);
       setEntityAutomationMappings([]);
       setSelectedAutomationId('');
+      setDocumentStatuses({});
       setError(null);
       return;
     }
@@ -650,7 +1128,6 @@ export const AutomationMappingDialog = ({
             const webDataItems = fallbackReq.webData || [];
             setWebData(webDataItems);
 
-            // Fetch automation details from webData automationId
             await fetchAutomationFromWebData(webDataItems);
 
             const allMasterFieldIds = webDataItems.flatMap((item: any) =>
@@ -673,7 +1150,6 @@ export const AutomationMappingDialog = ({
         const webDataItems = requirement.webData || [];
         if (isMounted) setWebData(webDataItems);
 
-        // Fetch automation details from webData automationId
         await fetchAutomationFromWebData(webDataItems);
 
         const allMasterFieldIds = webDataItems.flatMap((item: any) =>
@@ -689,7 +1165,6 @@ export const AutomationMappingDialog = ({
           }
         }
 
-        // Extract automation mappings from stage documents if available
         if (stageDocuments?.length > 0) {
           await extractAutomationMappings(stageDocuments);
         }
@@ -711,57 +1186,7 @@ export const AutomationMappingDialog = ({
     return () => {
       isMounted = false;
     };
-  }, [isOpen]); // Remove dynamic dependencies to prevent infinite loops
-
-  // New function to fetch automation details from webData
-  const fetchAutomationFromWebData = async (webDataItems: any[]) => {
-    try {
-      const automationIds = new Set<string>();
-      const mappings: EntityAutomationMapping[] = [];
-
-      // Collect automation IDs from webData
-      webDataItems.forEach((item, index) => {
-        if (item.automationId) {
-          automationIds.add(item.automationId);
-
-          // Create a mapping entry for this webData item
-          mappings.push({
-            entityKey: `webdata-${index}`, // Use index as key for webData items
-            entityName: item.documentName || `WebData Item ${index + 1}`,
-            entityType: 'webdata',
-            automationId: item.automationId
-          });
-        }
-      });
-
-      // Fetch automation details from tm_automations
-      if (automationIds.size > 0) {
-        const { data: automations, error } = await supabase
-          .from('tm_automations')
-          .select('*')
-          .in('id', Array.from(automationIds));
-
-        if (!error && automations) {
-          // Map automation details to mappings
-          mappings.forEach(mapping => {
-            const automation = automations.find(a => a.id === mapping.automationId);
-            if (automation) {
-              mapping.automation = automation;
-            }
-          });
-        }
-      }
-
-      setEntityAutomationMappings(mappings);
-
-      // Set the first automation as selected by default
-      if (mappings.length > 0 && mappings[0].automationId && !selectedAutomationId) {
-        setSelectedAutomationId(mappings[0].automationId);
-      }
-    } catch (error) {
-      console.error('Error fetching automation from webData:', error);
-    }
-  };
+  }, [isOpen, getRequirementId, classId, stageDocuments, fetchAutomationFromWebData]);
 
   // Separate useEffect for source data fetching with debouncing
   useEffect(() => {
@@ -775,7 +1200,6 @@ export const AutomationMappingDialog = ({
         if (!isMounted) return;
 
         try {
-          // Only fetch if we have the required data
           if (Object.keys(jobFields).length > 0) {
             await fetchSourceData(currentIndividualId);
           }
@@ -785,7 +1209,7 @@ export const AutomationMappingDialog = ({
         } catch (error) {
           console.error('Error in debounced fetch:', error);
         }
-      }, 300); // 300ms debounce
+      }, 300);
     };
 
     debouncedFetch();
@@ -796,7 +1220,7 @@ export const AutomationMappingDialog = ({
         clearTimeout(timeoutId);
       }
     };
-  }, [currentIndividualId, isOpen]); // Minimal dependencies
+  }, [currentIndividualId, isOpen]);
 
   // Separate effect to trigger data fetching when jobFields or webData are ready
   useEffect(() => {
@@ -820,7 +1244,7 @@ export const AutomationMappingDialog = ({
     return () => {
       isMounted = false;
     };
-  }, [jobFields, webData]); // Only trigger when these are populated
+  }, [jobFields, webData]);
 
   const getSourceInfo = (masterFieldIds: string[]) => {
     if (!masterFieldIds || masterFieldIds.length === 0) {
@@ -841,17 +1265,6 @@ export const AutomationMappingDialog = ({
       };
     }).filter(Boolean);
 
-    // Log multi-source fields for debugging
-    if (sources.length > 1) {
-      console.log(`🔗 Multi-source field detected:`, {
-        masterFieldIds,
-        sources: sources.map(s => ({
-          label: s.fieldLabel,
-          path: s.source
-        }))
-      });
-    }
-
     return { sources, hasData: sources.length > 0 };
   };
 
@@ -859,12 +1272,10 @@ export const AutomationMappingDialog = ({
     if (sources.length === 0) return "Missing";
 
     if (sources.length === 1) {
-      // Single source - return normally
       const sourceInfo = sources[0];
       return getSourceValue(sourceInfo.table, sourceInfo.path);
     }
 
-    // Multiple sources - merge them
     const validValues: string[] = [];
 
     sources.forEach(sourceInfo => {
@@ -873,7 +1284,6 @@ export const AutomationMappingDialog = ({
       if (typeof value === 'string' && value !== 'Missing' && value.trim() !== '') {
         const trimmedValue = value.trim();
 
-        // Avoid duplicate values
         if (!validValues.some(existing =>
           existing.toLowerCase() === trimmedValue.toLowerCase()
         )) {
@@ -884,7 +1294,6 @@ export const AutomationMappingDialog = ({
 
     if (validValues.length === 0) return "Missing";
 
-    // Join with spaces and clean up multiple spaces
     return validValues.join(' ').replace(/\s+/g, ' ').trim();
   };
 
@@ -922,23 +1331,30 @@ export const AutomationMappingDialog = ({
     setIsLoadingData(true);
 
     try {
-      const queryField = table === 'acc_portal_directors_documents' ? 'director_id' : 'id';
+      let queryField = 'id';
+      let queryValue = currentIndividualId;
 
-      // Get current record
+      // Special handling for tm_tasks table
+      if (table === 'tm_tasks') {
+        queryField = 'task_id';
+        queryValue = taskId || currentIndividualId;
+      } else if (table === 'acc_portal_directors_documents') {
+        queryField = 'director_id';
+      }
+
       const { data: existingData, error: fetchError } = await supabase
         .from(table)
         .select('*')
-        .eq(queryField, currentIndividualId)
+        .eq(queryField, queryValue)
         .maybeSingle();
 
       const updateData = updateJsonValue(existingData || {}, path, editValue);
 
       if (fetchError && !existingData) {
-        // Create new record
         const { error: insertError } = await supabase
           .from(table)
           .upsert({
-            [queryField]: currentIndividualId,
+            [queryField]: queryValue,
             ...updateData,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
@@ -946,19 +1362,17 @@ export const AutomationMappingDialog = ({
 
         if (insertError) throw insertError;
       } else {
-        // Update existing record
         const { error: updateError } = await supabase
           .from(table)
           .update({
             ...updateData,
             updated_at: new Date().toISOString()
           })
-          .eq(queryField, currentIndividualId);
+          .eq(queryField, queryValue);
 
         if (updateError) throw updateError;
       }
 
-      // Refresh data after successful update
       await fetchSourceData(currentIndividualId);
 
       toast({
@@ -995,17 +1409,14 @@ export const AutomationMappingDialog = ({
         const { sources } = getSourceInfo(field.masterFieldIds || []);
 
         if (sources.length === 0) {
-          // No sources mapped, skip this field
           return;
         }
 
         if (sources.length === 1) {
-          // Single source - handle normally
           const sourceInfo = sources[0];
           const value = getSourceValue(sourceInfo.table, sourceInfo.path);
 
           if (typeof value === 'string' && value !== 'Missing') {
-            // Handle date parsing if field has array items with date components
             if (field.arrayItems && field.arrayItems.length > 0) {
               const hasDateComponents = field.arrayItems.some((item: any) =>
                 ['day', 'month', 'year'].includes(item.variableName)
@@ -1022,7 +1433,6 @@ export const AutomationMappingDialog = ({
             }
           }
         } else {
-          // Multiple sources - merge them
           const allValues: string[] = [];
           let hasValidValue = false;
 
@@ -1035,18 +1445,8 @@ export const AutomationMappingDialog = ({
           });
 
           if (hasValidValue) {
-            // Merge all values into one string
             const mergedValue = allValues.join(' ').trim();
 
-            console.log(`🔗 Merging multiple sources for field "${field.variableName}":`, {
-              fieldName: field.efnsDisplayName || field.name,
-              variableName: field.variableName,
-              sourceLabels: sources.map(s => s.fieldLabel),
-              individualValues: allValues,
-              mergedValue: mergedValue
-            });
-
-            // Handle date parsing if field has array items with date components
             if (field.arrayItems && field.arrayItems.length > 0) {
               const hasDateComponents = field.arrayItems.some((item: any) =>
                 ['day', 'month', 'year'].includes(item.variableName)
@@ -1061,114 +1461,26 @@ export const AutomationMappingDialog = ({
             } else {
               formData[field.variableName] = mergedValue;
             }
-          } else {
-            console.log(`⚠️ No valid values found for multi-source field "${field.variableName}"`);
           }
         }
       });
     });
 
-    console.log('📝 Final prepared form data:', formData);
     return formData;
-  };
-
-  // Helper function to merge source values with better logic
-  const mergeSourceValues = (sources: any[], fieldName: string): string | null => {
-    const validValues: string[] = [];
-
-    sources.forEach((sourceInfo, index) => {
-      const value = getSourceValue(sourceInfo.table, sourceInfo.path);
-
-      if (typeof value === 'string' && value !== 'Missing' && value.trim() !== '') {
-        const trimmedValue = value.trim();
-
-        // Avoid duplicating values (in case same data appears in multiple sources)
-        if (!validValues.some(existingValue =>
-          existingValue.toLowerCase() === trimmedValue.toLowerCase()
-        )) {
-          validValues.push(trimmedValue);
-        }
-
-        console.log(`  Source ${index + 1} (${sourceInfo.fieldLabel}): "${trimmedValue}"`);
-      } else {
-        console.log(`  Source ${index + 1} (${sourceInfo.fieldLabel}): Missing or empty`);
-      }
-    });
-
-    if (validValues.length === 0) {
-      return null;
-    }
-
-    // Join all valid values with spaces
-    const merged = validValues.join(' ');
-
-    console.log(`🔗 Merged result for "${fieldName}": "${merged}"`);
-    return merged;
-  };
-
-  // Alternative helper function for more sophisticated merging (if needed)
-  const mergeSourceValuesAdvanced = (sources: any[], fieldName: string): string | null => {
-    const sourceData: { label: string; value: string }[] = [];
-
-    sources.forEach(sourceInfo => {
-      const value = getSourceValue(sourceInfo.table, sourceInfo.path);
-
-      if (typeof value === 'string' && value !== 'Missing' && value.trim() !== '') {
-        sourceData.push({
-          label: sourceInfo.fieldLabel,
-          value: value.trim()
-        });
-      }
-    });
-
-    if (sourceData.length === 0) {
-      return null;
-    }
-
-    // Special handling for name fields
-    if (fieldName.toLowerCase().includes('name')) {
-      // For names, join with spaces and remove extra spaces
-      const merged = sourceData.map(s => s.value).join(' ').replace(/\s+/g, ' ').trim();
-
-      console.log(`👤 Name field "${fieldName}" merged:`, {
-        sources: sourceData,
-        result: merged
-      });
-
-      return merged;
-    }
-
-    // For other fields, simple space-separated join
-    const merged = sourceData.map(s => s.value).join(' ').trim();
-
-    console.log(`📄 Field "${fieldName}" merged:`, {
-      sources: sourceData,
-      result: merged
-    });
-
-    return merged;
   };
 
   const parseDateToComponents = (dateValue: string): { day: string; month: string; year: string } | string => {
     if (!dateValue) return dateValue;
 
-    // Month name to number mapping
     const monthNames: Record<string, string> = {
-      'Jan': '01', 'January': '01',
-      'Feb': '02', 'February': '02',
-      'Mar': '03', 'March': '03',
-      'Apr': '04', 'April': '04',
-      'May': '05', 'May': '05',
-      'Jun': '06', 'June': '06',
-      'Jul': '07', 'July': '07',
-      'Aug': '08', 'August': '08',
-      'Sep': '09', 'September': '09',
-      'Oct': '10', 'October': '10',
-      'Nov': '11', 'November': '11',
+      'Jan': '01', 'January': '01', 'Feb': '02', 'February': '02',
+      'Mar': '03', 'March': '03', 'Apr': '04', 'April': '04',
+      'May': '05', 'Jun': '06', 'June': '06', 'Jul': '07', 'July': '07',
+      'Aug': '08', 'August': '08', 'Sep': '09', 'September': '09',
+      'Oct': '10', 'October': '10', 'Nov': '11', 'November': '11',
       'Dec': '12', 'December': '12'
     };
 
-    // Month number to short name mapping (for output)
     const monthNumberToName: Record<string, string> = {
       '01': 'Jan', '02': 'Feb', '03': 'Mar', '04': 'Apr',
       '05': 'May', '06': 'Jun', '07': 'Jul', '08': 'Aug',
@@ -1176,16 +1488,13 @@ export const AutomationMappingDialog = ({
     };
 
     const formats = [
-      // Numeric formats
-      /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/, // DD/MM/YYYY
-      /^(\d{4})-(\d{1,2})-(\d{1,2})$/, // YYYY-MM-DD
-      /^(\d{1,2})-(\d{1,2})-(\d{4})$/, // DD-MM-YYYY
-
-      // Month name formats
-      /^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/, // DD Month YYYY (e.g., "15 Jan 2024")
-      /^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/, // Month DD, YYYY (e.g., "Jan 15, 2024" or "Jan 15 2024")
-      /^(\d{1,2})[-\/]([A-Za-z]+)[-\/](\d{4})$/, // DD-Month-YYYY or DD/Month/YYYY
-      /^([A-Za-z]+)[-\/](\d{1,2})[-\/](\d{4})$/, // Month-DD-YYYY or Month/DD/YYYY
+      /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
+      /^(\d{4})-(\d{1,2})-(\d{1,2})$/,
+      /^(\d{1,2})-(\d{1,2})-(\d{4})$/,
+      /^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/,
+      /^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/,
+      /^(\d{1,2})[-\/]([A-Za-z]+)[-\/](\d{4})$/,
+      /^([A-Za-z]+)[-\/](\d{1,2})[-\/](\d{4})$/,
     ];
 
     for (let i = 0; i < formats.length; i++) {
@@ -1195,56 +1504,46 @@ export const AutomationMappingDialog = ({
       if (match) {
         let day, month, year;
 
-        if (i === 0 || i === 2) { // DD/MM/YYYY or DD-MM-YYYY
+        if (i === 0 || i === 2) {
           [, day, month, year] = match;
-          // Convert numeric month to month name
           month = monthNumberToName[month.padStart(2, '0')] || month.padStart(2, '0');
-        } else if (i === 1) { // YYYY-MM-DD
+        } else if (i === 1) {
           [, year, month, day] = match;
-          // Convert numeric month to month name
           month = monthNumberToName[month.padStart(2, '0')] || month.padStart(2, '0');
-        } else if (i === 3) { // DD Month YYYY
+        } else if (i === 3) {
           [, day, month, year] = match;
-          // Month is already a name, convert to short form if needed
           month = getShortMonthName(month, monthNames);
-        } else if (i === 4) { // Month DD, YYYY
+        } else if (i === 4) {
           [, month, day, year] = match;
-          // Month is already a name, convert to short form if needed
           month = getShortMonthName(month, monthNames);
-        } else if (i === 5) { // DD-Month-YYYY
+        } else if (i === 5) {
           [, day, month, year] = match;
-          // Month is already a name, convert to short form if needed
           month = getShortMonthName(month, monthNames);
-        } else if (i === 6) { // Month-DD-YYYY
+        } else if (i === 6) {
           [, month, day, year] = match;
-          // Month is already a name, convert to short form if needed
           month = getShortMonthName(month, monthNames);
         }
 
         return {
           day: day.padStart(2, '0'),
-          month: month, // Return month name (e.g., "Jan", "Feb", etc.)
+          month: month,
           year: year
         };
       }
     }
 
-    // If no format matches, return the original value
     return dateValue;
   };
 
-  // Helper function to get short month name
   const getShortMonthName = (monthInput: string, monthNames: Record<string, string>): string => {
     const monthInputLower = monthInput.toLowerCase();
 
-    // Check if it's already a short month name
     for (const [shortName] of Object.entries(monthNames)) {
       if (shortName.toLowerCase() === monthInputLower) {
         return shortName;
       }
     }
 
-    // Check if it's a full month name
     for (const [shortName] of Object.entries(monthNames)) {
       const fullName = getFullMonthName(shortName);
       if (fullName.toLowerCase() === monthInputLower) {
@@ -1252,11 +1551,9 @@ export const AutomationMappingDialog = ({
       }
     }
 
-    // If not found, return the first 3 characters capitalized
     return monthInput.charAt(0).toUpperCase() + monthInput.slice(1, 3).toLowerCase();
   };
 
-  // Helper function to get full month name from short name
   const getFullMonthName = (shortName: string): string => {
     const fullNames: Record<string, string> = {
       'Jan': 'January', 'Feb': 'February', 'Mar': 'March', 'Apr': 'April',
@@ -1266,7 +1563,7 @@ export const AutomationMappingDialog = ({
     return fullNames[shortName] || shortName;
   };
 
-  // Enhanced handleRunAutomation with improved document URL handling
+  // Enhanced handleRunAutomation
   const handleRunAutomation = async () => {
     if (!currentIndividualId) {
       toast({
@@ -1289,28 +1586,22 @@ export const AutomationMappingDialog = ({
     try {
       setIsAutomationRunning(true);
 
-      // Get the selected automation details
       const selectedMapping = entityAutomationMappings.find(m => m.automationId === selectedAutomationId);
       if (!selectedMapping?.automation) {
         throw new Error('Selected automation details not found');
       }
 
       const automation = selectedMapping.automation;
-
-      // Find the corresponding webData item
       const webDataItem = webData.find(item => item.automationId === selectedAutomationId);
       if (!webDataItem) {
         throw new Error('WebData configuration not found for selected automation');
       }
 
       const formData = prepareFormData();
-
-      // Enhanced document URL retrieval with better error handling
-      const documentUrl = getDocumentUrlWithFallback();
+      const documentUrl = getDocumentUrlForAutomation();
 
       if (!documentUrl) {
-        console.warn('⚠️ No document URL found for automation. This may be expected if no document is linked to any stage.');
-        // Show user-friendly message but continue with automation
+        console.warn('⚠️ No document URL found for automation');
         toast({
           title: 'No Document Linked',
           description: 'No document is linked to this stage. Automation will run without document data.',
@@ -1325,22 +1616,10 @@ export const AutomationMappingDialog = ({
         taskId: taskId,
         individualId: currentIndividualId,
         classId: classId,
-        // requirementId: getRequirementId(),
-        photoUrl: documentUrl, // Use dynamic document URL
-        // webDataItem: {
-        //   documentId: webDataItem.documentId,
-        //   documentName: webDataItem.documentName,
-        //   automationId: webDataItem.automationId,
-        //   fields: webDataItem.fields?.length || 0,
-        //   kycDocsUpload: webDataItem.kycDocsUpload?.length || 0,
-        //   photoUrl: documentUrl // Also include in webDataItem for backward compatibility
-        // },
+        photoUrl: documentUrl,
       };
 
       console.log('🚀 Sending automation request with payload:', payload);
-      console.log('📡 Using webhook URL:', automation.webhook_url);
-      console.log('📄 Document URL from linked document:', documentUrl);
-      console.log('🗃️ WebData item:', webDataItem);
 
       const response = await fetch(automation.webhook_url, {
         method: automation.webhook_method || 'POST',
@@ -1456,7 +1735,6 @@ export const AutomationMappingDialog = ({
                     {currentIndividualId ? (
                       hasData ? (
                         sources.length === 1 ? (
-                          // Single source - show normally with inline editing
                           <div className="space-y-2 text-sm">
                             {sources.map((sourceInfo, idx) => {
                               const value = getSourceValue(sourceInfo.table, sourceInfo.path);
@@ -1504,9 +1782,7 @@ export const AutomationMappingDialog = ({
                             })}
                           </div>
                         ) : (
-                          // Multi-source - show individual values with separate editing
                           <div className="space-y-2 text-sm">
-                            {/* Show merged value at top */}
                             <div className="border border-purple-200 bg-purple-50 p-2 rounded">
                               <div className="text-xs font-medium text-purple-800 mb-1">Merged Value:</div>
                               {(() => {
@@ -1523,7 +1799,6 @@ export const AutomationMappingDialog = ({
                               })()}
                             </div>
 
-                            {/* Show individual sources with separate editing */}
                             <div className="space-y-1">
                               <div className="text-xs font-medium text-gray-600">Individual Sources (click to edit):</div>
                               {sources.map((sourceInfo, idx) => {
@@ -1606,7 +1881,6 @@ export const AutomationMappingDialog = ({
 
     return (
       <div className="space-y-6">
-        {/* Automation Selector */}
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -1659,7 +1933,6 @@ export const AutomationMappingDialog = ({
                     {selectedMapping.automation.webhook_url}
                   </div>
                 </div>
-                {/* Login Configuration if available */}
                 {selectedMapping.automation.login && (
                   <div className="md:col-span-2">
                     <Label className="text-sm font-medium text-gray-700">Login Configuration</Label>
@@ -1693,246 +1966,6 @@ export const AutomationMappingDialog = ({
         </Card>
       </div>
     );
-  };
-
-  const renderDocumentsSection = () => {
-    if (isLoadingDocuments) {
-      return (
-        <div className="flex items-center justify-center p-8">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <span className="ml-2">Loading documents...</span>
-        </div>
-      );
-    }
-
-    if (!documentFiles.length) {
-      const requiredKycIds = webData.flatMap(item =>
-        (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
-      ).filter(Boolean);
-
-      return (
-        <div className="text-center p-8 text-gray-500">
-          <FileText className="h-10 w-10 mb-2 text-gray-300 mx-auto" />
-          <p>No documents found for this individual.</p>
-          {!currentIndividualId ? (
-            <p className="text-sm mt-1">Enter an Individual ID to view documents.</p>
-          ) : (
-            <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg text-left">
-              <p className="text-sm font-medium text-amber-800 mb-2">Required Documents:</p>
-              <div className="space-y-1">
-                {requiredKycIds.map(kycId => {
-                  const webDataDoc = webData.flatMap(item => item.kycDocsUpload || [])
-                    .find(doc => doc.kycDocumentId === kycId);
-                  return (
-                    <div key={kycId} className="text-xs text-amber-700">
-                      • KYC ID: {kycId} ({webDataDoc?.entityType || 'Document'})
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="text-xs text-amber-600 mt-2">
-                Upload documents with these KYC IDs for individual {currentIndividualId}
-              </p>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-4">
-        {/* Header info */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h4 className="font-medium text-blue-800 mb-2 flex items-center gap-2">
-            <Database className="h-4 w-4" />
-            Documents for Individual {currentIndividualId}
-          </h4>
-          <p className="text-sm text-blue-700">
-            Showing {documentFiles.length} document{documentFiles.length !== 1 ? 's' : ''} matching WebData requirements
-          </p>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {webData.flatMap(item => item.kycDocsUpload || []).map(doc => (
-              <Badge key={doc.kycDocumentId} variant="outline" className="text-xs">
-                {doc.entityType}: {doc.kycDocumentId.slice(0, 8)}...
-              </Badge>
-            ))}
-          </div>
-        </div>
-
-        {/* Enhanced Document URL Display */}
-        <div className="md:col-span-2">
-          <Label className="text-sm font-medium text-gray-700">Document URL</Label>
-          <div className="p-2 bg-gray-50 rounded border">
-            {(() => {
-              const documentUrl = getDocumentUrlWithFallback();
-              if (documentUrl) {
-                // Check which document is being used
-                const usedDocument = documentFiles.find(doc => {
-                  const testUrl = buildFileUrl(doc);
-                  return testUrl === documentUrl;
-                });
-
-                return (
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-start gap-2">
-                      <div className="text-xs font-mono text-gray-600 break-all flex-1">{documentUrl}</div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="shrink-0"
-                        onClick={() => setPreviewDocument({
-                          file_name: usedDocument.file_name || usedDocument.file_path?.split('/').pop() || 'Document',
-                          fileUrl: documentUrl,
-                          extractedData: {}
-                        })}
-                      >
-                        <Eye className="h-4 w-4 mr-1" />
-                        Preview
-                      </Button>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Badge variant="default" className="text-xs">
-                        Document Available
-                      </Badge>
-                      {usedDocument && (
-                        <Badge variant="outline" className="text-xs">
-                          KYC ID: {usedDocument.document_id}
-                        </Badge>
-                      )}
-                      {stage && (
-                        <span className="text-xs text-gray-500">
-                          Target stage: {stage.name || stage.id}
-                        </span>
-                      )}
-                    </div>
-                    {usedDocument && (
-                      <div className="text-xs text-blue-600">
-                        Using: {usedDocument.file_name || usedDocument.file_path?.split('/').pop()}
-                      </div>
-                    )}
-                  </div>
-                );
-              } else {
-                return (
-                  <div className="space-y-1">
-                    <div className="text-xs text-gray-500 italic">No document available for automation</div>
-                    <Badge variant="outline" className="text-xs">
-                      No Document
-                    </Badge>
-                    <div className="text-xs text-amber-600 mt-1">
-                      Upload documents matching KYC ID: {webData.flatMap(item =>
-                        (item.kycDocsUpload || []).map(upload => upload.kycDocumentId)
-                      ).filter(Boolean).join(', ')}
-                    </div>
-                  </div>
-                );
-              }
-            })()}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const handleDocumentPreview = (file: any) => {
-    try {
-      const kycDocument = file.kyc_document;
-
-      if (!kycDocument || !file.file_path) {
-        console.error('Error preparing preview: Missing kyc_document or file_path in the provided file object.', file);
-        toast({
-          title: 'Preview Error',
-          description: 'Cannot preview the document because essential configuration or file path is missing.',
-          variant: 'destructive',
-        });
-        return;
-      }
-
-      // Build the file URL directly from the file data
-      const bucketName = 'kyc-documents';
-      const filePath = file.file_path.startsWith(bucketName)
-        ? file.file_path
-        : `${bucketName}/${file.file_path}`;
-      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
-
-      console.log('Previewing document with pre-fetched data:', {
-        fileId: file.id,
-        documentId: file.document_id,
-        filePath: file.file_path,
-        fileUrl,
-        kycDocumentId: kycDocument.id,
-      });
-
-      // Transform KYC fields to ExtractionPreview format
-      const documentFields = (kycDocument.fields || []).map((field: any) => ({
-        id: field.id || field.fieldName || field.name || `field_${Math.random()}`,
-        name: field.fieldName || field.name || field.id || `field_${Math.random()}`,
-        type: field.fieldType || field.type || 'text',
-        isArray: field.isArray || field.type === 'array' || false,
-        required: field.isRequired || field.required || false,
-        arrayConfig: field.arrayConfig ? {
-          fields: (field.arrayConfig.fields || []).map((subField: any) => ({
-            id: subField.id || subField.fieldName || subField.name || `subfield_${Math.random()}`,
-            name: subField.fieldName || subField.name || subField.id || `subfield_${Math.random()}`,
-            type: subField.fieldType || subField.type || 'text',
-            required: subField.isRequired || subField.required || false,
-          })),
-          maxItems: field.arrayConfig.maxItems || 10,
-        } : undefined,
-      }));
-
-      // Use extracted data from the file, with fallbacks
-      let extractedData = {};
-      if (file.extracted_details && typeof file.extracted_details === 'object') {
-        extractedData = { ...file.extracted_details };
-      } else if (file.extracted_data && typeof file.extracted_data === 'object') {
-        extractedData = { ...file.extracted_data };
-      } else if (file.extraction_result && typeof file.extraction_result === 'object') {
-        extractedData = { ...file.extraction_result };
-      }
-
-      // Ensure all fields have values in extractedData for the form
-      documentFields.forEach((field: any) => {
-        const fieldName = field.name;
-        if (extractedData[fieldName] === undefined) {
-          extractedData[fieldName] = field.isArray ? [] : '';
-        }
-      });
-
-      const documentName = kycDocument.display_name || kycDocument.name || 'Document';
-      const fileName = file.file_name || file.file_path?.split('/').pop() || documentName;
-
-      // Determine file type for proper preview
-      const getFileType = (fileName: string, mimeType?: string) => {
-        if (mimeType) {
-          if (mimeType.startsWith('image/')) return 'image';
-          if (mimeType === 'application/pdf') return 'pdf';
-        }
-        const extension = fileName.toLowerCase().split('.').pop();
-        if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) return 'image';
-        if (extension === 'pdf') return 'pdf';
-        return 'unknown';
-      };
-      const fileType = getFileType(fileName, file.mime_type);
-
-      setPreviewDocument({
-        file: { ...file, name: fileName, type: fileType, url: fileUrl },
-        fileUrl,
-        fileName,
-        documentName,
-        fields: documentFields,
-        extractedData,
-        type: kycDocument.document_type || 'document',
-      });
-
-    } catch (error) {
-      console.error('Error preparing document preview:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to prepare document preview: ' + (error?.message || 'Unknown error'),
-        variant: 'destructive',
-      });
-    }
   };
 
   return (
@@ -1990,8 +2023,12 @@ export const AutomationMappingDialog = ({
                 {error}
               </div>
             ) : (
-              <Tabs defaultValue="automation" className="max-h-[100vh] flex flex-col">
+              <Tabs defaultValue="documents" className="max-h-[100vh] flex flex-col">
                 <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="documents" className="gap-2">
+                    <FileText className="h-4 w-4" />
+                    Documents ({Object.keys(documentStatuses).length})
+                  </TabsTrigger>
                   <TabsTrigger value="automation" className="gap-2">
                     <Settings className="h-4 w-4" />
                     Automation Config
@@ -2000,11 +2037,11 @@ export const AutomationMappingDialog = ({
                     <Database className="h-4 w-4" />
                     Field Mapping
                   </TabsTrigger>
-                  <TabsTrigger value="documents" className="gap-2">
-                    <FileText className="h-4 w-4" />
-                    Documents ({documentFiles.length})
-                  </TabsTrigger>
                 </TabsList>
+
+                <TabsContent value="documents" className="flex-grow overflow-y-auto mt-4">
+                  {renderDocumentsSection()}
+                </TabsContent>
 
                 <TabsContent value="automation" className="flex-grow overflow-y-auto mt-4">
                   {renderAutomationConfig()}
@@ -2012,10 +2049,6 @@ export const AutomationMappingDialog = ({
 
                 <TabsContent value="fields" className="flex-grow overflow-y-auto mt-4">
                   {renderFieldsTable()}
-                </TabsContent>
-
-                <TabsContent value="documents" className="flex-grow overflow-y-auto mt-4">
-                  {renderDocumentsSection()}
                 </TabsContent>
               </Tabs>
             )}
@@ -2049,31 +2082,62 @@ export const AutomationMappingDialog = ({
         </DialogContent>
       </Dialog>
 
-      {/* Document Preview Dialog */}
+      {/* Enhanced Document Preview Dialog */}
       <Dialog open={!!previewDocument} onOpenChange={(open) => !open && setPreviewDocument(null)}>
-        <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle>Document Preview</DialogTitle>
-            <DialogDescription>
-              {previewDocument?.file_name || 'Document'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 min-h-0 overflow-auto">
-            {previewDocument && (
-              <ExtractionPreview
-                documentName={previewDocument.file_name}
-                extractedData={previewDocument.extractedData || {}}
-                fileUrl={previewDocument.fileUrl}
-                fileName={previewDocument.file_name}
-                viewMode={true}
-              />
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPreviewDocument(null)}>
-              Close
-            </Button>
-          </DialogFooter>
+        <DialogContent className="max-w-7xl w-[95vw] h-[95vh] p-0 flex flex-col">
+          {previewDocument ? (
+            <div className="flex flex-col h-full">
+              <DialogHeader className="p-6 pb-2">
+                <DialogTitle className="text-xl flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  {previewDocument.documentName}
+                </DialogTitle>
+                <DialogDescription>
+                  Review extracted details for {task?.applicant_name || 'this document'}
+                  {stage && ` - Stage: ${stage.name}`}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex-1 overflow-hidden p-6 pt-2">
+                <ExtractionPreview
+                  documentName={previewDocument.documentName}
+                  fileUrl={previewDocument.fileUrl}
+                  fileName={previewDocument.fileName}
+                  extractedData={previewDocument.extractedData || {}}
+                  fields={previewDocument.fields || []}
+                  viewMode={true}
+                  showSaveButton={false}
+                  file={previewDocument.file}
+                  type={previewDocument.type}
+                  documentId={previewDocument.documentId}
+                  onDataChange={(fieldName, value) => {
+                    console.log('Document field changed:', fieldName, value);
+                  }}
+                  onSave={(updatedData) => {
+                    console.log('Document data saved:', updatedData);
+                    setPreviewDocument(null);
+                    toast({ 
+                      title: "Success", 
+                      description: "Document details saved successfully." 
+                    });
+                  }}
+                  onClose={() => setPreviewDocument(null)}
+                  getStylesByType={(type) => ({
+                    getBgColor: () => 'bg-primary',
+                    getTextColor: () => 'text-primary-foreground',
+                    getBorderColor: () => 'border-primary',
+                    getButtonStyle: () => 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                  })}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center">
+                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+                <p className="text-muted-foreground">Loading document preview...</p>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </>
