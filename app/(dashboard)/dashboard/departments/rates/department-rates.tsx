@@ -378,25 +378,27 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
     processedDepts = filterByDefaultDisplay(processedDepts, showDefaultDisplayOnly)
     
     // Process subdepartments, classes, and subclasses within each department
-    return processedDepts.map(dept => ({
-      ...dept,
-      tm_subdepartments: filterByDefaultDisplay(
-        sortByOrder(dept.tm_subdepartments || []).map(subdept => ({
+    return processedDepts.map(dept => {
+      // Sort subdepartments by order
+      const sortedSubdepts = sortByOrder(dept.tm_subdepartments || []).map(subdept => {
+        // Sort classes by order
+        const sortedClasses = sortByOrder(subdept.classes || []).map(cls => ({
+          ...cls,
+          // Sort subclasses by order
+          subClasses: sortByOrder(filterByDefaultDisplay(cls.subClasses || [], showDefaultDisplayOnly))
+        }))
+
+        return {
           ...subdept,
-          classes: filterByDefaultDisplay(
-            sortByOrder(subdept.classes || []).map(cls => ({
-              ...cls,
-              subClasses: filterByDefaultDisplay(
-                sortByOrder(cls.subClasses || []),
-                showDefaultDisplayOnly
-              )
-            })),
-            showDefaultDisplayOnly
-          )
-        })),
-        showDefaultDisplayOnly
-      )
-    }))
+          classes: filterByDefaultDisplay(sortedClasses, showDefaultDisplayOnly)
+        }
+      })
+
+      return {
+        ...dept,
+        tm_subdepartments: filterByDefaultDisplay(sortedSubdepts, showDefaultDisplayOnly)
+      }
+    })
   }
 
   const entityVisibilityOptions: EntityVisibilityOption[] = useMemo(() => {
@@ -1421,7 +1423,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
       <TableRow
         key={entry.id}
         className={cn(
-          isChild ? (depth === 1 ? 'bg-slate-50/50' : depth === 2 ? 'bg-blue-50/30' : 'bg-slate-100/50') : '',
+          isChild ? (depth === 1 ? 'bg-slate-50/50' : depth === 2 ? 'bg-blue-50/30' : 'bg-blue-50/30') : '',
           'hover:bg-muted/50',
           rowHeight,
           'transition-colors duration-150 ease-in-out',
@@ -1429,7 +1431,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
         )}
       >
         {columnVisibility.index && (
-          <TableCell className={cn("sticky left-0 bg-blue-100 border-r-2 text-center z-30 px-2", fontSize, "font-medium")}>
+          <TableCell className={cn("sticky left-0 bg-blue-50/30 border-r-2 text-center z-30 px-2", fontSize, "font-medium")}>
             <div className="flex items-center justify-center">
               {index}
             </div>
@@ -1438,23 +1440,13 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
  
         {columnVisibility.entity && (
           <TableCell className={cn(
-            "sticky bg-blue-100 border-r-2 font-medium z-30 px-3",
+            "sticky bg-blue-50/30 border-r-2 font-medium z-30 px-3",
             columnVisibility.index ? "left-16" : "left-0"
           )}>
             <div className={cn("flex items-center gap-2", paddingLeft)}>
-              {isChild && (
-                <div className="flex items-center text-muted-foreground">
-                  <div className="w-4 h-4 flex items-center justify-center">
-                    <ChevronRight className={cn("h-3 w-3", depth === 2 ? 'text-blue-500' : 'text-blue-500')} />
-                  </div>
-                </div>
-              )}
               <div className="flex flex-col gap-1 min-w-0">
-                <span className={cn("font-medium truncate", fontSize, depth === 2 ? 'text-blue-700' : depth === 1 ? 'text-blue-700' : '')}>
+                <span>
                   {entry.entityName}
-                </span>
-                <span className={cn("text-xs text-muted-foreground truncate", isChild ? 'opacity-75' : '')}>
-                  {entry.entityPath}
                 </span>
               </div>
             </div>

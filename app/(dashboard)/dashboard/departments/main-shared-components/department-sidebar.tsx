@@ -3,32 +3,6 @@
 import { cn } from "@/lib/utils"
 import { ChevronDown, ChevronRight, Layers, Search, ChevronsUpDown, Eye, EyeOff, Star, RotateCcw, Settings } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-
-// Base interface for items that can be ordered
-interface OrderedItem {
-  order?: number;
-  default_display?: boolean;
-  id: string;
-  name: string;
-}
-
-// Extended interfaces for the hierarchy
-interface SubClass extends OrderedItem {
-  // Additional properties specific to SubClass
-}
-
-interface Class extends OrderedItem {
-  subClasses?: SubClass[];
-}
-
-interface SubDepartment extends OrderedItem {
-  classes?: Class[];
-}
-
-interface Department extends OrderedItem {
-  description?: string;
-  subdepartments?: SubDepartment[];
-}
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
@@ -36,6 +10,37 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
 import React from "react"
+
+type SubClass = {
+  id: string | number;
+  name: string;
+  description?: string | null;
+  default_display?: boolean;
+}
+
+type Class = {
+  id: string | number;
+  name: string;
+  description?: string | null;
+  default_display?: boolean;
+  subClasses?: SubClass[];
+}
+
+type SubDepartment = {
+  id: string | number;
+  name: string;
+  description?: string | null;
+  default_display?: boolean;
+  classes?: Class[];
+}
+
+type Department = {
+  id: string;
+  name: string;
+  description?: string;
+  default_display?: boolean;
+  subdepartments?: SubDepartment[];
+}
 
 interface DepartmentSidebarProps {
   departments: Department[];
@@ -68,7 +73,7 @@ const IndexBadge = ({
 }) => {
   const levelColors = {
     department: {
-      bg: 'bg-blue-100 dark:bg-blue-900/50',
+      bg: '',
       text: 'text-blue-700 dark:text-blue-200',
       activeBg: 'bg-blue-100 dark:bg-blue-900/50',
       activeText: 'text-blue-700 dark:text-blue-200',
@@ -76,7 +81,7 @@ const IndexBadge = ({
       defaultText: 'text-blue-800 dark:text-blue-100',
     },
     subdepartment: {
-      bg: 'bg-emerald-100 dark:bg-emerald-900/40',
+      bg: '',
       text: 'text-emerald-700 dark:text-emerald-200',
       activeBg: 'bg-emerald-100 dark:bg-emerald-900/40',
       activeText: 'text-emerald-700 dark:text-emerald-200',
@@ -84,7 +89,7 @@ const IndexBadge = ({
       defaultText: 'text-emerald-800 dark:text-emerald-100',
     },
     class: {
-      bg: 'bg-amber-100 dark:bg-amber-900/30',
+      bg: '',
       text: 'text-amber-700 dark:text-amber-200',
       activeBg: 'bg-amber-100 dark:bg-amber-900/30',
       activeText: 'text-amber-700 dark:text-amber-200',
@@ -92,7 +97,7 @@ const IndexBadge = ({
       defaultText: 'text-amber-800 dark:text-amber-100',
     },
     subclass: {
-      bg: 'bg-purple-100 dark:bg-purple-900/30',
+      bg: '',
       text: 'text-purple-700 dark:text-purple-200',
       activeBg: 'bg-purple-100 dark:bg-purple-900/30',
       activeText: 'text-purple-700 dark:text-purple-200',
@@ -105,14 +110,11 @@ const IndexBadge = ({
 
   return (
     <span className={cn(
-      "flex items-center justify-center w-5 h-5 rounded-full text-xs font-medium mr-2 flex-shrink-0 transition-all relative",
-      isActive && isDefault ? colors.defaultBg : isActive ? colors.activeBg : isDefault ? colors.defaultBg : colors.bg,
-      isActive && isDefault ? colors.defaultText : isActive ? colors.activeText : isDefault ? colors.defaultText : colors.text
+      "flex items-center justify-center w-5 h-5 rounded-full text-xs font-medium mr-2 flex-shrink-0 transition-all",
+      isActive ? colors.activeBg : colors.bg,
+      isActive ? colors.activeText : colors.text
     )}>
       {index}
-      {isDefault && (
-        <Star className="absolute -top-1 -right-1 h-2.5 w-2.5 text-yellow-500 fill-yellow-500" />
-      )}
     </span>
   )
 }
@@ -165,39 +167,27 @@ const TruncatedText = ({
             <span className={`truncate block ${textColor} ${className}`}>
               {text}
             </span>
-            {isDefault && (
-              <Star className="h-3 w-3 text-yellow-500 fill-yellow-500 flex-shrink-0" />
-            )}
           </div>
         </TooltipTrigger>
         <TooltipContent side="right" className="max-w-xs">
-          <p className="text-sm">
-            {text}
-            {isDefault && (
-              <span className="block text-xs text-yellow-600 mt-1">★ Default Display</span>
-            )}
-          </p>
+          <p className="text-sm">{text}</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )
 }
 
-// Helper function to sort items by order
-const sortByOrder = <T extends OrderedItem>(items: T[]): T[] => {
-  return [...items].sort((a, b) => (a.order || 0) - (b.order || 0));
-};
-
 // Helper function to filter items by default display
-const filterByDefaultDisplay = <T extends OrderedItem>(items: T[], showDefaultOnly: boolean): T[] => {
-  if (!showDefaultOnly) return items;
-  return items.filter(item => item.default_display !== false);
-};
+const filterByDefaultDisplay = <T extends { default_display?: boolean }>(items: T[], showDefaultOnly: boolean): T[] => {
+  if (!showDefaultOnly) return items
+  return items.filter(item => item.default_display === true)
+}
 
 // Helper function to check if item should be visible based on default display filter
-const shouldShowItem = <T extends OrderedItem>(item: T, showDefaultOnly: boolean): boolean => {
-  return !showDefaultOnly || item.default_display !== false;
-};
+const shouldShowItem = (item: { default_display?: boolean }, showDefaultOnly: boolean): boolean => {
+  if (!showDefaultOnly) return true
+  return item.default_display === true
+}
 
 export function DepartmentSidebar({
   departments,
@@ -211,53 +201,31 @@ export function DepartmentSidebar({
   onSubclassClick = () => {},
   onToggleExpand = () => {},
   expandedItems = {},
-  showDefaultDisplayOnly = true,
+  showDefaultDisplayOnly = false,
   onToggleDefaultDisplay = () => {},
 }: DepartmentSidebarProps) {
   const [searchQuery, setSearchQuery] = React.useState('')
   const [isAllCollapsed, setIsAllCollapsed] = React.useState(false)
-
-  // Event handlers that ensure string IDs
-  const handleDeptClick = (deptId: string | number) => {
-    onDeptClick(String(deptId));
-  };
-
-  const handleSubdeptClick = (deptId: string | number, subdeptId: string | number) => {
-    onSubdeptClick(String(deptId), String(subdeptId));
-  };
-
-  const handleClassClick = (deptId: string | number, subdeptId: string | number, classId: string | number) => {
-    onClassClick(String(deptId), String(subdeptId), String(classId));
-  };
-
-  const handleSubclassClick = (deptId: string | number, subdeptId: string | number, classId: string | number, subclassId: string | number) => {
-    onSubclassClick(
-      String(deptId), 
-      String(subdeptId), 
-      String(classId), 
-      String(subclassId)
-    );
-  };
   
   const toggleAll = () => {
-    const newState = !isAllCollapsed;
-    setIsAllCollapsed(newState);
+    const newState = !isAllCollapsed
+    setIsAllCollapsed(newState)
     
     // Get all department and subdepartment keys
     const allKeys = departments.flatMap(dept => {
-      const deptKey = `dept-${dept.id}`;
+      const deptKey = `dept-${dept.id}`
       const subKeys = (dept.subdepartments || []).map(
         subdept => `subdept-${dept.id}-${subdept.id}`
-      );
+      )
       const classKeys = (dept.subdepartments || []).flatMap(subdept => 
         (subdept.classes || []).map(cls => `class-${dept.id}-${subdept.id}-${cls.id}`)
-      );
-      return [deptKey, ...subKeys, ...classKeys];
-    });
+      )
+      return [deptKey, ...subKeys, ...classKeys]
+    })
     
     // Collapse or expand all
-    allKeys.forEach(key => onToggleExpand(key));
-  };
+    allKeys.forEach(key => onToggleExpand(key))
+  }
 
   // Count default display items
   const defaultDisplayCounts = React.useMemo(() => {
@@ -288,92 +256,63 @@ export function DepartmentSidebar({
   }, [departments])
   
   const filteredDepartments = React.useMemo(() => {
-    // Start with a properly typed copy of departments
-    let depts: Department[] = JSON.parse(JSON.stringify(departments));
-    
-    // Ensure all IDs are strings
-    const ensureStringIds = <T extends { id: string | number }>(items: T[]): T[] => {
-      return items.map(item => ({
-        ...item,
-        id: String(item.id)
-      })) as T[];
-    };
-    
-    // Process departments to ensure string IDs and sort by order
-    depts = sortByOrder(ensureStringIds(depts));
+    let depts = departments
     
     // Apply default display filter first
     if (showDefaultDisplayOnly) {
-      depts = depts
-        .map(dept => {
-          const processedDept: Department = {
-            ...dept,
-            subdepartments: sortByOrder(ensureStringIds(dept.subdepartments || []))
-              .filter((subdept: SubDepartment) => shouldShowItem(subdept, showDefaultDisplayOnly))
-              .map((subdept: SubDepartment) => ({
-                ...subdept,
-                classes: sortByOrder(ensureStringIds(subdept.classes || []))
-                  .filter((cls: Class) => shouldShowItem(cls, showDefaultDisplayOnly))
-                  .map((cls: Class) => ({
-                    ...cls,
-                    subClasses: sortByOrder(ensureStringIds(cls.subClasses || []))
-                      .filter((subcls: SubClass) => shouldShowItem(subcls, showDefaultDisplayOnly))
-                  }))
+      depts = departments.map(dept => ({
+        ...dept,
+        subdepartments: (dept.subdepartments || [])
+          .filter(subdept => shouldShowItem(subdept, showDefaultDisplayOnly))
+          .map(subdept => ({
+            ...subdept,
+            classes: (subdept.classes || [])
+              .filter(cls => shouldShowItem(cls, showDefaultDisplayOnly))
+              .map(cls => ({
+                ...cls,
+                subClasses: (cls.subClasses || [])
+                  .filter(subcls => shouldShowItem(subcls, showDefaultDisplayOnly))
               }))
-          };
-          return processedDept;
-        })
-        .filter((dept: Department) => 
-          shouldShowItem(dept, showDefaultDisplayOnly) || 
-          (dept.subdepartments && dept.subdepartments.length > 0)
-        );
+          }))
+      })).filter(dept => 
+        shouldShowItem(dept, showDefaultDisplayOnly) || 
+        (dept.subdepartments && dept.subdepartments.length > 0)
+      )
     }
     
     // Apply search filter
-    if (!searchQuery.trim()) return depts;
+    if (!searchQuery.trim()) return depts
     
-    const query = searchQuery.toLowerCase();
-    return depts
-      .map((dept: Department) => {
-        // Ensure all IDs are strings before processing
-        const subdepartments = ensureStringIds(dept.subdepartments || []);
-        
-        const filteredSubdepts = sortByOrder(subdepartments)
-          .map((subdept: SubDepartment) => {
-            const classes = ensureStringIds(subdept.classes || []);
-            
-            const filteredClasses = sortByOrder(classes)
-              .map((cls: Class) => ({
-                ...cls,
-                subClasses: sortByOrder(ensureStringIds(cls.subClasses || []))
-                  .filter((subClass: SubClass) => 
-                    subClass.name.toLowerCase().includes(query)
-                  )
-              }))
-              .filter((cls: Class) => 
-                cls.name.toLowerCase().includes(query) || 
-                (cls.subClasses && cls.subClasses.length > 0)
-              )
-            
-            return {
-              ...subdept,
-              classes: filteredClasses
-            };
-          })
-          .filter((subdept: SubDepartment) => 
-            subdept.name.toLowerCase().includes(query) || 
-            (subdept.classes && subdept.classes.length > 0)
-          );
+    const query = searchQuery.toLowerCase()
+    return depts.map(dept => {
+      const filteredSubdepts = (dept.subdepartments || []).map(subdept => {
+        const filteredClasses = (subdept.classes || []).map(cls => ({
+          ...cls,
+          subClasses: (cls.subClasses || []).filter(
+            subClass => subClass.name.toLowerCase().includes(query)
+          )
+        })).filter(cls => 
+          cls.name.toLowerCase().includes(query) || 
+          cls.subClasses.length > 0
+        )
         
         return {
-          ...dept,
-          subdepartments: filteredSubdepts
-        };
-      })
-      .filter((dept: Department) => 
-        dept.name.toLowerCase().includes(query) || 
-        (dept.subdepartments && dept.subdepartments.length > 0)
-      );
+          ...subdept,
+          classes: filteredClasses
+        }
+      }).filter(subdept => 
+        subdept.name.toLowerCase().includes(query) || 
+        subdept.classes.length > 0
+      )
+      
+      return {
+        ...dept,
+        subdepartments: filteredSubdepts
+      }
+    }).filter(dept => 
+      dept.name.toLowerCase().includes(query) || 
+      dept.subdepartments.length > 0
+    )
   }, [departments, searchQuery, showDefaultDisplayOnly])
 
   return (
@@ -575,7 +514,7 @@ export function DepartmentSidebar({
                             ? "bg-blue-50/50 dark:bg-blue-900/20 text-gray-700 dark:text-gray-200 hover:bg-blue-100/70 dark:hover:bg-blue-900/40"
                             : "text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/50"
                       )}
-                      onClick={() => handleDeptClick(dept.id)}
+                      onClick={() => onDeptClick(dept.id)}
                     >
                       <div className="flex items-center space-x-2">
                         <ChevronDown
@@ -627,11 +566,11 @@ export function DepartmentSidebar({
                                   "w-full flex items-center justify-between p-2 pl-7 pr-2 text-sm transition-colors duration-200 group relative rounded-md",
                                   isActive
                                     ? subdept.default_display
-                                      ? "bg-emerald-100/80 dark:bg-emerald-900/50 shadow-sm border border-emerald-200 dark:border-emerald-800"
-                                      : "bg-emerald-100/70 dark:bg-emerald-900/40 shadow-sm border border-emerald-200 dark:border-emerald-800"
+                                      ? "shadow-sm border border-emerald-200 dark:border-emerald-800"
+                                      : "shadow-sm border border-emerald-200 dark:border-emerald-800"
                                     : subdept.default_display
-                                      ? "bg-emerald-50/50 dark:bg-emerald-900/20 text-gray-600 dark:text-gray-300 hover:bg-emerald-100/50 dark:hover:bg-emerald-900/30"
-                                      : "text-gray-600 dark:text-gray-300 hover:bg-gray-100/50 dark:hover:bg-gray-800/40",
+                                      ? "shadow-sm"
+                                      : "shadow-sm",
                                   "before:absolute before:left-4 before:top-1/2 before:-translate-y-1/2 before:w-1.5 before:h-1.5 before:rounded-full",
                                   isActive 
                                     ? "before:bg-emerald-500 before:ring-2 before:ring-emerald-200 dark:before:ring-emerald-900/50" 
@@ -641,7 +580,7 @@ export function DepartmentSidebar({
                                 )}
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  handleSubdeptClick(dept.id, subdept.id)
+                                  onSubdeptClick(dept.id, subdept.id.toString())
                                 }}
                               >
                                 <div className="flex items-center space-x-2">
@@ -696,11 +635,11 @@ export function DepartmentSidebar({
                                             "w-full flex items-center justify-between p-1.5 pl-8 pr-2 text-sm rounded-lg transition-colors duration-200 relative",
                                             activeClass === cls.id.toString()
                                               ? cls.default_display
-                                                ? "bg-amber-100/80 dark:bg-amber-900/50 shadow-sm border border-amber-200 dark:border-amber-800"
-                                                : "bg-amber-100/70 dark:bg-amber-900/40 shadow-sm border border-amber-200 dark:border-amber-800"
+                                                ? "shadow-sm border border-amber-200 dark:border-amber-800"
+                                                : "shadow-sm border border-amber-200 dark:border-amber-800"
                                               : cls.default_display
-                                                ? "bg-amber-50/50 dark:bg-amber-900/20 text-gray-600 dark:text-gray-400 hover:bg-amber-100/50 dark:hover:bg-amber-900/30"
-                                                : "text-gray-600 dark:text-gray-400 hover:bg-gray-100/50 dark:hover:bg-gray-800/40",
+                                                ? ""
+                                                : "",
                                             "before:absolute before:left-6 before:top-1/2 before:-translate-y-1/2 before:w-1.5 before:h-1.5 before:rounded-full",
                                             activeClass === cls.id.toString()
                                               ? "before:bg-amber-500 before:ring-2 before:ring-amber-200 dark:before:ring-amber-900/50"
@@ -710,7 +649,7 @@ export function DepartmentSidebar({
                                           )}
                                           onClick={(e) => {
                                             e.stopPropagation()
-                                            handleClassClick(dept.id, subdept.id, cls.id)
+                                            onClassClick(dept.id, subdept.id.toString(), cls.id.toString())
                                           }}
                                         >
                                           <div className="flex items-center space-x-2">
@@ -755,11 +694,11 @@ export function DepartmentSidebar({
                                               "w-full text-left p-1.5 pl-12 pr-2 text-sm rounded-md transition-all duration-200 relative group",
                                               activeSubclass === subClass.id.toString()
                                                 ? subClass.default_display
-                                                  ? "bg-purple-100/80 dark:bg-purple-900/50 shadow-sm border border-purple-200 dark:border-purple-800"
-                                                  : "bg-purple-50/80 dark:bg-purple-900/30 shadow-sm border border-purple-100 dark:border-purple-800/50"
+                                                  ? "shadow-sm border border-purple-200 dark:border-purple-800"
+                                                  : "shadow-sm border border-purple-200 dark:border-purple-800"
                                                 : subClass.default_display
-                                                  ? "bg-purple-50/50 dark:bg-purple-900/20 text-gray-600 dark:text-gray-400 hover:bg-purple-100/50 dark:hover:bg-purple-900/30"
-                                                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-100/40 dark:hover:bg-gray-800/30",
+                                                  ? ""
+                                                  : "",
                                               "before:absolute before:left-8 before:top-1/2 before:-translate-y-1/2 before:w-1.5 before:h-1.5 before:rounded-full before:transition-all",
                                               activeSubclass === subClass.id.toString()
                                                 ? "before:bg-purple-500 before:ring-2 before:ring-purple-200 dark:before:ring-purple-900/40"
@@ -769,11 +708,11 @@ export function DepartmentSidebar({
                                             )}
                                             onClick={(e) => {
                                               e.stopPropagation()
-                                              handleSubclassClick(
+                                              onSubclassClick(
                                                 dept.id, 
-                                                subdept.id, 
-                                                cls.id, 
-                                                subClass.id
+                                                subdept.id.toString(), 
+                                                cls.id.toString(), 
+                                                subClass.id.toString()
                                               )
                                             }}
                                           >
