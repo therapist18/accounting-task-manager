@@ -4,8 +4,9 @@
 import React, { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap } from "lucide-react"
+import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2 } from "lucide-react"
 import { AutomationMappingDialog } from "../components/AutomationMappingDialog"
+import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog"
 
 interface EnhancedTableProps {
   tasks: any[]
@@ -26,6 +27,7 @@ interface EnhancedTableProps {
   toggleDocumentExpansion: (docId: string) => void
   getTaskHierarchy: (task: any) => any
   getStaffName: (userId: any) => string
+  onDeleteTask?: (task: any) => void
 }
 
 export const EnhancedTable: React.FC<EnhancedTableProps> = ({
@@ -46,7 +48,8 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   toggleStageExpansion,
   toggleDocumentExpansion,
   getTaskHierarchy,
-  getStaffName
+  getStaffName,
+  onDeleteTask
 }) => {
   if (!tasks.length) {
     return (
@@ -84,8 +87,10 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
     requirementId: number, 
     subDeptId?: string,
     taskId: string,
-    task?: any // Add task object to state
+    task?: any
   } | null>(null);
+  
+  const [taskToDelete, setTaskToDelete] = useState<any>(null);
 
   const handleAutomationClick = (classId: string, requirementId: number, taskId: string) => {
     // Find the task to get the subDeptId
@@ -100,8 +105,33 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
     setAutomationDialogOpen(true);
   };
 
+  // Handle delete confirmation
+  const handleConfirmDelete = async () => {
+    if (taskToDelete && onDeleteTask) {
+      try {
+        await onDeleteTask(taskToDelete);
+      } catch (error) {
+        console.error('Error in delete confirmation:', error);
+      } finally {
+        setTaskToDelete(null);
+      }
+    } else {
+      setTaskToDelete(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
+      {/* Delete Confirmation Dialog */}
+      <DeleteConfirmationDialog
+        open={!!taskToDelete}
+        onOpenChange={(open) => !open && setTaskToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        title="Delete Task"
+        description="Are you sure you want to delete this task? This action cannot be undone."
+        confirmText="Delete Task"
+        loading={loading}
+      />
       <div className="border-2 border-slate-300 rounded-lg bg-white overflow-auto shadow-sm" style={{ maxHeight: 'calc(100vh - 200px)' }}>
         <Table className="min-w-full border-separate border-spacing-0">
           <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
@@ -197,8 +227,22 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
                   </TableCell>
                   <TableCell className={`sticky left-8 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 min-w-[400px]`}>
                     <div className="flex items-center gap-2 justify-between">
-                      <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }}>
+                      <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }} className="flex items-center gap-2">
                         <span className={row.type === 'stage' ? 'font-semibold' : ''}>{row.label}</span>
+                        {row.type === 'principal' && onDeleteTask && row.task && row.task.id && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-5 w-5 p-0 text-slate-400 hover:text-destructive hover:bg-destructive/10"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              console.log('Setting task to delete:', row.task);
+                              setTaskToDelete(row.task);
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                       {row.type === 'stage' && row.stage?.documents?.length > 0 && (
                         <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-500 hover:text-slate-800" onClick={() => toggleStageExpansion(row.stage.id)}>

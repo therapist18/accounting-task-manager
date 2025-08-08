@@ -110,7 +110,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
   const [kycDocuments, setKycDocuments] = useState<Record<string, string>>({});
   const [jobFields, setJobFields] = useState<Record<string, { id: string; field_key: string; label: string }>>({});
   const [searchQuery, setSearchQuery] = useState('');
-  
+  const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(true);
   // --- [CHANGE #1] Add state to hold the full data object for the item being edited ---
   const [currentWebDataForEdit, setCurrentWebDataForEdit] = useState<WebDataEntry[] | null>(null);
 
@@ -122,20 +122,20 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
         const { data, error } = await supabase
           .from('tm_job_fields')
           .select('id, field_key, label');
-          
+
         if (error) throw error;
-        
+
         const fieldsMap = data.reduce((acc, field) => ({
           ...acc,
           [field.id]: field
         }), {});
-        
+
         setJobFields(fieldsMap);
       } catch (error) {
         console.error('Error fetching job fields:', error);
       }
     };
-    
+
     fetchJobFields();
   }, []);
 
@@ -146,24 +146,24 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
         const { data, error } = await supabase
           .from('acc_portal_kyc')
           .select('id, display_name')
-          
+
         if (error) throw error;
-        
+
         // Create a map of KYC document IDs to their display names
         const kycMap = data.reduce((acc, doc) => ({
           ...acc,
           [doc.id]: doc.display_name
         }), {});
-        
+
         setKycDocuments(kycMap);
       } catch (error) {
         console.error('Error fetching KYC documents:', error);
       }
     };
-    
+
     fetchKycDocuments();
   }, []);
-  
+
   const toggleExpanded = (key: string) => {
     setExpandedItems(prev => ({
       ...prev,
@@ -422,13 +422,13 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
 
   const handleSaveWebData = async (updatedWebData: any) => {
     if (!editingContext) return;
-  
+
     try {
       setIsSubmitting(true);
       await replaceWebDataForContext(editingContext, updatedWebData);
       await refreshDepartments();
       setIsEditDialogOpen(false);
-      
+
       toast({
         title: "Success",
         description: "WebData updated successfully",
@@ -486,7 +486,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
       isVisible: field.isVisible !== false,
       isRequired: field.isRequired !== false,
     };
-  
+
     // Set up the context for the dialog, including which entry we're editing
     const editContext = {
       ...context,
@@ -496,12 +496,12 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
         documentName: entry.documentName
       }
     };
-  
+
     setEditingWebData(fieldToEdit);
     setEditingContext(editContext);
     setIsEditDialogOpen(true);
   };
-  
+
   const handleDeleteConfirm = async () => {
     if (!deleteContext || !editingContext) return
 
@@ -613,38 +613,38 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
 
   const filterWebData = (entries: WebDataEntry[]): WebDataEntry[] => {
     if (!searchQuery.trim()) return entries;
-    
+
     const query = searchQuery.toLowerCase();
     return entries.map(entry => {
       // Check if document name matches
       const docMatches = entry.documentName.toLowerCase().includes(query);
-      
+
       // Filter fields that match the search
-      const filteredFields = entry.fields.filter(field => 
-        (field.efnsDisplayName?.toLowerCase().includes(query) || 
-         field.name.toLowerCase().includes(query) ||
-         field.description?.toLowerCase().includes(query) ||
-         field.variableName?.toLowerCase().includes(query))
+      const filteredFields = entry.fields.filter(field =>
+      (field.efnsDisplayName?.toLowerCase().includes(query) ||
+        field.name.toLowerCase().includes(query) ||
+        field.description?.toLowerCase().includes(query) ||
+        field.variableName?.toLowerCase().includes(query))
       );
-      
+
       // Filter KYC uploads that match the search
-      const filteredKyc = entry.kycDocsUpload.filter(kyc => 
-        (kyc.documentName?.toLowerCase().includes(query) ||
-         kyc.documentType?.toLowerCase().includes(query) ||
-         kyc.description?.toLowerCase().includes(query) ||
-         kyc.kycDocumentId.toLowerCase().includes(query))
+      const filteredKyc = entry.kycDocsUpload.filter(kyc =>
+      (kyc.documentName?.toLowerCase().includes(query) ||
+        kyc.documentType?.toLowerCase().includes(query) ||
+        kyc.description?.toLowerCase().includes(query) ||
+        kyc.kycDocumentId.toLowerCase().includes(query))
       );
-      
+
       // If document name matches, include all fields and KYC
       if (docMatches) {
         return entry;
       }
-      
+
       // If no fields or KYC match, exclude this entry
       if (filteredFields.length === 0 && filteredKyc.length === 0) {
         return null;
       }
-      
+
       // Otherwise, return entry with filtered fields and KYC
       return {
         ...entry,
@@ -656,11 +656,11 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
 
   const highlightText = (text: string, query: string) => {
     if (!query || !text) return text;
-    
+
     const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
     const parts = text.split(regex);
-    
-    return parts.map((part, i) => 
+
+    return parts.map((part, i) =>
       regex.test(part) ? (
         <mark key={i} className="bg-yellow-200 dark:bg-yellow-800">
           {part}
@@ -676,7 +676,7 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
 
     return (
       <>
-       <div className="sticky top-0 z-20 bg-card p-4 border-b">
+        <div className="sticky top-0 z-20 bg-card p-4 border-b">
           <div className="relative max-w-md">
             <Input
               type="text"
@@ -703,289 +703,289 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
             </p>
           )}
         </div>
-      <div className="relative max-h-[62vh] overflow-y-auto border rounded-lg bg-card">
-        <Table className="">
-          <TableHeader className="sticky top-0 z-10 bg-blue-500 dark:bg-blue-800 backdrop-blur-sm border-b">
-            <TableRow>
-              <TableHead className="w-[60px] text-white border-r">#</TableHead>
-              <TableHead className="text-white border-r">Document/Field Name</TableHead>
-              <TableHead className="w-[200px] text-white border-r">Automation ID</TableHead>
-              <TableHead className="w-[120px] text-white border-r">Type</TableHead>
-              <TableHead className="w-[120px] text-white border-r">Entity Type</TableHead>
-              <TableHead className="text-white border-r">Description</TableHead>
-              <TableHead className="w-[200px] text-white border-r">Master Field</TableHead>
-              <TableHead className="w-[160px] text-white">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {safeWebData.length > 0 ? (
-              safeWebData.map((entry, entryIndex) => (
-                <React.Fragment key={entry.automationId}>
-                  {/* Document Header Row */}
-                  <TableRow className="bg-muted/30 border-b-2">
-                    <TableCell className="font-medium border-r">
-                      <Badge variant="outline" className="text-xs">
-                        DOC
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="border-r">
-                      <div className="flex items-center space-x-2">
-                        <span className="font-medium text-card-foreground">
-                          {entry.documentName}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => toggleDocumentExpansion(entry.automationId)}
-                          className="h-6 w-6 p-0"
-                        >
-                          {expandedDocuments.has(entry.automationId) ?
-                            <Minus className="h-4 w-4" /> :
-                            <Plus className="h-4 w-4" />
-                          }
-                        </Button>
-                      </div>
-                    </TableCell>
-                    <TableCell className="border-r">
-                      <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
-                        {entry.automationId}
-                      </code>
-                    </TableCell>
-                    <TableCell className="border-r">
-                      <Badge variant="outline" className="capitalize">
-                        Document
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="border-r">
-                      <Badge variant="secondary" className="text-xs">
-                        <Users className="h-3 w-3 mr-1" />
-                        Mixed
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground border-r">
-                      Form with {entry.fields.length} field{entry.fields.length !== 1 ? 's' : ''}
-                      {entry.kycDocsUpload.length > 0 && ` + ${entry.kycDocsUpload.length} upload${entry.kycDocsUpload.length !== 1 ? 's' : ''}`}
-                    </TableCell>
-                    <TableCell className="border-r">
-                    </TableCell>
-                    <TableCell className="border-r">
-                      <div className="flex items-center space-x-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => handleDeleteClick(entryIndex)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-
-                  {/* Field Rows (shown when expanded) */}
-                  {expandedDocuments.has(entry.automationId) && (
-                    <>
-                      {entry.fields.map((field, fieldIndex) => (
-                        <TableRow key={`${entry.automationId}-field-${fieldIndex}`} className="group hover:bg-muted/50">
-                          <TableCell className="font-medium border-r pl-8">
-                            <div className="flex items-center space-x-2">
-                              <span className="text-sm">F{fieldIndex + 1}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="border-r pl-8">
-                            <div className="flex items-center space-x-2">
-                              <FileText className="h-3 w-3 text-green-500" />
-                              <div className="font-medium text-card-foreground">{field.efnsDisplayName || field.name}</div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="border-r">
-                            <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
-                              {field.variableName || '-'}
-                            </code>
-                          </TableCell>
-                          <TableCell className="border-r">
-                            <Badge variant="secondary" className="capitalize">
-                              {field.fieldType || 'text'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="border-r">
-                            <Badge
-                              variant={field.entityType === 'both' ? 'default' : 'secondary'}
-                              className="text-xs"
-                            >
-                              {field.entityType === 'both' ? (
-                                <><Users className="h-3 w-3 mr-1" />Both</>
-                              ) : field.entityType === 'principal' ? (
-                                <><User className="h-3 w-3 mr-1" />Principal</>
-                              ) : (
-                                <><User className="h-3 w-3 mr-1" />Dependant</>
-                              )}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground border-r">
-                            <span className={!field.description ? 'italic' : ''}>
-                              {field.description || 'No description'}
-                            </span>
-                          </TableCell>
-                          <TableCell className="border-r">
-                            {field.masterFields && field.masterFields.length > 0 ? (
-                              <div className="flex flex-col space-y-1">
-                                {field.masterFields.map((masterField, index) => {
-                                  const jobField = jobFields[masterField.id];
-                                  return jobField ? (
-                                    <div key={`${masterField.id}-${index}`} className="flex items-center space-x-1">
-                                      <span className="text-sm font-medium">{jobField.label}</span>
-                                      <Badge variant="outline" className="text-xs">
-                                        {jobField.field_key}
-                                      </Badge>
-                                    </div>
-                                  ) : (
-                                    <code key={`${masterField.id}-${index}`} className="bg-muted px-2 py-1 rounded text-xs font-mono">
-                                      {masterField.id}
-                                    </code>
-                                  );
-                                })}
-                              </div>
-                            ) : field.masterFieldIds && field.masterFieldIds.length > 0 ? (
-                              <div className="flex flex-col space-y-1">
-                                {field.masterFieldIds.map((id) => {
-                                  const jobField = jobFields[id];
-                                  return jobField ? (
-                                    <div key={id} className="flex items-center space-x-1">
-                                      <span className="text-sm font-medium">{jobField.label}</span>
-                                      <Badge variant="outline" className="text-xs">
-                                        {jobField.field_key}
-                                      </Badge>
-                                    </div>
-                                  ) : (
-                                    <code key={id} className="bg-muted px-2 py-1 rounded text-xs font-mono">
-                                      {id}
-                                    </code>
-                                  );
-                                })}
-                              </div>
-                            ) : (
-                              <span className="text-muted-foreground text-sm">-</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right border-r">
-                            <div className="flex items-center space-x-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => handleEditClick(field, entry, context)}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-destructive hover:text-destructive"
-                                onClick={() => handleDeleteClick(entryIndex, 'field', fieldIndex)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-
-                      {/* KYC Upload Rows */}
-                      {entry.kycDocsUpload.map((kycDoc, kycIndex) => (
-                        <TableRow key={`${entry.automationId}-kyc-${kycIndex}`} className="group hover:bg-muted/50">
-                          <TableCell className="font-medium border-r pl-8">
-                            <div className="flex items-center space-x-2">
-                              <span className="text-sm">U{kycIndex + 1}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="border-r pl-8">
-                            <div className="flex items-center space-x-2">
-                              <Upload className="h-3 w-3 text-orange-500" />
-                              <div className="font-medium text-card-foreground">
-                                {kycDocuments[kycDoc.kycDocumentId] || kycDoc.documentName || entry.documentName}
-                              </div>
-                              {kycDoc.isRequired && (
-                                <Badge variant="destructive" className="text-xs">Required</Badge>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="border-r">
-                            <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
-                              {kycDoc.kycDocumentId}
-                            </code>
-                          </TableCell>
-                          <TableCell className="border-r">
-                            <Badge variant="outline" className="capitalize">
-                              {kycDoc.documentType}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="border-r">
-                            <Badge
-                              variant={kycDoc.entityType === 'both' ? 'default' : 'secondary'}
-                              className="text-xs"
-                            >
-                              {kycDoc.entityType === 'both' ? (
-                                <><Users className="h-3 w-3 mr-1" />Both</>
-                              ) : kycDoc.entityType === 'principal' ? (
-                                <><User className="h-3 w-3 mr-1" />Principal</>
-                              ) : (
-                                <><User className="h-3 w-3 mr-1" />Dependant</>
-                              )}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground border-r">
-                            <div className="space-y-1 text-xs">
-                              <div>{kycDoc.description || 'Document upload'}</div>
-                              <div className="text-muted-foreground">
-                                Max: {kycDoc.maxFileSizeMb}MB | {kycDoc.fileExtensions.join(', ')}
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="border-r">
-                            <span className="text-muted-foreground text-sm">-</span>
-                          </TableCell>
-                          <TableCell className="text-right border-r">
-                            <div className="flex items-center space-x-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                disabled // Edit for KYC uploads can be implemented here
-                                onClick={() => {/* Handle edit upload */ }}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-destructive hover:text-destructive"
-                                onClick={() => handleDeleteClick(entryIndex, 'upload', kycIndex)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </>
-                  )}
-                </React.Fragment>
-              ))
-            ) : (
+        <div className="relative max-h-[62vh] overflow-y-auto border rounded-lg bg-card">
+          <Table className="">
+            <TableHeader className="sticky top-0 z-10 bg-blue-500 dark:bg-blue-800 backdrop-blur-sm border-b">
               <TableRow>
-                <TableCell colSpan={8} className="h-48 text-center text-muted-foreground">
-                  <div className="flex flex-col items-center space-y-2">
-                    <FileText className="h-8 w-8" />
-                    <p className="font-medium">No WebData Yet</p>
-                    <p className="text-sm">Click "Add WebData" to get started.</p>
-                  </div>
-                </TableCell>
+                <TableHead className="w-[60px] text-white border-r">#</TableHead>
+                <TableHead className="text-white border-r">Document/Field Name</TableHead>
+                <TableHead className="w-[200px] text-white border-r">Automation ID</TableHead>
+                <TableHead className="w-[120px] text-white border-r">Type</TableHead>
+                <TableHead className="w-[120px] text-white border-r">Entity Type</TableHead>
+                <TableHead className="text-white border-r">Description</TableHead>
+                <TableHead className="w-[200px] text-white border-r">Master Field</TableHead>
+                <TableHead className="w-[160px] text-white">Actions</TableHead>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
+            </TableHeader>
+            <TableBody>
+              {safeWebData.length > 0 ? (
+                safeWebData.map((entry, entryIndex) => (
+                  <React.Fragment key={entry.automationId}>
+                    {/* Document Header Row */}
+                    <TableRow className="bg-muted/30 border-b-2">
+                      <TableCell className="font-medium border-r">
+                        <Badge variant="outline" className="text-xs">
+                          DOC
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="border-r">
+                        <div className="flex items-center space-x-2">
+                          <span className="font-medium text-card-foreground">
+                            {entry.documentName}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => toggleDocumentExpansion(entry.automationId)}
+                            className="h-6 w-6 p-0"
+                          >
+                            {expandedDocuments.has(entry.automationId) ?
+                              <Minus className="h-4 w-4" /> :
+                              <Plus className="h-4 w-4" />
+                            }
+                          </Button>
+                        </div>
+                      </TableCell>
+                      <TableCell className="border-r">
+                        <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
+                          {entry.automationId}
+                        </code>
+                      </TableCell>
+                      <TableCell className="border-r">
+                        <Badge variant="outline" className="capitalize">
+                          Document
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="border-r">
+                        <Badge variant="secondary" className="text-xs">
+                          <Users className="h-3 w-3 mr-1" />
+                          Mixed
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground border-r">
+                        Form with {entry.fields.length} field{entry.fields.length !== 1 ? 's' : ''}
+                        {entry.kycDocsUpload.length > 0 && ` + ${entry.kycDocsUpload.length} upload${entry.kycDocsUpload.length !== 1 ? 's' : ''}`}
+                      </TableCell>
+                      <TableCell className="border-r">
+                      </TableCell>
+                      <TableCell className="border-r">
+                        <div className="flex items-center space-x-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => handleDeleteClick(entryIndex)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+
+                    {/* Field Rows (shown when expanded) */}
+                    {expandedDocuments.has(entry.automationId) && (
+                      <>
+                        {entry.fields.map((field, fieldIndex) => (
+                          <TableRow key={`${entry.automationId}-field-${fieldIndex}`} className="group hover:bg-muted/50">
+                            <TableCell className="font-medium border-r pl-8">
+                              <div className="flex items-center space-x-2">
+                                <span className="text-sm">F{fieldIndex + 1}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="border-r pl-8">
+                              <div className="flex items-center space-x-2">
+                                <FileText className="h-3 w-3 text-green-500" />
+                                <div className="font-medium text-card-foreground">{field.efnsDisplayName || field.name}</div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="border-r">
+                              <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
+                                {field.variableName || '-'}
+                              </code>
+                            </TableCell>
+                            <TableCell className="border-r">
+                              <Badge variant="secondary" className="capitalize">
+                                {field.fieldType || 'text'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="border-r">
+                              <Badge
+                                variant={field.entityType === 'both' ? 'default' : 'secondary'}
+                                className="text-xs"
+                              >
+                                {field.entityType === 'both' ? (
+                                  <><Users className="h-3 w-3 mr-1" />Both</>
+                                ) : field.entityType === 'principal' ? (
+                                  <><User className="h-3 w-3 mr-1" />Principal</>
+                                ) : (
+                                  <><User className="h-3 w-3 mr-1" />Dependant</>
+                                )}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground border-r">
+                              <span className={!field.description ? 'italic' : ''}>
+                                {field.description || 'No description'}
+                              </span>
+                            </TableCell>
+                            <TableCell className="border-r">
+                              {field.masterFields && field.masterFields.length > 0 ? (
+                                <div className="flex flex-col space-y-1">
+                                  {field.masterFields.map((masterField, index) => {
+                                    const jobField = jobFields[masterField.id];
+                                    return jobField ? (
+                                      <div key={`${masterField.id}-${index}`} className="flex items-center space-x-1">
+                                        <span className="text-sm font-medium">{jobField.label}</span>
+                                        <Badge variant="outline" className="text-xs">
+                                          {jobField.field_key}
+                                        </Badge>
+                                      </div>
+                                    ) : (
+                                      <code key={`${masterField.id}-${index}`} className="bg-muted px-2 py-1 rounded text-xs font-mono">
+                                        {masterField.id}
+                                      </code>
+                                    );
+                                  })}
+                                </div>
+                              ) : field.masterFieldIds && field.masterFieldIds.length > 0 ? (
+                                <div className="flex flex-col space-y-1">
+                                  {field.masterFieldIds.map((id) => {
+                                    const jobField = jobFields[id];
+                                    return jobField ? (
+                                      <div key={id} className="flex items-center space-x-1">
+                                        <span className="text-sm font-medium">{jobField.label}</span>
+                                        <Badge variant="outline" className="text-xs">
+                                          {jobField.field_key}
+                                        </Badge>
+                                      </div>
+                                    ) : (
+                                      <code key={id} className="bg-muted px-2 py-1 rounded text-xs font-mono">
+                                        {id}
+                                      </code>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground text-sm">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right border-r">
+                              <div className="flex items-center space-x-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() => handleEditClick(field, entry, context)}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive hover:text-destructive"
+                                  onClick={() => handleDeleteClick(entryIndex, 'field', fieldIndex)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+
+                        {/* KYC Upload Rows */}
+                        {entry.kycDocsUpload.map((kycDoc, kycIndex) => (
+                          <TableRow key={`${entry.automationId}-kyc-${kycIndex}`} className="group hover:bg-muted/50">
+                            <TableCell className="font-medium border-r pl-8">
+                              <div className="flex items-center space-x-2">
+                                <span className="text-sm">U{kycIndex + 1}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="border-r pl-8">
+                              <div className="flex items-center space-x-2">
+                                <Upload className="h-3 w-3 text-orange-500" />
+                                <div className="font-medium text-card-foreground">
+                                  {kycDocuments[kycDoc.kycDocumentId] || kycDoc.documentName || entry.documentName}
+                                </div>
+                                {kycDoc.isRequired && (
+                                  <Badge variant="destructive" className="text-xs">Required</Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="border-r">
+                              <code className="bg-muted px-2 py-1 rounded text-xs font-mono text-muted-foreground">
+                                {kycDoc.kycDocumentId}
+                              </code>
+                            </TableCell>
+                            <TableCell className="border-r">
+                              <Badge variant="outline" className="capitalize">
+                                {kycDoc.documentType}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="border-r">
+                              <Badge
+                                variant={kycDoc.entityType === 'both' ? 'default' : 'secondary'}
+                                className="text-xs"
+                              >
+                                {kycDoc.entityType === 'both' ? (
+                                  <><Users className="h-3 w-3 mr-1" />Both</>
+                                ) : kycDoc.entityType === 'principal' ? (
+                                  <><User className="h-3 w-3 mr-1" />Principal</>
+                                ) : (
+                                  <><User className="h-3 w-3 mr-1" />Dependant</>
+                                )}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground border-r">
+                              <div className="space-y-1 text-xs">
+                                <div>{kycDoc.description || 'Document upload'}</div>
+                                <div className="text-muted-foreground">
+                                  Max: {kycDoc.maxFileSizeMb}MB | {kycDoc.fileExtensions.join(', ')}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="border-r">
+                              <span className="text-muted-foreground text-sm">-</span>
+                            </TableCell>
+                            <TableCell className="text-right border-r">
+                              <div className="flex items-center space-x-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  disabled // Edit for KYC uploads can be implemented here
+                                  onClick={() => {/* Handle edit upload */ }}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive hover:text-destructive"
+                                  onClick={() => handleDeleteClick(entryIndex, 'upload', kycIndex)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </>
+                    )}
+                  </React.Fragment>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={8} className="h-48 text-center text-muted-foreground">
+                    <div className="flex flex-col items-center space-y-2">
+                      <FileText className="h-8 w-8" />
+                      <p className="font-medium">No WebData Yet</p>
+                      <p className="text-sm">Click "Add WebData" to get started.</p>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </>
     );
   };
@@ -1118,6 +1118,8 @@ export default function WebData({ departments: initialDepartments }: WebdataProp
           onClassClick={handleClassClick}
           onSubclassClick={handleSubclassClick}
           onToggleExpand={toggleExpanded}
+          showDefaultDisplayOnly={showDefaultDisplayOnly}
+          onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
         />
         <div className="flex-1 p-6 flex flex-col">
           {renderMainContent()}

@@ -7,7 +7,7 @@ import {
   Department, 
   Subdepartment, 
   CATEGORY_MAPPING 
-} from './types';
+} from './components/types';
 
 export const useDocuments = () => {
   const [departments, setDepartments] = useState<Department[]>([]);

@@ -413,10 +413,6 @@ export default function DepartmentTasksManager({
     return Promise.resolve(allKycFields[doc.kycId] || []);
   }, [allKycFields])
 
-
-
-
-
   const determineCurrentStage = useCallback((task: any, stages: any[]) => {
     if (!task.stages || !stages.length) return null;
 
@@ -1761,7 +1757,48 @@ export default function DepartmentTasksManager({
       case 'actions': return (
         <div className="flex items-center justify-center gap-1">
           <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100" title="Edit Task"><Edit className="h-4 w-4" /></Button>
-          <Button variant="ghost" size="icon" onClick={() => onTaskAction?.({ type: 'delete', task })} className="h-8 w-8 text-red-600 hover:bg-red-100" title="Delete Task"><Trash2 className="h-4 w-4" /></Button>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={async (e) => {
+              e.stopPropagation();
+              if (window.confirm('Are you sure you want to delete this task? This action cannot be undone.')) {
+                try {
+                  setLoading(true);
+                  const { error } = await supabase
+                    .from('tm_tasks')
+                    .delete()
+                    .eq('id', task.id);
+                  
+                  if (error) throw error;
+                  
+                  // Update tasks list by removing the deleted task
+                  setTasks(prevTasks => prevTasks.filter(t => t.id !== task.id));
+                  
+                  toast({
+                    title: 'Success',
+                    description: 'Task deleted successfully',
+                    variant: 'default'
+                  });
+                  
+                } catch (error) {
+                  console.error('Error deleting task:', error);
+                  toast({
+                    title: 'Error',
+                    description: 'Failed to delete task. Please try again.',
+                    variant: 'destructive'
+                  });
+                } finally {
+                  setLoading(false);
+                }
+              }
+            }} 
+            className="h-8 w-8 text-red-600 hover:bg-red-100" 
+            title="Delete Task"
+            disabled={loading}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:bg-slate-100" title="More Actions">
@@ -2264,13 +2301,13 @@ export default function DepartmentTasksManager({
 
             <Tabs value={activeSubTab} onValueChange={setActiveSubTab}>
               <TabsList className="rounded-lg p-1 shadow-sm">
-                <TabsTrigger value="enquiries" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                <TabsTrigger value="enquiries" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
                   Enquiries <Badge variant="secondary">{enquiryTasks.length}</Badge>
                 </TabsTrigger>
-                <TabsTrigger value="wip-stages" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                <TabsTrigger value="wip-stages" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
                   WIP Stages <Badge variant="secondary">{wipTasks.length}</Badge>
                 </TabsTrigger>
-                <TabsTrigger value="completed" className="text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                <TabsTrigger value="completed" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
                   Completed <Badge variant="secondary">{completedTasks.length}</Badge>
                 </TabsTrigger>
               </TabsList>
@@ -2498,8 +2535,40 @@ export default function DepartmentTasksManager({
                             toggleDocumentExpansion={toggleDocumentExpansion}
                             getTaskHierarchy={getTaskHierarchy}
                             getStaffName={getStaffName}
+                            onDeleteTask={async (task) => {
+                              try {
+                                setLoading(true);
+                                
+                                const { error } = await supabase
+                                  .from('tm_tasks')
+                                  .delete()
+                                  .eq('id', task.id);
+                                
+                                if (error) throw error;
+                                
+                                // Update tasks list by removing the deleted task
+                                setTasks(prevTasks => prevTasks.filter(t => t.id !== task.id));
+                                
+                                toast({
+                                  title: 'Success',
+                                  description: 'Task deleted successfully',
+                                  variant: 'default'
+                                });
+                                
+                              } catch (error) {
+                                console.error('Error deleting task:', error);
+                                toast({
+                                  title: 'Error',
+                                  description: 'Failed to delete task. Please try again.',
+                                  variant: 'destructive'
+                                });
+                              } finally {
+                                setLoading(false);
+                              }
+                            }}
                           />
                         ) : (
+                          
                           <StandardTable
                             tasks={tasksToRender}
                             tableType={title}
@@ -2584,7 +2653,6 @@ export default function DepartmentTasksManager({
           stages={stages}
           allDocuments={allDocuments}
           kycDocuments={kycDocuments}
-          isStageApplicableToTask={isStageApplicableToTask}
           onLinkSuccess={() => {
             setIsLinkDialogOpen(false);
             setLinkingTask(null);

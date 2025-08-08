@@ -337,7 +337,8 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
   const handleResetEntitiesToDefault = () => {
     const newVisibility: Record<string, boolean> = {}
     entityVisibilityOptions.forEach(entity => {
-      newVisibility[entity.id] = entity.default_display !== false
+      // CHANGED: Use the actual default_display value from the data
+      newVisibility[entity.id] = entity.default_display === true
     })
     setEntityVisibility(newVisibility)
   }
@@ -398,14 +399,13 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
     }))
   }
 
-   // Generate entity visibility options based on current department
-   const entityVisibilityOptions: EntityVisibilityOption[] = useMemo(() => {
+  const entityVisibilityOptions: EntityVisibilityOption[] = useMemo(() => {
     const processedDepts = getProcessedDepartments()
     const currentDept = processedDepts.find(d => d.id === selectedDepartment)
     if (!currentDept) return []
-
+  
     const entities: EntityVisibilityOption[] = []
-
+  
     currentDept.tm_subdepartments?.forEach((subdept) => {
       const subdeptId = `subdept-${subdept.id}`
       entities.push({
@@ -416,9 +416,9 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
         level: 0,
         path: subdept.name,
         hasChildren: !!(subdept.classes && subdept.classes.length > 0),
-        default_display: subdept.default_display
+        default_display: subdept.default_display === true // CHANGED: Read from API data
       })
-
+  
       subdept.classes?.forEach((cls, clsIndex) => {
         const classId = `class-${subdept.id}-${cls.id || clsIndex}`
         entities.push({
@@ -430,9 +430,9 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
           level: 1,
           path: `${subdept.name} → ${cls.name}`,
           hasChildren: !!(cls.subClasses && cls.subClasses.length > 0),
-          default_display: cls.default_display
+          default_display: cls.default_display === true // CHANGED: Read from API data
         })
-
+  
         cls.subClasses?.forEach((subCls, subClsIndex) => {
           const subclassId = `subclass-${subdept.id}-${cls.id || clsIndex}-${subCls.id || subClsIndex}`
           entities.push({
@@ -443,14 +443,25 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
             visible: entityVisibility[subclassId] !== false,
             level: 2,
             path: `${subdept.name} → ${cls.name} → ${subCls.name}`,
-            default_display: subCls.default_display
+            default_display: subCls.default_display === true // CHANGED: Read from API data
           })
         })
       })
     })
-
+  
     return entities
-  }, [departments, selectedDepartment, entityVisibility])
+  }, [departments, selectedDepartment, entityVisibility, showDefaultDisplayOnly])
+  
+  useEffect(() => {
+    if (entityVisibilityOptions.length > 0 && Object.keys(entityVisibility).length === 0) {
+      const initialVisibility: Record<string, boolean> = {}
+      entityVisibilityOptions.forEach((entity) => {
+        // Initialize with default_display value instead of always true
+        initialVisibility[entity.id] = entity.default_display === true
+      })
+      setEntityVisibility(initialVisibility)
+    }
+  }, [entityVisibilityOptions])
   
   // Get grouped entries based on processed data and entity visibility
   const getGroupedEntries = (dept: Department) => {
@@ -1852,16 +1863,16 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
 
           {/* Entity Visibility Control */}
           <EntityVisibilityControl
-            entities={entityVisibilityOptions}
-            onVisibilityChange={handleEntityVisibilityChange}
-            onShowAll={handleShowAllEntities}
-            onHideAll={handleHideAllEntities}
-            onResetToDefault={handleResetEntitiesToDefault}
-            showDefaultDisplayOnly={showDefaultDisplayOnly}
-            onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
-            title="Entity Visibility"
-            description="Control which departments, classes, and subclasses are visible in the rates table"
-          />
+  entities={entityVisibilityOptions}
+  onVisibilityChange={handleEntityVisibilityChange}
+  onShowAll={handleShowAllEntities}
+  onHideAll={handleHideAllEntities}
+  onResetToDefault={handleResetEntitiesToDefault}
+  showDefaultDisplayOnly={showDefaultDisplayOnly}
+  onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
+  title="Entity Visibility"
+  description="Control which departments, classes, and subclasses are visible in the rates table. Items marked with ★ are set as default display." // CHANGED: Added default display mention
+/>
 
           {/* Column Visibility Control */}
           <ColumnVisibilityControl

@@ -9,7 +9,7 @@ import { AlertTriangle, BarChart3, Check, ChevronDown, ChevronLeft, ChevronRight
 import { format, parseISO } from "date-fns"
 import { supabase } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
-import { getTableFields, getGroupedFields } from "../../departments/documents+fields/formFields"
+import { getTableFields, getGroupedFields } from "../../departments/documents+fields/components/formFields"
 import { toast } from "@/hooks/use-toast"
 import { useSearchParams, useRouter } from "next/navigation"
 import { FileUploadComponent } from "./FileUploadComponent"

@@ -3,7 +3,7 @@
 
 import React, { useState, useMemo, useCallback, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { TruncatedText } from "@/app/(dashboard)/dashboard/departments/documents+fields/types"
+import { TruncatedText } from "@/app/(dashboard)/dashboard/departments/documents+fields/components/types"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"

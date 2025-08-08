@@ -12,10 +12,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Separator } from "@/components/ui/separator"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import { getTableFields, getGroupedFields, FormField } from "./formFields"
+import { getTableFields, getGroupedFields, FormField } from "./components/formFields"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "@/app/(dashboard)/dashboard/departments/main-shared-components/column-visibility"
-import { DocumentType, Subdepartment, DocumentField, ClientData, Department, GroupedDocuments, SubdepartmentClass, TruncatedText, SectionHeader, OptimizedCheckbox } from "./types"
-import { CATEGORY_MAPPING, CLASS_D_ID, REFERENCE_SUBDEPARTMENT_IDS, CACHE_DURATION, DEBOUNCE_DELAY, cache, getCachedData, setCachedData, debounce } from "./config"
+import { DocumentType, Subdepartment, DocumentField, ClientData, Department, GroupedDocuments, SubdepartmentClass, TruncatedText, SectionHeader, OptimizedCheckbox } from "./components/types"
+import { CATEGORY_MAPPING, CLASS_D_ID, REFERENCE_SUBDEPARTMENT_IDS, CACHE_DURATION, DEBOUNCE_DELAY, cache, getCachedData, setCachedData, debounce } from "./components/config"
 import {
   formatFieldValue as formatFieldValueUtil,
   processDocumentFields,
@@ -27,7 +27,7 @@ import {
   shouldShowUnderstudy as shouldShowUnderstudyUtil,
   shouldShowReferences as shouldShowReferencesUtil,
   getClientFieldAllocationStatus as getClientFieldAllocationStatusUtil
-} from "./utils"
+} from "./components/utils"
 
 // Memoized components to prevent unnecessary re-renders
 const MemoizedCheckbox = memo(OptimizedCheckbox)

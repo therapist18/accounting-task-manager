@@ -58,7 +58,6 @@ const transformKycFields = (fields: any[]): any[] => {
   })
 }
 
-// Utility functions for time conversion
 const minutesToTimeString = (minutes: number | null): string => {
   if (minutes === null || minutes === 0) return "0m"
   const days = Math.floor(minutes / (60 * 24))
@@ -70,15 +69,15 @@ const minutesToTimeString = (minutes: number | null): string => {
   if (mins > 0) parts.push(`${mins}m`)
   return parts.join(" ") || "0m"
 }
-// Utility function to sort items by order field
+
 const sortByOrder = <T extends { order?: number; order_num?: number }>(items: T[]): T[] => {
   return [...items].sort((a, b) => (a.order || a.order_num || 0) - (b.order || b.order_num || 0))
 }
 
-// Utility function to filter items by default display
 const filterByDefaultDisplay = <T extends { default_display?: boolean }>(items: T[], showDefaultOnly: boolean): T[] => {
   if (!showDefaultOnly) return items
-  return items.filter((item) => item.default_display !== false)
+  // Ensure we only keep items where default_display is explicitly true
+  return items.filter((item) => item.default_display === true)
 }
 
 export default function Stages() {
@@ -92,7 +91,6 @@ export default function Stages() {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false)
   const [isTransposed, setIsTransposed] = useState(false)
-
   const [allKycDocuments, setAllKycDocuments] = useState<Map<string, any>>(new Map())
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map())
   const [kycDocumentsLoading, setKycDocumentsLoading] = useState(false)
@@ -405,7 +403,6 @@ export default function Stages() {
     [getKycFields, getDocumentInfo],
   )
 
-  // Memoized column visibility options
   const columnVisibilityOptions: ColumnVisibilityOption[] = useMemo(
     () => [
       {
@@ -463,14 +460,14 @@ export default function Stages() {
     [columnVisibility, isTransposed],
   )
 
-  // Generate entity visibility options
   const entityVisibilityOptions: EntityVisibilityOption[] = useMemo(() => {
     const currentDept = departments.find((d) => d.id === activeTab)
     if (!currentDept) return []
 
     const entities: EntityVisibilityOption[] = []
 
-    currentDept.subdepartments?.forEach((subdept) => {
+    // Use sortByOrder to maintain consistent ordering
+    sortByOrder(currentDept.subdepartments || []).forEach((subdept) => {
       const subdeptId = `subdept-${subdept.id}`
       entities.push({
         id: subdeptId,
@@ -480,10 +477,10 @@ export default function Stages() {
         level: 0,
         path: subdept.name,
         hasChildren: !!(subdept.classes && subdept.classes.length > 0),
-        default_display: subdept.default_display,
+        default_display: subdept.default_display === true, // Read from API data
       })
 
-      subdept.classes?.forEach((cls, clsIndex) => {
+      sortByOrder(subdept.classes || []).forEach((cls, clsIndex) => {
         const classId = `class-${subdept.id}-${cls.id || clsIndex}`
         entities.push({
           id: classId,
@@ -494,10 +491,10 @@ export default function Stages() {
           level: 1,
           path: `${subdept.name} → ${cls.name}`,
           hasChildren: !!(cls.subClasses && cls.subClasses.length > 0),
-          default_display: cls.default_display,
+          default_display: cls.default_display === true, // Read from API data
         })
 
-        cls.subClasses?.forEach((subCls, subClsIndex) => {
+        sortByOrder(cls.subClasses || []).forEach((subCls, subClsIndex) => {
           const subclassId = `subclass-${subdept.id}-${cls.id || clsIndex}-${subCls.id || subClsIndex}`
           entities.push({
             id: subclassId,
@@ -507,7 +504,7 @@ export default function Stages() {
             visible: entityVisibility[subclassId] !== false,
             level: 2,
             path: `${subdept.name} → ${cls.name} → ${subCls.name}`,
-            default_display: subCls.default_display,
+            default_display: subCls.default_display === true, // Read from API data
           })
         })
       })
@@ -515,6 +512,17 @@ export default function Stages() {
 
     return entities
   }, [departments, activeTab, entityVisibility])
+
+  useEffect(() => {
+    if (entityVisibilityOptions.length > 0 && Object.keys(entityVisibility).length === 0) {
+      const initialVisibility: Record<string, boolean> = {}
+      entityVisibilityOptions.forEach((entity) => {
+        // Initialize with default_display value instead of always true
+        initialVisibility[entity.id] = entity.default_display === true
+      })
+      setEntityVisibility(initialVisibility)
+    }
+  }, [entityVisibilityOptions])
 
   const handleColumnVisibilityChange = (columnId: string, visible: boolean) => {
     setColumnVisibility((prev) => ({
@@ -585,7 +593,7 @@ export default function Stages() {
   const handleResetEntitiesToDefault = () => {
     const newVisibility: Record<string, boolean> = {}
     entityVisibilityOptions.forEach((entity) => {
-      newVisibility[entity.id] = entity.default_display !== false
+      newVisibility[entity.id] = entity.default_display === true
     })
     setEntityVisibility(newVisibility)
   }
@@ -614,42 +622,54 @@ export default function Stages() {
   }
 
   const getProcessedSubdepartments = useCallback((dept: Department) => {
-    let subdepartments = dept.subdepartments || []
+    if (!dept?.subdepartments) return []
 
-    // Filter by default display if needed
-    subdepartments = filterByDefaultDisplay(subdepartments, showDefaultDisplayOnly)
+    let subdepartments = sortByOrder(dept.subdepartments)
 
-    // Filter by entity visibility
+    // First, filter based on the global "Show Default Only" toggle
+    if (showDefaultDisplayOnly) {
+      subdepartments = filterByDefaultDisplay(subdepartments, true)
+    }
+
+    // Then, filter based on individual visibility settings
     subdepartments = subdepartments.filter((subdept) => {
       const subdeptId = `subdept-${subdept.id}`
       return entityVisibility[subdeptId] !== false
     })
 
-    // Process classes and subclasses within each subdepartment
-    return subdepartments.map((subdept) => ({
-      ...subdept,
-      classes: filterByDefaultDisplay(
-        (subdept.classes || [])
-          .filter((cls, clsIndex) => {
-            const classId = `class-${subdept.id}-${cls.id || clsIndex}`
-            return entityVisibility[classId] !== false
-          })
-          .map((cls, clsIndex) => ({
-            ...cls,
-            subClasses: filterByDefaultDisplay(
-              (cls.subClasses || []).filter((subCls, subClsIndex) => {
-                const subclassId = `subclass-${subdept.id}-${cls.id || clsIndex}-${subCls.id || subClsIndex}`
-                return entityVisibility[subclassId] !== false
-              }),
-              showDefaultDisplayOnly,
-            ),
-          })),
-        showDefaultDisplayOnly,
-      ),
-    }))
-  }, [showDefaultDisplayOnly, entityVisibility]);
+    // Process classes and subclasses within each visible subdepartment
+    return subdepartments.map((subdept) => {
+      let classes = sortByOrder(subdept.classes || [])
 
-  // Get all leaf entities (entities that should appear as columns in transposed view)
+      if (showDefaultDisplayOnly) {
+        classes = filterByDefaultDisplay(classes, true)
+      }
+
+      classes = classes.filter((cls, clsIndex) => {
+        const classId = `class-${subdept.id}-${cls.id || clsIndex}`
+        return entityVisibility[classId] !== false
+      })
+
+      return {
+        ...subdept,
+        classes: classes.map((cls, clsIndex) => {
+          let subClasses = sortByOrder(cls.subClasses || [])
+
+          if (showDefaultDisplayOnly) {
+            subClasses = filterByDefaultDisplay(subClasses, true)
+          }
+
+          subClasses = subClasses.filter((subCls, subClsIndex) => {
+            const subclassId = `subclass-${subdept.id}-${cls.id || clsIndex}-${subCls.id || subClsIndex}`
+            return entityVisibility[subclassId] !== false
+          })
+
+          return { ...cls, subClasses }
+        }),
+      }
+    })
+  }, [showDefaultDisplayOnly, entityVisibility, departments, activeTab]);
+
   const getLeafEntities = (dept: Department) => {
     const processedSubdepartments = getProcessedSubdepartments(dept)
     const leafEntities: Array<{
@@ -660,27 +680,25 @@ export default function Stages() {
       classIndex?: number
       subclassIndex?: number
       path: string
+      default_display: boolean // Add this property
     }> = []
 
     processedSubdepartments.forEach((subdept, subdeptIndex) => {
       const hasClasses = subdept.classes && subdept.classes.length > 0
 
       if (!hasClasses) {
-        // Subdepartment without classes - add as leaf
         leafEntities.push({
           id: `subdept-${subdept.id}`,
           name: subdept.name,
           type: "subdepartment",
           subdeptId: subdept.id,
           path: subdept.name,
+          default_display: subdept.default_display === true, // Include default_display
         })
       } else {
-        // Subdepartment with classes
         subdept.classes.forEach((cls, clsIndex) => {
           const hasSubClasses = cls.subClasses && cls.subClasses.length > 0
-
           if (!hasSubClasses) {
-            // Class without subclasses - add as leaf
             leafEntities.push({
               id: `class-${subdept.id}-${cls.id || clsIndex}`,
               name: cls.name,
@@ -688,9 +706,9 @@ export default function Stages() {
               subdeptId: subdept.id,
               classIndex: clsIndex,
               path: `${subdept.name} → ${cls.name}`,
+              default_display: cls.default_display === true, // Include default_display
             })
           } else {
-            // Class with subclasses - add subclasses as leaves
             cls.subClasses.forEach((subCls, subClsIndex) => {
               leafEntities.push({
                 id: `subclass-${subdept.id}-${cls.id || clsIndex}-${subCls.id || subClsIndex}`,
@@ -700,13 +718,13 @@ export default function Stages() {
                 classIndex: clsIndex,
                 subclassIndex: subClsIndex,
                 path: `${subdept.name} → ${cls.name} → ${subCls.name}`,
+                default_display: subCls.default_display === true, // Include default_display
               })
             })
           }
         })
       }
     })
-
     return leafEntities
   }
 
@@ -1947,6 +1965,7 @@ export default function Stages() {
           type: "subdepartment",
           colspan: 0,
           children: [],
+          default_display: subdept.default_display === true, // Include default_display
         }
 
         const hasClasses = subdept.classes && subdept.classes.length > 0
@@ -1960,6 +1979,7 @@ export default function Stages() {
               type: "class",
               colspan: 0,
               children: [],
+              default_display: cls.default_display === true, // Include default_display
             }
 
             const hasSubClasses = cls.subClasses && cls.subClasses.length > 0
@@ -1971,8 +1991,9 @@ export default function Stages() {
                   id: `header-subclass-${subdept.id}-${cls.id || clsIndex}-${subCls.id || subClsIndex}`,
                   name: subCls.name,
                   type: "subclass",
-                  colspan: 1, // Leaf node
+                  colspan: 1,
                   children: [],
+                  default_display: subCls.default_display === true, // Include default_display
                 }
                 classNode.children.push(subClassNode)
               })
@@ -2123,7 +2144,7 @@ export default function Stages() {
                     <div className="font-medium text-sm truncate max-w-[200px]" title={node.name}>
                       {node.name}
                     </div>
-                    <Badge variant="secondary" className="text-xs capitalize">{node.type}</Badge>
+                    {/* <Badge variant="secondary" className="text-xs capitalize">{node.type}</Badge> */}
                   </div>
                 </TableHead>
               ))}
@@ -2137,7 +2158,7 @@ export default function Stages() {
                       colSpan={node.colspan}
                       rowSpan={node.rowspan}
                       className={cn(
-                        "border-r border-blue-400 text-center font-semibold text-white min-w-[120px] p-2 align-middle",
+                        "border-r border-t border-blue-400 text-center font-semibold text-white min-w-[120px] p-2 align-middle",
                         rowIndex === 0 ? "bg-blue-600" : "bg-blue-500" // different color for depth
                       )}
                     >
@@ -2145,15 +2166,16 @@ export default function Stages() {
                         <div className="font-medium text-sm truncate max-w-[200px]" title={node.name}>
                           {node.name}
                         </div>
-                        <Badge variant="secondary" className="text-xs capitalize">{node.type}</Badge>
+                        {/* <Badge variant="secondary" className="text-xs capitalize">{node.type}</Badge> */}
                       </div>
                     </TableHead>
                   ))}
                 </TableRow>
               ))}
               <TableRow className="border-b-0">
-                <TableCell className="sticky bg-slate-100 border-r-2 border-slate-300 z-10" rowSpan={2} colSpan={2}></TableCell>
-              </TableRow>
+                <TableCell className="sticky left-0 bg-slate-500 border-r-2 border-slate-300 z-10" rowSpan={2} colSpan={3}></TableCell>
+                <TableCell className="bg-slate-500 border-r-2 border-slate-300 z-20" rowSpan={2} colSpan={2}></TableCell>
+             </TableRow>
               {/* Applicable/Display Controls Header Row */}
               {columnVisibility.controls && (
                 <TableRow className="border-b-0">
@@ -2185,9 +2207,9 @@ export default function Stages() {
                         columnVisibility.index ? "left-16" : "left-0",
                       )}
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex justify-between">
                         <span className="font-semibold text-slate-800">{stage.name}</span>
-                        {stage.documents && stage.documents.length > 0 && (
+                      <div>  {stage.documents && stage.documents.length > 0 && (
                           <Popover>
                             <PopoverTrigger asChild>
                               <Button
@@ -2235,7 +2257,7 @@ export default function Stages() {
                               </div>
                             </PopoverContent>
                           </Popover>
-                        )}
+                        )}</div>
                       </div>
                     </TableCell>
                   )}
@@ -3312,15 +3334,13 @@ export default function Stages() {
               onResetToDefault={handleResetEntitiesToDefault}
               showDefaultDisplayOnly={showDefaultDisplayOnly}
               onToggleDefaultDisplay={() => setShowDefaultDisplayOnly(!showDefaultDisplayOnly)}
-              title={isTransposed ? "Entity Visibility" : "Row Visibility"}
+              title={isTransposed ? "Entity Column Visibility" : "Entity Row Visibility"}
               description={
                 isTransposed
-                  ? "Control which entities are visible as columns"
-                  : "Control which departments, classes, and subclasses are visible"
+                  ? "Control which entities are visible as columns. Items marked with ★ are set as default display."
+                  : "Control which departments, classes, and subclasses are visible as rows. Items marked with ★ are set as default display."
               }
             />
-
-
             <Button
               variant="outline"
               size="sm"
