@@ -338,6 +338,14 @@ function AssistantHistoryPopover({ assistant_history, users, children }: {
                             <span>Started:</span>
                             <span className="font-medium">{new Date(assistant.start_date).toLocaleDateString()}</span>
                           </div>
+                          {assistant.manager_id && (
+                            <div className="flex justify-between">
+                              <span>Manager:</span>
+                              <span className="font-medium">
+                                {users.find(u => u.id === assistant.manager_id)?.name || 'Unknown Manager'}
+                              </span>
+                            </div>
+                          )}
                           <div className="flex justify-between">
                             <span>Duration:</span>
                             <span className="font-medium text-blue-600">{duration}</span>
@@ -373,6 +381,14 @@ function AssistantHistoryPopover({ assistant_history, users, children }: {
                             <span>Ended:</span>
                             <span className="font-medium">{new Date(assistant.end_date!).toLocaleDateString()}</span>
                           </div>
+                          {assistant.manager_id && (
+                            <div className="flex justify-between">
+                              <span>Manager:</span>
+                              <span className="font-medium">
+                                {users.find(u => u.id === assistant.manager_id)?.name || 'Unknown Manager'}
+                              </span>
+                            </div>
+                          )}
                           <div className="flex justify-between">
                             <span>Duration:</span>
                             <span className="font-medium text-blue-600">{duration}</span>
