@@ -1753,7 +1753,6 @@ export const AutomationMappingDialog = ({
                 </div>
                 <div className="ml-4">
                   <h3 className="text-lg font-medium text-gray-900">Document Repository</h3>
-                  <p className="text-sm text-gray-500">Documents for Individual ID: <span className="font-mono font-medium text-blue-700">{currentIndividualId}</span></p>
                 </div>
               </div>
               <div className="flex-shrink-0">
@@ -1774,7 +1773,7 @@ export const AutomationMappingDialog = ({
                 >
                   <span className="font-medium">{doc.entityType || 'Document'}</span>
                   <span className="ml-1.5 font-mono text-[11px] text-blue-600">
-                    ID: {doc.kycDocumentId.slice(0, 4)}...{doc.kycDocumentId.slice(-4)}
+                    {doc.kycDocument?.display_name || 'N/A'}  
                   </span>
                 </Badge>
               ))}

@@ -79,7 +79,7 @@ export function EnquiryDialog({
     const [localUsers, setLocalUsers] = useState<any[]>(users || [])
     const [localOfficers, setLocalOfficers] = useState<any[]>(officers || [])
     const [loadingStaff, setLoadingStaff] = useState(false)
-    
+
     const [loading, setLoading] = useState(false)
     const [searchLoading, setSearchLoading] = useState(false)
     const [taskType, setTaskType] = useState<'new' | 'renewal'>('new')
@@ -132,7 +132,6 @@ export function EnquiryDialog({
         // Enquiry date
         enquiry_date: new Date().toISOString().split('T')[0]
     })
-
     const handleChange = useCallback((field: keyof FormData, value: any) => {
         setFormData(prev => {
             if (field === 'department_id') {
@@ -142,52 +141,48 @@ export function EnquiryDialog({
                     subdepartment_id: '',
                     class_id: '',
                     subclass_id: '',
-                    // Reset staff assignments when department changes
+                    // Clear all staff assignments when department changes
                     officer_id: '',
                     task_manager_id: '',
                     task_assistant_id: ''
                 };
             }
+
             if (field === 'subdepartment_id') {
                 return {
                     ...prev,
                     subdepartment_id: value,
                     class_id: '',
                     subclass_id: '',
-                    // Reset staff assignments when subdepartment changes
+                    // Clear all staff assignments when subdepartment changes
                     officer_id: '',
                     task_manager_id: '',
                     task_assistant_id: ''
                 };
             }
+
             if (field === 'class_id') {
                 return { ...prev, class_id: value, subclass_id: '' };
             }
-            // Handle manager selection - reset assistant if manager changes
+
+            // When manager changes, clear assistant
             if (field === 'task_manager_id') {
                 return {
                     ...prev,
                     task_manager_id: value,
-                    // Reset assistant when manager changes
-                    task_assistant_id: value ? '' : prev.task_assistant_id
+                    task_assistant_id: '' // Always reset assistant when manager changes
                 };
             }
+
             return { ...prev, [field]: value };
         });
     }, []);
 
-    // ADD: Function to load staff data if not provided via props
     const loadStaffData = useCallback(async () => {
-        if ((users && users.length > 0) && (officers && officers.length > 0)) {
-            // Use prop data if available
-            setLocalUsers(users);
-            setLocalOfficers(officers);
-            return;
-        }
-
+        console.log('📥 Loading staff data from database...');
         setLoadingStaff(true);
+
         try {
-            // Fetch users and officers from the database
             const [usersResult, officersResult] = await Promise.all([
                 supabase.from('tm_users').select('*').order('name'),
                 supabase.from('tm_users').select('*').eq('role', 'officer').order('name')
@@ -198,13 +193,13 @@ export function EnquiryDialog({
 
             setLocalUsers(usersResult.data || []);
             setLocalOfficers(officersResult.data || []);
-            
-            console.log('📦 Loaded staff data:', {
+
+            console.log('✅ Staff data loaded successfully:', {
                 users: usersResult.data?.length || 0,
                 officers: officersResult.data?.length || 0
             });
         } catch (error) {
-            console.error('Error loading staff data:', error);
+            console.error('❌ Error loading staff data:', error);
             toast({
                 title: "Error",
                 description: "Failed to load staff data",
@@ -213,14 +208,24 @@ export function EnquiryDialog({
         } finally {
             setLoadingStaff(false);
         }
-    }, [users, officers]);
+    }, []);
 
-    // Load staff data when dialog opens
     useEffect(() => {
-        if (open) {
+        // Only load staff data once when dialog opens and we have the required data
+        if (!open) return;
+
+        // Prevent loading if we already have the data from props
+        if ((users && users.length > 0) && (officers && officers.length > 0)) {
+            setLocalUsers(users);
+            setLocalOfficers(officers);
+            return;
+        }
+
+        // Only load if we don't have local data yet
+        if (localUsers.length === 0 || localOfficers.length === 0) {
             loadStaffData();
         }
-    }, [open, loadStaffData]);
+    }, [open]);
 
     // Update local state when props change
     useEffect(() => {
@@ -232,7 +237,6 @@ export function EnquiryDialog({
         }
     }, [users, officers]);
 
-    // Staff filtering logic (copied from EditTaskDialog)
     const findActiveStaffForSubdept = useCallback((subdept, allUsers, allOfficers) => {
         console.log('🔍 findActiveStaffForSubdept called with:');
         console.log('Subdept:', subdept);
@@ -304,7 +308,6 @@ export function EnquiryDialog({
         return staff;
     }, []);
 
-    // Function to update form data with department/subdepartment/class IDs and names
     const updateTaskFields = useCallback(async (taskData: any) => {
         if (!taskData) return;
 
@@ -363,7 +366,6 @@ export function EnquiryDialog({
         }
     }, [handleChange])
 
-    // Load departments on mount - FIXED to prevent multiple calls
     useEffect(() => {
         const loadDepartments = async () => {
             try {
@@ -385,125 +387,71 @@ export function EnquiryDialog({
         if (open && departments.length === 0) {
             loadDepartments()
         }
-    }, [open]) // Removed propDepartments from dependencies to prevent multiple calls
+    }, [open])
 
-    // Staff filtering effects (similar to EditTaskDialog)
-
-    // EFFECT: Handle Subdepartment changes and staff filtering
     useEffect(() => {
-        if (isInitialLoad.current || !formData.subdepartment_id) return;
-
-        console.log('🔄 Subdepartment changed by user:', formData.subdepartment_id);
-        console.log('📊 Available props:', {
-            departmentsCount: departments.length,
-            usersCount: localUsers.length,
-            officersCount: localOfficers.length,
-            users: localUsers,
-            officers: localOfficers
-        });
-        
-        // FIX: Convert formData.department_id to number for comparison
-        const dept = departments.find(d => d.id.toString() === formData.department_id);
-        console.log('Department found:', dept);
-
-        // FIX: Convert formData.subdepartment_id to number for comparison
-        const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
-        console.log('Subdepartment found:', subdept);
-
-        if (subdept) {
-            // Check if we have any users or officers data
-            if (!localUsers || !localOfficers || localUsers.length === 0 || localOfficers.length === 0) {
-                console.log('⚠️ No users/officers data available - users:', localUsers, 'officers:', localOfficers);
-                
-                // Show a warning message about missing staff data
-                toast({
-                    title: "Info",
-                    description: "Staff data not loaded. Please ensure users and officers are properly passed to the component.",
-                    variant: "default"
-                });
-                
-                // Set empty arrays but don't return - still allow form to work
-                setAvailableOfficers([]);
-                setAvailableManagers([]);
-                setAvailableAssistants([]);
-            } else {
-                console.log('🔍 Finding active staff for changed subdepartment...');
-                const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
-                console.log('Staff filtering result:', activeStaff);
-
-                setAvailableOfficers(activeStaff.officers);
-                setAvailableManagers(activeStaff.managers);
-                setAvailableAssistants(activeStaff.assistants);
-            }
+        if (!open || !formData.subdepartment_id || localUsers.length === 0 || localOfficers.length === 0) {
+            return;
         }
 
-        // Reset staff assignments when subdepartment changes
-        handleChange('officer_id', '');
-        handleChange('task_manager_id', '');
-        handleChange('task_assistant_id', '');
-    }, [formData.subdepartment_id, departments, localUsers, localOfficers, findActiveStaffForSubdept, handleChange]);
+        console.log('🔄 Filtering staff for subdepartment:', formData.subdepartment_id);
 
-    // EFFECT: Handle Manager changes - filter assistants based on manager-assistant relationships
+        const dept = departments.find(d => d.id.toString() === formData.department_id);
+        const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
+
+        if (subdept) {
+            const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
+
+            setAvailableOfficers(activeStaff.officers);
+            setAvailableManagers(activeStaff.managers);
+            setAvailableAssistants([]);
+
+            setFormData(prev => ({
+                ...prev,
+                officer_id: '',
+                task_manager_id: '',
+                task_assistant_id: ''
+            }));
+        }
+    }, [open, formData.subdepartment_id, localUsers.length, localOfficers.length, departments.length]);
+
     useEffect(() => {
-        if (isInitialLoad.current) return;
+        if (!open || !formData.subdepartment_id || !formData.task_manager_id) {
+            // If no manager selected, clear assistants
+            setAvailableAssistants([]);
+            setFormData(prev => ({ ...prev, task_assistant_id: '' }));
+            return;
+        }
 
-        const filterAssistants = async () => {
-            if (!formData.task_manager_id) {
-                // If no manager selected, show all available assistants
-                const dept = departments.find(d => d.id.toString() === formData.department_id);
-                const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
+        const filterAssistantsByManager = () => {
+            const dept = departments.find(d => d.id.toString() === formData.department_id);
+            const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
 
-                if (subdept && localUsers) {
-                    const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
-                    setAvailableAssistants(activeStaff.assistants);
-                }
-                return;
-            }
+            if (!subdept) return;
 
-            try {
-                // Get all tasks where this manager is assigned
-                const { data: managerTasks, error } = await supabase
-                    .from('tm_tasks')
-                    .select('task_assistant_id')
-                    .eq('task_manager_id', formData.task_manager_id)
-                    .not('task_assistant_id', 'is', null);
+            // Get assistants assigned to this subdepartment and linked to the selected manager
+            const assistantsForManager = subdept.assistant_history
+                ?.filter(assistant =>
+                    !assistant.end_date && // Active assignments only
+                    assistant.manager_id?.toString() === formData.task_manager_id
+                )
+                ?.map(assistant => assistant.id) || [];
 
-                if (error) throw error;
+            // Filter local users to get the actual assistant user objects
+            const availableAssistants = localUsers.filter(user =>
+                assistantsForManager.includes(user.id)
+            );
 
-                // Get unique assistant IDs
-                const assistantIds = [...new Set(
-                    managerTasks.map(task => task.task_assistant_id?.toString())
-                )].filter(Boolean);
+            console.log(`🎯 Found ${availableAssistants.length} assistants for manager ${formData.task_manager_id}`);
+            setAvailableAssistants(availableAssistants);
 
-                // Filter available assistants to only those linked with the manager
-                const dept = departments.find(d => d.id.toString() === formData.department_id);
-                const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
-
-                if (subdept && localUsers) {
-                    const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
-                    const linkedAssistants = activeStaff.assistants.filter(assistant =>
-                        assistantIds.includes(assistant.id?.toString())
-                    );
-
-                    setAvailableAssistants(linkedAssistants.length > 0 ? linkedAssistants : activeStaff.assistants);
-                }
-            } catch (error) {
-                console.error('Error fetching manager-assistant relationships:', error);
-                // Fallback to showing all assistants
-                const dept = departments.find(d => d.id.toString() === formData.department_id);
-                const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
-
-                if (subdept && localUsers) {
-                    const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
-                    setAvailableAssistants(activeStaff.assistants);
-                }
-            }
+            // Reset assistant selection when manager changes
+            setFormData(prev => ({ ...prev, task_assistant_id: '' }));
         };
 
-        filterAssistants();
-    }, [formData.task_manager_id, formData.department_id, formData.subdepartment_id, departments, localUsers, localOfficers, findActiveStaffForSubdept]);
+        filterAssistantsByManager();
+    }, [formData.task_manager_id, formData.subdepartment_id, departments.length, localUsers.length]);
 
-    // Initial load effect when dialog opens
     useEffect(() => {
         if (open && formData.department_id && formData.subdepartment_id) {
             isInitialLoad.current = true;
@@ -528,7 +476,6 @@ export function EnquiryDialog({
         }
     }, [open, formData.department_id, formData.subdepartment_id, departments, localUsers, localOfficers, findActiveStaffForSubdept]);
 
-    // Search for individuals based on applicant type
     const searchIndividuals = useCallback(async (type: 'principal' | 'dependant') => {
         setSearchLoading(true)
         try {
@@ -564,7 +511,6 @@ export function EnquiryDialog({
         }
     }, [])
 
-    // Fetch family members for a principal
     const fetchDependants = async (principalId: number) => {
         try {
             // First, get the principal with their relationships
@@ -620,10 +566,8 @@ export function EnquiryDialog({
         }
     }
 
-    // Fetch references for an individual
     const fetchReferences = async (individualId: number) => {
         try {
-            // Get the individual with their references array
             const { data: individual, error } = await supabase
                 .from('registry_individuals')
                 .select(`
@@ -684,11 +628,17 @@ export function EnquiryDialog({
 
             if (individualError) throw individualError;
 
-            const employmentHistory = individualData?.employment_history || [];
+            const employmentData = individualData?.employment_history || { current: null, history: [] };
             const individualBillTo = individualData?.bill_to || null;
 
-            // If employment history is empty, use bill_to company
-            if (!employmentHistory || employmentHistory.length === 0) {
+            // Combine current and historical employments
+            const allEmployments = [
+                ...(employmentData.current ? [employmentData.current] : []),
+                ...(employmentData.history || [])
+            ];
+
+            // If no employments, use bill_to company
+            if (allEmployments.length === 0) {
                 if (individualBillTo?.company) {
                     const { data: companiesData, error: companiesError } = await supabase
                         .from('acc_portal_company_duplicate')
@@ -699,14 +649,13 @@ export function EnquiryDialog({
                     if (companiesError) throw companiesError;
 
                     if (companiesData) {
-                        setCompanies([
-                            {
-                                ...companiesData,
-                                id: companiesData.id.toString(),
-                                company_name: companiesData.company_name || 'Unnamed Company',
-                                is_bill_to: true
-                            }
-                        ]);
+                        setCompanies([{
+                            ...companiesData,
+                            id: companiesData.id.toString(),
+                            company_name: companiesData.company_name || 'Unnamed Company',
+                            is_bill_to: true,
+                            is_current: false
+                        }]);
                         setSelectedCompany(companiesData.id.toString());
                         fetchUnderstudies(companiesData.id.toString());
                     } else {
@@ -715,25 +664,33 @@ export function EnquiryDialog({
                         setUnderstudies([]);
                         setSelectedUnderstudy('');
                     }
-                    return;
                 } else {
                     setCompanies([]);
                     setSelectedCompany('');
                     setUnderstudies([]);
                     setSelectedUnderstudy('');
-                    return;
                 }
+                return;
             }
 
-            // Filter for director roles and get unique company IDs
-            const directorCompanies = employmentHistory
-                .filter((job: any) =>
-                    job.role?.toLowerCase() === 'director' &&
-                    job.company_id
+            // Filter for director roles and get unique company IDs with current status
+            const directorCompanies = allEmployments
+                .filter((job: any) => 
+                    job?.role?.toLowerCase() === 'director' &&
+                    job?.company_id
                 )
-                .map((job: any) => job.company_id);
+                .map((job: any) => ({
+                    id: job.company_id,
+                    isCurrent: job === employmentData.current
+                }));
 
-            const uniqueCompanyIds = [...new Set(directorCompanies)];
+            // Create a map to track if a company has a current employment
+            const companyMap = new Map();
+            directorCompanies.forEach(({ id, isCurrent }) => {
+                companyMap.set(id, companyMap.has(id) ? companyMap.get(id) || isCurrent : isCurrent);
+            });
+            
+            const uniqueCompanyIds = Array.from(companyMap.keys());
 
             if (uniqueCompanyIds.length === 0) {
                 setCompanies([]);
@@ -760,10 +717,8 @@ export function EnquiryDialog({
 
             if (companiesError) throw companiesError;
 
-            console.log('Raw companies data from database:', companiesData);
-
             // Create a map of company IDs to their data for easy lookup
-            const companyMap = new Map();
+            const companiesMap = new Map();
 
             (companiesData || []).forEach(company => {
                 if (!company) return;
@@ -774,23 +729,20 @@ export function EnquiryDialog({
                     ...company,
                     id: companyId,
                     company_name: company.company_name || 'Unnamed Company',
-                    is_bill_to: companyId === billToCompanyId
+                    is_bill_to: companyId === billToCompanyId,
+                    is_current: companyMap.get(companyId) || false
                 };
-                companyMap.set(companyId, mappedCompany);
-                console.log('Mapped company:', mappedCompany);
+                companiesMap.set(companyId, mappedCompany);
             });
 
-            const companiesWithDetails = Array.from(companyMap.values())
+            const companiesWithDetails = Array.from(companiesMap.values())
                 .filter(company => {
-                    // Convert both IDs to strings for comparison
                     const companyId = company.id?.toString();
                     return uniqueCompanyIdsStr.includes(companyId) ||
                         (billToCompanyId === companyId && !uniqueCompanyIdsStr.includes(companyId));
                 });
 
-            console.log('Filtered companies:', companiesWithDetails);
             setCompanies(companiesWithDetails);
-            console.log('Companies state after setting:', companiesWithDetails);
 
             // Auto-select the first company if only one exists
             if (companiesWithDetails.length === 1) {
@@ -819,39 +771,51 @@ export function EnquiryDialog({
             setSelectedUnderstudy('');
             return;
         }
-
+    
         setLoadingUnderstudies(true);
         try {
             // Get all individuals who have this company in their employment history as understudies
             const { data: individuals, error } = await supabase
                 .from('registry_individuals')
                 .select('*');
-
+    
             if (error) throw error;
-
+    
             // Filter individuals who are understudies for this company
             const understudiesList = individuals.filter(individual => {
                 if (!individual.employment_history) return false;
-
-                return individual.employment_history.some((job: any) =>
+    
+                const employmentData = individual.employment_history;
+                const allEmployments = [
+                    ...(employmentData.current ? [employmentData.current] : []),
+                    ...(employmentData.history || [])
+                ];
+    
+                return allEmployments.some((job: any) =>
                     job.company_id === companyId &&
                     job.understudy?.is_understudy === true
                 );
             });
-
+    
             // Add employment details to each understudy
             const understudiesWithDetails = understudiesList.map(understudy => {
-                const employment = understudy.employment_history.find((job: any) =>
+                const employmentData = understudy.employment_history;
+                const allEmployments = [
+                    ...(employmentData.current ? [employmentData.current] : []),
+                    ...(employmentData.history || [])
+                ];
+    
+                const employment = allEmployments.find((job: any) =>
                     job.company_id === companyId &&
                     job.understudy?.is_understudy === true
                 );
-
+    
                 return {
                     ...understudy,
                     employment_details: employment?.understudy || {}
                 };
             });
-
+    
             setUnderstudies(understudiesWithDetails);
             setSelectedUnderstudy('');
         } catch (error) {
@@ -951,6 +915,7 @@ export function EnquiryDialog({
                     const dependant = availableDependants.find(d => d.id.toString() === id);
                     return dependant ? {
                         id: dependant.id,
+                        name: dependant.full_name,
                         relationship: dependant.relationship_type === 'Principal Member' ? 'Principal' : (dependant.relationship_type || 'Family Member')
                     } : null;
                 }).filter(Boolean)
@@ -962,6 +927,7 @@ export function EnquiryDialog({
                     const reference = availableReferences.find(r => r.id.toString() === id);
                     return reference ? {
                         id: reference.id,
+                        name: reference.full_name,
                         relationship: reference.relationship_type || 'reference'
                     } : null;
                 }).filter(Boolean)
@@ -1330,8 +1296,20 @@ export function EnquiryDialog({
                                             {companies && companies.length > 0 ? (
                                                 <>
                                                     {companies.map((company) => (
-                                                        <SelectItem key={company.id} value={company.id.toString()}>
-                                                            {company.company_name} {company.is_bill_to && "(Bill To)"}
+                                                        <SelectItem key={company.id} value={company.id.toString()} className="flex items-center justify-between">
+                                                            <span>{company.company_name}</span>
+                                                            <div className="flex items-center gap-2 ml-2">
+                                                                {company.is_current && (
+                                                                    <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                                                        Current
+                                                                    </Badge>
+                                                                )}
+                                                                {company.is_bill_to && (
+                                                                    <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                                                                        Bill To
+                                                                    </Badge>
+                                                                )}
+                                                            </div>
                                                         </SelectItem>
                                                     ))}
                                                 </>
@@ -1718,46 +1696,48 @@ export function EnquiryDialog({
                                         Staff Assignment
                                     </CardTitle>
                                     <CardDescription className="text-blue-600 text-xs">
-                                        Staff are filtered based on subdepartment assignments. Select a subdepartment first.
+                                        {!formData.subdepartment_id
+                                            ? "Select a subdepartment first to see available staff"
+                                            : "Staff filtered based on subdepartment assignments"
+                                        }
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
-                                    {/* Debug Info - Remove in production */}
-                                    {formData.subdepartment_id && (
-                                        <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
-                                            <strong>Debug Info:</strong><br/>
-                                            Props - Users: {users.length}, Officers: {officers.length}<br/>
-                                            Local - Users: {localUsers.length}, Officers: {localOfficers.length}<br/>
-                                            Available Staff: O:{availableOfficers.length}, M:{availableManagers.length}, A:{availableAssistants.length}<br/>
-                                            {loadingStaff && <span className="text-blue-600">Loading staff data...</span>}
-                                        </div>
-                                    )}
-
                                     {/* Officer Selection */}
                                     <div className="space-y-2">
                                         <Label className="text-xs font-medium flex items-center">
                                             <Shield className="w-3 h-3 mr-1" />
                                             Officer
-                                            <span className="ml-2 text-xs text-slate-500">({availableOfficers.length} available)</span>
+                                            {formData.subdepartment_id && (
+                                                <span className="ml-2 text-xs text-slate-500">
+                                                    ({availableOfficers.length} available)
+                                                </span>
+                                            )}
                                         </Label>
                                         <Select
                                             value={formData.officer_id}
                                             onValueChange={(value) => handleChange('officer_id', value)}
-                                            disabled={!formData.subdepartment_id}
+                                            disabled={!formData.subdepartment_id || loadingStaff}
                                         >
                                             <SelectTrigger className="w-full h-8 text-xs">
-                                                <SelectValue placeholder="Select officer" />
+                                                <SelectValue placeholder={
+                                                    !formData.subdepartment_id
+                                                        ? "Select subdepartment first"
+                                                        : loadingStaff
+                                                            ? "Loading..."
+                                                            : "Select officer"
+                                                } />
                                             </SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="none">No Officer</SelectItem>
-                                                {availableOfficers.map((user) => (
-                                                    <SelectItem key={user.id} value={user.id.toString()}>
-                                                        <span className="text-xs">{user.name || user.email} ({user.role})</span>
+                                                {availableOfficers.map((officer) => (
+                                                    <SelectItem key={officer.id} value={officer.id.toString()}>
+                                                        {officer.name || officer.email}
                                                     </SelectItem>
                                                 ))}
                                             </SelectContent>
                                         </Select>
-                                        {formData.subdepartment_id && availableOfficers.length === 0 && (
+                                        {formData.subdepartment_id && availableOfficers.length === 0 && !loadingStaff && (
                                             <p className="text-xs text-amber-600">No officers assigned to this subdepartment.</p>
                                         )}
                                     </div>
@@ -1767,67 +1747,85 @@ export function EnquiryDialog({
                                         <Label className="text-xs font-medium flex items-center">
                                             <User className="w-3 h-3 mr-1" />
                                             Task Manager
-                                            <span className="ml-2 text-xs text-slate-500">({availableManagers.length} available)</span>
+                                            {formData.subdepartment_id && (
+                                                <span className="ml-2 text-xs text-slate-500">
+                                                    ({availableManagers.length} available)
+                                                </span>
+                                            )}
                                         </Label>
                                         <Select
                                             value={formData.task_manager_id}
                                             onValueChange={(value) => handleChange('task_manager_id', value)}
-                                            disabled={!formData.subdepartment_id}
+                                            disabled={!formData.subdepartment_id || loadingStaff}
                                         >
                                             <SelectTrigger className="w-full h-8 text-xs">
-                                                <SelectValue placeholder="Select task manager" />
+                                                <SelectValue placeholder={
+                                                    !formData.subdepartment_id
+                                                        ? "Select subdepartment first"
+                                                        : loadingStaff
+                                                            ? "Loading..."
+                                                            : "Select task manager"
+                                                } />
                                             </SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="none">No Task Manager</SelectItem>
-                                                {availableManagers.map((user) => (
-                                                    <SelectItem key={user.id} value={user.id.toString()}>
-                                                        <span className="text-xs">{user.name || user.email} ({user.role})</span>
+                                                {availableManagers.map((manager) => (
+                                                    <SelectItem key={manager.id} value={manager.id.toString()}>
+                                                        {manager.name || manager.email}
                                                     </SelectItem>
                                                 ))}
                                             </SelectContent>
                                         </Select>
-                                        {formData.subdepartment_id && availableManagers.length === 0 && (
+                                        {formData.subdepartment_id && availableManagers.length === 0 && !loadingStaff && (
                                             <p className="text-xs text-amber-600">No managers assigned to this subdepartment.</p>
                                         )}
                                     </div>
 
-                                    {/* Task Assistant Selection */}
+                                    {/* Task Assistant Selection - Only shown when manager is selected */}
                                     <div className="space-y-2">
                                         <Label className="text-xs font-medium flex items-center">
                                             <UserCheck className="w-3 h-3 mr-1" />
                                             Task Assistant
-                                            <span className="ml-2 text-xs text-slate-500">
-                                                ({availableAssistants.length} available{formData.task_manager_id ? ' for selected manager' : ''})
-                                            </span>
+                                            {formData.task_manager_id && (
+                                                <span className="ml-2 text-xs text-slate-500">
+                                                    ({availableAssistants.length} available for selected manager)
+                                                </span>
+                                            )}
                                         </Label>
                                         <Select
                                             value={formData.task_assistant_id}
                                             onValueChange={(value) => handleChange('task_assistant_id', value)}
-                                            disabled={!formData.subdepartment_id || (formData.task_manager_id && availableAssistants.length === 0)}
+                                            disabled={!formData.task_manager_id || loadingStaff}
                                         >
                                             <SelectTrigger className="w-full h-8 text-xs">
                                                 <SelectValue placeholder={
-                                                    formData.task_manager_id && availableAssistants.length === 0
-                                                        ? "No assistants linked to this manager"
-                                                        : "Select task assistant"
+                                                    !formData.subdepartment_id
+                                                        ? "Select subdepartment first"
+                                                        : !formData.task_manager_id
+                                                            ? "Select a manager first"
+                                                            : loadingStaff
+                                                                ? "Loading..."
+                                                                : availableAssistants.length === 0
+                                                                    ? "No assistants available for this manager"
+                                                                    : "Select task assistant"
                                                 } />
                                             </SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="none">No Task Assistant</SelectItem>
-                                                {availableAssistants.map((user) => (
-                                                    <SelectItem key={user.id} value={user.id.toString()}>
-                                                        <span className="text-xs">{user.name || user.email} ({user.role})</span>
+                                                {availableAssistants.map((assistant) => (
+                                                    <SelectItem key={assistant.id} value={assistant.id.toString()}>
+                                                        {assistant.name || assistant.email}
                                                     </SelectItem>
                                                 ))}
                                             </SelectContent>
                                         </Select>
-                                        {formData.task_manager_id && availableAssistants.length === 0 ? (
+
+                                        {/* Helper text */}
+                                        {!formData.task_manager_id ? (
+                                            <p className="text-xs text-blue-500">Select a manager to see available assistants</p>
+                                        ) : formData.task_manager_id && availableAssistants.length === 0 && !loadingStaff ? (
                                             <p className="text-xs text-amber-600">
-                                                No assistants are currently linked to the selected manager.
-                                            </p>
-                                        ) : formData.subdepartment_id && availableAssistants.length === 0 ? (
-                                            <p className="text-xs text-amber-600">
-                                                No assistants assigned to this subdepartment.
+                                                No assistants are linked to the selected manager in this subdepartment.
                                             </p>
                                         ) : null}
                                     </div>

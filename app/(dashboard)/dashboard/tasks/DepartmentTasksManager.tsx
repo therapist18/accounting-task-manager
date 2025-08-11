@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AutomationDialog } from "@/app/(dashboard)/dashboard/settings/automation/components/AutomationDialog";
 import { Loader2, Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, Zap } from "lucide-react"
+import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { Building, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
 import { format } from 'date-fns';
@@ -70,6 +71,8 @@ export default function DepartmentTasksManager({
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null)
   const [isPushingCase, setIsPushingCase] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [taskToDelete, setTaskToDelete] = useState<any>(null)
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
   const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(new Set(ENHANCED_TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
   const [visibleStats, setVisibleStats] = useState<Set<string>>(new Set(STATS_HEADERS.filter(h => h.default).map(h => h.id)))
@@ -1757,23 +1760,38 @@ export default function DepartmentTasksManager({
       case 'actions': return (
         <div className="flex items-center justify-center gap-1">
           <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100" title="Edit Task"><Edit className="h-4 w-4" /></Button>
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={async (e) => {
-              e.stopPropagation();
-              if (window.confirm('Are you sure you want to delete this task? This action cannot be undone.')) {
+          <>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={(e) => {
+                e.stopPropagation();
+                setDeleteDialogOpen(true);
+                setTaskToDelete(task);
+              }} 
+              className="h-8 w-8 text-red-600 hover:bg-red-100" 
+              title="Delete Task"
+              disabled={loading}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            <DeleteConfirmationDialog
+              open={deleteDialogOpen}
+              onOpenChange={setDeleteDialogOpen}
+              onConfirm={async () => {
+                if (!taskToDelete) return;
+                
                 try {
                   setLoading(true);
                   const { error } = await supabase
                     .from('tm_tasks')
                     .delete()
-                    .eq('id', task.id);
+                    .eq('id', taskToDelete.id);
                   
                   if (error) throw error;
                   
                   // Update tasks list by removing the deleted task
-                  setTasks(prevTasks => prevTasks.filter(t => t.id !== task.id));
+                  setTasks(prevTasks => prevTasks.filter(t => t.id !== taskToDelete.id));
                   
                   toast({
                     title: 'Success',
@@ -1790,15 +1808,13 @@ export default function DepartmentTasksManager({
                   });
                 } finally {
                   setLoading(false);
+                  setDeleteDialogOpen(false);
+                  setTaskToDelete(null);
                 }
-              }
-            }} 
-            className="h-8 w-8 text-red-600 hover:bg-red-100" 
-            title="Delete Task"
-            disabled={loading}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+              }}
+              loading={loading}
+            />
+          </>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:bg-slate-100" title="More Actions">
