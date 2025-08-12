@@ -32,7 +32,7 @@ import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog'
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
 import {
-  ENHANCED_TABLE_HEADERS,
+  ENHANCED_TABLE_HEADERS_IMMIGRATION,
   STATS_HEADERS,
   calculateAge,
   getEnhancedImmigrationStatus,
@@ -45,6 +45,7 @@ import {
 } from './overall-view/tableUtils';
 import EditableStageCell from "./components/EditableStageCell"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { OtherDialog } from "./components/OtherDialog"
 
 export default function DepartmentTasksManager({
   error,
@@ -66,6 +67,7 @@ export default function DepartmentTasksManager({
   const [stages, setStages] = useState<any[]>([])
   const [allDocuments, setAllDocuments] = useState<Document[]>([])
   const [isEnquiryDialogOpen, setIsEnquiryDialogOpen] = useState(false)
+  const [isOtherDialogOpen, setIsOtherDialogOpen] = useState(false)
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null)
   const [isStageUploadDialogOpen, setIsStageUploadDialogOpen] = useState(false)
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null)
@@ -74,7 +76,7 @@ export default function DepartmentTasksManager({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [taskToDelete, setTaskToDelete] = useState<any>(null)
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
-  const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(new Set(ENHANCED_TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
+  const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(new Set(ENHANCED_TABLE_HEADERS_IMMIGRATION.filter(h => h.default).map(h => h.id)))
   const [visibleStats, setVisibleStats] = useState<Set<string>>(new Set(STATS_HEADERS.filter(h => h.default).map(h => h.id)))
   const [visibleStageIds, setVisibleStageIds] = useState<Set<string>>(new Set())
   const [expandedDependants, setExpandedDependants] = useState<Set<string>>(new Set())
@@ -421,35 +423,35 @@ export default function DepartmentTasksManager({
 
     // Sort stages by order_num
     const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-    
+
     // Get all stages that have status or date in task.stages
     const stagesWithStatus = sortedStages.filter(stage => {
       const stageStatus = task.stages[stage.id];
       return stageStatus && (stageStatus.status || stageStatus.date);
     });
-    
+
     // If no stages have status/date, return the first stage
     if (stagesWithStatus.length === 0) {
       return sortedStages[0] || null;
     }
-    
+
     // Find the last completed stage
     const lastCompletedStage = [...stagesWithStatus].reverse().find(stage => {
       const stageStatus = task.stages[stage.id];
       return stageStatus.status === 'completed' || stageStatus.date;
     });
-    
+
     // If no completed stages, return the first stage with status
     if (!lastCompletedStage) {
       return stagesWithStatus[0] || null;
     }
-    
+
     // Find the next stage after the last completed one
     const lastCompletedIndex = sortedStages.findIndex(s => s.id === lastCompletedStage.id);
     if (lastCompletedIndex < sortedStages.length - 1) {
       return sortedStages[lastCompletedIndex + 1];
     }
-    
+
     // If last completed is the last stage, return it
     return lastCompletedStage;
   }, [getDocumentForTaskStage])
@@ -1364,10 +1366,10 @@ export default function DepartmentTasksManager({
                   if (!dept) return false;
                   const subdept = dept.tm_subdepartments?.find(s => s.id === task.subdepartment?.id);
                   if (!subdept) return false;
-                  
+
                   const subdeptStage = subdept.stages?.find(s => s.stage_id === stage.id);
                   if (subdeptStage && !subdeptStage.applicable) return false;
-                  
+
                   if (task.class_id) {
                     const cls = subdept.classes?.find(c => c.id.toString() === task.class_id.toString());
                     if (cls) {
@@ -1375,10 +1377,10 @@ export default function DepartmentTasksManager({
                       if (classStage && !classStage.applicable) return false;
                     }
                   }
-                  
+
                   return true;
                 })();
-                
+
                 if (!isApplicable) return 'N/A';
 
                 const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
@@ -1676,10 +1678,10 @@ export default function DepartmentTasksManager({
 
       case 'stage':
         // Check if stage is applicable to task
-        const isStageApplicable = !row.stage.targetEntities || row.stage.targetEntities.length === 0 || 
+        const isStageApplicable = !row.stage.targetEntities || row.stage.targetEntities.length === 0 ||
           row.stage.targetEntities.some((target: any) => {
             const matchesClass = target.class_id?.toString() === task.class_id?.toString();
-            const matchesSubclass = !target.subclass_id || 
+            const matchesSubclass = !target.subclass_id ||
               target.subclass_id.toString() === task.subclass_id?.toString();
             return matchesClass && matchesSubclass;
           });
@@ -1690,7 +1692,7 @@ export default function DepartmentTasksManager({
 
         // Determine if this stage requires upload based on stage configuration
         const requiresUpload = row.stage.requires_upload !== false; // Default to true if not specified
-        
+
         return (
           <EditableStageCell
             key={row.stage.id}
@@ -1718,10 +1720,10 @@ export default function DepartmentTasksManager({
         )
       case 'document':
         // Check if document is applicable to task
-        const isDocApplicable = !row.document?.targetEntities || row.document.targetEntities.length === 0 || 
+        const isDocApplicable = !row.document?.targetEntities || row.document.targetEntities.length === 0 ||
           row.document.targetEntities.some((target: any) => {
             const matchesClass = target.class_id?.toString() === task.class_id?.toString();
-            const matchesSubclass = !target.subclass_id || 
+            const matchesSubclass = !target.subclass_id ||
               target.subclass_id.toString() === task.subclass_id?.toString();
             return matchesClass && matchesSubclass;
           });
@@ -1761,15 +1763,15 @@ export default function DepartmentTasksManager({
         <div className="flex items-center justify-center gap-1">
           <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100" title="Edit Task"><Edit className="h-4 w-4" /></Button>
           <>
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={(e) => {
                 e.stopPropagation();
                 setDeleteDialogOpen(true);
                 setTaskToDelete(task);
-              }} 
-              className="h-8 w-8 text-red-600 hover:bg-red-100" 
+              }}
+              className="h-8 w-8 text-red-600 hover:bg-red-100"
               title="Delete Task"
               disabled={loading}
             >
@@ -1780,25 +1782,25 @@ export default function DepartmentTasksManager({
               onOpenChange={setDeleteDialogOpen}
               onConfirm={async () => {
                 if (!taskToDelete) return;
-                
+
                 try {
                   setLoading(true);
                   const { error } = await supabase
                     .from('tm_tasks')
                     .delete()
                     .eq('id', taskToDelete.id);
-                  
+
                   if (error) throw error;
-                  
+
                   // Update tasks list by removing the deleted task
                   setTasks(prevTasks => prevTasks.filter(t => t.id !== taskToDelete.id));
-                  
+
                   toast({
                     title: 'Success',
                     description: 'Task deleted successfully',
                     variant: 'default'
                   });
-                  
+
                 } catch (error) {
                   console.error('Error deleting task:', error);
                   toast({
@@ -2071,6 +2073,14 @@ export default function DepartmentTasksManager({
     return null;
   };
 
+  const handleNewEnquiryClick = () => {
+    if (activeDepartmentTab === '1') {
+      setIsEnquiryDialogOpen(true)
+    } else {
+      setIsOtherDialogOpen(true)
+    }
+  }
+
   const defaultSubdepartments = getDefaultSubdepartments()
 
   useEffect(() => {
@@ -2168,7 +2178,7 @@ export default function DepartmentTasksManager({
     };
 
     performInitialLoad();
-  }, [fetchTmUsers]);
+  }, []);
 
   useEffect(() => {
     if (activeDepartmentTab && departments.length > 0) {
@@ -2353,7 +2363,15 @@ export default function DepartmentTasksManager({
                             </CardDescription>
                           </div>
                           <div className="flex items-center gap-2">
-                            {tabValue === 'enquiries' && <Button className="flex items-center gap-2" onClick={() => setIsEnquiryDialogOpen(true)}><Plus className="h-4 w-4" />New Enquiry</Button>}
+                            {tabValue === 'enquiries' && (
+                              <Button
+                                className="flex items-center gap-2"
+                                onClick={handleNewEnquiryClick}
+                              >
+                                <Plus className="h-4 w-4" />
+                                New Enquiry
+                              </Button>
+                            )}
                             <div className="relative">
                               <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
                               <Input
@@ -2432,7 +2450,7 @@ export default function DepartmentTasksManager({
                                   {/* Case Details Fields */}
                                   <div className="space-y-2 border-t pt-2">
                                     <h5 className="text-sm font-medium text-slate-700">Case Details ({visibleHeaders.size})</h5>
-                                    {ENHANCED_TABLE_HEADERS.map((header) => (
+                                    {ENHANCED_TABLE_HEADERS_IMMIGRATION.map((header) => (
                                       <div key={header.id} className="flex items-center space-x-2">
                                         <Checkbox
                                           id={header.id}
@@ -2477,7 +2495,7 @@ export default function DepartmentTasksManager({
                                       variant="outline"
                                       size="sm"
                                       onClick={() => {
-                                        setVisibleHeaders(new Set(ENHANCED_TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
+                                        setVisibleHeaders(new Set(ENHANCED_TABLE_HEADERS_IMMIGRATION.filter(h => h.default).map(h => h.id)))
                                         if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.filter(s => s.default).map(s => s.id)))
                                         setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
                                       }}
@@ -2488,7 +2506,7 @@ export default function DepartmentTasksManager({
                                       variant="outline"
                                       size="sm"
                                       onClick={() => {
-                                        setVisibleHeaders(new Set(ENHANCED_TABLE_HEADERS.map(h => h.id)))
+                                        setVisibleHeaders(new Set(ENHANCED_TABLE_HEADERS_IMMIGRATION.map(h => h.id)))
                                         if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.map(s => s.id)))
                                         setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
                                       }}
@@ -2535,7 +2553,7 @@ export default function DepartmentTasksManager({
                           <EnhancedTable
                             tasks={tasksToRender}
                             tableType={title}
-                            ENHANCED_TABLE_HEADERS={ENHANCED_TABLE_HEADERS}
+                            ENHANCED_TABLE_HEADERS_IMMIGRATION={ENHANCED_TABLE_HEADERS_IMMIGRATION}
                             visibleHeaders={visibleHeaders}
                             taskDependants={taskDependants}
                             expandedDependants={expandedDependants}
@@ -2554,23 +2572,23 @@ export default function DepartmentTasksManager({
                             onDeleteTask={async (task) => {
                               try {
                                 setLoading(true);
-                                
+
                                 const { error } = await supabase
                                   .from('tm_tasks')
                                   .delete()
                                   .eq('id', task.id);
-                                
+
                                 if (error) throw error;
-                                
+
                                 // Update tasks list by removing the deleted task
                                 setTasks(prevTasks => prevTasks.filter(t => t.id !== task.id));
-                                
+
                                 toast({
                                   title: 'Success',
                                   description: 'Task deleted successfully',
                                   variant: 'default'
                                 });
-                                
+
                               } catch (error) {
                                 console.error('Error deleting task:', error);
                                 toast({
@@ -2584,11 +2602,11 @@ export default function DepartmentTasksManager({
                             }}
                           />
                         ) : (
-                          
+
                           <StandardTable
                             tasks={tasksToRender}
                             tableType={title}
-                            ENHANCED_TABLE_HEADERS={ENHANCED_TABLE_HEADERS}
+                            ENHANCED_TABLE_HEADERS_IMMIGRATION={ENHANCED_TABLE_HEADERS_IMMIGRATION}
                             stages={stages}
                             companies={companies}
                             visibleHeaders={visibleHeaders}
@@ -2632,7 +2650,25 @@ export default function DepartmentTasksManager({
           </TabsContent>
         ))}
       </Tabs>
-
+      {activeDepartmentTab === '1' ? (
+        <EnquiryDialog
+          open={isEnquiryDialogOpen}
+          onOpenChange={setIsEnquiryDialogOpen}
+          onEnquiryCreated={handleEnquiryCreated}
+          departments={departments}
+          users={Array.from(tmUsers.values())}
+          officers={Array.from(tmUsers.values()).filter(u => u.role === 'officer')}
+        />
+      ) : (
+        <OtherDialog
+          open={isOtherDialogOpen}
+          onOpenChange={setIsOtherDialogOpen}
+          onEnquiryCreated={handleEnquiryCreated}
+          departments={departments}
+          users={Array.from(tmUsers.values())}
+          officers={Array.from(tmUsers.values()).filter(u => u.role === 'officer')}
+        />
+      )}
       <EditTaskDialog
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
@@ -2641,12 +2677,6 @@ export default function DepartmentTasksManager({
         users={Array.from(tmUsers.values())}
         officers={Array.from(tmUsers.values()).filter(u => u.role === 'officer')}
         onTaskUpdate={handleTaskUpdate}
-      />
-
-      <EnquiryDialog
-        open={isEnquiryDialogOpen}
-        onOpenChange={setIsEnquiryDialogOpen}
-        onEnquiryCreated={handleEnquiryCreated}
       />
 
       <StageUploadDialog
@@ -2751,8 +2781,8 @@ export default function DepartmentTasksManager({
                     >
                       <div className="flex items-center gap-3">
                         <div className={`w-4 h-4 rounded-full border-2 ${selectedTaskForPush?.applicantClassId === classItem.id.toString()
-                            ? 'bg-blue-500 border-blue-500'
-                            : 'border-gray-300'
+                          ? 'bg-blue-500 border-blue-500'
+                          : 'border-gray-300'
                           }`}>
                           {selectedTaskForPush?.applicantClassId === classItem.id.toString() && (
                             <div className="w-2 h-2 bg-white rounded-full m-0.5" />
@@ -2810,8 +2840,8 @@ export default function DepartmentTasksManager({
                               >
                                 <div className="flex items-center gap-3">
                                   <div className={`w-4 h-4 rounded-full border-2 ${selectedTaskForPush?.dependantClasses?.get(dependant.id) === classItem.id.toString()
-                                      ? 'bg-orange-500 border-orange-500'
-                                      : 'border-gray-300'
+                                    ? 'bg-orange-500 border-orange-500'
+                                    : 'border-gray-300'
                                     }`}>
                                     {selectedTaskForPush?.dependantClasses?.get(dependant.id) === classItem.id.toString() && (
                                       <div className="w-2 h-2 bg-white rounded-full m-0.5" />

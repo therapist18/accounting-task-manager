@@ -11,7 +11,7 @@ import { DeleteConfirmationDialog } from "../components/DeleteConfirmationDialog
 interface EnhancedTableProps {
   tasks: any[]
   tableType: string
-  ENHANCED_TABLE_HEADERS: any[]
+  ENHANCED_TABLE_HEADERS_IMMIGRATION: any[]
   visibleHeaders: Set<string>
   taskDependants: Map<string, any[]>
   expandedDependants: Set<string>
@@ -33,7 +33,7 @@ interface EnhancedTableProps {
 export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   tasks,
   tableType,
-  ENHANCED_TABLE_HEADERS,
+  ENHANCED_TABLE_HEADERS_IMMIGRATION,
   visibleHeaders,
   taskDependants,
   expandedDependants,
@@ -76,7 +76,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   })
 
   const totalColumns = headerStructure.length;
-  const visibleCaseDetailHeaders = ENHANCED_TABLE_HEADERS.filter(header =>
+  const visibleCaseDetailHeaders = ENHANCED_TABLE_HEADERS_IMMIGRATION.filter(header =>
     visibleHeaders.has(header.id)
   );
 
