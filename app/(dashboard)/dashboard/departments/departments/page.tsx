@@ -827,29 +827,34 @@ export default function Departments() {
       throw new Error('Another subdepartment with this name already exists in this department');
     }
   
-    // ⭐ FIXED: Use the history arrays directly from the form
-    const officer_history = subdept.officer_history || [];
-    const manager_history = subdept.manager_history || [];
-    const assistant_history = subdept.assistant_history || [];
+    // Prepare the update data with ALL subdepartment fields
+    const updateData = {
+      name: subdept.name.trim(),
+      description: subdept.description || '',
+      default_display: subdept.default_display || false,
+      
+      // Include all the additional fields that exist in the subdepartment
+      classes: subdept.classes || [],
+      rates: subdept.rates || null,
+      stages: subdept.stages || null,
+      webdata: subdept.webdata || null,
+      upload_requirements: subdept.upload_requirements || null,
+      
+      // History fields
+      officer_history: subdept.officer_history || [],
+      manager_history: subdept.manager_history || [],
+      assistant_history: subdept.assistant_history || [],
+      
+      // Update timestamp
+      updated_at: new Date().toISOString()
+    };
   
-    console.log('History data to save:', {
-      officer_history,
-      manager_history,
-      assistant_history
-    });
+    console.log('Update data to save:', updateData);
   
-    // Update the subdepartment with the new history-based structure
+    // Update the subdepartment with ALL the data
     const { error: updateError } = await supabase
       .from('tm_subdepartments')
-      .update({
-        name: subdept.name.trim(),
-        description: subdept.description,
-        default_display: subdept.default_display,
-        officer_history,
-        manager_history,
-        assistant_history,
-        updated_at: new Date().toISOString()
-      })
+      .update(updateData)
       .eq('id', editingSubdepartmentId);
   
     if (updateError) {

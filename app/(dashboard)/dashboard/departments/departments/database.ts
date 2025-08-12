@@ -733,17 +733,29 @@ export async function fetchDepartmentById(id: string): Promise<Department> {
 // Helper function to save class requirements (deletes existing and creates new)
 export async function saveClassRequirements(subdepartmentId: string, classes: ClassForm[]): Promise<void> {
   try {
+    console.log('Saving class requirements for subdepartment:', subdepartmentId);
+    console.log('Classes to save:', JSON.stringify(classes, null, 2));
+
     for (const [clsIndex, cls] of classes.entries()) {
-      const classId = `${subdepartmentId}_${cls.id}`
+      // Ensure class ID is properly formatted as a string
+      const classId = cls.id ? `${subdepartmentId}_${cls.id}` : `${subdepartmentId}_new_${clsIndex}`;
+      console.log(`Processing class ${clsIndex}:`, { className: cls.name, classId });
 
       // Delete existing requirements for this class
-      await supabase
+      const { error: deleteError } = await supabase
         .from('tm_class_requirements')
         .delete()
-        .eq('class_id', classId)
+        .eq('class_id', classId);
+
+      if (deleteError) {
+        console.error('Error deleting existing class requirements:', deleteError);
+        throw deleteError;
+      }
 
       // Insert class requirements if any exist
       if (cls.requirements && cls.requirements.length > 0) {
+        console.log(`Saving ${cls.requirements.length} requirements for class ${cls.name}`);
+        
         const requirementsArray = cls.requirements.map((req, reqIndex) => {
           const newId = req.id || generateRequirementId(
             cls.requirements.slice(0, reqIndex).filter(r => r.id)
@@ -758,62 +770,104 @@ export async function saveClassRequirements(subdepartmentId: string, classes: Cl
             isVisible: req.isVisible,
             type: req.type || 'standard'
           };
-        })
+        });
 
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('tm_class_requirements')
           .insert({
             class_id: classId,
             requirements: requirementsArray,
             type: 'class',
-            is_mandatory: true
+            is_mandatory: true,
+            subdepartment_id: subdepartmentId,
+            class_name: cls.name,
+            class_description: cls.description || ''
           })
+          .select();
 
-        if (error) throw error
+        if (error) {
+          console.error('Error inserting class requirements:', error);
+          throw error;
+        }
+        console.log('Successfully saved class requirements:', data);
+      } else {
+        console.log(`No requirements to save for class ${cls.name}`);
       }
 
       // Handle sub-class requirements
-      for (const [subClsIndex, subCls] of (cls.subClasses || []).entries()) {
-        const subClassId = `${classId}_${subCls.id}`
+      if (cls.subClasses && cls.subClasses.length > 0) {
+        console.log(`Processing ${cls.subClasses.length} subclasses for class ${cls.name}`);
+        
+        for (const [subClsIndex, subCls] of cls.subClasses.entries()) {
+          const subClassId = subCls.id ? `${classId}_${subCls.id}` : `${classId}_sub_${subClsIndex}`;
+          console.log(`  Processing subclass ${subClsIndex}:`, { subClassName: subCls.name, subClassId });
 
-        await supabase
-          .from('tm_class_requirements')
-          .delete()
-          .eq('class_id', subClassId)
-
-        if (subCls.requirements && subCls.requirements.length > 0) {
-          const subRequirementsArray = subCls.requirements.map((req, reqIndex) => {
-            const newId = req.id || generateRequirementId(
-              subCls.requirements.slice(0, reqIndex).filter(r => r.id)
-            );
-            
-            return {
-              id: newId,
-              name: req.name,
-              description: req.description || null,
-              isRequired: req.isRequired,
-              order: req.order || reqIndex + 1,
-              isVisible: req.isVisible,
-              type: req.type || 'standard'
-            };
-          })
-
-          const { error: subReqError } = await supabase
+          // Delete existing requirements for this subclass
+          const { error: deleteSubclassError } = await supabase
             .from('tm_class_requirements')
-            .insert({
-              class_id: subClassId,
-              requirements: subRequirementsArray,
-              type: 'subclass',
-              is_mandatory: true
-            })
+            .delete()
+            .eq('class_id', subClassId);
 
-          if (subReqError) throw subReqError
+          if (deleteSubclassError) {
+            console.error('Error deleting existing subclass requirements:', deleteSubclassError);
+            throw deleteSubclassError;
+          }
+
+          if (subCls.requirements && subCls.requirements.length > 0) {
+            console.log(`  Saving ${subCls.requirements.length} requirements for subclass ${subCls.name}`);
+            
+            const subRequirementsArray = subCls.requirements.map((req, reqIndex) => {
+              const newId = req.id || generateRequirementId(
+                subCls.requirements.slice(0, reqIndex).filter(r => r.id)
+              );
+              
+              return {
+                id: newId,
+                name: req.name,
+                description: req.description || null,
+                isRequired: req.isRequired,
+                order: req.order || reqIndex + 1,
+                isVisible: req.isVisible,
+                type: req.type || 'standard'
+              };
+            });
+
+            const { error: subReqError } = await supabase
+              .from('tm_class_requirements')
+              .insert({
+                class_id: subClassId,
+                requirements: subRequirementsArray,
+                type: 'subclass',
+                is_mandatory: true,
+                subdepartment_id: subdepartmentId,
+                parent_class_id: classId,
+                class_name: subCls.name,
+                class_description: subCls.description || ''
+              });
+
+            if (subReqError) {
+              console.error('Error inserting subclass requirements:', subReqError);
+              throw subReqError;
+            }
+            console.log('  Successfully saved subclass requirements');
+          } else {
+            console.log(`  No requirements to save for subclass ${subCls.name}`);
+          }
         }
+      } else {
+        console.log(`No subclasses to process for class ${cls.name}`);
       }
     }
+    
+    console.log('Successfully saved all class requirements');
   } catch (error) {
-    console.error('Error saving class requirements:', error)
-    throw error
+    console.error('Error in saveClassRequirements:', {
+      error,
+      subdepartmentId,
+      errorMessage: error.message,
+      stack: error.stack
+    });
+    throw error;
   }
 }
 
