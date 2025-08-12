@@ -619,80 +619,42 @@ export function EnquiryDialog({
 
         setLoadingCompanies(true);
         try {
-            // Get the individual with their employment history and bill_to information
+            // Get the individual with their employment history
             const { data: individualData, error: individualError } = await supabase
                 .from('registry_individuals')
-                .select('employment_history, bill_to')
+                .select('employment_history')
                 .eq('id', individualId)
                 .single();
 
             if (individualError) throw individualError;
 
             const employmentData = individualData?.employment_history || { current: null, history: [] };
-            const individualBillTo = individualData?.bill_to || null;
-
+            
             // Combine current and historical employments
             const allEmployments = [
                 ...(employmentData.current ? [employmentData.current] : []),
                 ...(employmentData.history || [])
             ];
 
-            // If no employments, use bill_to company
-            if (allEmployments.length === 0) {
-                if (individualBillTo?.company) {
-                    const { data: companiesData, error: companiesError } = await supabase
-                        .from('acc_portal_company_duplicate')
-                        .select('id, company_name')
-                        .eq('id', individualBillTo.company)
-                        .single();
+            // Get all unique company IDs from employments
+            const companyIds = new Set<string>();
+            const companiesMap = new Map();
 
-                    if (companiesError) throw companiesError;
-
-                    if (companiesData) {
-                        setCompanies([{
-                            ...companiesData,
-                            id: companiesData.id.toString(),
-                            company_name: companiesData.company_name || 'Unnamed Company',
-                            is_bill_to: true,
-                            is_current: false
-                        }]);
-                        setSelectedCompany(companiesData.id.toString());
-                        fetchUnderstudies(companiesData.id.toString());
-                    } else {
-                        setCompanies([]);
-                        setSelectedCompany('');
-                        setUnderstudies([]);
-                        setSelectedUnderstudy('');
-                    }
-                } else {
-                    setCompanies([]);
-                    setSelectedCompany('');
-                    setUnderstudies([]);
-                    setSelectedUnderstudy('');
+            allEmployments.forEach((job: any) => {
+                if (job?.company_id) {
+                    const companyId = job.company_id.toString();
+                    companyIds.add(companyId);
+                    
+                    // Track if this is the current job and if it's bill_to
+                    companiesMap.set(companyId, {
+                        id: companyId,
+                        isCurrent: job === employmentData.current,
+                        isBillTo: job.bill_to === true
+                    });
                 }
-                return;
-            }
-
-            // Filter for director roles and get unique company IDs with current status
-            const directorCompanies = allEmployments
-                .filter((job: any) => 
-                    job?.role?.toLowerCase() === 'director' &&
-                    job?.company_id
-                )
-                .map((job: any) => ({
-                    id: job.company_id,
-                    isCurrent: job === employmentData.current
-                }));
-
-            // Create a map to track if a company has a current employment
-            const companyMap = new Map();
-            directorCompanies.forEach(({ id, isCurrent }) => {
-                companyMap.set(id, companyMap.has(id) ? companyMap.get(id) || isCurrent : isCurrent);
             });
-            
-            const uniqueCompanyIds = Array.from(companyMap.keys());
 
-            if (uniqueCompanyIds.length === 0) {
+            if (companyIds.size === 0) {
                 setCompanies([]);
                 setSelectedCompany('');
                 setUnderstudies([]);
@@ -700,47 +662,27 @@ export function EnquiryDialog({
                 return;
             }
 
-            // Get the bill_to company ID if it exists
-            const billToCompanyId = individualBillTo?.company?.toString();
-
-            // Convert all company IDs to strings for consistent comparison
-            const uniqueCompanyIdsStr = uniqueCompanyIds.map(id => id.toString());
-
-            // Combine all company IDs (director companies + bill_to company if different)
-            const allCompanyIds = [...new Set([...uniqueCompanyIdsStr, billToCompanyId].filter(Boolean))];
-
-            // Fetch all companies including the bill_to company
+            // Fetch company details
             const { data: companiesData, error: companiesError } = await supabase
                 .from('acc_portal_company_duplicate')
-                .select('id, company_name')
-                .in('id', allCompanyIds);
+                .select('id, company_name, understudy')
+                .in('id', Array.from(companyIds));
 
             if (companiesError) throw companiesError;
 
-            // Create a map of company IDs to their data for easy lookup
-            const companiesMap = new Map();
-
-            (companiesData || []).forEach(company => {
-                if (!company) return;
+            // Enrich company data with employment info
+            const companiesWithDetails = (companiesData || []).map(company => {
                 const companyId = company.id?.toString();
-                if (!companyId) return;
-
-                const mappedCompany = {
-                    ...company,
+                const employmentInfo = companiesMap.get(companyId) || {};
+                
+                return {
                     id: companyId,
                     company_name: company.company_name || 'Unnamed Company',
-                    is_bill_to: companyId === billToCompanyId,
-                    is_current: companyMap.get(companyId) || false
+                    is_bill_to: employmentInfo.isBillTo || false,
+                    is_current: employmentInfo.isCurrent || false,
+                    understudy: company.understudy || null
                 };
-                companiesMap.set(companyId, mappedCompany);
             });
-
-            const companiesWithDetails = Array.from(companiesMap.values())
-                .filter(company => {
-                    const companyId = company.id?.toString();
-                    return uniqueCompanyIdsStr.includes(companyId) ||
-                        (billToCompanyId === companyId && !uniqueCompanyIdsStr.includes(companyId));
-                });
 
             setCompanies(companiesWithDetails);
 
@@ -749,7 +691,7 @@ export function EnquiryDialog({
                 setSelectedCompany(companiesWithDetails[0].id);
                 fetchUnderstudies(companiesWithDetails[0].id);
             } else {
-                setSelectedCompany('');
+                setSelectedCompany(companiesWithDetails.find(c => c.is_bill_to)?.id || '');
                 setUnderstudies([]);
                 setSelectedUnderstudy('');
             }
@@ -774,45 +716,40 @@ export function EnquiryDialog({
     
         setLoadingUnderstudies(true);
         try {
-            // Get all individuals who have this company in their employment history as understudies
-            const { data: individuals, error } = await supabase
+            // First get the company to check for understudies
+            const { data: companyData, error: companyError } = await supabase
+                .from('acc_portal_company_duplicate')
+                .select('understudy')
+                .eq('id', companyId)
+                .single();
+    
+            if (companyError) throw companyError;
+            
+            const understudiesData = companyData?.understudy || [];
+            
+            if (!understudiesData.length) {
+                setUnderstudies([]);
+                setSelectedUnderstudy('');
+                return;
+            }
+            
+            // Get understudy details from registry_individuals
+            const { data: understudies, error } = await supabase
                 .from('registry_individuals')
-                .select('*');
+                .select('*')
+                .in('id', understudiesData.map((u: any) => u.individual_id));
     
             if (error) throw error;
     
-            // Filter individuals who are understudies for this company
-            const understudiesList = individuals.filter(individual => {
-                if (!individual.employment_history) return false;
-    
-                const employmentData = individual.employment_history;
-                const allEmployments = [
-                    ...(employmentData.current ? [employmentData.current] : []),
-                    ...(employmentData.history || [])
-                ];
-    
-                return allEmployments.some((job: any) =>
-                    job.company_id === companyId &&
-                    job.understudy?.is_understudy === true
+            // Map understudy data with their details
+            const understudiesWithDetails = understudies.map(understudy => {
+                const understudyInfo = understudiesData.find((u: any) => 
+                    u.individual_id === understudy.id
                 );
-            });
-    
-            // Add employment details to each understudy
-            const understudiesWithDetails = understudiesList.map(understudy => {
-                const employmentData = understudy.employment_history;
-                const allEmployments = [
-                    ...(employmentData.current ? [employmentData.current] : []),
-                    ...(employmentData.history || [])
-                ];
-    
-                const employment = allEmployments.find((job: any) =>
-                    job.company_id === companyId &&
-                    job.understudy?.is_understudy === true
-                );
-    
+                
                 return {
                     ...understudy,
-                    employment_details: employment?.understudy || {}
+                    employment_details: understudyInfo?.details || {}
                 };
             });
     
