@@ -41,7 +41,8 @@ import {
   renderCurrentStageStatusCell,
   getCellContent as utilGetCellContent,
   sortTasks,
-  filterTasksBySearch
+  filterTasksBySearch,
+  ENHANCED_TABLE_HEADERS
 } from './overall-view/tableUtils';
 import EditableStageCell from "./components/EditableStageCell"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -76,7 +77,8 @@ export default function DepartmentTasksManager({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [taskToDelete, setTaskToDelete] = useState<any>(null)
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
-  const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(new Set(ENHANCED_TABLE_HEADERS_IMMIGRATION.filter(h => h.default).map(h => h.id)))
+  const [currentTableHeaders, setCurrentTableHeaders] = useState(ENHANCED_TABLE_HEADERS)
+  const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(new Set(ENHANCED_TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
   const [visibleStats, setVisibleStats] = useState<Set<string>>(new Set(STATS_HEADERS.filter(h => h.default).map(h => h.id)))
   const [visibleStageIds, setVisibleStageIds] = useState<Set<string>>(new Set())
   const [expandedDependants, setExpandedDependants] = useState<Set<string>>(new Set())
@@ -87,6 +89,15 @@ export default function DepartmentTasksManager({
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
+
+  // Update table headers when department changes
+  useEffect(() => {
+    const headers = activeDepartmentTab === '1' 
+      ? ENHANCED_TABLE_HEADERS_IMMIGRATION 
+      : ENHANCED_TABLE_HEADERS;
+    setCurrentTableHeaders(headers);
+    setVisibleHeaders(new Set(headers.filter(h => h.default).map(h => h.id)));
+  }, [activeDepartmentTab]);
   const [tmUsers, setTmUsers] = useState<Map<number, any>>(new Map())
   const [activeOfficerTab, setActiveOfficerTab] = useState<string | null>(null)
   const [activeManagerTab, setActiveManagerTab] = useState<string | null>(null)
@@ -1413,7 +1424,7 @@ export default function DepartmentTasksManager({
                     isSubRow: true,
                     isSubSubRow: true,
                     getValue: (task: UtilTask) => {
-                      if (!isStageApplicableToTask(stage, task)) return 'N/A'
+                      // if (!isStageApplicableToTask(stage, task)) return 'N/A'
 
                       const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
 
@@ -2450,7 +2461,7 @@ export default function DepartmentTasksManager({
                                   {/* Case Details Fields */}
                                   <div className="space-y-2 border-t pt-2">
                                     <h5 className="text-sm font-medium text-slate-700">Case Details ({visibleHeaders.size})</h5>
-                                    {ENHANCED_TABLE_HEADERS_IMMIGRATION.map((header) => (
+                                    {currentTableHeaders.map((header) => (
                                       <div key={header.id} className="flex items-center space-x-2">
                                         <Checkbox
                                           id={header.id}
@@ -2495,7 +2506,7 @@ export default function DepartmentTasksManager({
                                       variant="outline"
                                       size="sm"
                                       onClick={() => {
-                                        setVisibleHeaders(new Set(ENHANCED_TABLE_HEADERS_IMMIGRATION.filter(h => h.default).map(h => h.id)))
+                                        setVisibleHeaders(new Set(currentTableHeaders.filter(h => h.default).map(h => h.id)))
                                         if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.filter(s => s.default).map(s => s.id)))
                                         setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
                                       }}
@@ -2506,7 +2517,7 @@ export default function DepartmentTasksManager({
                                       variant="outline"
                                       size="sm"
                                       onClick={() => {
-                                        setVisibleHeaders(new Set(ENHANCED_TABLE_HEADERS_IMMIGRATION.map(h => h.id)))
+                                        setVisibleHeaders(new Set(currentTableHeaders.map(h => h.id)))
                                         if (isTransposedView) setVisibleStats(new Set(STATS_HEADERS.map(s => s.id)))
                                         setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
                                       }}
@@ -2553,7 +2564,7 @@ export default function DepartmentTasksManager({
                           <EnhancedTable
                             tasks={tasksToRender}
                             tableType={title}
-                            ENHANCED_TABLE_HEADERS_IMMIGRATION={ENHANCED_TABLE_HEADERS_IMMIGRATION}
+                            ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
                             visibleHeaders={visibleHeaders}
                             taskDependants={taskDependants}
                             expandedDependants={expandedDependants}
@@ -2606,7 +2617,7 @@ export default function DepartmentTasksManager({
                           <StandardTable
                             tasks={tasksToRender}
                             tableType={title}
-                            ENHANCED_TABLE_HEADERS_IMMIGRATION={ENHANCED_TABLE_HEADERS_IMMIGRATION}
+                            ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
                             stages={stages}
                             companies={companies}
                             visibleHeaders={visibleHeaders}

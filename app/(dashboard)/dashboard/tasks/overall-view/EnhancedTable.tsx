@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState } from "react"
+import React, { useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { FileText, Plus, Minus, Loader2, AlertTriangle, Zap, Trash2 } from "lucide-react"
@@ -76,9 +76,9 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
   })
 
   const totalColumns = headerStructure.length;
-  const visibleCaseDetailHeaders = ENHANCED_TABLE_HEADERS_IMMIGRATION.filter(header =>
+  const visibleCaseDetailHeaders = useMemo(() => ENHANCED_TABLE_HEADERS_IMMIGRATION.filter(header =>
     visibleHeaders.has(header.id)
-  );
+  ), [ENHANCED_TABLE_HEADERS_IMMIGRATION, visibleHeaders]);
 
   // State for automation dialog
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
