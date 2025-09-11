@@ -48,7 +48,6 @@ interface EnquiryDialogProps {
     open: boolean
     onOpenChange: (open: boolean) => void
     onEnquiryCreated: (enquiry: any) => void
-    // Add staff props similar to EditTaskDialog
     departments: any[]
     users: any[]
     officers: any[]
@@ -64,22 +63,16 @@ export function EnquiryDialog({
 }: EnquiryDialogProps) {
     const [applicantType, setApplicantType] = useState<'principal' | 'dependant'>('principal')
     const [individuals, setIndividuals] = useState<Individual[]>([])
-    // Use a ref to maintain the selected individual across re-renders
     const selectedIndividualRef = useRef<Individual | null>(null);
     const [selectedIndividual, setSelectedIndividualState] = useState<Individual | null>(null);
-
-    // Update both the state and ref when selected individual changes
     const setSelectedIndividual = useCallback((individual: Individual | null) => {
         selectedIndividualRef.current = individual;
         setSelectedIndividualState(individual);
     }, []);
-
     const [departments, setDepartments] = useState<any[]>(propDepartments || [])
-    // ADD: Local state for users and officers with fallback loading
     const [localUsers, setLocalUsers] = useState<any[]>(users || [])
     const [localOfficers, setLocalOfficers] = useState<any[]>(officers || [])
     const [loadingStaff, setLoadingStaff] = useState(false)
-
     const [loading, setLoading] = useState(false)
     const [searchLoading, setSearchLoading] = useState(false)
     const [taskType, setTaskType] = useState<'new' | 'renewal'>('new')
@@ -96,13 +89,9 @@ export function EnquiryDialog({
     const [loadingCompanies, setLoadingCompanies] = useState(false)
     const [loadingUnderstudies, setLoadingUnderstudies] = useState(false)
     const [principalForDependant, setPrincipalForDependant] = useState<Individual | null>(null);
-
-    // Staff Assignment States (similar to EditTaskDialog)
     const [availableOfficers, setAvailableOfficers] = useState([])
     const [availableManagers, setAvailableManagers] = useState([])
     const [availableAssistants, setAvailableAssistants] = useState([])
-
-    // Refs to prevent cascading effects on initial load
     const isInitialLoad = useRef(true);
 
     // Form data - enhanced with staff fields
@@ -135,6 +124,7 @@ export function EnquiryDialog({
     const handleChange = useCallback((field: keyof FormData, value: any) => {
         setFormData(prev => {
             if (field === 'department_id') {
+                console.log(`[LOG] Department changed to ID: ${value}. Resetting sub-dept, class, and staff.`);
                 return {
                     ...prev,
                     department_id: value,
@@ -149,6 +139,7 @@ export function EnquiryDialog({
             }
 
             if (field === 'subdepartment_id') {
+                console.log(`[LOG] Subdepartment changed to ID: ${value}. Resetting class and staff.`);
                 return {
                     ...prev,
                     subdepartment_id: value,
@@ -167,6 +158,7 @@ export function EnquiryDialog({
 
             // When manager changes, clear assistant
             if (field === 'task_manager_id') {
+                console.log(`[LOG] Task Manager changed to ID: ${value}. Resetting assistant.`);
                 return {
                     ...prev,
                     task_manager_id: value,
@@ -179,7 +171,7 @@ export function EnquiryDialog({
     }, []);
 
     const loadStaffData = useCallback(async () => {
-        console.log('📥 Loading staff data from database...');
+        console.log('📥 [LOG] Loading staff data from database...');
         setLoadingStaff(true);
 
         try {
@@ -193,13 +185,7 @@ export function EnquiryDialog({
 
             setLocalUsers(usersResult.data || []);
             setLocalOfficers(officersResult.data || []);
-
-            console.log('✅ Staff data loaded successfully:', {
-                users: usersResult.data?.length || 0,
-                officers: officersResult.data?.length || 0
-            });
         } catch (error) {
-            console.error('❌ Error loading staff data:', error);
             toast({
                 title: "Error",
                 description: "Failed to load staff data",
@@ -211,23 +197,19 @@ export function EnquiryDialog({
     }, []);
 
     useEffect(() => {
-        // Only load staff data once when dialog opens and we have the required data
         if (!open) return;
 
-        // Prevent loading if we already have the data from props
         if ((users && users.length > 0) && (officers && officers.length > 0)) {
             setLocalUsers(users);
             setLocalOfficers(officers);
             return;
         }
 
-        // Only load if we don't have local data yet
         if (localUsers.length === 0 || localOfficers.length === 0) {
             loadStaffData();
         }
     }, [open]);
 
-    // Update local state when props change
     useEffect(() => {
         if (users && users.length > 0) {
             setLocalUsers(users);
@@ -238,13 +220,10 @@ export function EnquiryDialog({
     }, [users, officers]);
 
     const findActiveStaffForSubdept = useCallback((subdept, allUsers, allOfficers) => {
-        console.log('🔍 findActiveStaffForSubdept called with:');
-        console.log('Subdept:', subdept);
-        console.log('AllUsers count:', allUsers?.length || 0);
-        console.log('AllOfficers count:', allOfficers?.length || 0);
+        console.log('🔍 [LOG] findActiveStaffForSubdept called for:', subdept?.name);
 
         if (!subdept || !allUsers || !allOfficers) {
-            console.log('❌ Missing required data for staff filtering');
+            console.log('❌ [LOG] Missing required data for staff filtering');
             return { officers: [], managers: [], assistants: [] };
         }
 
@@ -253,14 +232,8 @@ export function EnquiryDialog({
         const hasManagerHistory = subdept.manager_history && Array.isArray(subdept.manager_history);
         const hasAssistantHistory = subdept.assistant_history && Array.isArray(subdept.assistant_history);
 
-        console.log('History fields present:', {
-            officer_history: hasOfficerHistory,
-            manager_history: hasManagerHistory,
-            assistant_history: hasAssistantHistory
-        });
-
         if (!hasOfficerHistory && !hasManagerHistory && !hasAssistantHistory) {
-            console.log('⚠️ No history fields found - using fallback to all available staff');
+            console.log('⚠️ [LOG] No history fields found - using fallback to all available staff');
             return {
                 officers: allOfficers,
                 managers: allUsers.filter(u => u.role === 'user' || u.role === 'admin'),
@@ -280,17 +253,18 @@ export function EnquiryDialog({
         const activeOfficerIds = getActiveUserIds(subdept.officer_history);
         const activeManagerIds = getActiveUserIds(subdept.manager_history);
         const activeAssistantIds = getActiveUserIds(subdept.assistant_history);
-
-        console.log('Active staff IDs found:', {
+        
+        console.log('[LOG] Active staff IDs found:', {
             officers: activeOfficerIds,
             managers: activeManagerIds,
             assistants: activeAssistantIds
         });
 
+
         const hasSpecificAssignments = activeOfficerIds.length > 0 || activeManagerIds.length > 0 || activeAssistantIds.length > 0;
 
         if (!hasSpecificAssignments) {
-            console.log(`⚠️ No specific staff assignments for subdept "${subdept.name}". Using fallback roles.`);
+            console.log(`⚠️ [LOG] No specific staff assignments for subdept "${subdept.name}". Using fallback roles.`);
             return {
                 officers: allOfficers,
                 managers: allUsers.filter(u => u.role === 'user' || u.role === 'admin'),
@@ -304,7 +278,7 @@ export function EnquiryDialog({
             assistants: allUsers.filter(u => activeAssistantIds.includes(u.id)),
         };
 
-        console.log(`✅ Found filtered staff for subdept "${subdept.name}":`, staff);
+        console.log(`✅ [LOG] Found filtered staff for subdept "${subdept.name}":`, staff);
         return staff;
     }, []);
 
@@ -371,10 +345,10 @@ export function EnquiryDialog({
             try {
                 // Use prop departments if available, otherwise fetch
                 if (propDepartments && propDepartments.length > 0) {
-                    console.log('📦 Using prop departments:', propDepartments.length);
+                    console.log('📦 [LOG] Using prop departments:', propDepartments.length);
                     setDepartments(propDepartments);
                 } else {
-                    console.log('🔄 Fetching departments from API...');
+                    console.log('🔄 [LOG] Fetching departments from API...');
                     const depts = await fetchDepartments()
                     setDepartments(depts)
                 }
@@ -387,14 +361,14 @@ export function EnquiryDialog({
         if (open && departments.length === 0) {
             loadDepartments()
         }
-    }, [open])
+    }, [open, propDepartments, departments.length])
 
     useEffect(() => {
         if (!open || !formData.subdepartment_id || localUsers.length === 0 || localOfficers.length === 0) {
             return;
         }
 
-        console.log('🔄 Filtering staff for subdepartment:', formData.subdepartment_id);
+        console.log(`🔄 [LOG] Filtering staff for subdepartment ID: ${formData.subdepartment_id}`);
 
         const dept = departments.find(d => d.id.toString() === formData.department_id);
         const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
@@ -404,8 +378,9 @@ export function EnquiryDialog({
 
             setAvailableOfficers(activeStaff.officers);
             setAvailableManagers(activeStaff.managers);
-            setAvailableAssistants([]);
+            setAvailableAssistants([]); // Assistants depend on manager selection, so clear for now
 
+            // Reset selections
             setFormData(prev => ({
                 ...prev,
                 officer_id: '',
@@ -413,17 +388,17 @@ export function EnquiryDialog({
                 task_assistant_id: ''
             }));
         }
-    }, [open, formData.subdepartment_id, localUsers.length, localOfficers.length, departments.length]);
+    }, [open, formData.subdepartment_id, localUsers.length, localOfficers.length, departments.length, findActiveStaffForSubdept]);
 
     useEffect(() => {
         if (!open || !formData.subdepartment_id || !formData.task_manager_id) {
             // If no manager selected, clear assistants
             setAvailableAssistants([]);
-            setFormData(prev => ({ ...prev, task_assistant_id: '' }));
             return;
         }
-
+        
         const filterAssistantsByManager = () => {
+            console.log(`[LOG] Filtering assistants for Manager ID: ${formData.task_manager_id}`);
             const dept = departments.find(d => d.id.toString() === formData.department_id);
             const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
 
@@ -442,41 +417,15 @@ export function EnquiryDialog({
                 assistantsForManager.includes(user.id)
             );
 
-            console.log(`🎯 Found ${availableAssistants.length} assistants for manager ${formData.task_manager_id}`);
+            console.log(`🎯 [LOG] Found ${availableAssistants.length} assistants for manager ${formData.task_manager_id}`);
             setAvailableAssistants(availableAssistants);
-
-            // Reset assistant selection when manager changes
-            setFormData(prev => ({ ...prev, task_assistant_id: '' }));
         };
 
         filterAssistantsByManager();
-    }, [formData.task_manager_id, formData.subdepartment_id, departments.length, localUsers.length]);
-
-    useEffect(() => {
-        if (open && formData.department_id && formData.subdepartment_id) {
-            isInitialLoad.current = true;
-
-            // Populate staff lists on initial load
-            const dept = departments.find(d => d.id.toString() === formData.department_id);
-            const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
-
-            if (subdept && localUsers && localOfficers && localUsers.length > 0 && localOfficers.length > 0) {
-                console.log('Initial load - populating staff for subdepartment:', subdept.name);
-                const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
-
-                setAvailableOfficers(activeStaff.officers);
-                setAvailableManagers(activeStaff.managers);
-                setAvailableAssistants(activeStaff.assistants);
-            }
-
-            // Mark initial load complete
-            Promise.resolve().then(() => {
-                isInitialLoad.current = false;
-            });
-        }
-    }, [open, formData.department_id, formData.subdepartment_id, departments, localUsers, localOfficers, findActiveStaffForSubdept]);
+    }, [formData.task_manager_id, formData.subdepartment_id, departments, localUsers]);
 
     const searchIndividuals = useCallback(async (type: 'principal' | 'dependant') => {
+        console.log(`🔍 [LOG] Searching for individuals of type: ${type}`);
         setSearchLoading(true)
         try {
             const { data, error } = await supabase
@@ -497,7 +446,8 @@ export function EnquiryDialog({
                 .order('full_name')
 
             if (error) throw error
-
+            
+            console.log(`✅ [LOG] Found ${data?.length || 0} individuals.`);
             setIndividuals(data || [])
         } catch (error) {
             console.error('Error searching individuals:', error)
@@ -512,6 +462,7 @@ export function EnquiryDialog({
     }, [])
 
     const fetchDependants = async (principalId: number) => {
+        console.log(`👨‍👩‍👧 [LOG] Fetching dependants for principal ID: ${principalId}`);
         try {
             // First, get the principal with their relationships
             const { data: principal, error: principalError } = await supabase
@@ -567,6 +518,7 @@ export function EnquiryDialog({
     }
 
     const fetchReferences = async (individualId: number) => {
+        console.log(`🔗 [LOG] Fetching references for individual ID: ${individualId}`);
         try {
             const { data: individual, error } = await supabase
                 .from('registry_individuals')
@@ -616,8 +568,7 @@ export function EnquiryDialog({
 
     const fetchCompanies = async (individualId: number) => {
         if (!individualId) return;
-
-        setLoadingCompanies(true);
+        console.log(`🏢 [LOG] Fetching companies for individual ID: ${individualId}`);
         try {
             // Get the individual with their employment history
             const { data: individualData, error: individualError } = await supabase
@@ -713,7 +664,7 @@ export function EnquiryDialog({
             setSelectedUnderstudy('');
             return;
         }
-    
+        console.log(`👥 [LOG] Fetching understudies for company ID: ${companyId}`);
         setLoadingUnderstudies(true);
         try {
             // First get the company to check for understudies
@@ -770,6 +721,7 @@ export function EnquiryDialog({
     // Load individuals when applicant type changes
     useEffect(() => {
         if (open) {
+            console.log(`🔄 [LOG] Applicant type changed to: ${applicantType}. Reloading and resetting.`);
             searchIndividuals(applicantType);
             setSelectedIndividual(null);
             setPrincipalForDependant(null);
@@ -784,14 +736,12 @@ export function EnquiryDialog({
                 task_manager_id: '',
                 task_assistant_id: ''
             }));
-            // Clear references and dependants when dialog opens
             setIncludeReferences(false);
             setAvailableReferences([]);
             setSelectedReferences([]);
             setIncludeDependants(false);
             setAvailableDependants([]);
             setSelectedDependants([]);
-            // Clear staff assignments
             setAvailableOfficers([]);
             setAvailableManagers([]);
             setAvailableAssistants([]);
@@ -801,6 +751,7 @@ export function EnquiryDialog({
     // Handle company selection change
     useEffect(() => {
         if (selectedCompany) {
+            console.log(`[LOG] Company selected: ID ${selectedCompany}. Fetching understudies.`);
             fetchUnderstudies(selectedCompany);
         } else {
             setUnderstudies([]);
@@ -808,45 +759,53 @@ export function EnquiryDialog({
         }
     }, [selectedCompany]);
 
-    // Get available subdepartments
     const availableSubdepartments = useMemo(() => {
         if (!formData.department_id) return []
         const dept = departments.find(d => d.id.toString() === formData.department_id)
         return dept?.tm_subdepartments || []
     }, [departments, formData.department_id])
 
-    // Get available classes
     const availableClasses = useMemo(() => {
         if (!formData.subdepartment_id) return []
         const subdept = availableSubdepartments.find(s => s.id.toString() === formData.subdepartment_id)
         return subdept?.classes || []
     }, [availableSubdepartments, formData.subdepartment_id])
 
-    // Get available subclasses
     const availableSubclasses = useMemo(() => {
         if (!formData.class_id) return []
         const cls = availableClasses.find(c => c.id.toString() === formData.class_id)
         return cls?.subClasses || []
     }, [availableClasses, formData.class_id])
 
-    // Handle form submission - updated to include staff assignments
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
-
+        console.log("🚀 [LOG] Attempting to create enquiry...");
+        console.log("📋 [LOG] Current form state:", {
+            taskType,
+            applicantType,
+            selectedIndividual: selectedIndividual?.full_name,
+            formData
+        });
+    
         try {
             const individualToUse = selectedIndividualRef.current;
-
+    
             if (!individualToUse) {
                 throw new Error('No individual selected. Please select an individual from the dropdown.');
             }
-
+    
             const individualId = individualToUse.id;
             if (!individualId) {
                 throw new Error('Selected individual does not have a valid ID');
             }
-
-            // Prepare dependant and reference data with full details
+    
+            console.log("👤 [LOG] Using individual:", {
+                id: individualId,
+                name: individualToUse.full_name,
+                type: individualToUse.individual_type
+            });
+    
             const dependantsToSave = includeDependants
                 ? selectedDependants.map(id => {
                     const dependant = availableDependants.find(d => d.id.toString() === id);
@@ -856,9 +815,9 @@ export function EnquiryDialog({
                         relationship: dependant.relationship_type === 'Principal Member' ? 'Principal' : (dependant.relationship_type || 'Family Member')
                     } : null;
                 }).filter(Boolean)
-                    .filter(dependant => dependant.relationship !== 'Principal') // Exclude principal member
+                    .filter(dependant => dependant.relationship !== 'Principal')
                 : [];
-
+    
             const referencesToSave = includeReferences
                 ? selectedReferences.map(id => {
                     const reference = availableReferences.find(r => r.id.toString() === id);
@@ -869,8 +828,10 @@ export function EnquiryDialog({
                     } : null;
                 }).filter(Boolean)
                 : [];
-
-            // Prepare the initial stage data
+    
+            console.log("👨‍👩‍👧‍👦 [LOG] Dependants to save:", dependantsToSave);
+            console.log("🔗 [LOG] References to save:", referencesToSave);
+    
             const enquiryStageId = '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa';
             const now = new Date();
             const formattedDate = format(now, 'dd/MM/yyyy');
@@ -881,73 +842,97 @@ export function EnquiryDialog({
                     completedAt: now.toISOString(),
                 },
             };
-
-            // Prepare the task data - enhanced with staff assignments
+    
             const taskData: any = {
                 job_description: formData.job_description || '',
                 status: 'enquiry',
+                renewal_status: taskType, // Also add renewal_status field if your schema supports it
                 department_id: formData.department_id,
                 subdepartment_id: formData.subdepartment_id,
                 individual_id: individualId,
                 applicant_type: applicantType,
                 class_id: formData.class_id || null,
                 subclass_id: formData.subclass_id || null,
-                date_initiated: now,
+                date_initiated: new Date(formData.enquiry_date), // Use the selected date
                 applicant_name: individualToUse.full_name,
                 stages: initialStages,
                 dependant_member: dependantsToSave,
                 references: referencesToSave,
                 understudy: selectedUnderstudy || null,
                 company_id: selectedCompany || null,
-                // Add staff assignments
                 officer_id: formData.officer_id && formData.officer_id !== 'none' ? formData.officer_id : null,
                 task_manager_id: formData.task_manager_id && formData.task_manager_id !== 'none' ? formData.task_manager_id : null,
                 task_assistant_id: formData.task_assistant_id && formData.task_assistant_id !== 'none' ? formData.task_assistant_id : null,
             };
-
-            // Assign principal member based on applicant type
+    
             if (applicantType === 'principal') {
                 taskData.principal_member = individualId;
+                console.log("👑 [LOG] Set principal_member to:", individualId);
             } else if (applicantType === 'dependant') {
                 const principalId = formData.principal_member_id;
                 if (!principalId) {
                     throw new Error("Principal member could not be identified for the selected dependant. Cannot create enquiry.");
                 }
                 taskData.principal_member = principalId;
+                console.log("👑 [LOG] Set principal_member for dependant to:", principalId);
             }
-
-            console.log('Creating enquiry with staff assignments:', {
+    
+            // Enhanced logging for staff assignments
+            console.log("👥 [LOG] Staff assignments:", {
                 officer_id: taskData.officer_id,
                 task_manager_id: taskData.task_manager_id,
-                task_assistant_id: taskData.task_assistant_id
+                task_assistant_id: taskData.task_assistant_id,
+                department_id: taskData.department_id,
+                subdepartment_id: taskData.subdepartment_id
             });
-
-            // Insert the task into the database
+    
+            // --- CRITICAL LOG: SHOW DATA BEFORE SUBMISSION ---
+            console.log('📦 [LOG] Submitting the following task data to Supabase:', JSON.stringify(taskData, null, 2));
+    
             const { data, error } = await supabase
                 .from('tm_tasks')
                 .insert([taskData])
                 .select()
                 .single();
-
-            if (error) throw error;
-
-            // Notify parent component
-            const { data: fullTask, error: fetchError } = await supabase.from('tm_tasks').select(`*,department:department_id(name),subdepartment:subdepartment_id(name),individual:individual_id(full_name)`).eq('id', data.id).single();
-            if (fetchError) console.error('Error fetching task details:', fetchError);
-
-            // Update form fields with task data
+    
+            if (error) {
+                console.error('❌ [LOG] Supabase insertion error:', error);
+                throw error;
+            }
+            
+            console.log('✅ [LOG] Enquiry created successfully! Response:', data);
+    
+            const { data: fullTask, error: fetchError } = await supabase
+                .from('tm_tasks')
+                .select(`*,department:department_id(name),subdepartment:subdepartment_id(name),individual:individual_id(full_name)`)
+                .eq('id', data.id)
+                .single();
+                
+            if (fetchError) {
+                console.error('⚠️ [LOG] Error fetching full task details:', fetchError);
+            } else {
+                console.log('📋 [LOG] Full task details retrieved:', fullTask);
+            }
+    
             updateTaskFields(fullTask || data);
-
+    
             onEnquiryCreated(fullTask || data);
             resetForm();
             onOpenChange(false);
-
+    
             toast({
                 title: 'Success',
-                description: 'Enquiry created successfully with staff assignments',
+                description: `${taskType === 'renewal' ? 'Renewal' : 'Enquiry'} created successfully with staff assignments`,
             });
         } catch (error) {
-            console.error('Error creating enquiry:', error);
+            console.error('❌ [LOG] Error creating enquiry:', error);
+            console.error('❌ [LOG] Error details:', {
+                message: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined,
+                formData: formData,
+                taskType: taskType,
+                applicantType: applicantType
+            });
             toast({
                 title: 'Error',
                 description: error instanceof Error ? error.message : 'Failed to create enquiry',
@@ -957,8 +942,8 @@ export function EnquiryDialog({
             setLoading(false);
         }
     };
-
     const resetForm = () => {
+        console.log("🧹 [LOG] Resetting form to initial state.");
         setFormData({
             full_name: '',
             mobile_number: '',
@@ -1003,6 +988,7 @@ export function EnquiryDialog({
     }
 
     const handleIndividualSelect = async (individual: Individual) => {
+        console.log(`👤 [LOG] Individual selected: ${individual.full_name} (ID: ${individual.id})`);
         setSelectedIndividual(individual);
         setPrincipalForDependant(null);
         setSelectedCompany('');
@@ -1026,14 +1012,14 @@ export function EnquiryDialog({
         const references = await fetchReferences(individual.id);
         setAvailableReferences(references);
 
-        // Fetch family members for the selected individual
         const familyMembers = await fetchDependants(individual.id);
 
         if (individual.individual_type === 'principal') {
+            console.log('[LOG] Selected individual is a Principal. Fetching their companies and dependants.');
             setAvailableDependants(familyMembers);
-            // Fetch companies for this principal
             await fetchCompanies(individual.id);
         } else if (individual.individual_type === 'dependant') {
+            console.log('[LOG] Selected individual is a Dependant. Finding their principal member.');
             const principalRelation = individual.relationships?.find(
                 (rel: any) => rel.isPrincipal === 'Yes' || ['principal', 'spouse', 'husband', 'wife'].includes(rel.relationship?.toLowerCase())
             );
@@ -1041,8 +1027,8 @@ export function EnquiryDialog({
             if (principalRelation && principalRelation.individual_id) {
                 const principalId = principalRelation.individual_id;
                 formUpdate.principal_member_id = principalId.toString();
+                console.log(`[LOG] Found Principal ID: ${principalId}. Fetching details and companies.`);
 
-                // Fetch principal details
                 const principalResult = await supabase
                     .from('registry_individuals')
                     .select('id, full_name')
@@ -1050,7 +1036,7 @@ export function EnquiryDialog({
                     .single();
 
                 if (principalResult.error) {
-                    console.error("Error fetching principal details:", principalResult.error);
+                    console.error("[LOG] Error fetching principal details:", principalResult.error);
                     toast({ title: "Error", description: "Could not load principal member's details.", variant: "destructive" });
                     return;
                 }
@@ -1058,23 +1044,19 @@ export function EnquiryDialog({
                 const principalData = principalResult.data;
                 setPrincipalForDependant(principalData);
 
-                // Fetch companies for the principal (this will set companies state internally)
                 await fetchCompanies(principalId);
 
-                // Check if principal is already in family members list and handle accordingly
                 const principalIndex = familyMembers.findIndex(fm => fm.id === principalId);
                 let allFamilyForSelection;
 
                 if (principalIndex !== -1) {
-                    // Principal is already in family members, update their relationship type
                     allFamilyForSelection = familyMembers
-                        .filter(fm => fm.id !== individual.id) // Exclude the selected dependant
+                        .filter(fm => fm.id !== individual.id)
                         .map(fm => fm.id === principalId
                             ? { ...fm, relationship_type: 'Principal Member' }
                             : fm
                         );
                 } else {
-                    // Principal is not in family members, add them
                     allFamilyForSelection = [
                         { ...principalData, relationship_type: 'Principal Member' },
                         ...familyMembers.filter(fm => fm.id !== individual.id)
@@ -1083,7 +1065,7 @@ export function EnquiryDialog({
 
                 setAvailableDependants(allFamilyForSelection);
 
-                // Auto-select the principal member
+                console.log('[LOG] Auto-including family members and selecting the Principal.');
                 setIncludeDependants(true);
                 setSelectedDependants([principalData.id.toString()]);
             } else {
