@@ -11,22 +11,22 @@ import React from "react";
 export const ENHANCED_TABLE_HEADERS_IMMIGRATION = [
   { id: 'id', label: 'Task ID', default: true, width: 'w-20' },
   { id: 'applicant_name', label: 'Applicant Name', default: true, width: 'w-48' },
-  { id: 'immigration_document_type', label: 'Current Immigration Doc Type', default: true, width: 'w-48' },
+  { id: 'company_name', label: 'Company Name', default: true, width: 'w-48' },
+  { id: 'job_level', label: 'Job Level', default: true, width: 'w-32' },
+  { id: 'renewal_new', label: 'Renewal/New', default: true, width: 'w-28' },
+  { id: 'immigration_document_type', label: 'Current Immigration Doc Type', default: false, width: 'w-48' },
   { id: 'immigration_expiry_date', label: 'Current Immigration Expiry Date', default: false, width: 'w-40' },
   { id: 'immigration_status', label: 'Current Immigration Status', default: true, width: 'w-48' },
-  { id: 'current_stage_name', label: 'Current Stage Name', default: false, width: 'w-48' },
+  { id: 'current_stage_name', label: 'Current Stage Name', default: true, width: 'w-48' },
   { id: 'current_stage_status_value', label: 'Current Stage Status', default: true, width: 'w-48' },
   { id: 'current_stage_follow_up', label: 'Current Stage Follow-up', default: false, width: 'w-40' },
-  { id: 'company_name', label: 'Company Name', default: true, width: 'w-48' },
-  { id: 'job_description', label: 'Job Description', default: true, width: 'w-32' },
-  { id: 'job_level', label: 'Job Level', default: true, width: 'w-32' },
-  { id: 'renewal_new', label: 'Renewal/New', default: false, width: 'w-28' },
+  { id: 'job_description', label: 'Job Description', default: false, width: 'w-32' },
   { id: 'case_status', label: 'Case Status', default: false, width: 'w-28' },
   { id: 'nationality', label: 'Nationality', default: false, width: 'w-32' },
-  { id: 'age', label: 'Age', default: true, width: 'w-20' },
-  { id: 'task_manager', label: 'Task Manager', default: true, width: 'w-32' },
-  { id: 'officer', label: 'Officer', default: true, width: 'w-32' },
-  { id: 'task_assistant', label: 'Task Assistant', default: true, width: 'w-32' },
+  { id: 'age', label: 'Age', default: false, width: 'w-20' },
+  { id: 'task_manager', label: 'Task Manager', default: false, width: 'w-32' },
+  { id: 'officer', label: 'Officer', default: false, width: 'w-32' },
+  { id: 'task_assistant', label: 'Task Assistant', default: false, width: 'w-32' },
 ];
 
 export const ENHANCED_TABLE_HEADERS = [
@@ -36,9 +36,9 @@ export const ENHANCED_TABLE_HEADERS = [
   { id: 'job_level', label: 'Job Level', default: true, width: 'w-32' },
   { id: 'renewal_new', label: 'Renewal/New', default: false, width: 'w-28' },
   { id: 'case_status', label: 'Case Status', default: false, width: 'w-28' },
-  { id: 'task_manager', label: 'Task Manager', default: true, width: 'w-32' },
-  { id: 'officer', label: 'Officer', default: true, width: 'w-32' },
-  { id: 'task_assistant', label: 'Task Assistant', default: true, width: 'w-32' },
+  { id: 'task_manager', label: 'Task Manager', default: false, width: 'w-32' },
+  { id: 'officer', label: 'Officer', default: false, width: 'w-32' },
+  { id: 'task_assistant', label: 'Task Assistant', default: false, width: 'w-32' },
 ];
 
 // Stats options

@@ -89,8 +89,6 @@ export default function DepartmentTasksManager({
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
-
-  // Update table headers when department changes
   useEffect(() => {
     const headers = activeDepartmentTab === '1' 
       ? ENHANCED_TABLE_HEADERS_IMMIGRATION 
