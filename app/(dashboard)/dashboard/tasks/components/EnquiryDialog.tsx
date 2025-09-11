@@ -93,6 +93,9 @@ export function EnquiryDialog({
     const [availableManagers, setAvailableManagers] = useState([])
     const [availableAssistants, setAvailableAssistants] = useState([])
     const isInitialLoad = useRef(true);
+    // State to control the individual selection popover
+    const [isIndividualPopoverOpen, setIsIndividualPopoverOpen] = useState(false);
+
 
     // Form data - enhanced with staff fields
     const [formData, setFormData] = useState({
@@ -1135,7 +1138,7 @@ export function EnquiryDialog({
                                             <Loader2 className="h-5 w-5 animate-spin text-gray-500" />
                                         </div>
                                     ) : (
-                                        <Popover>
+                                        <Popover open={isIndividualPopoverOpen} onOpenChange={setIsIndividualPopoverOpen}>
                                             <PopoverTrigger asChild>
                                                 <Button
                                                     variant="outline"
@@ -1164,6 +1167,7 @@ export function EnquiryDialog({
                                                                 key={individual.id}
                                                                 onSelect={() => {
                                                                     handleIndividualSelect(individual);
+                                                                    setIsIndividualPopoverOpen(false); // Close popover on select
                                                                 }}
                                                             >
                                                                 {individual.full_name}
