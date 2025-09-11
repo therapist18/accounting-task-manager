@@ -90,8 +90,8 @@ export default function DepartmentTasksManager({
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
   useEffect(() => {
-    const headers = activeDepartmentTab === '1' 
-      ? ENHANCED_TABLE_HEADERS_IMMIGRATION 
+    const headers = activeDepartmentTab === '1'
+      ? ENHANCED_TABLE_HEADERS_IMMIGRATION
       : ENHANCED_TABLE_HEADERS;
     setCurrentTableHeaders(headers);
     setVisibleHeaders(new Set(headers.filter(h => h.default).map(h => h.id)));
@@ -1646,9 +1646,29 @@ export default function DepartmentTasksManager({
       return <span className="text-sm text-gray-400 italic">N/A</span>;
     }
 
+    // Helper function to check if a value has meaningful data
+    const hasData = (val: any) => {
+      if (val === null || val === undefined || val === '' || val === 'N/A') return false;
+      if (typeof val === 'object' && val?.status === 'N/A') return false;
+      if (typeof val === 'string' && val.trim() === '') return false;
+      return true;
+    };
+
+    // Helper function to render content with pencil icon for editable cells
+    const renderWithPencil = (content: JSX.Element, isEditable: boolean = true) => {
+      if (!hasData(value) || !isEditable) return content;
+
+      return (
+        <div className="flex items-center gap-2 group">
+          {content}
+          <Pencil className="h-3 w-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer" />
+        </div>
+      );
+    };
+
     if (row.type === 'stage' && row.stage && task.stages?.[row.stage.id]) {
       const stageData = task.stages[row.stage.id];
-      return (
+      const content = (
         <div className="flex flex-col items-center gap-0.5">
           {stageData.date && (
             <span className="text-sm font-medium text-slate-800">
@@ -1657,6 +1677,7 @@ export default function DepartmentTasksManager({
           )}
         </div>
       );
+      return renderWithPencil(content);
     }
 
     if (row.type === 'field') {
@@ -1665,25 +1686,36 @@ export default function DepartmentTasksManager({
 
       if (row.field?.fieldType?.toLowerCase() === 'date') {
         const formattedDate = formatDateValue(fieldValue);
-        return (
+        const content = (
           <div className="flex items-center gap-1">
             <span className="text-sm text-slate-700" title={formattedDate}>{formattedDate}</span>
             {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
           </div>
         );
+        return renderWithPencil(content);
       }
-      return (
+
+      const content = (
         <div className="flex items-center gap-1">
           <span className="text-sm text-gray-700">{fieldValue}</span>
           {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
         </div>
       );
+      return renderWithPencil(content);
     }
 
     switch (row.type) {
-      case 'badge': return <span className="text-sm font-semibold">{value}</span>
-      case 'date': return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
-      case 'stat': return <span className="text-sm font-semibold">{value}</span>
+      case 'badge':
+        const badgeContent = <span className="text-sm font-semibold">{value}</span>;
+        return renderWithPencil(badgeContent);
+
+      case 'date':
+        const dateContent = <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
+        return renderWithPencil(dateContent);
+
+      case 'stat':
+        const statContent = <span className="text-sm font-semibold">{value}</span>;
+        return renderWithPencil(statContent);
 
       case 'stage':
         // Check if stage is applicable to task
@@ -1726,9 +1758,10 @@ export default function DepartmentTasksManager({
             getKycFields={getKycFields}
             allDocuments={allDocuments}
           />
-        )
+        );
+
       case 'document':
-        // Check if document is applicable to task
+        // Document type cells - no pencil icon as requested
         const isDocApplicable = !row.document?.targetEntities || row.document.targetEntities.length === 0 ||
           row.document.targetEntities.some((target: any) => {
             const matchesClass = target.class_id?.toString() === task.class_id?.toString();
@@ -1767,7 +1800,8 @@ export default function DepartmentTasksManager({
             getKycFields={getKycFields}
             allDocuments={allDocuments}
           />
-        )
+        );
+
       case 'actions': return (
         <div className="flex items-center justify-center gap-1">
           <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100" title="Edit Task"><Edit className="h-4 w-4" /></Button>
