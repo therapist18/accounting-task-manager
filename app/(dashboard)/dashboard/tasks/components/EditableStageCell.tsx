@@ -906,8 +906,6 @@ export default function EditableStageCell({
   const handleClick = () => {
     if (requiresUpload) {
       handleDocumentUpload();
-    } else {
-      setIsEditing(true);
     }
   };
 
@@ -1122,7 +1120,6 @@ export default function EditableStageCell({
         </div>
       );
     } else {
-      // For non-upload stages, add automation button here too if needed
       const hasAutomation = !!(stage?.automation?.automationId || stage?.automation?.id || stage?.web_automation?.automationId);
 
       return (
@@ -1146,18 +1143,34 @@ export default function EditableStageCell({
           )}
 
           {stageDate && stageDate !== 'NaN/NaN/NaN' ? (
-            <div className="flex items-center gap-2 group">
-              <Badge variant="default" className="bg-green-100 text-green-800 hover:bg-green-100">
+            <div className="flex items-center gap-1 group">
+              <Badge
+                variant="default"
+                className="bg-green-100 text-green-800 hover:bg-green-100 cursor-pointer"
+                onClick={() => setIsEditing(true)}
+              >
                 <Check className="h-3 w-3 mr-1" />
                 {formatDateDisplay(stageDate)}
               </Badge>
-              <Pencil className="h-3 w-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-gray-600"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsEditing(true);
+                }}
+                title="Edit date"
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
             </div>
           ) : (
             <Button
               variant="ghost"
               size="sm"
               className="h-8 px-3 text-gray-600 hover:text-gray-800 hover:bg-gray-100 border border-dashed border-gray-300"
+              onClick={() => setIsEditing(true)}
             >
               <Calendar className="h-3 w-3 mr-1" />
               {isEnquiryStage ? 'Add Enquiry Date' :
@@ -1169,7 +1182,6 @@ export default function EditableStageCell({
       );
     }
   }
-
   // Get automation ID if it exists - check both stage and document level
   const automationId = isDocumentRow
     ? documentData?.automation?.automationId || documentData?.automation?.id
@@ -1192,13 +1204,14 @@ export default function EditableStageCell({
         stage={stage} // Pass the current stage
         allDocuments={allDocuments}
       />
-      <div
-        className={`flex items-center justify-center min-h-[32px] cursor-pointer hover:bg-gray-50 rounded p-1 ${requiresUpload ? 'hover:bg-blue-50' : 'hover:bg-gray-50'
-          }`}
-        onClick={handleClick}
-      >
-        {renderCellContent()}
-      </div>
+<div
+  className={`flex items-center justify-center min-h-[32px] rounded p-1 ${
+    requiresUpload ? 'cursor-pointer hover:bg-blue-50' : ''
+  }`}
+  onClick={requiresUpload ? handleClick : undefined} // Only handle click for upload stages
+>
+  {renderCellContent()}
+</div>
 
       {/* Enhanced Document Preview Dialog */}
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>

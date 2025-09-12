@@ -90,8 +90,8 @@ export default function DepartmentTasksManager({
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
   useEffect(() => {
-    const headers = activeDepartmentTab === '1'
-      ? ENHANCED_TABLE_HEADERS_IMMIGRATION
+    const headers = activeDepartmentTab === '1' 
+      ? ENHANCED_TABLE_HEADERS_IMMIGRATION 
       : ENHANCED_TABLE_HEADERS;
     setCurrentTableHeaders(headers);
     setVisibleHeaders(new Set(headers.filter(h => h.default).map(h => h.id)));
@@ -429,41 +429,47 @@ export default function DepartmentTasksManager({
 
   const determineCurrentStage = useCallback((task: any, stages: any[]) => {
     if (!task.stages || !stages.length) return null;
-
+  
     // Sort stages by order_num
     const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-
+  
     // Get all stages that have status or date in task.stages
     const stagesWithStatus = sortedStages.filter(stage => {
-      const stageStatus = task.stages[stage.id];
-      return stageStatus && (stageStatus.status || stageStatus.date);
+      const stageData = task.stages[stage.id];
+      return stageData && (stageData.status || stageData.date);
     });
-
+  
     // If no stages have status/date, return the first stage
     if (stagesWithStatus.length === 0) {
       return sortedStages[0] || null;
     }
-
-    // Find the last completed stage
-    const lastCompletedStage = [...stagesWithStatus].reverse().find(stage => {
-      const stageStatus = task.stages[stage.id];
-      return stageStatus.status === 'completed' || stageStatus.date;
+  
+    // Find all completed stages (with status completed or date)
+    const completedStages = sortedStages.filter(stage => {
+      const stageData = task.stages[stage.id];
+      return stageData && (stageData.status === 'completed' || stageData.date);
     });
-
-    // If no completed stages, return the first stage with status
-    if (!lastCompletedStage) {
-      return stagesWithStatus[0] || null;
+  
+    // If we have completed stages, find the last one in the sequence
+    if (completedStages.length > 0) {
+      // Find the highest order_num among completed stages
+      const lastCompletedStage = completedStages.reduce((prev, current) => 
+        (prev.order_num || 0) > (current.order_num || 0) ? prev : current
+      );
+  
+      // If there's a next stage after the last completed one, return it
+      const nextStageIndex = sortedStages.findIndex(s => s.id === lastCompletedStage.id) + 1;
+      if (nextStageIndex < sortedStages.length) {
+        return sortedStages[nextStageIndex];
+      }
+      
+      // Otherwise return the last completed stage
+      return lastCompletedStage;
     }
-
-    // Find the next stage after the last completed one
-    const lastCompletedIndex = sortedStages.findIndex(s => s.id === lastCompletedStage.id);
-    if (lastCompletedIndex < sortedStages.length - 1) {
-      return sortedStages[lastCompletedIndex + 1];
-    }
-
-    // If last completed is the last stage, return it
-    return lastCompletedStage;
-  }, [getDocumentForTaskStage])
+  
+    // If no completed stages but we have stages with status, return the first one
+    return stagesWithStatus[0] || sortedStages[0] || null;
+  }, []);
 
   // Create wrapper functions for utility functions
   const getEnhancedImmigrationStatusWrapper = useCallback((task: any) => {
@@ -1638,127 +1644,30 @@ export default function DepartmentTasksManager({
         onTaskAction?.(action)
     }
   }, [onTaskAction, refreshAllData])
+
   const renderCellContent = useCallback((row: any, task: any) => {
+    console.log('🔄 renderCellContent called:', {
+      rowType: row.type,
+      rowKey: row.key,
+      stageName: row.stage?.name,
+      taskId: task.id,
+      stageId: row.stage?.id
+    });
     const value = row.getValue ? row.getValue(task) : '';
-  
+
     if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
       return <span className="text-sm text-gray-400 italic">N/A</span>;
     }
-  
-    // Helper function to check if a value has meaningful data
-    const hasData = (val: any) => {
-      if (val === null || val === undefined || val === '' || val === 'N/A') return false;
-      if (typeof val === 'object' && val?.status === 'N/A') return false;
-      if (typeof val === 'string' && val.trim() === '') return false;
-      return true;
-    };
-  
-    // Helper function to save field data to database
-    const saveFieldData = async (newValue: string) => {
-      try {
-        if (row.type === 'field' && row.field) {
-          // For field data, we need to update the document's extracted_details
-          const linkedDocument = getDocumentForTaskStage(task, { ...row.stage, documents: [row.document] });
-          
-          if (linkedDocument) {
-            const updatedExtractedDetails = {
-              ...linkedDocument.extracted_details,
-              [row.field.fieldName]: newValue
-            };
-  
-            const { error } = await supabase
-              .from('uploaded_documents')
-              .update({ extracted_details: updatedExtractedDetails })
-              .eq('id', linkedDocument.id);
-  
-            if (error) throw error;
-  
-            toast({
-              title: "Success",
-              description: "Field updated successfully",
-              variant: "default"
-            });
-  
-            // Refresh data to show updated values
-            await refreshAllData();
-          }
-        } else if (row.type === 'stage') {
-          // For stage data, use the existing stage save handler
-          await enhancedHandleStageStatusSave(row.stage.id, task.id, newValue);
-        } else {
-          // For other field types, update the task directly
-          const updateData = getTaskUpdateData(row, newValue);
-          
-          if (updateData) {
-            const { error } = await supabase
-              .from('tm_tasks')
-              .update(updateData)
-              .eq('id', task.id);
-  
-            if (error) throw error;
-  
-            toast({
-              title: "Success",
-              description: "Data updated successfully",
-              variant: "default"
-            });
-  
-            await refreshAllData();
-          }
-        }
-      } catch (error) {
-        console.error('Error saving data:', error);
-        toast({
-          title: "Error",
-          description: "Failed to save changes",
-          variant: "destructive"
-        });
-      }
-    };
-
-    const getTaskUpdateData = (row: any, newValue: string) => {
-      const updateData: any = {};
-      
-      // Map row types to database fields
-      switch (row.key) {
-        case 'applicant_name':
-          updateData.applicant_name = newValue;
-          break;
-        case 'company':
-          // For company, we'd need to find the company ID by name
-          // This is more complex and might require a separate lookup
-          break;
-        case 'nationality':
-          updateData.nationality = newValue;
-          break;
-        case 'job_description':
-          updateData.job_description = newValue;
-          break;
-        // Add other mappings as needed
-        default:
-          console.warn('Unknown field type for update:', row.key);
-          return null;
-      }
-      
-      updateData.updated_at = new Date().toISOString();
-      return updateData;
-    };
-
-        // Helper function to render content with pencil icon for editable cells
-    const renderWithPencil = (content: JSX.Element, isEditable: boolean = true) => {
-      if (!hasData(value) || !isEditable) return content;
-
-      return (
-        <div className="flex items-center gap-2 group">
-          {content}
-          <Pencil className="h-3 w-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer" />
-        </div>
-      );
-    };
 
     if (row.type === 'stage' && row.stage && task.stages?.[row.stage.id]) {
       const stageData = task.stages[row.stage.id];
-      const content = (
+      console.log('📊 Stage data found:', {
+        stageName: row.stage.name,
+        stageData,
+        hasDate: !!stageData.date
+      });
+      
+      return (
         <div className="flex flex-col items-center gap-0.5">
           {stageData.date && (
             <span className="text-sm font-medium text-slate-800">
@@ -1767,7 +1676,43 @@ export default function DepartmentTasksManager({
           )}
         </div>
       );
-      return renderWithPencil(content);
+    }
+    if (row.type === 'stage') {
+      console.log('🎛️ Rendering EditableStageCell:', {
+        stageName: row.stage?.name,
+        stageId: row.stage?.id,
+        taskId: task.id,
+        requiresUpload: row.stage?.requires_upload !== false
+      });
+  
+      const requiresUpload = row.stage?.requires_upload !== false;
+      
+      return (
+        <EditableStageCell
+          key={row.stage.id}
+          stage={row.stage}
+          task={task}
+          value={task.stages?.[row.stage.id]?.status}
+          onSave={enhancedHandleStageStatusSave}
+          onDocumentUpload={handleStageDocumentUpload}
+          onShowDocuments={handleViewDocument}
+          requiresUpload={requiresUpload}
+          onAutomationClick={(e) => {
+            e.stopPropagation();
+            console.log('⚡ Automation clicked for stage:', row.stage.name);
+            if (row.stage.automation) {
+              setSelectedAutomation({
+                ...row.stage.automation,
+                stageId: row.stage.id,
+                taskId: task.id
+              });
+              setAutomationDialogOpen(true);
+            }
+          }}
+          getKycFields={getKycFields}
+          allDocuments={allDocuments}
+        />
+      );
     }
 
     if (row.type === 'field') {
@@ -1776,290 +1721,109 @@ export default function DepartmentTasksManager({
 
       if (row.field?.fieldType?.toLowerCase() === 'date') {
         const formattedDate = formatDateValue(fieldValue);
-        const content = (
+        return (
           <div className="flex items-center gap-1">
             <span className="text-sm text-slate-700" title={formattedDate}>{formattedDate}</span>
             {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
           </div>
         );
-        return renderWithPencil(content);
       }
-
-      const content = (
+      return (
         <div className="flex items-center gap-1">
           <span className="text-sm text-gray-700">{fieldValue}</span>
           {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
         </div>
       );
-      return renderWithPencil(content);
     }
 
-    const EditableCell = ({ children, onSave, fieldType = 'text' }: { 
-      children: React.ReactNode, 
-      onSave: (value: string) => Promise<void>,
-      fieldType?: string 
-    }) => {
-      const [isEditing, setIsEditing] = useState(false);
-      const [editValue, setEditValue] = useState('');
-      const [isLoading, setIsLoading] = useState(false);
-      const inputRef = useRef<HTMLInputElement>(null);
-  
-      const startEditing = () => {
-        const currentValue = typeof value === 'object' ? value.value || '' : value || '';
-        setEditValue(currentValue.toString());
-        setIsEditing(true);
-      };
-  
-      const handleSave = async () => {
-        if (!editValue.trim() && fieldType !== 'text') return;
-        
-        try {
-          setIsLoading(true);
-          await onSave(editValue);
-          setIsEditing(false);
-        } catch (error) {
-          console.error('Save error:', error);
-        } finally {
-          setIsLoading(false);
-        }
-      };
-  
-      const handleCancel = () => {
-        setIsEditing(false);
-        setEditValue('');
-      };
-  
-      const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          handleSave();
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          handleCancel();
-        }
-      };
-  
-      useEffect(() => {
-        if (isEditing && inputRef.current) {
-          inputRef.current.focus();
-          inputRef.current.select();
-        }
-      }, [isEditing]);
-  
-      if (isEditing) {
-        return (
-          <div className="flex items-center gap-2 min-w-[150px]" onClick={(e) => e.stopPropagation()}>
-            <Input
-              ref={inputRef}
-              type={fieldType}
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="text-sm h-8"
-              disabled={isLoading}
-            />
-            <div className="flex gap-1">
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 w-6 p-0 text-green-600 hover:text-green-800 hover:bg-green-100"
-                onClick={handleSave}
-                disabled={isLoading}
-              >
-                <Check className="h-3 w-3" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 w-6 p-0 text-red-600 hover:text-red-800 hover:bg-red-100"
-                onClick={handleCancel}
-                disabled={isLoading}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </div>
-          </div>
-        );
-      }
-  
-      return (
-        <div className="flex items-center gap-2 group cursor-pointer" onClick={startEditing}>
-          {children}
-          {hasData(value) && (
-            <Pencil className="h-3 w-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-          )}
-        </div>
-      );
-    };
-  
-    // Determine field type for input
-    const getFieldType = () => {
-      if (row.field?.fieldType?.toLowerCase() === 'date') return 'date';
-      if (row.type === 'date') return 'date';
-      return 'text';
-    };
-  
-    if (row.type === 'stage' && row.stage && task.stages?.[row.stage.id]) {
-      const stageData = task.stages[row.stage.id];
-      const content = (
-        <div className="flex flex-col items-center gap-0.5">
-          {stageData.date && (
-            <span className="text-sm font-medium text-slate-800">
-              {formatDateValue(stageData.date)}
-            </span>
-          )}
-        </div>
-      );
-      
-      return (
-        <EditableCell onSave={saveFieldData} fieldType="date">
-          {content}
-        </EditableCell>
-      );
-    }
-  
-    if (row.type === 'field') {
-      const fieldValue = typeof value === 'object' ? value.value : value;
-      const isOldDoc = typeof value === 'object' ? value.isOldDocument : false;
-  
-      if (row.field?.fieldType?.toLowerCase() === 'date') {
-        const formattedDate = formatDateValue(fieldValue);
-        const content = (
-          <div className="flex items-center gap-1">
-            <span className="text-sm text-slate-700" title={formattedDate}>{formattedDate}</span>
-            {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
-          </div>
-        );
-        
-        return (
-          <EditableCell onSave={saveFieldData} fieldType="date">
-            {content}
-          </EditableCell>
-        );
-      }
-  
-      const content = (
-        <div className="flex items-center gap-1">
-          <span className="text-sm text-gray-700">{fieldValue}</span>
-          {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
-        </div>
-      );
-      
-      return (
-        <EditableCell onSave={saveFieldData} fieldType="text">
-          {content}
-        </EditableCell>
-      );
-    }
-  
     switch (row.type) {
-      case 'badge':
-        const badgeContent = <span className="text-sm font-semibold">{value}</span>;
-        return (
-          <EditableCell onSave={saveFieldData} fieldType="text">
-            {badgeContent}
-          </EditableCell>
-        );
-  
-      case 'date':
-        const dateContent = <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
-        return (
-          <EditableCell onSave={saveFieldData} fieldType="date">
-            {dateContent}
-          </EditableCell>
-        );
-  
-      case 'stat':
-        const statContent = <span className="text-sm font-semibold">{value}</span>;
-        return (
-          <EditableCell onSave={saveFieldData} fieldType="text">
-            {statContent}
-          </EditableCell>
-        );
-        case 'stage':
-          // ... existing stage logic remains the same
-          const isStageApplicable = !row.stage.targetEntities || row.stage.targetEntities.length === 0 ||
-            row.stage.targetEntities.some((target: any) => {
-              const matchesClass = target.class_id?.toString() === task.class_id?.toString();
-              const matchesSubclass = !target.subclass_id ||
-                target.subclass_id.toString() === task.subclass_id?.toString();
-              return matchesClass && matchesSubclass;
-            });
-    
-          if (!isStageApplicable) {
-            return <span className="text-sm text-gray-400 italic">N/A</span>;
-          }
-    
-          const requiresUpload = row.stage.requires_upload !== false;
-    
-          return (
-            <EditableStageCell
-              key={row.stage.id}
-              stage={row.stage}
-              task={task}
-              value={task.stages?.[row.stage.id]?.status}
-              onSave={enhancedHandleStageStatusSave}
-              onDocumentUpload={handleStageDocumentUpload}
-              onShowDocuments={handleViewDocument}
-              requiresUpload={requiresUpload}
-              onAutomationClick={(e) => {
-                e.stopPropagation();
-                if (row.stage.automation) {
-                  setSelectedAutomation({
-                    ...row.stage.automation,
-                    stageId: row.stage.id,
-                    taskId: task.id
-                  });
-                  setAutomationDialogOpen(true);
-                }
-              }}
-              getKycFields={getKycFields}
-              allDocuments={allDocuments}
-            />
-          );
-    
-        case 'document':
-          // Document type cells - no pencil icon as requested
-          const isDocApplicable = !row.document?.targetEntities || row.document.targetEntities.length === 0 ||
-            row.document.targetEntities.some((target: any) => {
-              const matchesClass = target.class_id?.toString() === task.class_id?.toString();
-              const matchesSubclass = !target.subclass_id ||
-                target.subclass_id.toString() === task.subclass_id?.toString();
-              return matchesClass && matchesSubclass;
-            });
-    
-          if (!isDocApplicable) {
-            return <span className="text-sm text-gray-400 italic">N/A</span>;
-          }
-    
-          return (
-            <EditableStageCell
-              key={`${row.stage.id}_${row.document?.id}`}
-              stage={row.stage}
-              task={task}
-              value={value}
-              isDocumentRow={true}
-              documentData={row.document}
-              onSave={enhancedHandleStageStatusSave}
-              onDocumentUpload={handleStageDocumentUpload}
-              onShowDocuments={(task, stage) => handleViewDocument(task, { ...stage, documents: [row.document] })}
-              onAutomationClick={(e, docData) => {
-                e.stopPropagation();
-                if (docData?.automation) {
-                  setSelectedAutomation({
-                    ...docData.automation,
-                    documentId: docData.id,
-                    stageId: row.stage.id,
-                    taskId: task.id
-                  });
-                  setAutomationDialogOpen(true);
-                }
-              }}
-              getKycFields={getKycFields}
-              allDocuments={allDocuments}
-            />
-          );
+      case 'badge': return <span className="text-sm font-semibold">{value}</span>
+      case 'date': return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
+      case 'stat': return <span className="text-sm font-semibold">{value}</span>
 
+      case 'stage':
+        // Check if stage is applicable to task
+        const isStageApplicable = !row.stage.targetEntities || row.stage.targetEntities.length === 0 ||
+          row.stage.targetEntities.some((target: any) => {
+            const matchesClass = target.class_id?.toString() === task.class_id?.toString();
+            const matchesSubclass = !target.subclass_id ||
+              target.subclass_id.toString() === task.subclass_id?.toString();
+            return matchesClass && matchesSubclass;
+          });
+
+        if (!isStageApplicable) {
+          return <span className="text-sm text-gray-400 italic">N/A</span>;
+        }
+
+        // Determine if this stage requires upload based on stage configuration
+        const requiresUpload = row.stage.requires_upload !== false; // Default to true if not specified
+
+        return (
+          <EditableStageCell
+            key={row.stage.id}
+            stage={row.stage}
+            task={task}
+            value={task.stages?.[row.stage.id]?.status}
+            onSave={enhancedHandleStageStatusSave}
+            onDocumentUpload={handleStageDocumentUpload}
+            onShowDocuments={handleViewDocument}
+            requiresUpload={requiresUpload}
+            onAutomationClick={(e) => {
+              e.stopPropagation();
+              if (row.stage.automation) {
+                setSelectedAutomation({
+                  ...row.stage.automation,
+                  stageId: row.stage.id,
+                  taskId: task.id
+                });
+                setAutomationDialogOpen(true);
+              }
+            }}
+            getKycFields={getKycFields}
+            allDocuments={allDocuments}
+          />
+        )
+      case 'document':
+        // Check if document is applicable to task
+        const isDocApplicable = !row.document?.targetEntities || row.document.targetEntities.length === 0 ||
+          row.document.targetEntities.some((target: any) => {
+            const matchesClass = target.class_id?.toString() === task.class_id?.toString();
+            const matchesSubclass = !target.subclass_id ||
+              target.subclass_id.toString() === task.subclass_id?.toString();
+            return matchesClass && matchesSubclass;
+          });
+
+        if (!isDocApplicable) {
+          return <span className="text-sm text-gray-400 italic">N/A</span>;
+        }
+
+        return (
+          <EditableStageCell
+            key={`${row.stage.id}_${row.document?.id}`}
+            stage={row.stage}
+            task={task}
+            value={value}
+            isDocumentRow={true}
+            documentData={row.document}
+            onSave={enhancedHandleStageStatusSave}
+            onDocumentUpload={handleStageDocumentUpload}
+            onShowDocuments={(task, stage) => handleViewDocument(task, { ...stage, documents: [row.document] })}
+            onAutomationClick={(e, docData) => {
+              e.stopPropagation();
+              if (docData?.automation) {
+                setSelectedAutomation({
+                  ...docData.automation,
+                  documentId: docData.id,
+                  stageId: row.stage.id,
+                  taskId: task.id
+                });
+                setAutomationDialogOpen(true);
+              }
+            }}
+            getKycFields={getKycFields}
+            allDocuments={allDocuments}
+          />
+        )
       case 'actions': return (
         <div className="flex items-center justify-center gap-1">
           <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100" title="Edit Task"><Edit className="h-4 w-4" /></Button>
@@ -2144,15 +1908,10 @@ export default function DepartmentTasksManager({
           </DropdownMenu>
         </div>
       )
-      default: 
-      const defaultContent = <span className="text-sm text-slate-800">{value}</span>;
-      return (
-        <EditableCell onSave={saveFieldData} fieldType="text">
-          {defaultContent}
-        </EditableCell>
-      );
-  }
-}, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getKycFields, refreshAllData, getDocumentForTaskStage]);
+      default: return <span className="text-sm text-slate-800">{value}</span>
+    }
+  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getKycFields])
+
   const loadRows = useCallback(async (tasks: any[]) => {
     if (!tasks || tasks.length === 0) return;
     setLoading(true);
@@ -2982,6 +2741,7 @@ export default function DepartmentTasksManager({
         departments={departments}
         users={Array.from(tmUsers.values())}
         officers={Array.from(tmUsers.values()).filter(u => u.role === 'officer')}
+        allDocuments={allDocuments} 
         onTaskUpdate={handleTaskUpdate}
       />
 
