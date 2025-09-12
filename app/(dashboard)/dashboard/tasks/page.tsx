@@ -78,7 +78,13 @@ export default function Page() {
 
   return (
     <>
-      <Tabs defaultValue="overall">
+      <div>
+        <h2 className="text-2xl font-bold text-slate-900">Task Manager</h2>
+      </div>
+      <DepartmentTasksManager
+        handleStageStatusSave={handleStageStatusSave}
+      />
+      {/* <Tabs defaultValue="overall">
         <div className="flex justify-between">
           <div>
             <h2 className="text-2xl font-bold text-slate-900">Task Manager</h2>
@@ -96,7 +102,7 @@ export default function Page() {
         <TabsContent value="department">
           <TasksPage />
         </TabsContent>
-      </Tabs>
+      </Tabs> */}
     </>
   )
 }

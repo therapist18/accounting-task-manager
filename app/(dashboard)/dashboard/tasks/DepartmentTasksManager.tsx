@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AutomationDialog } from "@/app/(dashboard)/dashboard/settings/automation/components/AutomationDialog";
-import { Loader2, Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, Zap } from "lucide-react"
+import { Loader2, Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, Zap, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { Building, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -19,7 +19,7 @@ import { fetchDepartments } from "../departments/departments/database"
 import { DepartmentTasksManagerProps } from "./components/types"
 import { StageUploadDialog } from "./components/StageUploadDialog"
 import { Input } from "@/components/ui/input"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
@@ -47,6 +47,46 @@ import {
 import EditableStageCell from "./components/EditableStageCell"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { OtherDialog } from "./components/OtherDialog"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { ReportTable } from "./components/ReportTable"
+import { MemorizedReportDialog } from "./components/MemorizedReportDialog"
+
+type ReportConfiguration = {
+  taskFields: string[];
+  stages: {
+    [stageId: string]: {
+      documents: {
+        [kycId: string]: {
+          fields: string[];
+        }
+      }
+    }
+  }
+};
+type MemorizedReport = {
+  id: string;
+  name: string;
+  description?: string;
+  configuration: ReportConfiguration;
+  department_id: number;
+};
+
+interface MemorizedReportDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  department: Department | null;
+  stages: any[];
+  kycDocuments: Map<string, KycDocument>;
+  onApplyReport: (report: MemorizedReport) => void;
+}
+
+const DEFAULT_TASK_FIELDS = [
+  { id: 'applicant_name', label: 'Applicant Name' },
+  { id: 'company_id', label: 'Company' },
+  { id: 'task_manager_id', label: 'Task Manager' },
+  { id: 'officer_id', label: 'Officer' },
+];
 
 export default function DepartmentTasksManager({
   error,
@@ -89,9 +129,18 @@ export default function DepartmentTasksManager({
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
+  
+  // States for Memorized Reports
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
+  const [activeReport, setActiveReport] = useState<any | null>(null);
+
+  // New states for UI enhancements
+  const [areTabsVisible, setAreTabsVisible] = useState(true);
+  const [isAllExpanded, setIsAllExpanded] = useState(false);
+
   useEffect(() => {
-    const headers = activeDepartmentTab === '1'
-      ? ENHANCED_TABLE_HEADERS_IMMIGRATION
+    const headers = activeDepartmentTab === '1' 
+      ? ENHANCED_TABLE_HEADERS_IMMIGRATION 
       : ENHANCED_TABLE_HEADERS;
     setCurrentTableHeaders(headers);
     setVisibleHeaders(new Set(headers.filter(h => h.default).map(h => h.id)));
@@ -125,6 +174,13 @@ export default function DepartmentTasksManager({
   const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
 
+
+  const handleApplyReport = (report: MemorizedReport) => {
+    setActiveReport(report);
+    // When a report is applied, switch to standard (columnar) view if not already
+    setIsTransposedView(false); 
+  };
+  
   // Enhanced function to fetch all dependants and applicant data
   const fetchAllDependantsAndApplicants = useCallback(async (tasks: UtilTask[]) => {
     try {
@@ -147,9 +203,6 @@ export default function DepartmentTasksManager({
               // Log dependant information for debugging
               if (dep.full_name) {
                 const age = calculateAge(dep.date_of_birth);
-                console.log(`Dependant: ${dep.full_name} (ID: ${dep.id}), Age: ${age}, DOB: ${dep.date_of_birth}`);
-
-                // Don't assume age if DOB is missing or invalid
                 if (age === null) {
                   console.warn(`Skipping age assumption for dependant: ${dep.full_name} (ID: ${dep.id}) - missing or invalid date of birth`);
                 }
@@ -221,12 +274,6 @@ export default function DepartmentTasksManager({
       tasks.forEach(task => {
         // Enhance task with applicant data
         const applicantData = applicantsMap.get(task.individual_id);
-
-        // Debug logging
-        console.log(`Task ${task.id} - Applicant: ${task.applicant_name}`);
-        console.log(`DOB: ${task.date_of_birth}, Individual ID: ${task.individual_id}`);
-        console.log(`Applicant Data:`, applicantData);
-        console.log(`Calculated Age: ${applicantData?.age}`);
 
         enhancedTasksMap.set(task.id.toString(), {
           ...task,
@@ -429,41 +476,47 @@ export default function DepartmentTasksManager({
 
   const determineCurrentStage = useCallback((task: any, stages: any[]) => {
     if (!task.stages || !stages.length) return null;
-
+  
     // Sort stages by order_num
     const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-
+  
     // Get all stages that have status or date in task.stages
     const stagesWithStatus = sortedStages.filter(stage => {
-      const stageStatus = task.stages[stage.id];
-      return stageStatus && (stageStatus.status || stageStatus.date);
+      const stageData = task.stages[stage.id];
+      return stageData && (stageData.status || stageData.date);
     });
-
+  
     // If no stages have status/date, return the first stage
     if (stagesWithStatus.length === 0) {
       return sortedStages[0] || null;
     }
-
-    // Find the last completed stage
-    const lastCompletedStage = [...stagesWithStatus].reverse().find(stage => {
-      const stageStatus = task.stages[stage.id];
-      return stageStatus.status === 'completed' || stageStatus.date;
+  
+    // Find all completed stages (with status completed or date)
+    const completedStages = sortedStages.filter(stage => {
+      const stageData = task.stages[stage.id];
+      return stageData && (stageData.status === 'completed' || stageData.date);
     });
-
-    // If no completed stages, return the first stage with status
-    if (!lastCompletedStage) {
-      return stagesWithStatus[0] || null;
+  
+    // If we have completed stages, find the last one in the sequence
+    if (completedStages.length > 0) {
+      // Find the highest order_num among completed stages
+      const lastCompletedStage = completedStages.reduce((prev, current) => 
+        (prev.order_num || 0) > (current.order_num || 0) ? prev : current
+      );
+  
+      // If there's a next stage after the last completed one, return it
+      const nextStageIndex = sortedStages.findIndex(s => s.id === lastCompletedStage.id) + 1;
+      if (nextStageIndex < sortedStages.length) {
+        return sortedStages[nextStageIndex];
+      }
+      
+      // Otherwise return the last completed stage
+      return lastCompletedStage;
     }
-
-    // Find the next stage after the last completed one
-    const lastCompletedIndex = sortedStages.findIndex(s => s.id === lastCompletedStage.id);
-    if (lastCompletedIndex < sortedStages.length - 1) {
-      return sortedStages[lastCompletedIndex + 1];
-    }
-
-    // If last completed is the last stage, return it
-    return lastCompletedStage;
-  }, [getDocumentForTaskStage])
+  
+    // If no completed stages but we have stages with status, return the first one
+    return stagesWithStatus[0] || sortedStages[0] || null;
+  }, []);
 
   // Create wrapper functions for utility functions
   const getEnhancedImmigrationStatusWrapper = useCallback((task: any) => {
@@ -563,6 +616,7 @@ export default function DepartmentTasksManager({
       t.dependant_member && Array.isArray(t.dependant_member) && t.dependant_member.length > 0
     ).map(t => t.id.toString());
     setExpandedDependants(new Set(allTaskIdsWithDependants));
+    setIsAllExpanded(true);
   }
 
   const collapseAll = () => {
@@ -570,6 +624,7 @@ export default function DepartmentTasksManager({
     setExpandedStages(new Set())
     setExpandedDocuments(new Set())
     setExpandedDependants(new Set())
+    setIsAllExpanded(false);
   }
 
   const toggleHeaderVisibility = (headerId: string) => {
@@ -732,489 +787,168 @@ export default function DepartmentTasksManager({
   const wipTasks = useMemo(() => filterTasksBySearchWrapper(getWIPTasksByFollowUp(activeFollowUpFilter)), [getWIPTasksByFollowUp, activeFollowUpFilter, filterTasksBySearchWrapper])
   const completedTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('completed')), [getFilteredTasks, filterTasksBySearchWrapper])
 
-  // Enhanced Excel export function
-  const handleExport = useCallback(async (tasks: any[], tableType: string) => {
-    if (!tasks.length) {
-      toast({ title: "No Data", description: "No data available to export.", variant: "destructive" })
-      return
-    }
+ // Enhanced Excel export function
+ const handleExport = useCallback(async (tasks: any[], tableType: string) => {
+  if (!tasks.length) {
+    toast({ title: "No Data", description: "No data available to export.", variant: "destructive" })
+    return
+  }
 
-    try {
-      const workbook = XLSX.utils.book_new();
-
-      // Prepare data for export
-      const exportData = [];
-
-      for (const task of tasks) {
-        const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
-        const taskDeps = taskDependants.get(task.id.toString()) || [];
-        const statusInfo = getEnhancedImmigrationStatusWrapper(task);
-        const stageStatusInfo = getCurrentStageStatusWrapper(task);
-
-        // Add main applicant row
-        const mainRow = {
-          'Task ID': task.id,
-          'Type': 'Applicant',
-          'Name': task.applicant_name,
-          'Nationality': enhancedTask.nationality || 'N/A',
-          'Age': enhancedTask.age || 'N/A',
-          'Relationship': 'Principal',
-          'Company': companies.get(task.company_id) || 'N/A',
-          'Job Level': getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || 'N/A',
-          'Immigration Status': statusInfo.status,
-          'Immigration Document Type': statusInfo.documentType || 'N/A',
-          'Immigration Expiry Date': statusInfo.date ? format(statusInfo.date, 'dd MMM yyyy') : 'N/A',
-          'Current Stage': stageStatusInfo.stageName,
-          'Stage Status': stageStatusInfo.stageStatus,
-          'Stage Follow-up': stageStatusInfo.stageFollowUp || 'N/A',
-          'Task Manager': getStaffName(task.task_manager_id),
-          'Officer': getStaffName(task.officer_id),
-          'Task Assistant': getStaffName(task.task_assistant_id),
-          'Case Status': task.status,
-          'Renewal Status': task.renewal_status || 'New'
+  try {
+    const workbook = XLSX.utils.book_new();
+    const exportData = [];
+    for (const task of tasks) {
+      const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
+      const taskDeps = taskDependants.get(task.id.toString()) || [];
+      const statusInfo = getEnhancedImmigrationStatusWrapper(task);
+      const stageStatusInfo = getCurrentStageStatusWrapper(task);
+      const mainRow = {
+        'Task ID': task.id, 'Type': 'Applicant', 'Name': task.applicant_name, 'Nationality': enhancedTask.nationality || 'N/A', 'Age': enhancedTask.age || 'N/A', 'Relationship': 'Principal', 'Company': companies.get(task.company_id) || 'N/A', 'Job Level': getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || 'N/A', 'Immigration Status': statusInfo.status, 'Immigration Document Type': statusInfo.documentType || 'N/A', 'Immigration Expiry Date': statusInfo.date ? format(statusInfo.date, 'dd MMM yyyy') : 'N/A', 'Current Stage': stageStatusInfo.stageName, 'Stage Status': stageStatusInfo.stageStatus, 'Stage Follow-up': stageStatusInfo.stageFollowUp || 'N/A', 'Task Manager': getStaffName(task.task_manager_id), 'Officer': getStaffName(task.officer_id), 'Task Assistant': getStaffName(task.task_assistant_id), 'Case Status': task.status, 'Renewal Status': task.renewal_status || 'New'
+      };
+      exportData.push(mainRow);
+      taskDeps.forEach(dep => {
+        const depRow = {
+          'Task ID': task.id, 'Type': 'Dependant', 'Name': dep.full_name, 'Nationality': dep.nationality || 'N/A', 'Age': dep.age || 'N/A', 'Relationship': dep.relationship || 'Dependant', 'Company': companies.get(task.company_id) || 'N/A', 'Job Level': getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || 'N/A', 'Immigration Status': 'N/A', 'Immigration Document Type': 'N/A', 'Immigration Expiry Date': 'N/A', 'Current Stage': 'N/A', 'Stage Status': 'N/A', 'Stage Follow-up': 'N/A', 'Task Manager': getStaffName(task.task_manager_id), 'Officer': getStaffName(task.officer_id), 'Task Assistant': getStaffName(task.task_assistant_id), 'Case Status': task.status, 'Renewal Status': task.renewal_status || 'New'
         };
-
-        exportData.push(mainRow);
-
-        // Add dependants rows
-        taskDeps.forEach(dep => {
-          const depRow = {
-            'Task ID': task.id,
-            'Type': 'Dependant',
-            'Name': dep.full_name,
-            'Nationality': dep.nationality || 'N/A',
-            'Age': dep.age || 'N/A',
-            'Relationship': dep.relationship || 'Dependant',
-            'Company': companies.get(task.company_id) || 'N/A',
-            'Job Level': getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || 'N/A',
-            'Immigration Status': 'N/A',
-            'Immigration Document Type': 'N/A',
-            'Immigration Expiry Date': 'N/A',
-            'Current Stage': 'N/A',
-            'Stage Status': 'N/A',
-            'Stage Follow-up': 'N/A',
-            'Task Manager': getStaffName(task.task_manager_id),
-            'Officer': getStaffName(task.officer_id),
-            'Task Assistant': getStaffName(task.task_assistant_id),
-            'Case Status': task.status,
-            'Renewal Status': task.renewal_status || 'New'
-          };
-
-          exportData.push(depRow);
-        });
-      }
-
-      // Create worksheet
-      const worksheet = XLSX.utils.json_to_sheet(exportData);
-
-      // Add worksheet to workbook
-      XLSX.utils.book_append_sheet(workbook, worksheet, tableType);
-
-      // Generate filename with timestamp
-      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
-      const filename = `${tableType}_${timestamp}.xlsx`;
-
-      // Save file
-      XLSX.writeFile(workbook, filename);
-
-      toast({
-        title: "Export Successful",
-        description: `${tableType} data exported to ${filename}`
-      });
-
-    } catch (error) {
-      console.error('Export error:', error);
-      toast({
-        title: "Export Failed",
-        description: "Failed to export data to Excel.",
-        variant: "destructive"
+        exportData.push(depRow);
       });
     }
-  }, [enhancedTasksData, taskDependants, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, companies, getTaskHierarchy, getStaffName]);
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    XLSX.utils.book_append_sheet(workbook, worksheet, tableType);
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
+    const filename = `${tableType}_${timestamp}.xlsx`;
+    XLSX.writeFile(workbook, filename);
+    toast({ title: "Export Successful", description: `${tableType} data exported to ${filename}` });
+  } catch (error) {
+    console.error('Export error:', error);
+    toast({ title: "Export Failed", description: "Failed to export data to Excel.", variant: "destructive" });
+  }
+}, [enhancedTasksData, taskDependants, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, companies, getTaskHierarchy, getStaffName]);
 
-  const getClassesForSubdepartment = useCallback((deptId: number, subDeptId: number) => {
-    const department = departments.find(d => d.id === deptId);
-    if (!department) return [];
+const getClassesForSubdepartment = useCallback((deptId: number, subDeptId: number) => {
+  const department = departments.find(d => d.id === deptId);
+  if (!department) return [];
 
-    const subdepartment = department.tm_subdepartments?.find(s => s.id === subDeptId);
-    return subdepartment?.classes || [];
-  }, [departments]);
+  const subdepartment = department.tm_subdepartments?.find(s => s.id === subDeptId);
+  return subdepartment?.classes || [];
+}, [departments]);
 
-  const handlePushCase = useCallback(async (task: UtilTask, targetSubDeptId: number, targetSubDeptName: string) => {
-    const targetDeptId = 1;
-    if (targetSubDeptId === 6) { // Alien subdepartment
-      const classes = getClassesForSubdepartment(targetDeptId, targetSubDeptId);
-      if (classes.length > 0) {
-        // Use enhanced task data for applicant age
-        const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
-        let applicantAge = enhancedTask.age;
+const handlePushCase = useCallback(async (task: UtilTask, targetSubDeptId: number, targetSubDeptName: string) => {
+  const targetDeptId = 1;
+  if (targetSubDeptId === 6) { // Alien subdepartment
+    const classes = getClassesForSubdepartment(targetDeptId, targetSubDeptId);
+    if (classes.length > 0) {
+      const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
+      let applicantAge = enhancedTask.age;
+      if (applicantAge === undefined || applicantAge === null) {
+        applicantAge = calculateAge(task.date_of_birth);
+      }
+      setSelectedTaskForPush({ task, targetDeptId, targetSubDeptId, targetSubDeptName, isApplicant: true, applicantAge, applicantClassId: undefined, dependantClasses: new Map() });
+      setAvailableClasses(classes);
+      setIsClassSelectionOpen(true);
+      return;
+    }
+  }
+  await executePushCase(task, targetDeptId, targetSubDeptId, targetSubDeptName, null, null);
+}, [getClassesForSubdepartment, enhancedTasksData]);
 
-        // If age is not in enhanced data, calculate it from date_of_birth
-        if (applicantAge === undefined || applicantAge === null) {
-          applicantAge = calculateAge(task.date_of_birth);
+const executePushCase = useCallback(async (
+  task: UtilTask,
+  targetDeptId: number,
+  targetSubDeptId: number,
+  targetSubDeptName: string,
+  applicantClassId: string | null,
+  dependantClassId: string | null
+) => {
+  setIsPushingCase(true);
+  toast({ title: "Pushing Case...", description: `Creating new task(s) in ${targetSubDeptName}.` });
+  const isReEntry = targetSubDeptId === 7;
+  const isPrincipalMember = task.applicant_type === 'principal' || task.principal_member === true;
+  const isAlien = targetSubDeptId === 6;
+  try {
+    const tasksToCreate = [];
+    const currentDate = new Date().toISOString();
+    const stages = {};
+    if (isAlien || isReEntry) {
+      stages['1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'] = { date: currentDate, status: 'completed' };
+      stages['a19b270e-6d1e-4e6d-b2bc-f21db72cde08'] = { date: currentDate, status: 'completed' };
+      stages['9ccdbfa6-8d76-49db-b8d4-09742c734905'] = { date: currentDate, status: 'completed' };
+    }
+    const { dependantsMap } = await fetchAllDependantsAndApplicants([task]);
+    const dependants = [];
+    let skippedMinors = 0;
+
+    if (isReEntry) {
+      if (!isPrincipalMember) tasksToCreate.push({ status: 'in_progress', department_id: targetDeptId, subdepartment_id: targetSubDeptId, class_id: applicantClassId ? Number(applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, current_stage_id: null, current_stage_started_at: null, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: false, understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(task.applicant_name || ''), individual_id: String(task.individual_id || '') });
+      if (task.dependant_member && Array.isArray(task.dependant_member)) {
+        task.dependant_member.forEach(dep => { if (dep?.id && dependantsMap.has(dep.id)) dependants.push({ ...dependantsMap.get(dep.id), relationship: dep.relationship || 'Dependant' }); });
+        for (const dependant of dependants) tasksToCreate.push({ status: 'in_progress', department_id: Number(targetDeptId) || null, subdepartment_id: Number(targetSubDeptId) || null, class_id: dependantClassId || applicantClassId ? Number(dependantClassId || applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, current_stage_id: null, current_stage_started_at: null, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: false, understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(dependant.full_name || ''), individual_id: String(dependant.individual_id || '') });
+      }
+    } else {
+      const baseTaskData = { status: 'in_progress', department_id: Number(targetDeptId) || null, subdepartment_id: Number(targetSubDeptId) || null, class_id: applicantClassId ? Number(applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, current_stage_id: null, current_stage_started_at: null, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: isPrincipalMember ? 'principal' : 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: Boolean(isPrincipalMember), understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(task.applicant_name || ''), individual_id: String(task.individual_id || '') };
+      tasksToCreate.push(baseTaskData);
+      if (task.dependant_member && Array.isArray(task.dependant_member)) {
+        task.dependant_member.forEach(dep => { if (dep?.id && dependantsMap.has(dep.id)) dependants.push({ ...dependantsMap.get(dep.id), relationship: dep.relationship || 'Dependant' }); });
+        for (const dependant of dependants) {
+          if (isAlien) { const age = dependant.age; if (age === null || age < 18) { skippedMinors++; continue; } }
+          tasksToCreate.push({ ...baseTaskData, class_id: dependantClassId || applicantClassId, applicant_name: dependant.full_name, individual_id: dependant.individual_id, applicant_type: 'dependant', principal_member: false });
         }
-
-        console.log(`Applicant: ${task.applicant_name}, DOB: ${task.date_of_birth}, Calculated Age: ${applicantAge}`);
-
-        setSelectedTaskForPush({
-          task,
-          targetDeptId,
-          targetSubDeptId,
-          targetSubDeptName,
-          isApplicant: true,
-          applicantAge,
-          applicantClassId: undefined,
-          dependantClasses: new Map()
-        });
-        setAvailableClasses(classes);
-        setIsClassSelectionOpen(true);
-        return;
       }
     }
+    const { data: newTasks, error } = await supabase.from('tm_tasks').insert(tasksToCreate).select();
+    if (error) throw error;
+    const mainTask = newTasks[0]; const dependantTasks = newTasks.slice(1);
+    let successMessage = `Main case pushed to ${targetSubDeptName} successfully. New Task ID: ${mainTask.id}`;
+    if (dependantTasks.length > 0) successMessage += `\n${dependantTasks.length} dependant task(s) also created.`;
+    if (targetSubDeptId === 6 && skippedMinors > 0) successMessage += `\nNote: ${skippedMinors} minor dependant(s) were skipped for Alien cases.`;
+    toast({ title: "Success", description: successMessage, variant: "default" });
+    await refreshAllData();
+  } catch (error) {
+    console.error(`Error pushing case to ${targetSubDeptName}:`, error);
+    toast({ title: "Error", description: `Failed to push case: ${error.message}`, variant: "destructive" });
+  } finally { setIsPushingCase(false); }
+}, [refreshAllData, fetchAllDependantsAndApplicants]);
 
-    await executePushCase(task, targetDeptId, targetSubDeptId, targetSubDeptName, null, null);
-  }, [getClassesForSubdepartment, enhancedTasksData]);
-
-  const executePushCase = useCallback(async (
-    task: UtilTask,
-    targetDeptId: number,
-    targetSubDeptId: number,
-    targetSubDeptName: string,
-    applicantClassId: string | null,
-    dependantClassId: string | null
-  ) => {
-    setIsPushingCase(true);
-    toast({
-      title: "Pushing Case...",
-      description: `Creating new task(s) in ${targetSubDeptName}.`
+const handleDownloadZip = useCallback(async (task: UtilTask) => {
+  setIsDownloading(true);
+  toast({ title: "Preparing Download", description: "Collecting and organizing documents..." });
+  try {
+    const userDocuments = allDocuments.filter(doc => doc.director_id === task.individual_id);
+    if (userDocuments.length === 0) { toast({ title: "No Documents", description: "No documents found for this applicant to download.", variant: "default" }); setIsDownloading(false); return; }
+    const zip = new JSZip(); const bucketName = 'kyc-documents';
+    const jobLevel = getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || getTaskHierarchy(task)?.subdepartment?.name || 'Unknown';
+    const folderName = `${task.applicant_name || 'Applicant'} - ${jobLevel}`;
+    const documentStageMap = new Map();
+    stages.forEach(stage => { if (stage.documents && stage.documents.length > 0) stage.documents.forEach(stageDoc => documentStageMap.set(stageDoc.kycId, stage.name)); });
+    const downloadPromises = userDocuments.map(async (doc, index) => {
+      if (!doc.file_path) return;
+      const filePath = doc.file_path.startsWith(bucketName) ? doc.file_path : `${bucketName}/${doc.file_path}`;
+      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+      const originalFileName = doc.file_path.split('/').pop() || 'document'; const fileExtension = originalFileName.split('.').pop(); let newFileName = originalFileName;
+      if (doc.document_id) {
+        const stageName = documentStageMap.get(doc.document_id);
+        if (stageName) {
+          newFileName = `${stageName}.${fileExtension}`;
+          let counter = 1;
+          while (Array.from(zip.folder(folderName)?.files || {}).some(file => file.includes(newFileName))) { newFileName = `${stageName}_${counter}.${fileExtension}`; counter++; }
+        }
+      }
+      try {
+        const response = await fetch(fileUrl);
+        if (!response.ok) return;
+        const blob = await response.blob();
+        zip.folder(folderName)?.file(newFileName, blob);
+      } catch (error) { console.error(`Error downloading file ${originalFileName}:`, error); }
     });
-
-    const isReEntry = targetSubDeptId === 7; // 7: Re-Entry Pass
-    const isPrincipalMember = task.applicant_type === 'principal' || task.principal_member === true;
-    const isAlien = targetSubDeptId === 6; // 6: Alien
-
-    try {
-      const tasksToCreate = [];
-      const currentDate = new Date().toISOString();
-
-      // For alien/re-entry, set up stages with current date
-      const stages = {};
-      if (isAlien || isReEntry) {
-        stages['1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'] = { date: currentDate, status: 'completed' }; // Enquiry
-        stages['a19b270e-6d1e-4e6d-b2bc-f21db72cde08'] = { date: currentDate, status: 'completed' }; // Confirmation
-        stages['9ccdbfa6-8d76-49db-b8d4-09742c734905'] = { date: currentDate, status: 'completed' }; // Submission
-      }
-
-      // Handle dependants for re-entry
-      const { dependantsMap } = await fetchAllDependantsAndApplicants([task]);
-      const dependants = [];
-      let skippedMinors = 0;
-
-      // Only process dependants for re-entry
-      if (isReEntry) {
-        // Add main task (for re-entry, this will be a dependant task)
-        if (!isPrincipalMember) {
-          tasksToCreate.push({
-            status: 'in_progress',
-            department_id: targetDeptId,
-            subdepartment_id: targetSubDeptId,
-            class_id: applicantClassId ? Number(applicantClassId) : null,
-            subclass_id: null,
-            created_by: 'system',
-            date_initiated: currentDate,
-            stages: { ...stages },
-            current_stage_id: null,
-            current_stage_started_at: null,
-            task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null,
-            task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null,
-            officer_id: task.officer_id ? Number(task.officer_id) : null,
-            account_used: task.account_used ? String(task.account_used) : null,
-            batch: task.batch ? String(task.batch) : null,
-            applied_by: task.applied_by ? String(task.applied_by) : null,
-            applicant_type: 'dependant',
-            r_number: task.r_number ? String(task.r_number) : null,
-            principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null,
-            renewal_status: task.renewal_status ? String(task.renewal_status) : null,
-            selections: task.selections ? JSON.stringify(task.selections) : null,
-            company_id: task.company_id ? Number(task.company_id) : null,
-            principal_member: false,
-            understudy: task.understudy ? String(task.understudy) : null,
-            references: task.references ? JSON.stringify(task.references) : '[]',
-            job_description: task.job_description ? String(task.job_description) : null,
-            document_id: null,
-            source_document_id: null,
-            applicant_name: String(task.applicant_name || ''),
-            individual_id: String(task.individual_id || '')
-          });
-        }
-
-        // Process dependants for re-entry
-        if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          task.dependant_member.forEach(dep => {
-            if (dep?.id && dependantsMap.has(dep.id)) {
-              const dependantData = dependantsMap.get(dep.id);
-              dependants.push({
-                ...dependantData,
-                relationship: dep.relationship || 'Dependant'
-              });
-            }
-          });
-
-          // Create tasks for dependants
-          for (const dependant of dependants) {
-            tasksToCreate.push({
-              status: 'in_progress',
-              department_id: Number(targetDeptId) || null,
-              subdepartment_id: Number(targetSubDeptId) || null,
-              class_id: dependantClassId || applicantClassId ? Number(dependantClassId || applicantClassId) : null,
-              subclass_id: null,
-              created_by: 'system',
-              date_initiated: currentDate,
-              stages: { ...stages },
-              current_stage_id: null,
-              current_stage_started_at: null,
-              task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null,
-              task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null,
-              officer_id: task.officer_id ? Number(task.officer_id) : null,
-              account_used: task.account_used ? String(task.account_used) : null,
-              batch: task.batch ? String(task.batch) : null,
-              applied_by: task.applied_by ? String(task.applied_by) : null,
-              applicant_type: 'dependant',
-              r_number: task.r_number ? String(task.r_number) : null,
-              principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null,
-              renewal_status: task.renewal_status ? String(task.renewal_status) : null,
-              selections: task.selections ? JSON.stringify(task.selections) : null,
-              company_id: task.company_id ? Number(task.company_id) : null,
-              principal_member: false,
-              understudy: task.understudy ? String(task.understudy) : null,
-              references: task.references ? JSON.stringify(task.references) : '[]',
-              job_description: task.job_description ? String(task.job_description) : null,
-              document_id: null,
-              source_document_id: null,
-              applicant_name: String(dependant.full_name || ''),
-              individual_id: String(dependant.individual_id || '')
-            });
-          }
-        }
-      } else {
-        // For non-re-entry departments, process as before
-        const baseTaskData = {
-          status: 'in_progress',
-          department_id: Number(targetDeptId) || null,
-          subdepartment_id: Number(targetSubDeptId) || null,
-          class_id: applicantClassId ? Number(applicantClassId) : null,
-          subclass_id: null,
-          created_by: 'system',
-          date_initiated: currentDate,
-          stages: { ...stages },
-          current_stage_id: null,
-          current_stage_started_at: null,
-          task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null,
-          task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null,
-          officer_id: task.officer_id ? Number(task.officer_id) : null,
-          account_used: task.account_used ? String(task.account_used) : null,
-          batch: task.batch ? String(task.batch) : null,
-          applied_by: task.applied_by ? String(task.applied_by) : null,
-          applicant_type: isPrincipalMember ? 'principal' : 'dependant',
-          r_number: task.r_number ? String(task.r_number) : null,
-          principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null,
-          renewal_status: task.renewal_status ? String(task.renewal_status) : null,
-          selections: task.selections ? JSON.stringify(task.selections) : null,
-          company_id: task.company_id ? Number(task.company_id) : null,
-          principal_member: Boolean(isPrincipalMember),
-          understudy: task.understudy ? String(task.understudy) : null,
-          references: task.references ? JSON.stringify(task.references) : '[]',
-          job_description: task.job_description ? String(task.job_description) : null,
-          document_id: null,
-          source_document_id: null,
-          applicant_name: String(task.applicant_name || ''),
-          individual_id: String(task.individual_id || '')
-        };
-
-        tasksToCreate.push(baseTaskData);
-
-        // Process dependants for non-re-entry departments (Alien, etc.)
-        if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          task.dependant_member.forEach(dep => {
-            if (dep?.id && dependantsMap.has(dep.id)) {
-              const dependantData = dependantsMap.get(dep.id);
-              dependants.push({
-                ...dependantData,
-                relationship: dep.relationship || 'Dependant'
-              });
-            }
-          });
-
-          for (const dependant of dependants) {
-            // For Alien cases, only create tasks for adults (18+)
-            if (isAlien) {
-              const age = dependant.age;
-              if (age === null || age < 18) {
-                console.log(`Skipping minor dependant: ${dependant.full_name} (age: ${age})`);
-                skippedMinors++;
-                continue;
-              }
-            }
-
-            tasksToCreate.push({
-              ...baseTaskData,
-              class_id: dependantClassId || applicantClassId,
-              applicant_name: dependant.full_name,
-              individual_id: dependant.individual_id,
-              applicant_type: 'dependant',
-              principal_member: false
-            });
-          }
-        }
-      }
-
-      console.log('Tasks to create:', tasksToCreate);
-
-      // Insert all tasks at once - Supabase will auto-generate IDs
-      const { data: newTasks, error } = await supabase
-        .from('tm_tasks')
-        .insert(tasksToCreate)
-        .select();
-
-      if (error) {
-        console.error('Supabase error:', error);
-        throw error;
-      }
-
-      const mainTask = newTasks[0];
-      const dependantTasks = newTasks.slice(1);
-
-      let successMessage = `Main case pushed to ${targetSubDeptName} successfully. New Task ID: ${mainTask.id}`;
-
-      if (dependantTasks.length > 0) {
-        successMessage += `\n${dependantTasks.length} dependant task(s) also created.`;
-      }
-
-      if (targetSubDeptId === 6 && skippedMinors > 0) {
-        successMessage += `\nNote: ${skippedMinors} minor dependant(s) were skipped for Alien cases.`;
-      }
-
-      toast({
-        title: "Success",
-        description: successMessage,
-        variant: "default"
-      });
-
-      await refreshAllData();
-    } catch (error) {
-      console.error(`Error pushing case to ${targetSubDeptName}:`, error);
-      toast({
-        title: "Error",
-        description: `Failed to push case: ${error.message}`,
-        variant: "destructive"
-      });
-    } finally {
-      setIsPushingCase(false);
-    }
-  }, [refreshAllData, fetchAllDependantsAndApplicants]);
-
-  const handleDownloadZip = useCallback(async (task: UtilTask) => {
-    setIsDownloading(true);
-    toast({
-      title: "Preparing Download",
-      description: "Collecting and organizing documents..."
-    });
-
-    try {
-      const userDocuments = allDocuments.filter(doc =>
-        doc.director_id === task.individual_id
-      );
-
-      if (userDocuments.length === 0) {
-        toast({
-          title: "No Documents",
-          description: "No documents found for this applicant to download.",
-          variant: "default"
-        });
-        setIsDownloading(false);
-        return;
-      }
-
-      const zip = new JSZip();
-      const bucketName = 'kyc-documents';
-
-      const jobLevel = getTaskHierarchy(task)?.subclass?.name ||
-        getTaskHierarchy(task)?.class?.name ||
-        getTaskHierarchy(task)?.subdepartment?.name ||
-        'Unknown';
-      const folderName = `${task.applicant_name || 'Applicant'} - ${jobLevel}`;
-
-      const documentStageMap = new Map();
-
-      stages.forEach(stage => {
-        if (stage.documents && stage.documents.length > 0) {
-          stage.documents.forEach(stageDoc => {
-            documentStageMap.set(stageDoc.kycId, stage.name);
-          });
-        }
-      });
-
-      const downloadPromises = userDocuments.map(async (doc, index) => {
-        if (!doc.file_path) return;
-
-        const filePath = doc.file_path.startsWith(bucketName)
-          ? doc.file_path
-          : `${bucketName}/${doc.file_path}`;
-
-        const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
-        const originalFileName = doc.file_path.split('/').pop() || 'document';
-        const fileExtension = originalFileName.split('.').pop();
-
-        let newFileName = originalFileName;
-
-        if (doc.document_id) {
-          const stageName = documentStageMap.get(doc.document_id);
-          if (stageName) {
-            newFileName = `${stageName}.${fileExtension}`;
-
-            let counter = 1;
-            while (Array.from(zip.folder(folderName)?.files || {}).some(file =>
-              file.includes(newFileName)
-            )) {
-              newFileName = `${stageName}_${counter}.${fileExtension}`;
-              counter++;
-            }
-          }
-        }
-
-        try {
-          const response = await fetch(fileUrl);
-          if (!response.ok) {
-            console.error(`Failed to fetch ${fileUrl}: ${response.statusText}`);
-            return;
-          }
-          const blob = await response.blob();
-          zip.folder(folderName)?.file(newFileName, blob);
-        } catch (error) {
-          console.error(`Error downloading file ${originalFileName}:`, error);
-        }
-      });
-
-      await Promise.all(downloadPromises);
-
-      const content = await zip.generateAsync({ type: "blob" });
-      saveAs(content, `${folderName}.zip`);
-
-      toast({
-        title: "Download Started",
-        description: `Downloading ${folderName}.zip with organized documents.`
-      });
-    } catch (error) {
-      console.error("Error creating ZIP file:", error);
-      toast({
-        title: "Error",
-        description: "Failed to create ZIP file.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsDownloading(false);
-    }
-  }, [allDocuments, getTaskHierarchy, stages]);
+    await Promise.all(downloadPromises);
+    const content = await zip.generateAsync({ type: "blob" });
+    saveAs(content, `${folderName}.zip`);
+    toast({ title: "Download Started", description: `Downloading ${folderName}.zip with organized documents.` });
+  } catch (error) {
+    console.error("Error creating ZIP file:", error);
+    toast({ title: "Error", description: "Failed to create ZIP file.", variant: "destructive" });
+  } finally { setIsDownloading(false); }
+}, [allDocuments, getTaskHierarchy, stages]);
 
   const enhancedHandleStageStatusSave = useCallback(async (
     stageId: string,
@@ -1223,50 +957,19 @@ export default function DepartmentTasksManager({
     updatedExtractedDetails?: Record<string, any>
   ) => {
     try {
-      if (handleStageStatusSave) {
-        await handleStageStatusSave(stageId, taskId, value, updatedExtractedDetails)
-      }
-
+      if (handleStageStatusSave) await handleStageStatusSave(stageId, taskId, value, updatedExtractedDetails)
       const task = tasks.find(t => t.id.toString() === taskId.toString())
       if (!task) return
-
-      const updatedStages = {
-        ...task.stages,
-        [stageId]: {
-          status: 'completed',
-          date: value,
-          completedAt: new Date().toISOString()
-        }
-      }
-
+      const updatedStages = { ...task.stages, [stageId]: { status: 'completed', date: value, completedAt: new Date().toISOString() } }
       const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages)
-
-      const updateData: any = {
-        stages: updatedStages,
-        updated_at: new Date().toISOString()
-      }
-
-      if (currentStage) {
-        updateData.current_stage_id = currentStage.id
-        updateData.current_stage_started_at = new Date().toISOString()
-      }
-
-      const { error } = await supabase
-        .from('tm_tasks')
-        .update(updateData)
-        .eq('id', taskId)
-
+      const updateData: any = { stages: updatedStages, updated_at: new Date().toISOString() }
+      if (currentStage) { updateData.current_stage_id = currentStage.id; updateData.current_stage_started_at = new Date().toISOString(); }
+      const { error } = await supabase.from('tm_tasks').update(updateData).eq('id', taskId)
       if (error) throw error
-
       await loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
-
     } catch (error) {
       console.error('Error updating stage status:', error)
-      toast({
-        title: "Error",
-        description: "Failed to update stage status.",
-        variant: "destructive"
-      })
+      toast({ title: "Error", description: "Failed to update stage status.", variant: "destructive" })
     }
   }, [handleStageStatusSave, tasks, stages, determineCurrentStage, loadTasksData, activeDepartmentTab, activeSubdepartmentTab])
 
@@ -1638,127 +1341,30 @@ export default function DepartmentTasksManager({
         onTaskAction?.(action)
     }
   }, [onTaskAction, refreshAllData])
+
   const renderCellContent = useCallback((row: any, task: any) => {
+    console.log('🔄 renderCellContent called:', {
+      rowType: row.type,
+      rowKey: row.key,
+      stageName: row.stage?.name,
+      taskId: task.id,
+      stageId: row.stage?.id
+    });
     const value = row.getValue ? row.getValue(task) : '';
-  
+
     if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
       return <span className="text-sm text-gray-400 italic">N/A</span>;
     }
-  
-    // Helper function to check if a value has meaningful data
-    const hasData = (val: any) => {
-      if (val === null || val === undefined || val === '' || val === 'N/A') return false;
-      if (typeof val === 'object' && val?.status === 'N/A') return false;
-      if (typeof val === 'string' && val.trim() === '') return false;
-      return true;
-    };
-  
-    // Helper function to save field data to database
-    const saveFieldData = async (newValue: string) => {
-      try {
-        if (row.type === 'field' && row.field) {
-          // For field data, we need to update the document's extracted_details
-          const linkedDocument = getDocumentForTaskStage(task, { ...row.stage, documents: [row.document] });
-          
-          if (linkedDocument) {
-            const updatedExtractedDetails = {
-              ...linkedDocument.extracted_details,
-              [row.field.fieldName]: newValue
-            };
-  
-            const { error } = await supabase
-              .from('uploaded_documents')
-              .update({ extracted_details: updatedExtractedDetails })
-              .eq('id', linkedDocument.id);
-  
-            if (error) throw error;
-  
-            toast({
-              title: "Success",
-              description: "Field updated successfully",
-              variant: "default"
-            });
-  
-            // Refresh data to show updated values
-            await refreshAllData();
-          }
-        } else if (row.type === 'stage') {
-          // For stage data, use the existing stage save handler
-          await enhancedHandleStageStatusSave(row.stage.id, task.id, newValue);
-        } else {
-          // For other field types, update the task directly
-          const updateData = getTaskUpdateData(row, newValue);
-          
-          if (updateData) {
-            const { error } = await supabase
-              .from('tm_tasks')
-              .update(updateData)
-              .eq('id', task.id);
-  
-            if (error) throw error;
-  
-            toast({
-              title: "Success",
-              description: "Data updated successfully",
-              variant: "default"
-            });
-  
-            await refreshAllData();
-          }
-        }
-      } catch (error) {
-        console.error('Error saving data:', error);
-        toast({
-          title: "Error",
-          description: "Failed to save changes",
-          variant: "destructive"
-        });
-      }
-    };
-
-    const getTaskUpdateData = (row: any, newValue: string) => {
-      const updateData: any = {};
-      
-      // Map row types to database fields
-      switch (row.key) {
-        case 'applicant_name':
-          updateData.applicant_name = newValue;
-          break;
-        case 'company':
-          // For company, we'd need to find the company ID by name
-          // This is more complex and might require a separate lookup
-          break;
-        case 'nationality':
-          updateData.nationality = newValue;
-          break;
-        case 'job_description':
-          updateData.job_description = newValue;
-          break;
-        // Add other mappings as needed
-        default:
-          console.warn('Unknown field type for update:', row.key);
-          return null;
-      }
-      
-      updateData.updated_at = new Date().toISOString();
-      return updateData;
-    };
-
-        // Helper function to render content with pencil icon for editable cells
-    const renderWithPencil = (content: JSX.Element, isEditable: boolean = true) => {
-      if (!hasData(value) || !isEditable) return content;
-
-      return (
-        <div className="flex items-center gap-2 group">
-          {content}
-          <Pencil className="h-3 w-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer" />
-        </div>
-      );
-    };
 
     if (row.type === 'stage' && row.stage && task.stages?.[row.stage.id]) {
       const stageData = task.stages[row.stage.id];
-      const content = (
+      console.log('📊 Stage data found:', {
+        stageName: row.stage.name,
+        stageData,
+        hasDate: !!stageData.date
+      });
+      
+      return (
         <div className="flex flex-col items-center gap-0.5">
           {stageData.date && (
             <span className="text-sm font-medium text-slate-800">
@@ -1767,7 +1373,43 @@ export default function DepartmentTasksManager({
           )}
         </div>
       );
-      return renderWithPencil(content);
+    }
+    if (row.type === 'stage') {
+      console.log('🎛️ Rendering EditableStageCell:', {
+        stageName: row.stage?.name,
+        stageId: row.stage?.id,
+        taskId: task.id,
+        requiresUpload: row.stage?.requires_upload !== false
+      });
+  
+      const requiresUpload = row.stage?.requires_upload !== false;
+      
+      return (
+        <EditableStageCell
+          key={row.stage.id}
+          stage={row.stage}
+          task={task}
+          value={task.stages?.[row.stage.id]?.status}
+          onSave={enhancedHandleStageStatusSave}
+          onDocumentUpload={handleStageDocumentUpload}
+          onShowDocuments={handleViewDocument}
+          requiresUpload={requiresUpload}
+          onAutomationClick={(e) => {
+            e.stopPropagation();
+            console.log('⚡ Automation clicked for stage:', row.stage.name);
+            if (row.stage.automation) {
+              setSelectedAutomation({
+                ...row.stage.automation,
+                stageId: row.stage.id,
+                taskId: task.id
+              });
+              setAutomationDialogOpen(true);
+            }
+          }}
+          getKycFields={getKycFields}
+          allDocuments={allDocuments}
+        />
+      );
     }
 
     if (row.type === 'field') {
@@ -1776,290 +1418,109 @@ export default function DepartmentTasksManager({
 
       if (row.field?.fieldType?.toLowerCase() === 'date') {
         const formattedDate = formatDateValue(fieldValue);
-        const content = (
+        return (
           <div className="flex items-center gap-1">
             <span className="text-sm text-slate-700" title={formattedDate}>{formattedDate}</span>
             {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
           </div>
         );
-        return renderWithPencil(content);
       }
-
-      const content = (
+      return (
         <div className="flex items-center gap-1">
           <span className="text-sm text-gray-700">{fieldValue}</span>
           {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
         </div>
       );
-      return renderWithPencil(content);
     }
 
-    const EditableCell = ({ children, onSave, fieldType = 'text' }: { 
-      children: React.ReactNode, 
-      onSave: (value: string) => Promise<void>,
-      fieldType?: string 
-    }) => {
-      const [isEditing, setIsEditing] = useState(false);
-      const [editValue, setEditValue] = useState('');
-      const [isLoading, setIsLoading] = useState(false);
-      const inputRef = useRef<HTMLInputElement>(null);
-  
-      const startEditing = () => {
-        const currentValue = typeof value === 'object' ? value.value || '' : value || '';
-        setEditValue(currentValue.toString());
-        setIsEditing(true);
-      };
-  
-      const handleSave = async () => {
-        if (!editValue.trim() && fieldType !== 'text') return;
-        
-        try {
-          setIsLoading(true);
-          await onSave(editValue);
-          setIsEditing(false);
-        } catch (error) {
-          console.error('Save error:', error);
-        } finally {
-          setIsLoading(false);
-        }
-      };
-  
-      const handleCancel = () => {
-        setIsEditing(false);
-        setEditValue('');
-      };
-  
-      const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          handleSave();
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          handleCancel();
-        }
-      };
-  
-      useEffect(() => {
-        if (isEditing && inputRef.current) {
-          inputRef.current.focus();
-          inputRef.current.select();
-        }
-      }, [isEditing]);
-  
-      if (isEditing) {
-        return (
-          <div className="flex items-center gap-2 min-w-[150px]" onClick={(e) => e.stopPropagation()}>
-            <Input
-              ref={inputRef}
-              type={fieldType}
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="text-sm h-8"
-              disabled={isLoading}
-            />
-            <div className="flex gap-1">
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 w-6 p-0 text-green-600 hover:text-green-800 hover:bg-green-100"
-                onClick={handleSave}
-                disabled={isLoading}
-              >
-                <Check className="h-3 w-3" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 w-6 p-0 text-red-600 hover:text-red-800 hover:bg-red-100"
-                onClick={handleCancel}
-                disabled={isLoading}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </div>
-          </div>
-        );
-      }
-  
-      return (
-        <div className="flex items-center gap-2 group cursor-pointer" onClick={startEditing}>
-          {children}
-          {hasData(value) && (
-            <Pencil className="h-3 w-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-          )}
-        </div>
-      );
-    };
-  
-    // Determine field type for input
-    const getFieldType = () => {
-      if (row.field?.fieldType?.toLowerCase() === 'date') return 'date';
-      if (row.type === 'date') return 'date';
-      return 'text';
-    };
-  
-    if (row.type === 'stage' && row.stage && task.stages?.[row.stage.id]) {
-      const stageData = task.stages[row.stage.id];
-      const content = (
-        <div className="flex flex-col items-center gap-0.5">
-          {stageData.date && (
-            <span className="text-sm font-medium text-slate-800">
-              {formatDateValue(stageData.date)}
-            </span>
-          )}
-        </div>
-      );
-      
-      return (
-        <EditableCell onSave={saveFieldData} fieldType="date">
-          {content}
-        </EditableCell>
-      );
-    }
-  
-    if (row.type === 'field') {
-      const fieldValue = typeof value === 'object' ? value.value : value;
-      const isOldDoc = typeof value === 'object' ? value.isOldDocument : false;
-  
-      if (row.field?.fieldType?.toLowerCase() === 'date') {
-        const formattedDate = formatDateValue(fieldValue);
-        const content = (
-          <div className="flex items-center gap-1">
-            <span className="text-sm text-slate-700" title={formattedDate}>{formattedDate}</span>
-            {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
-          </div>
-        );
-        
-        return (
-          <EditableCell onSave={saveFieldData} fieldType="date">
-            {content}
-          </EditableCell>
-        );
-      }
-  
-      const content = (
-        <div className="flex items-center gap-1">
-          <span className="text-sm text-gray-700">{fieldValue}</span>
-          {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
-        </div>
-      );
-      
-      return (
-        <EditableCell onSave={saveFieldData} fieldType="text">
-          {content}
-        </EditableCell>
-      );
-    }
-  
     switch (row.type) {
-      case 'badge':
-        const badgeContent = <span className="text-sm font-semibold">{value}</span>;
-        return (
-          <EditableCell onSave={saveFieldData} fieldType="text">
-            {badgeContent}
-          </EditableCell>
-        );
-  
-      case 'date':
-        const dateContent = <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
-        return (
-          <EditableCell onSave={saveFieldData} fieldType="date">
-            {dateContent}
-          </EditableCell>
-        );
-  
-      case 'stat':
-        const statContent = <span className="text-sm font-semibold">{value}</span>;
-        return (
-          <EditableCell onSave={saveFieldData} fieldType="text">
-            {statContent}
-          </EditableCell>
-        );
-        case 'stage':
-          // ... existing stage logic remains the same
-          const isStageApplicable = !row.stage.targetEntities || row.stage.targetEntities.length === 0 ||
-            row.stage.targetEntities.some((target: any) => {
-              const matchesClass = target.class_id?.toString() === task.class_id?.toString();
-              const matchesSubclass = !target.subclass_id ||
-                target.subclass_id.toString() === task.subclass_id?.toString();
-              return matchesClass && matchesSubclass;
-            });
-    
-          if (!isStageApplicable) {
-            return <span className="text-sm text-gray-400 italic">N/A</span>;
-          }
-    
-          const requiresUpload = row.stage.requires_upload !== false;
-    
-          return (
-            <EditableStageCell
-              key={row.stage.id}
-              stage={row.stage}
-              task={task}
-              value={task.stages?.[row.stage.id]?.status}
-              onSave={enhancedHandleStageStatusSave}
-              onDocumentUpload={handleStageDocumentUpload}
-              onShowDocuments={handleViewDocument}
-              requiresUpload={requiresUpload}
-              onAutomationClick={(e) => {
-                e.stopPropagation();
-                if (row.stage.automation) {
-                  setSelectedAutomation({
-                    ...row.stage.automation,
-                    stageId: row.stage.id,
-                    taskId: task.id
-                  });
-                  setAutomationDialogOpen(true);
-                }
-              }}
-              getKycFields={getKycFields}
-              allDocuments={allDocuments}
-            />
-          );
-    
-        case 'document':
-          // Document type cells - no pencil icon as requested
-          const isDocApplicable = !row.document?.targetEntities || row.document.targetEntities.length === 0 ||
-            row.document.targetEntities.some((target: any) => {
-              const matchesClass = target.class_id?.toString() === task.class_id?.toString();
-              const matchesSubclass = !target.subclass_id ||
-                target.subclass_id.toString() === task.subclass_id?.toString();
-              return matchesClass && matchesSubclass;
-            });
-    
-          if (!isDocApplicable) {
-            return <span className="text-sm text-gray-400 italic">N/A</span>;
-          }
-    
-          return (
-            <EditableStageCell
-              key={`${row.stage.id}_${row.document?.id}`}
-              stage={row.stage}
-              task={task}
-              value={value}
-              isDocumentRow={true}
-              documentData={row.document}
-              onSave={enhancedHandleStageStatusSave}
-              onDocumentUpload={handleStageDocumentUpload}
-              onShowDocuments={(task, stage) => handleViewDocument(task, { ...stage, documents: [row.document] })}
-              onAutomationClick={(e, docData) => {
-                e.stopPropagation();
-                if (docData?.automation) {
-                  setSelectedAutomation({
-                    ...docData.automation,
-                    documentId: docData.id,
-                    stageId: row.stage.id,
-                    taskId: task.id
-                  });
-                  setAutomationDialogOpen(true);
-                }
-              }}
-              getKycFields={getKycFields}
-              allDocuments={allDocuments}
-            />
-          );
+      case 'badge': return <span className="text-sm font-semibold">{value}</span>
+      case 'date': return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
+      case 'stat': return <span className="text-sm font-semibold">{value}</span>
 
+      case 'stage':
+        // Check if stage is applicable to task
+        const isStageApplicable = !row.stage.targetEntities || row.stage.targetEntities.length === 0 ||
+          row.stage.targetEntities.some((target: any) => {
+            const matchesClass = target.class_id?.toString() === task.class_id?.toString();
+            const matchesSubclass = !target.subclass_id ||
+              target.subclass_id.toString() === task.subclass_id?.toString();
+            return matchesClass && matchesSubclass;
+          });
+
+        if (!isStageApplicable) {
+          return <span className="text-sm text-gray-400 italic">N/A</span>;
+        }
+
+        // Determine if this stage requires upload based on stage configuration
+        const requiresUpload = row.stage.requires_upload !== false; // Default to true if not specified
+
+        return (
+          <EditableStageCell
+            key={row.stage.id}
+            stage={row.stage}
+            task={task}
+            value={task.stages?.[row.stage.id]?.status}
+            onSave={enhancedHandleStageStatusSave}
+            onDocumentUpload={handleStageDocumentUpload}
+            onShowDocuments={handleViewDocument}
+            requiresUpload={requiresUpload}
+            onAutomationClick={(e) => {
+              e.stopPropagation();
+              if (row.stage.automation) {
+                setSelectedAutomation({
+                  ...row.stage.automation,
+                  stageId: row.stage.id,
+                  taskId: task.id
+                });
+                setAutomationDialogOpen(true);
+              }
+            }}
+            getKycFields={getKycFields}
+            allDocuments={allDocuments}
+          />
+        )
+      case 'document':
+        // Check if document is applicable to task
+        const isDocApplicable = !row.document?.targetEntities || row.document.targetEntities.length === 0 ||
+          row.document.targetEntities.some((target: any) => {
+            const matchesClass = target.class_id?.toString() === task.class_id?.toString();
+            const matchesSubclass = !target.subclass_id ||
+              target.subclass_id.toString() === task.subclass_id?.toString();
+            return matchesClass && matchesSubclass;
+          });
+
+        if (!isDocApplicable) {
+          return <span className="text-sm text-gray-400 italic">N/A</span>;
+        }
+
+        return (
+          <EditableStageCell
+            key={`${row.stage.id}_${row.document?.id}`}
+            stage={row.stage}
+            task={task}
+            value={value}
+            isDocumentRow={true}
+            documentData={row.document}
+            onSave={enhancedHandleStageStatusSave}
+            onDocumentUpload={handleStageDocumentUpload}
+            onShowDocuments={(task, stage) => handleViewDocument(task, { ...stage, documents: [row.document] })}
+            onAutomationClick={(e, docData) => {
+              e.stopPropagation();
+              if (docData?.automation) {
+                setSelectedAutomation({
+                  ...docData.automation,
+                  documentId: docData.id,
+                  stageId: row.stage.id,
+                  taskId: task.id
+                });
+                setAutomationDialogOpen(true);
+              }
+            }}
+            getKycFields={getKycFields}
+            allDocuments={allDocuments}
+          />
+        )
       case 'actions': return (
         <div className="flex items-center justify-center gap-1">
           <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100" title="Edit Task"><Edit className="h-4 w-4" /></Button>
@@ -2144,15 +1605,10 @@ export default function DepartmentTasksManager({
           </DropdownMenu>
         </div>
       )
-      default: 
-      const defaultContent = <span className="text-sm text-slate-800">{value}</span>;
-      return (
-        <EditableCell onSave={saveFieldData} fieldType="text">
-          {defaultContent}
-        </EditableCell>
-      );
-  }
-}, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getKycFields, refreshAllData, getDocumentForTaskStage]);
+      default: return <span className="text-sm text-slate-800">{value}</span>
+    }
+  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getKycFields])
+
   const loadRows = useCallback(async (tasks: any[]) => {
     if (!tasks || tasks.length === 0) return;
     setLoading(true);
@@ -2602,21 +2058,71 @@ export default function DepartmentTasksManager({
     )
   }
 
+  const activeDept = departments.find(d => d.id.toString() === activeDepartmentTab);
+  const activeSubDept = defaultSubdepartments.find(s => s.id.toString() === activeSubdepartmentTab);
+  const activeStatus = {
+    'enquiries': 'Enquiries',
+    'wip-stages': 'WIP Stages',
+    'completed': 'Completed'
+  }[activeSubTab] || '';
+
+  let wipFilter = '';
+  if (activeSubTab === 'wip-stages') {
+    wipFilter = {
+      'all': 'All Follow-ups',
+      'bcl': 'BCL Follow-up',
+      'officer': 'Officer Follow-up',
+      'client': 'Client Follow-up'
+    }[activeFollowUpFilter] || '';
+  }
+
+  const breadcrumbParts = [
+    activeDept?.name,
+    activeSubDept?.name || (defaultSubdepartments.length > 0 ? 'All Subdepartments' : null),
+    activeStatus,
+    (activeSubTab === 'wip-stages' ? wipFilter : null)
+  ].filter(Boolean);
+
   return (
     <div className="flex-1 space-y-2 p-2 bg-slate-50/30 min-h-screen">
+      <div className="flex justify-between items-center px-1">
+        {!areTabsVisible && (
+           <div className="text-sm text-slate-600 font-medium flex items-center gap-2 flex-wrap">
+            <span className="font-bold text-slate-800">Viewing:</span>
+            {breadcrumbParts.map((part, index) => (
+              <React.Fragment key={index}>
+                <span className="bg-slate-100 px-2 py-1 rounded-md">{part}</span>
+                {index < breadcrumbParts.length - 1 && <ChevronRight className="h-4 w-4 text-slate-400" />}
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+         <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => setAreTabsVisible(!areTabsVisible)}
+          className={`ml-auto transition-all ${!areTabsVisible ? 'bg-slate-100' : ''}`}
+          >
+          {areTabsVisible ? <PanelLeftClose className="h-4 w-4 mr-2" /> : <PanelLeftOpen className="h-4 w-4 mr-2" />}
+          {areTabsVisible ? 'Hide Navigation' : 'Show Navigation'}
+        </Button>
+      </div>
+
       <Tabs value={activeDepartmentTab} onValueChange={setActiveDepartmentTab} className="space-y-2">
-        <TabsList className="grid w-full rounded-lg p-1 shadow-sm" style={{ gridTemplateColumns: `repeat(${departments.length}, 1fr)` }}>
-          {departments.map(dept => (
-            <TabsTrigger key={dept.id} value={dept.id.toString()} className="text-sm font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-              {dept.name}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        {areTabsVisible && (
+          <TabsList className="grid w-full rounded-lg p-1 shadow-sm" style={{ gridTemplateColumns: `repeat(${departments.length}, 1fr)` }}>
+            {departments.map(dept => (
+              <TabsTrigger key={dept.id} value={dept.id.toString()} className="text-sm font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                {dept.name}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        )}
 
         {departments.map(dept => (
           <TabsContent key={dept.id} value={dept.id.toString()} className="space-y-4">
             {/* Subdepartment Tabs */}
-            {defaultSubdepartments.length > 0 && (
+            {areTabsVisible && defaultSubdepartments.length > 0 && (
               <Tabs value={activeSubdepartmentTab} onValueChange={setActiveSubdepartmentTab}>
                 <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
                   <TabsTrigger value="" className="text-sm font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">
@@ -2632,17 +2138,19 @@ export default function DepartmentTasksManager({
             )}
 
             <Tabs value={activeSubTab} onValueChange={setActiveSubTab}>
-              <TabsList className="rounded-lg p-1 shadow-sm">
-                <TabsTrigger value="enquiries" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                  Enquiries <Badge variant="secondary">{enquiryTasks.length}</Badge>
-                </TabsTrigger>
-                <TabsTrigger value="wip-stages" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                  WIP Stages <Badge variant="secondary">{wipTasks.length}</Badge>
-                </TabsTrigger>
-                <TabsTrigger value="completed" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                  Completed <Badge variant="secondary">{completedTasks.length}</Badge>
-                </TabsTrigger>
-              </TabsList>
+              {areTabsVisible && (
+                <TabsList className="rounded-lg p-1 shadow-sm">
+                  <TabsTrigger value="enquiries" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                    Enquiries <Badge variant="secondary">{enquiryTasks.length}</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="wip-stages" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                    WIP Stages <Badge variant="secondary">{wipTasks.length}</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="completed" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                    Completed <Badge variant="secondary">{completedTasks.length}</Badge>
+                  </TabsTrigger>
+                </TabsList>
+              )}
 
               {/* All Tabs Content */}
               {['enquiries', 'wip-stages', 'completed'].map(tabValue => {
@@ -2668,7 +2176,7 @@ export default function DepartmentTasksManager({
                               Showing {tasksToRender.length} {globalSearchTerm ? 'filtered ' : ''}tasks {isTransposedView ? '(Transposed View)' : '(Standard View)'}
                             </CardDescription>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap justify-end">
                             {tabValue === 'enquiries' && (
                               <Button
                                 className="flex items-center gap-2"
@@ -2698,13 +2206,12 @@ export default function DepartmentTasksManager({
                               )}
                             </div>
 
-                            {isTransposedView && (
-                              <>
-                                <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={expandAll}><Plus className="h-4 w-4" />Expand All</Button>
-                                <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={collapseAll}><Minus className="h-4 w-4" />Collapse All</Button>
-                              </>
+                            {isTransposedView && !activeReport && (
+                              <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => isAllExpanded ? collapseAll() : expandAll()}>
+                                {isAllExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                                {isAllExpanded ? 'Collapse All' : 'Expand All'}
+                              </Button>
                             )}
-
                             <Button
                               variant="outline"
                               size="sm"
@@ -2824,6 +2331,10 @@ export default function DepartmentTasksManager({
                               </PopoverContent>
                             </Popover>
 
+                            <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => setIsReportDialogOpen(true)}>
+                              <FileText className="h-4 w-4" /> Reports
+                            </Button>
+
                             <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(tasksToRender, title)}>
                               <Download className="h-4 w-4" />Export to Excel
                             </Button>
@@ -2834,8 +2345,8 @@ export default function DepartmentTasksManager({
                           </div>
                         </div>
 
-                        {isWipTab && (
-                          <div className="space-y-4">
+                        {isWipTab && areTabsVisible && (
+                          <div className="space-y-4 pt-4">
                             <Tabs value={activeFollowUpFilter} onValueChange={setActiveFollowUpFilter}>
                               <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
                                 <TabsTrigger value="all" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">All <Badge variant="outline">{wipTasks.length}</Badge></TabsTrigger>
@@ -2855,7 +2366,41 @@ export default function DepartmentTasksManager({
                         )}
                       </CardHeader>
                       <CardContent className="p-2 sm:p-4">
-                        {isTransposedView ? (
+                      {activeReport ? (
+                          <div>
+                            <div className="flex items-center justify-between mb-4 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                              <div>
+                                <h3 className="font-semibold text-blue-800">Viewing Report: {activeReport.name}</h3>
+                                <p className="text-sm text-blue-700">Displaying columns as defined in the selected report.</p>
+                              </div>
+                              <Button variant="outline" onClick={() => setActiveReport(null)}>
+                                <X className="mr-2 h-4 w-4" /> Back to Overall Table
+                              </Button>
+                            </div>
+                            <ReportTable
+                              tasks={tasksToRender}
+                              report={activeReport}
+                              companies={companies}
+                              getStaffName={getStaffName}
+                              getDocumentForTaskStage={getDocumentForTaskStage}
+                              loading={dataLoading.tasks}
+                              stages={stages}
+                              kycDocuments={kycDocuments}
+                              tableHeaders={currentTableHeaders}
+                              enhancedTasksData={enhancedTasksData}
+                              taskDependants={taskDependants}
+                              expandedDependants={expandedDependants}
+                              getTaskHierarchy={getTaskHierarchy}
+                              getEnhancedImmigrationStatus={getEnhancedImmigrationStatus}
+                              getCurrentStageStatus={getCurrentStageStatus}
+                              renderImmigrationStatusCell={renderImmigrationStatusCell}
+                              renderCurrentStageStatusCell={renderCurrentStageStatusCell}
+                              toggleDependantsExpansion={toggleDependantsExpansion}
+                              setLinkingTask={setLinkingTask}
+                              setIsLinkDialogOpen={setIsLinkDialogOpen}
+                            />
+                          </div>
+                        ) : isTransposedView ? (
                           <EnhancedTable
                             tasks={tasksToRender}
                             tableType={title}
@@ -2982,6 +2527,7 @@ export default function DepartmentTasksManager({
         departments={departments}
         users={Array.from(tmUsers.values())}
         officers={Array.from(tmUsers.values()).filter(u => u.role === 'officer')}
+        allDocuments={allDocuments} 
         onTaskUpdate={handleTaskUpdate}
       />
 
@@ -3257,6 +2803,17 @@ export default function DepartmentTasksManager({
           </div>
         </DialogContent>
       </Dialog>
+
+      <MemorizedReportDialog
+        open={isReportDialogOpen}
+        onOpenChange={setIsReportDialogOpen}
+        department={departments.find(d => d.id.toString() === activeDepartmentTab) || null}
+        stages={stages}
+        kycDocuments={kycDocuments}
+        onApplyReport={handleApplyReport}
+        tableHeaders={currentTableHeaders}
+      />
+
     </div>
   )
 }
