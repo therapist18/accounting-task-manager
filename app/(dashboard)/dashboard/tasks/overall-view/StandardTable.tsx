@@ -270,7 +270,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
           <TableHeader className="sticky top-0 z-20 bg-slate-100/80 backdrop-blur-sm">
             <TableRow className="group border-b-2 border-slate-300">
               <TableHead className="sticky left-0 z-30 bg-blue-600 text-white border-r border-b border-slate-300 font-semibold text-sm p-2 text-center w-12">#</TableHead>
-              <TableHead className="sticky left-12 z-30 bg-blue-600 text-white border-r border-b border-slate-300 font-semibold text-sm p-2 min-w-[250px] text-left">Applicant / Dependant</TableHead>
+              <TableHead className="sticky left-6 z-30 bg-blue-600 text-white border-r border-b border-slate-300 font-semibold text-sm p-2 min-w-[250px] text-left">Applicant / Dependant</TableHead>
               {allColumns.map((column) => (
                 <TableHead key={column.key} className={`text-center text-sm p-2 border-r border-b border-slate-300 w-[150px] min-w-[150px] max-w-[150px] ${column.isSubSubColumn ? 'bg-slate-100 text-slate-700' : column.isSubColumn ? 'bg-slate-50 text-slate-700' : 'bg-blue-600 text-white'}`}>
                   <div className={`flex flex-col items-center justify-center gap-1 h-full`}>
@@ -290,7 +290,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
               taskRows.map((row, rowIndex) => (
                 <TableRow key={row.key} className={`h-14 align-middle group ${row.type === 'dependant' ? 'bg-orange-50/40' : 'bg-white'} hover:bg-blue-50/50`}>
                   <TableCell className={`sticky left-0 z-10 border-r border-b border-slate-200 font-medium text-sm p-2 text-center w-12 ${row.type === 'dependant' ? 'bg-orange-50/40' : 'bg-white'} group-hover:bg-blue-50/50`}>{rowIndex + 1}</TableCell>
-                  <TableCell className={`sticky left-12 z-10 border-r border-b border-slate-200 p-2 min-w-[250px] ${row.type === 'dependant' ? 'bg-orange-50/40' : 'bg-white'} group-hover:bg-blue-50/50`}>
+                  <TableCell className={`sticky left-6 z-10 border-r border-b border-slate-200 p-2 min-w-[250px] ${row.type === 'dependant' ? 'bg-orange-50/40' : 'bg-white'} group-hover:bg-blue-50/50`}>
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-3">
                         {row.type === 'dependant' && <div className="w-2.5 h-2.5 bg-orange-500 rounded-full flex-shrink-0" title="Dependant" />}

@@ -221,15 +221,17 @@ export const getEnhancedImmigrationStatus = (
     daysRemaining: isFuture ? daysRemaining : null
   };
 };
-
 export const getCurrentStageStatus = (
   task: any,
   stages: any[],
   departments: any[],
-  determineCurrentStage: any
+  allDocuments: any[] = []
 ) => {
-  const currentStage = determineCurrentStage(task, stages);
-  if (!currentStage) {
+  console.log('🔍 getCurrentStageStatus called for task:', task.id, 'applicant:', task.applicant_name);
+  
+  // Early return if no stages or task
+  if (!stages.length || !task) {
+    console.log('❌ No stages or task found');
     return {
       stageName: 'No Stage',
       stageStatus: 'N/A',
@@ -237,30 +239,238 @@ export const getCurrentStageStatus = (
     };
   }
 
-  const department = departments.find(d => d.id === task.department_id);
-  const subdepartment = department?.tm_subdepartments?.find(s => s.id === task.subdepartment_id);
-
-  let stageStatus = currentStage.status || 'Pending';
-
-  const departmentStage = department?.stages?.find(s => s.id === currentStage.id);
-  if (departmentStage?.status) {
-    stageStatus = departmentStage.status;
+  // Sort stages by order_num for proper sequence
+  const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+  console.log('📋 Sorted stages:', sortedStages.map(s => ({ id: s.id, name: s.name, order: s.order_num })));
+  
+  // Helper function to check if a stage is truly completed based on ACTUAL data
+  const isStageCompleted = (stage: any) => {
+    console.log(`🔄 Checking completion for stage: ${stage.name} (${stage.id})`);
+    
+    // Check if stage has documents requirement
+    const requiresDocuments = stage.documents && stage.documents.length > 0;
+    console.log('📄 Stage requires documents:', requiresDocuments);
+    
+    if (requiresDocuments) {
+      console.log('🔍 Checking document requirements...');
+      
+      // For document-based stages, check for linked documents
+      const linkedDocumentData = task.source_document_id?.[stage.id];
+      console.log('🔗 Linked document data:', linkedDocumentData);
+      const hasLinkedDocument = !!linkedDocumentData;
+      console.log('📎 Has linked document:', hasLinkedDocument);
+      
+      if (!hasLinkedDocument) {
+        console.log('❌ Missing linked document for upload stage');
+        return false;
+      }
+      
+      // Verify the linked document exists and is valid
+      if (allDocuments.length > 0) {
+        const documentId = typeof linkedDocumentData === 'string' 
+          ? linkedDocumentData 
+          : linkedDocumentData.id;
+        console.log('🔍 Looking for document ID:', documentId);
+        
+        const linkedDoc = allDocuments.find(doc => doc.id === documentId);
+        console.log('📋 Found linked document:', linkedDoc ? { 
+          id: linkedDoc.id, 
+          indicator: linkedDoc.indicator, 
+          created_at: linkedDoc.created_at,
+          document_id: linkedDoc.document_id 
+        } : 'NOT FOUND');
+        
+        // Document should exist and not be marked as indicator-only
+        if (!linkedDoc || linkedDoc.indicator === true) {
+          console.log('❌ Document not found or is indicator-only');
+          return false;
+        }
+        
+        // Check if document is older than task (which makes it invalid)
+        if (task.created_at && linkedDoc.created_at) {
+          const docDate = new Date(linkedDoc.created_at);
+          const taskDate = new Date(task.created_at);
+          const isOldDoc = docDate < taskDate;
+          console.log('📅 Document age check:', {
+            docDate: docDate.toISOString(),
+            taskDate: taskDate.toISOString(),
+            isOldDoc
+          });
+          if (isOldDoc) {
+            console.log('❌ Document is older than task');
+            return false;
+          }
+        }
+      }
+      
+      console.log('✅ Stage with documents is completed (has valid linked document)');
+      return true;
+    } else {
+      // For stages without document requirements, check stored stage data
+      const stageData = task.stages?.[stage.id];
+      const hasDateOrStatus = stageData && (
+        stageData.status === 'completed' || 
+        stageData.date || 
+        stageData.completedAt
+      );
+      
+      console.log('✅ Stage without documents completion check:', {
+        hasStoredData: !!stageData,
+        hasDateOrStatus,
+        stageData
+      });
+      
+      return hasDateOrStatus;
+    }
+  };
+  
+  // Find the last completed stage using ACTUAL completion detection
+  let lastCompletedStage = null;
+  let lastCompletedIndex = -1;
+  
+  console.log('🔍 Checking all stages for completion using ACTUAL data...');
+  for (let i = 0; i < sortedStages.length; i++) {
+    const stage = sortedStages[i];
+    
+    console.log(`\n--- Stage ${i + 1}: ${stage.name} ---`);
+    const completed = isStageCompleted(stage);
+    
+    if (completed) {
+      console.log(`✅ Stage ${stage.name} is COMPLETED`);
+      lastCompletedStage = stage;
+      lastCompletedIndex = i;
+    } else {
+      console.log(`❌ Stage ${stage.name} is NOT completed`);
+    }
+  }
+  
+  console.log('\n🎯 Final completion analysis:');
+  console.log('Last completed stage:', lastCompletedStage?.name || 'NONE');
+  console.log('Last completed index:', lastCompletedIndex);
+  
+  // Determine current stage based on completion status
+  let currentStage;
+  let stageStatus = 'Pending'; // Default fallback
+  
+  if (lastCompletedStage === null) {
+    // No stages completed - current stage is the first applicable stage
+    console.log('🎯 No stages completed, finding first applicable stage...');
+    currentStage = findFirstApplicableStage(sortedStages, task, departments) || sortedStages[0];
+    // Use the predefined status from the stage configuration
+    stageStatus = currentStage?.status || 'Pending';
+    console.log('📍 Current stage (first):', currentStage?.name, 'Status:', stageStatus);
+  } else {
+    // Check if there's a next stage after the last completed one
+    const nextStageIndex = lastCompletedIndex + 1;
+    console.log('🎯 Last completed stage index:', lastCompletedIndex, 'Next stage index:', nextStageIndex);
+    
+    if (nextStageIndex < sortedStages.length) {
+      // Find the next applicable stage
+      console.log('🔍 Finding next applicable stage...');
+      currentStage = findNextApplicableStage(
+        lastCompletedStage, 
+        sortedStages.slice(nextStageIndex), 
+        task, 
+        departments
+      ) || sortedStages[nextStageIndex];
+      
+      // Use the predefined status from the stage configuration
+      stageStatus = currentStage?.status || 'Pending';
+      console.log('📍 Current stage (next):', currentStage?.name, 'Status:', stageStatus);
+      
+      // Check if the current stage is actually completed
+      if (currentStage) {
+        const isCurrentStageCompleted = isStageCompleted(currentStage);
+        if (isCurrentStageCompleted) {
+          stageStatus = 'Completed';
+          console.log('📊 Current stage is actually completed');
+        }
+      }
+    } else {
+      // All stages completed - current stage is the last stage
+      console.log('🎯 All stages completed');
+      currentStage = lastCompletedStage;
+      stageStatus = 'Completed';
+    }
+  }
+  
+  if (!currentStage) {
+    console.log('❌ No current stage determined');
+    return {
+      stageName: 'No Stage',
+      stageStatus: 'N/A',
+      stageFollowUp: null
+    };
   }
 
-  const subdepartmentStage = subdepartment?.stages?.find(s => s.stage_id === currentStage.id);
-  if (!stageStatus && subdepartmentStage?.status) {
-    stageStatus = subdepartmentStage.status;
-  }
-
-  if (!stageStatus && task.stages?.[currentStage.id]?.status) {
-    stageStatus = task.stages[currentStage.id].status;
-  }
+  console.log('\n🏁 FINAL RESULT:');
+  console.log('Current Stage:', currentStage.name);
+  console.log('Stage Status:', stageStatus);
+  console.log('Stage Follow-up:', currentStage.follow_up);
 
   return {
-    stageName: currentStage.name,
+    stageName: currentStage.name || 'Unknown Stage',
     stageStatus: stageStatus,
     stageFollowUp: currentStage.follow_up || null
   };
+};
+
+// Helper function to find the first applicable stage
+const findFirstApplicableStage = (sortedStages: any[], task: any, departments: any[]): any => {
+  for (const stage of sortedStages) {
+    if (isStageApplicableToTask(stage, task, departments)) {
+      return stage;
+    }
+  }
+  return null;
+};
+
+// Updated helper function to find the next applicable stage
+const findNextApplicableStage = (currentStage: any, remainingStages: any[], task: any, departments: any[]): any => {
+  for (const stage of remainingStages) {
+    if (isStageApplicableToTask(stage, task, departments)) {
+      return stage;
+    }
+  }
+  return null;
+};
+
+// Helper function to check if a stage is applicable to a task
+const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boolean => {
+  try {
+    if (!task || !departments.length) return true;
+
+    const dept = departments.find(d => d.id === task.department?.id || d.id === task.department_id);
+    if (!dept) return true;
+
+    const subdept = dept.tm_subdepartments?.find(s => 
+      s.id === task.subdepartment?.id || s.id === task.subdepartment_id
+    );
+
+    // Check subdepartment level applicability
+    if (subdept) {
+      const subdeptStage = subdept.stages?.find(s => s.stage_id === stage.id);
+      if (subdeptStage && subdeptStage.applicable === false) return false;
+
+      // Check class level applicability
+      if (task.class_id) {
+        const cls = subdept.classes?.find(c => c.id.toString() === task.class_id.toString());
+        if (cls) {
+          const classStage = cls.stages?.find(s => s.stage_id === stage.id);
+          if (classStage && classStage.applicable === false) return false;
+        }
+      }
+    }
+
+    // Check department level applicability
+    const deptStage = dept.stages?.find(s => s.stage_id === stage.id);
+    if (deptStage && deptStage.applicable === false) return false;
+
+    return true;
+  } catch (error) {
+    console.error('Error in isStageApplicableToTask:', error);
+    return true;
+  }
 };
 
 export const renderImmigrationStatusCell = (

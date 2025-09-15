@@ -30,6 +30,7 @@ interface EditableStageCellProps {
   isDocumentRow?: boolean
   documentData?: any
   onAutomationClick?: (e: React.MouseEvent, documentData?: any) => void
+  departments?: any[]
 }
 
 // Helper function to check if document is older than task creation
@@ -108,43 +109,60 @@ const isDocumentApplicable = (doc: any, task: any): boolean => {
   return false;
 };
 
-// Helper function to check if a stage is applicable to the current task
+// Helper function to check if a stage is applicable to a task
 const isStageApplicableToTask = (stage: any, task: any, departments: any[] = []): boolean => {
   try {
-    if (!task) return false;
+    if (!task || !stage) return false;
 
+    // If no departments data available, assume applicable (fallback)
     if (!departments.length) return true;
 
-    const dept = departments.find(d => d?.id === task.department?.id || d?.id === task.department);
+    const dept = departments.find(d => d?.id === task.department?.id || d?.id === task.department_id);
     if (!dept) return false;
 
     const subdept = dept.tm_subdepartments?.find((s: any) =>
-      s?.id === task.subdepartment?.id || s?.id === task.subdepartment
+      s?.id === task.subdepartment?.id || s?.id === task.subdepartment_id
     );
 
-    if (task.subdepartment && !subdept) return false;
+    if (!subdept) return false;
 
-    if (!task.subdepartment) {
-      const deptStage = dept.stages?.find((s: any) => s.stage_id === stage.id);
-      return deptStage ? deptStage.applicable !== false : true;
-    }
-
+    // Check subdepartment level applicability first
     const subdeptStage = subdept.stages?.find((s: any) => s.stage_id === stage.id);
     if (subdeptStage && subdeptStage.applicable === false) return false;
 
+    // If task has a class, check class-level applicability
     if (task.class_id) {
       const cls = subdept.classes?.find((c: any) =>
-        c?.id?.toString() === task.class_id?.toString() ||
-        c?.id === task.class_id
+        c?.id?.toString() === task.class_id?.toString()
       );
 
       if (cls) {
         const classStage = cls.stages?.find((s: any) => s.stage_id === stage.id);
-        if (classStage && classStage.applicable === false) return false;
+        // If class stage exists and is explicitly marked as not applicable, return false
+        if (classStage && classStage.applicable === false) {
+          return false;
+        }
+        // If class stage exists and is explicitly marked as applicable, return true
+        if (classStage && classStage.applicable === true) {
+          return true;
+        }
+        // If no class stage configuration exists, fall back to subdepartment level
       }
     }
 
-    return true;
+    // If subdepartment stage exists and is explicitly marked as applicable, return true
+    if (subdeptStage && subdeptStage.applicable === true) {
+      return true;
+    }
+
+    // Check department level applicability as final fallback
+    const deptStage = dept.stages?.find((s: any) => s.stage_id === stage.id);
+    if (deptStage) {
+      return deptStage.applicable !== false;
+    }
+
+    // If no explicit configuration found at any level, default to not applicable
+    return false;
   } catch (error) {
     console.error('Error in isStageApplicableToTask:', error);
     return false;
@@ -162,7 +180,8 @@ export default function EditableStageCell({
   allDocuments = [],
   isDocumentRow = false,
   documentData = null,
-  onAutomationClick
+  onAutomationClick,
+  departments = [],
 }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
@@ -1119,6 +1138,15 @@ export default function EditableStageCell({
               hasAnyLinkedDocument ? 'Document Ready' :
                 'No Document Linked'}
           </div>
+          {/* <div className={`text-xs text-center mt-1 ${
+        hasOldDocument ? 'text-orange-600' :
+        hasAnyLinkedDocument ? 'text-green-600' :
+        'text-slate-500'
+      }`}>
+        {hasOldDocument ? 'Old Document' :
+          hasAnyLinkedDocument ? 'Completed' :
+          (stage.status || 'Pending')} 
+      </div> */}
         </div>
       );
     } else {

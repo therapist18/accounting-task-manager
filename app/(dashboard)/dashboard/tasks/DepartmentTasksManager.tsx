@@ -129,7 +129,7 @@ export default function DepartmentTasksManager({
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
-  
+
   // States for Memorized Reports
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
   const [activeReport, setActiveReport] = useState<any | null>(null);
@@ -139,8 +139,8 @@ export default function DepartmentTasksManager({
   const [isAllExpanded, setIsAllExpanded] = useState(false);
 
   useEffect(() => {
-    const headers = activeDepartmentTab === '1' 
-      ? ENHANCED_TABLE_HEADERS_IMMIGRATION 
+    const headers = activeDepartmentTab === '1'
+      ? ENHANCED_TABLE_HEADERS_IMMIGRATION
       : ENHANCED_TABLE_HEADERS;
     setCurrentTableHeaders(headers);
     setVisibleHeaders(new Set(headers.filter(h => h.default).map(h => h.id)));
@@ -178,9 +178,9 @@ export default function DepartmentTasksManager({
   const handleApplyReport = (report: MemorizedReport) => {
     setActiveReport(report);
     // When a report is applied, switch to standard (columnar) view if not already
-    setIsTransposedView(false); 
+    setIsTransposedView(false);
   };
-  
+
   // Enhanced function to fetch all dependants and applicant data
   const fetchAllDependantsAndApplicants = useCallback(async (tasks: UtilTask[]) => {
     try {
@@ -474,58 +474,105 @@ export default function DepartmentTasksManager({
     return Promise.resolve(allKycFields[doc.kycId] || []);
   }, [allKycFields])
 
-  const determineCurrentStage = useCallback((task: any, stages: any[]) => {
-    if (!task.stages || !stages.length) return null;
+  const determineCurrentStage = (task: any, stages: any[]) => {
+    console.log('🎯 determineCurrentStage called for task:', task.id);
+    
+    if (!task || !stages.length) {
+      console.log('❌ No task or stages array');
+      return null;
+    }
   
-    // Sort stages by order_num
+    // Sort stages by order_num for proper sequence
     const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-  
-    // Get all stages that have status or date in task.stages
-    const stagesWithStatus = sortedStages.filter(stage => {
-      const stageData = task.stages[stage.id];
-      return stageData && (stageData.status || stageData.date);
-    });
-  
-    // If no stages have status/date, return the first stage
-    if (stagesWithStatus.length === 0) {
-      return sortedStages[0] || null;
-    }
-  
-    // Find all completed stages (with status completed or date)
-    const completedStages = sortedStages.filter(stage => {
-      const stageData = task.stages[stage.id];
-      return stageData && (stageData.status === 'completed' || stageData.date);
-    });
-  
-    // If we have completed stages, find the last one in the sequence
-    if (completedStages.length > 0) {
-      // Find the highest order_num among completed stages
-      const lastCompletedStage = completedStages.reduce((prev, current) => 
-        (prev.order_num || 0) > (current.order_num || 0) ? prev : current
-      );
-  
-      // If there's a next stage after the last completed one, return it
-      const nextStageIndex = sortedStages.findIndex(s => s.id === lastCompletedStage.id) + 1;
-      if (nextStageIndex < sortedStages.length) {
-        return sortedStages[nextStageIndex];
-      }
+    console.log('📋 Sorted stages for determine:', sortedStages.map(s => ({ name: s.name, order: s.order_num })));
+    
+    // Helper function to check if a stage is truly completed based on ACTUAL data
+    const isStageCompleted = (stage: any) => {
+      console.log(`🔄 [DETERMINE] Checking completion for: ${stage.name}`);
       
-      // Otherwise return the last completed stage
-      return lastCompletedStage;
+      const requiresDocuments = stage.documents && stage.documents.length > 0;
+      console.log(`📄 [DETERMINE] Stage requires documents: ${requiresDocuments}`);
+      
+      if (requiresDocuments) {
+        // For stages with document requirements, check for linked documents
+        const linkedDocumentData = task.source_document_id?.[stage.id];
+        const hasLinkedDocument = !!linkedDocumentData;
+        console.log(`🔗 [DETERMINE] ${stage.name} has linked document: ${hasLinkedDocument}`);
+        
+        if (!hasLinkedDocument) {
+          return false;
+        }
+        
+        // Verify document is valid (not indicator, not old)
+        if (allDocuments.length > 0) {
+          const documentId = typeof linkedDocumentData === 'string' 
+            ? linkedDocumentData 
+            : linkedDocumentData.id;
+          const linkedDoc = allDocuments.find(doc => doc.id === documentId);
+          
+          if (!linkedDoc || linkedDoc.indicator === true) {
+            return false;
+          }
+          
+          if (task.created_at && linkedDoc.created_at) {
+            const docDate = new Date(linkedDoc.created_at);
+            const taskDate = new Date(task.created_at);
+            if (docDate < taskDate) return false;
+          }
+        }
+        
+        return true;
+      } else {
+        // For stages without document requirements, check stored stage data
+        const stageData = task.stages?.[stage.id];
+        const completed = stageData && (
+          stageData.status === 'completed' || 
+          stageData.date || 
+          stageData.completedAt
+        );
+        console.log(`✅ [DETERMINE] ${stage.name} completed (no docs required): ${completed}`);
+        return completed;
+      }
+    };
+    
+    // Find the last stage with completion data
+    let lastCompletedIndex = -1;
+    
+    for (let i = 0; i < sortedStages.length; i++) {
+      const stage = sortedStages[i];
+      
+      if (isStageCompleted(stage)) {
+        console.log(`✅ [DETERMINE] Stage ${stage.name} is completed at index ${i}`);
+        lastCompletedIndex = i;
+      }
     }
-  
-    // If no completed stages but we have stages with status, return the first one
-    return stagesWithStatus[0] || sortedStages[0] || null;
-  }, []);
-
+    
+    console.log(`🎯 [DETERMINE] Last completed index: ${lastCompletedIndex}`);
+    
+    // Return the next stage after the last completed one, or the first stage if none completed
+    const nextStageIndex = lastCompletedIndex + 1;
+    
+    if (nextStageIndex < sortedStages.length) {
+      console.log(`📍 [DETERMINE] Returning next stage: ${sortedStages[nextStageIndex].name}`);
+      return sortedStages[nextStageIndex];
+    } else if (lastCompletedIndex >= 0) {
+      // All stages completed, return the last stage
+      console.log(`📍 [DETERMINE] All completed, returning last stage: ${sortedStages[lastCompletedIndex].name}`);
+      return sortedStages[lastCompletedIndex];
+    } else {
+      // No stages completed, return the first stage
+      console.log(`📍 [DETERMINE] No stages completed, returning first stage: ${sortedStages[0].name}`);
+      return sortedStages[0];
+    }
+  };
   // Create wrapper functions for utility functions
   const getEnhancedImmigrationStatusWrapper = useCallback((task: any) => {
     return getEnhancedImmigrationStatus(task, stages, allDocuments, kycDocuments);
   }, [stages, allDocuments, kycDocuments]);
 
   const getCurrentStageStatusWrapper = useCallback((task: UtilTask) => {
-    return getCurrentStageStatus(task, stages, departments, determineCurrentStage);
-  }, [stages, departments, determineCurrentStage]);
+    return getCurrentStageStatus(task, stages, departments, allDocuments);
+  }, [stages, departments, allDocuments]);
 
   const getUserDisplayName = useCallback((userId: number | null | undefined) => {
     if (!userId) return 'N/A'
@@ -787,168 +834,168 @@ export default function DepartmentTasksManager({
   const wipTasks = useMemo(() => filterTasksBySearchWrapper(getWIPTasksByFollowUp(activeFollowUpFilter)), [getWIPTasksByFollowUp, activeFollowUpFilter, filterTasksBySearchWrapper])
   const completedTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('completed')), [getFilteredTasks, filterTasksBySearchWrapper])
 
- // Enhanced Excel export function
- const handleExport = useCallback(async (tasks: any[], tableType: string) => {
-  if (!tasks.length) {
-    toast({ title: "No Data", description: "No data available to export.", variant: "destructive" })
-    return
-  }
+  // Enhanced Excel export function
+  const handleExport = useCallback(async (tasks: any[], tableType: string) => {
+    if (!tasks.length) {
+      toast({ title: "No Data", description: "No data available to export.", variant: "destructive" })
+      return
+    }
 
-  try {
-    const workbook = XLSX.utils.book_new();
-    const exportData = [];
-    for (const task of tasks) {
-      const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
-      const taskDeps = taskDependants.get(task.id.toString()) || [];
-      const statusInfo = getEnhancedImmigrationStatusWrapper(task);
-      const stageStatusInfo = getCurrentStageStatusWrapper(task);
-      const mainRow = {
-        'Task ID': task.id, 'Type': 'Applicant', 'Name': task.applicant_name, 'Nationality': enhancedTask.nationality || 'N/A', 'Age': enhancedTask.age || 'N/A', 'Relationship': 'Principal', 'Company': companies.get(task.company_id) || 'N/A', 'Job Level': getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || 'N/A', 'Immigration Status': statusInfo.status, 'Immigration Document Type': statusInfo.documentType || 'N/A', 'Immigration Expiry Date': statusInfo.date ? format(statusInfo.date, 'dd MMM yyyy') : 'N/A', 'Current Stage': stageStatusInfo.stageName, 'Stage Status': stageStatusInfo.stageStatus, 'Stage Follow-up': stageStatusInfo.stageFollowUp || 'N/A', 'Task Manager': getStaffName(task.task_manager_id), 'Officer': getStaffName(task.officer_id), 'Task Assistant': getStaffName(task.task_assistant_id), 'Case Status': task.status, 'Renewal Status': task.renewal_status || 'New'
-      };
-      exportData.push(mainRow);
-      taskDeps.forEach(dep => {
-        const depRow = {
-          'Task ID': task.id, 'Type': 'Dependant', 'Name': dep.full_name, 'Nationality': dep.nationality || 'N/A', 'Age': dep.age || 'N/A', 'Relationship': dep.relationship || 'Dependant', 'Company': companies.get(task.company_id) || 'N/A', 'Job Level': getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || 'N/A', 'Immigration Status': 'N/A', 'Immigration Document Type': 'N/A', 'Immigration Expiry Date': 'N/A', 'Current Stage': 'N/A', 'Stage Status': 'N/A', 'Stage Follow-up': 'N/A', 'Task Manager': getStaffName(task.task_manager_id), 'Officer': getStaffName(task.officer_id), 'Task Assistant': getStaffName(task.task_assistant_id), 'Case Status': task.status, 'Renewal Status': task.renewal_status || 'New'
+    try {
+      const workbook = XLSX.utils.book_new();
+      const exportData = [];
+      for (const task of tasks) {
+        const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
+        const taskDeps = taskDependants.get(task.id.toString()) || [];
+        const statusInfo = getEnhancedImmigrationStatusWrapper(task);
+        const stageStatusInfo = getCurrentStageStatusWrapper(task);
+        const mainRow = {
+          'Task ID': task.id, 'Type': 'Applicant', 'Name': task.applicant_name, 'Nationality': enhancedTask.nationality || 'N/A', 'Age': enhancedTask.age || 'N/A', 'Relationship': 'Principal', 'Company': companies.get(task.company_id) || 'N/A', 'Job Level': getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || 'N/A', 'Immigration Status': statusInfo.status, 'Immigration Document Type': statusInfo.documentType || 'N/A', 'Immigration Expiry Date': statusInfo.date ? format(statusInfo.date, 'dd MMM yyyy') : 'N/A', 'Current Stage': stageStatusInfo.stageName, 'Stage Status': stageStatusInfo.stageStatus, 'Stage Follow-up': stageStatusInfo.stageFollowUp || 'N/A', 'Task Manager': getStaffName(task.task_manager_id), 'Officer': getStaffName(task.officer_id), 'Task Assistant': getStaffName(task.task_assistant_id), 'Case Status': task.status, 'Renewal Status': task.renewal_status || 'New'
         };
-        exportData.push(depRow);
+        exportData.push(mainRow);
+        taskDeps.forEach(dep => {
+          const depRow = {
+            'Task ID': task.id, 'Type': 'Dependant', 'Name': dep.full_name, 'Nationality': dep.nationality || 'N/A', 'Age': dep.age || 'N/A', 'Relationship': dep.relationship || 'Dependant', 'Company': companies.get(task.company_id) || 'N/A', 'Job Level': getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || 'N/A', 'Immigration Status': 'N/A', 'Immigration Document Type': 'N/A', 'Immigration Expiry Date': 'N/A', 'Current Stage': 'N/A', 'Stage Status': 'N/A', 'Stage Follow-up': 'N/A', 'Task Manager': getStaffName(task.task_manager_id), 'Officer': getStaffName(task.officer_id), 'Task Assistant': getStaffName(task.task_assistant_id), 'Case Status': task.status, 'Renewal Status': task.renewal_status || 'New'
+          };
+          exportData.push(depRow);
+        });
+      }
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      XLSX.utils.book_append_sheet(workbook, worksheet, tableType);
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
+      const filename = `${tableType}_${timestamp}.xlsx`;
+      XLSX.writeFile(workbook, filename);
+      toast({ title: "Export Successful", description: `${tableType} data exported to ${filename}` });
+    } catch (error) {
+      console.error('Export error:', error);
+      toast({ title: "Export Failed", description: "Failed to export data to Excel.", variant: "destructive" });
+    }
+  }, [enhancedTasksData, taskDependants, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, companies, getTaskHierarchy, getStaffName]);
+
+  const getClassesForSubdepartment = useCallback((deptId: number, subDeptId: number) => {
+    const department = departments.find(d => d.id === deptId);
+    if (!department) return [];
+
+    const subdepartment = department.tm_subdepartments?.find(s => s.id === subDeptId);
+    return subdepartment?.classes || [];
+  }, [departments]);
+
+  const handlePushCase = useCallback(async (task: UtilTask, targetSubDeptId: number, targetSubDeptName: string) => {
+    const targetDeptId = 1;
+    if (targetSubDeptId === 6) { // Alien subdepartment
+      const classes = getClassesForSubdepartment(targetDeptId, targetSubDeptId);
+      if (classes.length > 0) {
+        const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
+        let applicantAge = enhancedTask.age;
+        if (applicantAge === undefined || applicantAge === null) {
+          applicantAge = calculateAge(task.date_of_birth);
+        }
+        setSelectedTaskForPush({ task, targetDeptId, targetSubDeptId, targetSubDeptName, isApplicant: true, applicantAge, applicantClassId: undefined, dependantClasses: new Map() });
+        setAvailableClasses(classes);
+        setIsClassSelectionOpen(true);
+        return;
+      }
+    }
+    await executePushCase(task, targetDeptId, targetSubDeptId, targetSubDeptName, null, null);
+  }, [getClassesForSubdepartment, enhancedTasksData]);
+
+  const executePushCase = useCallback(async (
+    task: UtilTask,
+    targetDeptId: number,
+    targetSubDeptId: number,
+    targetSubDeptName: string,
+    applicantClassId: string | null,
+    dependantClassId: string | null
+  ) => {
+    setIsPushingCase(true);
+    toast({ title: "Pushing Case...", description: `Creating new task(s) in ${targetSubDeptName}.` });
+    const isReEntry = targetSubDeptId === 7;
+    const isPrincipalMember = task.applicant_type === 'principal' || task.principal_member === true;
+    const isAlien = targetSubDeptId === 6;
+    try {
+      const tasksToCreate = [];
+      const currentDate = new Date().toISOString();
+      const stages = {};
+      if (isAlien || isReEntry) {
+        stages['1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'] = { date: currentDate, status: 'completed' };
+        stages['a19b270e-6d1e-4e6d-b2bc-f21db72cde08'] = { date: currentDate, status: 'completed' };
+        stages['9ccdbfa6-8d76-49db-b8d4-09742c734905'] = { date: currentDate, status: 'completed' };
+      }
+      const { dependantsMap } = await fetchAllDependantsAndApplicants([task]);
+      const dependants = [];
+      let skippedMinors = 0;
+
+      if (isReEntry) {
+        if (!isPrincipalMember) tasksToCreate.push({ status: 'in_progress', department_id: targetDeptId, subdepartment_id: targetSubDeptId, class_id: applicantClassId ? Number(applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, current_stage_id: null, current_stage_started_at: null, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: false, understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(task.applicant_name || ''), individual_id: String(task.individual_id || '') });
+        if (task.dependant_member && Array.isArray(task.dependant_member)) {
+          task.dependant_member.forEach(dep => { if (dep?.id && dependantsMap.has(dep.id)) dependants.push({ ...dependantsMap.get(dep.id), relationship: dep.relationship || 'Dependant' }); });
+          for (const dependant of dependants) tasksToCreate.push({ status: 'in_progress', department_id: Number(targetDeptId) || null, subdepartment_id: Number(targetSubDeptId) || null, class_id: dependantClassId || applicantClassId ? Number(dependantClassId || applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, current_stage_id: null, current_stage_started_at: null, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: false, understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(dependant.full_name || ''), individual_id: String(dependant.individual_id || '') });
+        }
+      } else {
+        const baseTaskData = { status: 'in_progress', department_id: Number(targetDeptId) || null, subdepartment_id: Number(targetSubDeptId) || null, class_id: applicantClassId ? Number(applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, current_stage_id: null, current_stage_started_at: null, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: isPrincipalMember ? 'principal' : 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: Boolean(isPrincipalMember), understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(task.applicant_name || ''), individual_id: String(task.individual_id || '') };
+        tasksToCreate.push(baseTaskData);
+        if (task.dependant_member && Array.isArray(task.dependant_member)) {
+          task.dependant_member.forEach(dep => { if (dep?.id && dependantsMap.has(dep.id)) dependants.push({ ...dependantsMap.get(dep.id), relationship: dep.relationship || 'Dependant' }); });
+          for (const dependant of dependants) {
+            if (isAlien) { const age = dependant.age; if (age === null || age < 18) { skippedMinors++; continue; } }
+            tasksToCreate.push({ ...baseTaskData, class_id: dependantClassId || applicantClassId, applicant_name: dependant.full_name, individual_id: dependant.individual_id, applicant_type: 'dependant', principal_member: false });
+          }
+        }
+      }
+      const { data: newTasks, error } = await supabase.from('tm_tasks').insert(tasksToCreate).select();
+      if (error) throw error;
+      const mainTask = newTasks[0]; const dependantTasks = newTasks.slice(1);
+      let successMessage = `Main case pushed to ${targetSubDeptName} successfully. New Task ID: ${mainTask.id}`;
+      if (dependantTasks.length > 0) successMessage += `\n${dependantTasks.length} dependant task(s) also created.`;
+      if (targetSubDeptId === 6 && skippedMinors > 0) successMessage += `\nNote: ${skippedMinors} minor dependant(s) were skipped for Alien cases.`;
+      toast({ title: "Success", description: successMessage, variant: "default" });
+      await refreshAllData();
+    } catch (error) {
+      console.error(`Error pushing case to ${targetSubDeptName}:`, error);
+      toast({ title: "Error", description: `Failed to push case: ${error.message}`, variant: "destructive" });
+    } finally { setIsPushingCase(false); }
+  }, [refreshAllData, fetchAllDependantsAndApplicants]);
+
+  const handleDownloadZip = useCallback(async (task: UtilTask) => {
+    setIsDownloading(true);
+    toast({ title: "Preparing Download", description: "Collecting and organizing documents..." });
+    try {
+      const userDocuments = allDocuments.filter(doc => doc.director_id === task.individual_id);
+      if (userDocuments.length === 0) { toast({ title: "No Documents", description: "No documents found for this applicant to download.", variant: "default" }); setIsDownloading(false); return; }
+      const zip = new JSZip(); const bucketName = 'kyc-documents';
+      const jobLevel = getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || getTaskHierarchy(task)?.subdepartment?.name || 'Unknown';
+      const folderName = `${task.applicant_name || 'Applicant'} - ${jobLevel}`;
+      const documentStageMap = new Map();
+      stages.forEach(stage => { if (stage.documents && stage.documents.length > 0) stage.documents.forEach(stageDoc => documentStageMap.set(stageDoc.kycId, stage.name)); });
+      const downloadPromises = userDocuments.map(async (doc, index) => {
+        if (!doc.file_path) return;
+        const filePath = doc.file_path.startsWith(bucketName) ? doc.file_path : `${bucketName}/${doc.file_path}`;
+        const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
+        const originalFileName = doc.file_path.split('/').pop() || 'document'; const fileExtension = originalFileName.split('.').pop(); let newFileName = originalFileName;
+        if (doc.document_id) {
+          const stageName = documentStageMap.get(doc.document_id);
+          if (stageName) {
+            newFileName = `${stageName}.${fileExtension}`;
+            let counter = 1;
+            while (Array.from(zip.folder(folderName)?.files || {}).some(file => file.includes(newFileName))) { newFileName = `${stageName}_${counter}.${fileExtension}`; counter++; }
+          }
+        }
+        try {
+          const response = await fetch(fileUrl);
+          if (!response.ok) return;
+          const blob = await response.blob();
+          zip.folder(folderName)?.file(newFileName, blob);
+        } catch (error) { console.error(`Error downloading file ${originalFileName}:`, error); }
       });
-    }
-    const worksheet = XLSX.utils.json_to_sheet(exportData);
-    XLSX.utils.book_append_sheet(workbook, worksheet, tableType);
-    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
-    const filename = `${tableType}_${timestamp}.xlsx`;
-    XLSX.writeFile(workbook, filename);
-    toast({ title: "Export Successful", description: `${tableType} data exported to ${filename}` });
-  } catch (error) {
-    console.error('Export error:', error);
-    toast({ title: "Export Failed", description: "Failed to export data to Excel.", variant: "destructive" });
-  }
-}, [enhancedTasksData, taskDependants, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, companies, getTaskHierarchy, getStaffName]);
-
-const getClassesForSubdepartment = useCallback((deptId: number, subDeptId: number) => {
-  const department = departments.find(d => d.id === deptId);
-  if (!department) return [];
-
-  const subdepartment = department.tm_subdepartments?.find(s => s.id === subDeptId);
-  return subdepartment?.classes || [];
-}, [departments]);
-
-const handlePushCase = useCallback(async (task: UtilTask, targetSubDeptId: number, targetSubDeptName: string) => {
-  const targetDeptId = 1;
-  if (targetSubDeptId === 6) { // Alien subdepartment
-    const classes = getClassesForSubdepartment(targetDeptId, targetSubDeptId);
-    if (classes.length > 0) {
-      const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
-      let applicantAge = enhancedTask.age;
-      if (applicantAge === undefined || applicantAge === null) {
-        applicantAge = calculateAge(task.date_of_birth);
-      }
-      setSelectedTaskForPush({ task, targetDeptId, targetSubDeptId, targetSubDeptName, isApplicant: true, applicantAge, applicantClassId: undefined, dependantClasses: new Map() });
-      setAvailableClasses(classes);
-      setIsClassSelectionOpen(true);
-      return;
-    }
-  }
-  await executePushCase(task, targetDeptId, targetSubDeptId, targetSubDeptName, null, null);
-}, [getClassesForSubdepartment, enhancedTasksData]);
-
-const executePushCase = useCallback(async (
-  task: UtilTask,
-  targetDeptId: number,
-  targetSubDeptId: number,
-  targetSubDeptName: string,
-  applicantClassId: string | null,
-  dependantClassId: string | null
-) => {
-  setIsPushingCase(true);
-  toast({ title: "Pushing Case...", description: `Creating new task(s) in ${targetSubDeptName}.` });
-  const isReEntry = targetSubDeptId === 7;
-  const isPrincipalMember = task.applicant_type === 'principal' || task.principal_member === true;
-  const isAlien = targetSubDeptId === 6;
-  try {
-    const tasksToCreate = [];
-    const currentDate = new Date().toISOString();
-    const stages = {};
-    if (isAlien || isReEntry) {
-      stages['1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'] = { date: currentDate, status: 'completed' };
-      stages['a19b270e-6d1e-4e6d-b2bc-f21db72cde08'] = { date: currentDate, status: 'completed' };
-      stages['9ccdbfa6-8d76-49db-b8d4-09742c734905'] = { date: currentDate, status: 'completed' };
-    }
-    const { dependantsMap } = await fetchAllDependantsAndApplicants([task]);
-    const dependants = [];
-    let skippedMinors = 0;
-
-    if (isReEntry) {
-      if (!isPrincipalMember) tasksToCreate.push({ status: 'in_progress', department_id: targetDeptId, subdepartment_id: targetSubDeptId, class_id: applicantClassId ? Number(applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, current_stage_id: null, current_stage_started_at: null, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: false, understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(task.applicant_name || ''), individual_id: String(task.individual_id || '') });
-      if (task.dependant_member && Array.isArray(task.dependant_member)) {
-        task.dependant_member.forEach(dep => { if (dep?.id && dependantsMap.has(dep.id)) dependants.push({ ...dependantsMap.get(dep.id), relationship: dep.relationship || 'Dependant' }); });
-        for (const dependant of dependants) tasksToCreate.push({ status: 'in_progress', department_id: Number(targetDeptId) || null, subdepartment_id: Number(targetSubDeptId) || null, class_id: dependantClassId || applicantClassId ? Number(dependantClassId || applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, current_stage_id: null, current_stage_started_at: null, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: false, understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(dependant.full_name || ''), individual_id: String(dependant.individual_id || '') });
-      }
-    } else {
-      const baseTaskData = { status: 'in_progress', department_id: Number(targetDeptId) || null, subdepartment_id: Number(targetSubDeptId) || null, class_id: applicantClassId ? Number(applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, current_stage_id: null, current_stage_started_at: null, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: isPrincipalMember ? 'principal' : 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: Boolean(isPrincipalMember), understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(task.applicant_name || ''), individual_id: String(task.individual_id || '') };
-      tasksToCreate.push(baseTaskData);
-      if (task.dependant_member && Array.isArray(task.dependant_member)) {
-        task.dependant_member.forEach(dep => { if (dep?.id && dependantsMap.has(dep.id)) dependants.push({ ...dependantsMap.get(dep.id), relationship: dep.relationship || 'Dependant' }); });
-        for (const dependant of dependants) {
-          if (isAlien) { const age = dependant.age; if (age === null || age < 18) { skippedMinors++; continue; } }
-          tasksToCreate.push({ ...baseTaskData, class_id: dependantClassId || applicantClassId, applicant_name: dependant.full_name, individual_id: dependant.individual_id, applicant_type: 'dependant', principal_member: false });
-        }
-      }
-    }
-    const { data: newTasks, error } = await supabase.from('tm_tasks').insert(tasksToCreate).select();
-    if (error) throw error;
-    const mainTask = newTasks[0]; const dependantTasks = newTasks.slice(1);
-    let successMessage = `Main case pushed to ${targetSubDeptName} successfully. New Task ID: ${mainTask.id}`;
-    if (dependantTasks.length > 0) successMessage += `\n${dependantTasks.length} dependant task(s) also created.`;
-    if (targetSubDeptId === 6 && skippedMinors > 0) successMessage += `\nNote: ${skippedMinors} minor dependant(s) were skipped for Alien cases.`;
-    toast({ title: "Success", description: successMessage, variant: "default" });
-    await refreshAllData();
-  } catch (error) {
-    console.error(`Error pushing case to ${targetSubDeptName}:`, error);
-    toast({ title: "Error", description: `Failed to push case: ${error.message}`, variant: "destructive" });
-  } finally { setIsPushingCase(false); }
-}, [refreshAllData, fetchAllDependantsAndApplicants]);
-
-const handleDownloadZip = useCallback(async (task: UtilTask) => {
-  setIsDownloading(true);
-  toast({ title: "Preparing Download", description: "Collecting and organizing documents..." });
-  try {
-    const userDocuments = allDocuments.filter(doc => doc.director_id === task.individual_id);
-    if (userDocuments.length === 0) { toast({ title: "No Documents", description: "No documents found for this applicant to download.", variant: "default" }); setIsDownloading(false); return; }
-    const zip = new JSZip(); const bucketName = 'kyc-documents';
-    const jobLevel = getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || getTaskHierarchy(task)?.subdepartment?.name || 'Unknown';
-    const folderName = `${task.applicant_name || 'Applicant'} - ${jobLevel}`;
-    const documentStageMap = new Map();
-    stages.forEach(stage => { if (stage.documents && stage.documents.length > 0) stage.documents.forEach(stageDoc => documentStageMap.set(stageDoc.kycId, stage.name)); });
-    const downloadPromises = userDocuments.map(async (doc, index) => {
-      if (!doc.file_path) return;
-      const filePath = doc.file_path.startsWith(bucketName) ? doc.file_path : `${bucketName}/${doc.file_path}`;
-      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
-      const originalFileName = doc.file_path.split('/').pop() || 'document'; const fileExtension = originalFileName.split('.').pop(); let newFileName = originalFileName;
-      if (doc.document_id) {
-        const stageName = documentStageMap.get(doc.document_id);
-        if (stageName) {
-          newFileName = `${stageName}.${fileExtension}`;
-          let counter = 1;
-          while (Array.from(zip.folder(folderName)?.files || {}).some(file => file.includes(newFileName))) { newFileName = `${stageName}_${counter}.${fileExtension}`; counter++; }
-        }
-      }
-      try {
-        const response = await fetch(fileUrl);
-        if (!response.ok) return;
-        const blob = await response.blob();
-        zip.folder(folderName)?.file(newFileName, blob);
-      } catch (error) { console.error(`Error downloading file ${originalFileName}:`, error); }
-    });
-    await Promise.all(downloadPromises);
-    const content = await zip.generateAsync({ type: "blob" });
-    saveAs(content, `${folderName}.zip`);
-    toast({ title: "Download Started", description: `Downloading ${folderName}.zip with organized documents.` });
-  } catch (error) {
-    console.error("Error creating ZIP file:", error);
-    toast({ title: "Error", description: "Failed to create ZIP file.", variant: "destructive" });
-  } finally { setIsDownloading(false); }
-}, [allDocuments, getTaskHierarchy, stages]);
+      await Promise.all(downloadPromises);
+      const content = await zip.generateAsync({ type: "blob" });
+      saveAs(content, `${folderName}.zip`);
+      toast({ title: "Download Started", description: `Downloading ${folderName}.zip with organized documents.` });
+    } catch (error) {
+      console.error("Error creating ZIP file:", error);
+      toast({ title: "Error", description: "Failed to create ZIP file.", variant: "destructive" });
+    } finally { setIsDownloading(false); }
+  }, [allDocuments, getTaskHierarchy, stages]);
 
   const enhancedHandleStageStatusSave = useCallback(async (
     stageId: string,
@@ -1363,7 +1410,7 @@ const handleDownloadZip = useCallback(async (task: UtilTask) => {
         stageData,
         hasDate: !!stageData.date
       });
-      
+
       return (
         <div className="flex flex-col items-center gap-0.5">
           {stageData.date && (
@@ -1381,9 +1428,9 @@ const handleDownloadZip = useCallback(async (task: UtilTask) => {
         taskId: task.id,
         requiresUpload: row.stage?.requires_upload !== false
       });
-  
+
       const requiresUpload = row.stage?.requires_upload !== false;
-      
+
       return (
         <EditableStageCell
           key={row.stage.id}
@@ -1394,6 +1441,7 @@ const handleDownloadZip = useCallback(async (task: UtilTask) => {
           onDocumentUpload={handleStageDocumentUpload}
           onShowDocuments={handleViewDocument}
           requiresUpload={requiresUpload}
+          departments={departments}
           onAutomationClick={(e) => {
             e.stopPropagation();
             console.log('⚡ Automation clicked for stage:', row.stage.name);
@@ -2087,7 +2135,7 @@ const handleDownloadZip = useCallback(async (task: UtilTask) => {
     <div className="flex-1 space-y-2 p-2 bg-slate-50/30 min-h-screen">
       <div className="flex justify-between items-center px-1">
         {!areTabsVisible && (
-           <div className="text-sm text-slate-600 font-medium flex items-center gap-2 flex-wrap">
+          <div className="text-sm text-slate-600 font-medium flex items-center gap-2 flex-wrap">
             <span className="font-bold text-slate-800">Viewing:</span>
             {breadcrumbParts.map((part, index) => (
               <React.Fragment key={index}>
@@ -2097,12 +2145,12 @@ const handleDownloadZip = useCallback(async (task: UtilTask) => {
             ))}
           </div>
         )}
-         <Button 
-          variant="outline" 
-          size="sm" 
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => setAreTabsVisible(!areTabsVisible)}
           className={`ml-auto transition-all ${!areTabsVisible ? 'bg-slate-100' : ''}`}
-          >
+        >
           {areTabsVisible ? <PanelLeftClose className="h-4 w-4 mr-2" /> : <PanelLeftOpen className="h-4 w-4 mr-2" />}
           {areTabsVisible ? 'Hide Navigation' : 'Show Navigation'}
         </Button>
@@ -2229,7 +2277,7 @@ const handleDownloadZip = useCallback(async (task: UtilTask) => {
                                   {isTransposedView ? `Fields (${visibleHeaders.size + visibleStats.size + visibleStageIds.size})` : `Columns (${visibleHeaders.size + visibleStageIds.size})`}
                                 </Button>
                               </PopoverTrigger>
-                              <PopoverContent className="w-80">
+                              <PopoverContent className="w-80 h-[65vh] overflow-y-auto">
                                 <div className="space-y-4">
                                   <div className="space-y-2">
                                     <h4 className="font-medium">
@@ -2366,7 +2414,7 @@ const handleDownloadZip = useCallback(async (task: UtilTask) => {
                         )}
                       </CardHeader>
                       <CardContent className="p-2 sm:p-4">
-                      {activeReport ? (
+                        {activeReport ? (
                           <div>
                             <div className="flex items-center justify-between mb-4 p-2 bg-blue-50 border border-blue-200 rounded-lg">
                               <div>
@@ -2527,7 +2575,7 @@ const handleDownloadZip = useCallback(async (task: UtilTask) => {
         departments={departments}
         users={Array.from(tmUsers.values())}
         officers={Array.from(tmUsers.values()).filter(u => u.role === 'officer')}
-        allDocuments={allDocuments} 
+        allDocuments={allDocuments}
         onTaskUpdate={handleTaskUpdate}
       />
 
