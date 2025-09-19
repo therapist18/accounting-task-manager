@@ -95,212 +95,149 @@ export default function DepartmentTasksManager({
   onTaskUpdate,
   getCurrentRequirements
 }: DepartmentTasksManagerProps) {
-  const [departments, setDepartments] = useState<Department[]>([])
-  const [companies, setCompanies] = useState<Map<number, string>>(new Map())
-  const [activeDepartmentTab, setActiveDepartmentTab] = useState<string>("")
-  const [activeSubTab, setActiveSubTab] = useState<string>("wip-stages")
-  const [activeSubdepartmentTab, setActiveSubdepartmentTab] = useState<string>("")
-  const [activeFollowUpFilter, setActiveFollowUpFilter] = useState<string>("all")
-  const [isTransposedView, setIsTransposedView] = useState<boolean>(true)
-  const [editDialogOpen, setEditDialogOpen] = useState(false)
-  const [editingTask, setEditingTask] = useState<any>(null)
-  const [tasks, setTasks] = useState<UtilTask[]>([])
-  const [stages, setStages] = useState<any[]>([])
-  const [allDocuments, setAllDocuments] = useState<Document[]>([])
-  const [isEnquiryDialogOpen, setIsEnquiryDialogOpen] = useState(false)
-  const [isOtherDialogOpen, setIsOtherDialogOpen] = useState(false)
-  const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null)
-  const [isStageUploadDialogOpen, setIsStageUploadDialogOpen] = useState(false)
-  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null)
-  const [isPushingCase, setIsPushingCase] = useState(false)
-  const [isDownloading, setIsDownloading] = useState(false)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [taskToDelete, setTaskToDelete] = useState<any>(null)
-  const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
-  const [currentTableHeaders, setCurrentTableHeaders] = useState(ENHANCED_TABLE_HEADERS)
-  const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(new Set(ENHANCED_TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
-  const [visibleStats, setVisibleStats] = useState<Set<string>>(new Set(STATS_HEADERS.filter(h => h.default).map(h => h.id)))
-  const [visibleStageIds, setVisibleStageIds] = useState<Set<string>>(new Set())
-  const [expandedDependants, setExpandedDependants] = useState<Set<string>>(new Set())
-  const [kycDocuments, setKycDocuments] = useState<Map<string, KycDocument>>(new Map())
-  const [allKycFields, setAllKycFields] = useState<Record<string, any[]>>({})
-  const [previewDocument, setPreviewDocument] = useState<any>(null);
-  const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set())
-  const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
-  const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
+   // Raw Data States
+   const [departments, setDepartments] = useState<Department[]>([]);
+   const [companies, setCompanies] = useState<Map<number, string>>(new Map());
+   const [tasks, setTasks] = useState<UtilTask[]>([]);
+   const [stages, setStages] = useState<any[]>([]);
+   const [allDocuments, setAllDocuments] = useState<Document[]>([]);
+   const [kycDocuments, setKycDocuments] = useState<Map<string, KycDocument>>(new Map());
+   const [allKycFields, setAllKycFields] = useState<Record<string, any[]>>({});
+   const [tmUsers, setTmUsers] = useState<Map<number, any>>(new Map());
+ 
+   // OPTIMIZATION: State to hold tasks with pre-calculated fields for fast rendering
+   const [processedTasks, setProcessedTasks] = useState<UtilTask[]>([]);
+ 
+   // UI & Interaction States
+   const [activeDepartmentTab, setActiveDepartmentTab] = useState<string>("");
+   const [activeSubTab, setActiveSubTab] = useState<string>("wip-stages");
+   const [activeSubdepartmentTab, setActiveSubdepartmentTab] = useState<string>("");
+   const [activeFollowUpFilter, setActiveFollowUpFilter] = useState<string>("all");
+   const [isTransposedView, setIsTransposedView] = useState<boolean>(true);
+   const [editDialogOpen, setEditDialogOpen] = useState(false);
+   const [editingTask, setEditingTask] = useState<any>(null);
+   const [isEnquiryDialogOpen, setIsEnquiryDialogOpen] = useState(false);
+   const [isOtherDialogOpen, setIsOtherDialogOpen] = useState(false);
+   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null);
+   const [isStageUploadDialogOpen, setIsStageUploadDialogOpen] = useState(false);
+   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
+   const [isPushingCase, setIsPushingCase] = useState(false);
+   const [isDownloading, setIsDownloading] = useState(false);
+   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+   const [taskToDelete, setTaskToDelete] = useState<any>(null);
+   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('');
+   const [currentTableHeaders, setCurrentTableHeaders] = useState(ENHANCED_TABLE_HEADERS);
+   const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(new Set(ENHANCED_TABLE_HEADERS.filter(h => h.default).map(h => h.id)));
+   const [visibleStats, setVisibleStats] = useState<Set<string>>(new Set(STATS_HEADERS.filter(h => h.default).map(h => h.id)));
+   const [visibleStageIds, setVisibleStageIds] = useState<Set<string>>(new Set());
+   const [expandedDependants, setExpandedDependants] = useState<Set<string>>(new Set());
+   const [previewDocument, setPreviewDocument] = useState<any>(null);
+   const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set());
+   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set());
+   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']));
+   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set());
+   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
+   const [activeReport, setActiveReport] = useState<any | null>(null);
+   const [areTabsVisible, setAreTabsVisible] = useState(true);
+   const [isAllExpanded, setIsAllExpanded] = useState(false);
+   const [activeOfficerTab, setActiveOfficerTab] = useState<string | null>(null);
+   const [activeManagerTab, setActiveManagerTab] = useState<string | null>(null);
+   const [activeAssistantTab, setActiveAssistantTab] = useState<string | null>(null);
+   const [subdepartmentOfficers, setSubdepartmentOfficers] = useState<Array<{ id: string, name: string }>>([]);
+   const [subdepartmentManagers, setSubdepartmentManagers] = useState<Array<{ id: string, name: string }>>([]);
+   const [subdepartmentAssistants, setSubdepartmentAssistants] = useState<Array<{ id: string, name: string }>>([]);
+   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
+   const [linkingTask, setLinkingTask] = useState<UtilTask | null>(null);
+   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
+   const [selectedAutomation, setSelectedAutomation] = useState<any>(null);
+   const [dataLoading, setDataLoading] = useState({ departments: true, companies: true, documents: true, kycFields: true, tasks: true, stages: false, users: true });
+   const [isClassSelectionOpen, setIsClassSelectionOpen] = useState(false);
+   const [selectedTaskForPush, setSelectedTaskForPush] = useState<any>(null);
+   const [availableClasses, setAvailableClasses] = useState<any[]>([]);
+   const [loading, setLoading] = useState(false);
+   const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
+   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
 
-  // States for Memorized Reports
-  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
-  const [activeReport, setActiveReport] = useState<any | null>(null);
+  // Create memoized wrapper functions for expensive calculations
+  const getEnhancedImmigrationStatusWrapper = useCallback((task: any) => {
+    return getEnhancedImmigrationStatus(task, stages, allDocuments, kycDocuments);
+  }, [stages, allDocuments, kycDocuments]);
 
-  // New states for UI enhancements
-  const [areTabsVisible, setAreTabsVisible] = useState(true);
-  const [isAllExpanded, setIsAllExpanded] = useState(false);
+  const getCurrentStageStatusWrapper = useCallback((task: UtilTask) => {
+    return getCurrentStageStatus(task, stages, departments, allDocuments);
+  }, [stages, departments, allDocuments]);
 
+  // OPTIMIZATION: This useEffect pre-calculates expensive status information.
+  // It runs only when the main 'tasks' array changes, avoiding re-calculation on every render.
   useEffect(() => {
-    const headers = activeDepartmentTab === '1'
-      ? ENHANCED_TABLE_HEADERS_IMMIGRATION
-      : ENHANCED_TABLE_HEADERS;
-    setCurrentTableHeaders(headers);
-    setVisibleHeaders(new Set(headers.filter(h => h.default).map(h => h.id)));
-  }, [activeDepartmentTab]);
-  const [tmUsers, setTmUsers] = useState<Map<number, any>>(new Map())
-  const [activeOfficerTab, setActiveOfficerTab] = useState<string | null>(null)
-  const [activeManagerTab, setActiveManagerTab] = useState<string | null>(null)
-  const [activeAssistantTab, setActiveAssistantTab] = useState<string | null>(null)
-  const [subdepartmentOfficers, setSubdepartmentOfficers] = useState<Array<{ id: string, name: string }>>([])
-  const [subdepartmentManagers, setSubdepartmentManagers] = useState<Array<{ id: string, name: string }>>([])
-  const [subdepartmentAssistants, setSubdepartmentAssistants] = useState<Array<{ id: string, name: string }>>([])
-  const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
-  const [linkingTask, setLinkingTask] = useState<UtilTask | null>(null);
-  const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
-  const [selectedAutomation, setSelectedAutomation] = useState<any>(null);
-  const [dataLoading, setDataLoading] = useState({ departments: true, companies: true, documents: true, kycFields: true, tasks: true, stages: false, users: true })
-  const [isClassSelectionOpen, setIsClassSelectionOpen] = useState(false);
-  const [selectedTaskForPush, setSelectedTaskForPush] = useState<{
-    task: UtilTask;
-    targetDeptId: number;
-    targetSubDeptId: number;
-    targetSubDeptName: string;
-    isApplicant: boolean;
-    applicantAge: number | null;
-    applicantClassId?: string;
-    dependantClasses?: Map<string, string>;
-  } | null>(null);
-  const [availableClasses, setAvailableClasses] = useState<any[]>([]);
-  const [tableRows, setTableRows] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
-  const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
+    if (!tasks || tasks.length === 0 || !stages.length) {
+      setProcessedTasks([]);
+      return;
+    }
 
+    const newProcessedTasks = tasks.map(task => {
+      const enhancedTaskData = enhancedTasksData.get(task.id.toString()) || {};
+      return {
+        ...task,
+        ...enhancedTaskData,
+        _currentStageInfo: getCurrentStageStatusWrapper(task),
+        _immigrationStatusInfo: getEnhancedImmigrationStatusWrapper(task),
+      };
+    });
+
+    setProcessedTasks(newProcessedTasks);
+  }, [tasks, enhancedTasksData, stages, getCurrentStageStatusWrapper, getEnhancedImmigrationStatusWrapper]);
 
   const handleApplyReport = (report: MemorizedReport) => {
     setActiveReport(report);
-    // When a report is applied, switch to standard (columnar) view if not already
     setIsTransposedView(false);
   };
 
-  // Enhanced function to fetch all dependants and applicant data
-  const fetchAllDependantsAndApplicants = useCallback(async (tasks: UtilTask[]) => {
+  const fetchAllDependantsAndApplicants = useCallback(async (tasksToProcess: UtilTask[]) => {
     try {
       const allIndividualIds = new Set<number>();
-
-      // Collect applicant IDs
-      tasks.forEach(task => {
-        if (task.individual_id) {
-          allIndividualIds.add(task.individual_id);
-        }
-      });
-
-      // Collect dependant IDs
-      tasks.forEach(task => {
+      tasksToProcess.forEach(task => {
+        if (task.individual_id) allIndividualIds.add(task.individual_id);
         if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          task.dependant_member.forEach(dep => {
-            if (dep?.id) {
-              allIndividualIds.add(dep.id);
-
-              // Log dependant information for debugging
-              if (dep.full_name) {
-                const age = calculateAge(dep.date_of_birth);
-                if (age === null) {
-                  console.warn(`Skipping age assumption for dependant: ${dep.full_name} (ID: ${dep.id}) - missing or invalid date of birth`);
-                }
-              }
-            }
-          });
+          task.dependant_member.forEach(dep => { if (dep?.id) allIndividualIds.add(dep.id); });
         }
       });
 
       if (allIndividualIds.size === 0) return { dependantsMap: new Map(), applicantsMap: new Map() };
 
-      // Fetch all unique individuals (both applicants and dependants) in a single query
-      const { data, error } = await supabase
-        .from('registry_individuals')
-        .select('id, full_name, nationality, date_of_birth, relationships')
-        .in('id', Array.from(allIndividualIds));
+      const { data, error } = await supabase.from('registry_individuals').select('id, full_name, nationality, date_of_birth, relationships').in('id', Array.from(allIndividualIds));
+      if (error) { console.error('Error fetching all individuals:', error); return { dependantsMap: new Map(), applicantsMap: new Map() }; }
 
-      if (error) {
-        console.error('Error fetching all individuals:', error);
-        return { dependantsMap: new Map(), applicantsMap: new Map() };
-      }
-
-      // Separate dependants and applicants
       const dependantsMap = new Map<number, any>();
       const applicantsMap = new Map<number, any>();
-
       data.forEach(individual => {
-        const enhancedIndividual = {
-          ...individual,
-          age: calculateAge(individual.date_of_birth),
-          individual_id: individual.id
-        };
-
-        // Check if this individual is an applicant
-        const isApplicant = tasks.some(task => task.individual_id === individual.id);
-
-        if (isApplicant) {
-          applicantsMap.set(individual.id, enhancedIndividual);
-        }
-
-        // Check if this individual is a dependant
-        const isDependant = tasks.some(task =>
-          task.dependant_member && Array.isArray(task.dependant_member) &&
-          task.dependant_member.some(dep => dep?.id === individual.id)
-        );
-
-        if (isDependant) {
-          dependantsMap.set(individual.id, enhancedIndividual);
-        }
+        const enhancedIndividual = { ...individual, age: calculateAge(individual.date_of_birth), individual_id: individual.id };
+        if (tasksToProcess.some(task => task.individual_id === individual.id)) applicantsMap.set(individual.id, enhancedIndividual);
+        if (tasksToProcess.some(task => task.dependant_member?.some(dep => dep?.id === individual.id))) dependantsMap.set(individual.id, enhancedIndividual);
       });
-
       return { dependantsMap, applicantsMap };
     } catch (error) {
-      console.error('Error in fetchAllDependantsAndApplicants:', error);
-      return { dependantsMap: new Map(), applicantsMap: new Map() };
+      console.error('Error in fetchAllDependantsAndApplicants:', error); return { dependantsMap: new Map(), applicantsMap: new Map() };
     }
   }, []);
 
   useEffect(() => {
     const fetchAndMapIndividuals = async () => {
       if (!tasks.length) return;
-
       const { dependantsMap, applicantsMap } = await fetchAllDependantsAndApplicants(tasks);
-
-      // Map each task to its dependants
       const taskDependantsMap = new Map<string, any[]>();
       const enhancedTasksMap = new Map<string, any>();
-
       tasks.forEach(task => {
-        // Enhance task with applicant data
         const applicantData = applicantsMap.get(task.individual_id);
-
-        enhancedTasksMap.set(task.id.toString(), {
-          ...task,
-          applicant_data: applicantData,
-          nationality: applicantData?.nationality || task.nationality,
-          age: applicantData?.age // This should be the calculated age or null
-        });
-
-        // Map dependants
+        enhancedTasksMap.set(task.id.toString(), { ...task, applicant_data: applicantData, nationality: applicantData?.nationality || task.nationality, age: applicantData?.age });
         if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          const taskDependants = task.dependant_member
-            .filter(dep => dep?.id && dependantsMap.has(dep.id))
-            .map(dep => ({
-              ...dependantsMap.get(dep.id),
-              relationship: dep.relationship || 'Dependant'
-            }));
-
-          if (taskDependants.length > 0) {
-            taskDependantsMap.set(task.id.toString(), taskDependants);
-          }
+          const taskDeps = task.dependant_member.filter(dep => dep?.id && dependantsMap.has(dep.id)).map(dep => ({ ...dependantsMap.get(dep.id), relationship: dep.relationship || 'Dependant' }));
+          if (taskDeps.length > 0) taskDependantsMap.set(task.id.toString(), taskDeps);
         }
       });
-
       setTaskDependants(taskDependantsMap);
       setEnhancedTasksData(enhancedTasksMap);
     };
-
     fetchAndMapIndividuals();
   }, [tasks, fetchAllDependantsAndApplicants]);
 
@@ -325,15 +262,10 @@ export default function DepartmentTasksManager({
     return assistantHistory.filter(assistant => !assistant.end_date);
   }, []);
 
-  const getDocumentForTaskStage = useCallback((
-    task: UtilTask,
-    stage: { id: string; documents?: { kycId: string }[] },
-  ): Document | undefined => {
+  const getDocumentForTaskStage = useCallback((task: UtilTask, stage: { id: string; }): Document | undefined => {
     const linkedDocumentData = task.source_document_id?.[stage.id];
     if (linkedDocumentData) {
-      const documentId = typeof linkedDocumentData === 'string'
-        ? linkedDocumentData
-        : linkedDocumentData.id;
+      const documentId = typeof linkedDocumentData === 'string' ? linkedDocumentData : linkedDocumentData.id;
       return allDocuments.find(doc => doc.id === documentId);
     }
     return undefined;
@@ -400,7 +332,6 @@ export default function DepartmentTasksManager({
     try {
       const { data, error } = await supabase.from('tm_users').select('*')
       if (error) throw error
-
       const usersMap = new Map()
       data?.forEach(user => {
         usersMap.set(user.id, user)
@@ -428,46 +359,44 @@ export default function DepartmentTasksManager({
 
     } catch (error) {
       console.error('Error loading tasks data:', error)
-      toast({
-        title: "Error",
-        description: "Failed to load tasks data.",
-        variant: "destructive"
-      })
+      toast({ title: "Error", description: "Failed to load tasks data.", variant: "destructive" })
       setDataLoading(prev => ({ ...prev, tasks: false, stages: false }))
     }
   }, [departments])
 
+  const refreshTaskInState = useCallback(async (taskId: string | number) => {
+    try {
+      const { data: updatedTask, error } = await supabase.from('tm_tasks').select('*').eq('id', taskId).single();
+      if (error) throw error;
+      if (updatedTask) handleTaskUpdate(updatedTask); // Use the centralized update handler
+    } catch (error) {
+      console.error(`Error refreshing task ${taskId}:`, error);
+      toast({ title: "Error", description: "Could not refresh task details.", variant: "destructive" });
+    }
+  }, []);
+
   const refreshAllData = useCallback(async () => {
     try {
+      setDataLoading(prev => ({ ...prev, documents: true, kycFields: true, users: true }))
       const [documentsData, kycFieldsData, usersData] = await Promise.all([
         fetchAllDocuments(),
         fetchAllKycFields(),
         fetchTmUsers()
       ])
-
       setAllDocuments(documentsData)
       setAllKycFields(kycFieldsData.fieldsMap)
       setKycDocuments(kycFieldsData.kycDocsMap)
       setTmUsers(usersData)
+      setDataLoading(prev => ({ ...prev, documents: false, kycFields: false, users: false }))
 
-      if (activeDepartmentTab) {
-        await loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
-      }
-
-      toast({
-        title: "Success",
-        description: "Data refreshed successfully.",
-        variant: "default"
-      })
+      if (activeDepartmentTab) await loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
+      toast({ title: "Success", description: "Data refreshed successfully." })
     } catch (error) {
       console.error('Error refreshing data:', error)
-      toast({
-        title: "Error",
-        description: "Failed to refresh data.",
-        variant: "destructive"
-      })
+      toast({ title: "Error", description: "Failed to refresh data.", variant: "destructive" })
     }
   }, [activeDepartmentTab, activeSubdepartmentTab, loadTasksData, fetchTmUsers])
+
 
   const getKycFields = useCallback((doc: any) => {
     if (!doc.kycId) return Promise.resolve([]);
@@ -475,104 +404,53 @@ export default function DepartmentTasksManager({
   }, [allKycFields])
 
   const determineCurrentStage = (task: any, stages: any[]) => {
-    console.log('🎯 determineCurrentStage called for task:', task.id);
-    
     if (!task || !stages.length) {
-      console.log('❌ No task or stages array');
       return null;
     }
-  
-    // Sort stages by order_num for proper sequence
     const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-    console.log('📋 Sorted stages for determine:', sortedStages.map(s => ({ name: s.name, order: s.order_num })));
-    
-    // Helper function to check if a stage is truly completed based on ACTUAL data
     const isStageCompleted = (stage: any) => {
-      console.log(`🔄 [DETERMINE] Checking completion for: ${stage.name}`);
-      
       const requiresDocuments = stage.documents && stage.documents.length > 0;
-      console.log(`📄 [DETERMINE] Stage requires documents: ${requiresDocuments}`);
-      
       if (requiresDocuments) {
-        // For stages with document requirements, check for linked documents
         const linkedDocumentData = task.source_document_id?.[stage.id];
         const hasLinkedDocument = !!linkedDocumentData;
-        console.log(`🔗 [DETERMINE] ${stage.name} has linked document: ${hasLinkedDocument}`);
-        
         if (!hasLinkedDocument) {
           return false;
         }
-        
-        // Verify document is valid (not indicator, not old)
         if (allDocuments.length > 0) {
-          const documentId = typeof linkedDocumentData === 'string' 
-            ? linkedDocumentData 
+          const documentId = typeof linkedDocumentData === 'string'
+            ? linkedDocumentData
             : linkedDocumentData.id;
           const linkedDoc = allDocuments.find(doc => doc.id === documentId);
-          
           if (!linkedDoc || linkedDoc.indicator === true) {
             return false;
           }
-          
           if (task.created_at && linkedDoc.created_at) {
             const docDate = new Date(linkedDoc.created_at);
             const taskDate = new Date(task.created_at);
             if (docDate < taskDate) return false;
           }
         }
-        
         return true;
       } else {
-        // For stages without document requirements, check stored stage data
         const stageData = task.stages?.[stage.id];
-        const completed = stageData && (
-          stageData.status === 'completed' || 
-          stageData.date || 
-          stageData.completedAt
-        );
-        console.log(`✅ [DETERMINE] ${stage.name} completed (no docs required): ${completed}`);
-        return completed;
+        return stageData && (stageData.status === 'completed' || stageData.date || stageData.completedAt);
       }
     };
-    
-    // Find the last stage with completion data
     let lastCompletedIndex = -1;
-    
     for (let i = 0; i < sortedStages.length; i++) {
-      const stage = sortedStages[i];
-      
-      if (isStageCompleted(stage)) {
-        console.log(`✅ [DETERMINE] Stage ${stage.name} is completed at index ${i}`);
+      if (isStageCompleted(sortedStages[i])) {
         lastCompletedIndex = i;
       }
     }
-    
-    console.log(`🎯 [DETERMINE] Last completed index: ${lastCompletedIndex}`);
-    
-    // Return the next stage after the last completed one, or the first stage if none completed
     const nextStageIndex = lastCompletedIndex + 1;
-    
     if (nextStageIndex < sortedStages.length) {
-      console.log(`📍 [DETERMINE] Returning next stage: ${sortedStages[nextStageIndex].name}`);
       return sortedStages[nextStageIndex];
     } else if (lastCompletedIndex >= 0) {
-      // All stages completed, return the last stage
-      console.log(`📍 [DETERMINE] All completed, returning last stage: ${sortedStages[lastCompletedIndex].name}`);
       return sortedStages[lastCompletedIndex];
     } else {
-      // No stages completed, return the first stage
-      console.log(`📍 [DETERMINE] No stages completed, returning first stage: ${sortedStages[0].name}`);
       return sortedStages[0];
     }
   };
-  // Create wrapper functions for utility functions
-  const getEnhancedImmigrationStatusWrapper = useCallback((task: any) => {
-    return getEnhancedImmigrationStatus(task, stages, allDocuments, kycDocuments);
-  }, [stages, allDocuments, kycDocuments]);
-
-  const getCurrentStageStatusWrapper = useCallback((task: UtilTask) => {
-    return getCurrentStageStatus(task, stages, departments, allDocuments);
-  }, [stages, departments, allDocuments]);
 
   const getUserDisplayName = useCallback((userId: number | null | undefined) => {
     if (!userId) return 'N/A'
@@ -597,72 +475,17 @@ export default function DepartmentTasksManager({
     return { department: dept, subdepartment: subdept, class: cls, subclass: subCls }
   }, [departments])
 
-  const toggleImmigrationStatusExpansion = useCallback((taskId: string) => {
-    setExpandedImmigrationStatus(prev => ({
-      ...prev,
-      [taskId]: !prev[taskId]
-    }))
-  }, [])
-
-  const toggleSectionExpansion = useCallback((sectionId: string) => {
-    setExpandedSections(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(sectionId)) {
-        newSet.delete(sectionId)
-      } else {
-        newSet.add(sectionId)
-      }
-      return newSet
-    })
-  }, [])
-
-  const toggleStageExpansion = useCallback((stageId: string) => {
-    setExpandedStages(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(stageId)) {
-        newSet.delete(stageId)
-      } else {
-        newSet.add(stageId)
-      }
-      return newSet
-    })
-  }, [])
-
-  const toggleDocumentExpansion = useCallback((docId: string) => {
-    setExpandedDocuments(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(docId)) {
-        newSet.delete(docId)
-      } else {
-        newSet.add(docId)
-      }
-      return newSet
-    })
-  }, [])
-
-  const toggleDependantsExpansion = useCallback((taskId: string) => {
-    setExpandedDependants(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(taskId)) {
-        newSet.delete(taskId)
-      } else {
-        newSet.add(taskId)
-      }
-      return newSet
-    })
-  }, [])
+  const toggleImmigrationStatusExpansion = useCallback((taskId: string) => setExpandedImmigrationStatus(prev => ({ ...prev, [taskId]: !prev[taskId] })), [])
+  const toggleSectionExpansion = useCallback((sectionId: string) => setExpandedSections(prev => new Set(prev.has(sectionId) ? [...prev].filter(id => id !== sectionId) : [...prev, sectionId])), [])
+  const toggleStageExpansion = useCallback((stageId: string) => setExpandedStages(prev => new Set(prev.has(stageId) ? [...prev].filter(id => id !== stageId) : [...prev, stageId])), [])
+  const toggleDocumentExpansion = useCallback((docId: string) => setExpandedDocuments(prev => new Set(prev.has(docId) ? [...prev].filter(id => id !== docId) : [...prev, docId])), [])
+  const toggleDependantsExpansion = useCallback((taskId: string) => setExpandedDependants(prev => new Set(prev.has(taskId) ? [...prev].filter(id => id !== taskId) : [...prev, taskId])), [])
 
   const expandAll = () => {
     setExpandedSections(new Set(['case_details', 'stages', 'stats']))
-    const allStageIds = stages.map(s => s.id)
-    setExpandedStages(new Set(allStageIds))
-    const allDocIds = stages.flatMap(s => s.documents?.map(d => d.id) || [])
-    setExpandedDocuments(new Set(allDocIds))
-
-    const allTaskIdsWithDependants = tasks.filter(t =>
-      t.dependant_member && Array.isArray(t.dependant_member) && t.dependant_member.length > 0
-    ).map(t => t.id.toString());
-    setExpandedDependants(new Set(allTaskIdsWithDependants));
+    setExpandedStages(new Set(stages.map(s => s.id)))
+    setExpandedDocuments(new Set(stages.flatMap(s => s.documents?.map(d => d.id) || [])))
+    setExpandedDependants(new Set(tasks.filter(t => t.dependant_member?.length > 0).map(t => t.id.toString())));
     setIsAllExpanded(true);
   }
 
@@ -674,165 +497,44 @@ export default function DepartmentTasksManager({
     setIsAllExpanded(false);
   }
 
-  const toggleHeaderVisibility = (headerId: string) => {
-    setVisibleHeaders(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(headerId)) {
-        newSet.delete(headerId)
-      } else {
-        newSet.add(headerId)
-      }
-      return newSet
-    })
-  }
+  const toggleHeaderVisibility = (headerId: string) => setVisibleHeaders(prev => new Set(prev.has(headerId) ? [...prev].filter(id => id !== headerId) : [...prev, headerId]))
+  const toggleStatsVisibility = (statId: string) => setVisibleStats(prev => new Set(prev.has(statId) ? [...prev].filter(id => id !== statId) : [...prev, statId]))
+  const toggleStageVisibility = (stageId: string) => setVisibleStageIds(prev => new Set(prev.has(stageId) ? [...prev].filter(id => id !== stageId) : [...prev, stageId]))
 
-  const toggleStatsVisibility = (statId: string) => {
-    setVisibleStats(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(statId)) {
-        newSet.delete(statId)
-      } else {
-        newSet.add(statId)
-      }
-      return newSet
-    })
-  }
+  // OPTIMIZATION: Filtering is now done on the pre-processed tasks for speed
+  const getFilteredProcessedTasks = useCallback((status?: string) => {
+    if (!departments.length || !activeDepartmentTab) return [];
+    const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab);
+    if (!currentDept) return [];
 
-  const toggleStageVisibility = (stageId: string) => {
-    setVisibleStageIds(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(stageId)) {
-        newSet.delete(stageId)
-      } else {
-        newSet.add(stageId)
-      }
-      return newSet
-    })
-  }
-
-  const getFilteredTasks = useCallback((status?: string) => {
-    if (!departments.length || !activeDepartmentTab || !tasks.length) return []
-    const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
-    if (!currentDept) return []
-
-    let filteredTasks = tasks.filter(task =>
-      task &&
-      task.department?.id?.toString() === currentDept.id.toString() &&
-      (!status || task.status === status)
-    )
-
-    if (activeSubdepartmentTab) {
-      filteredTasks = filteredTasks.filter(task =>
-        task.subdepartment?.id?.toString() === activeSubdepartmentTab
-      )
-    }
-
-    if (activeSubTab === 'wip-stages') {
-      if (activeFollowUpFilter === 'bcl') {
-        if (activeManagerTab) {
-          filteredTasks = filteredTasks.filter(task =>
-            task.task_assistant_id?.toString() === activeAssistantTab
-          );
-        }
-      } else if (activeFollowUpFilter === 'officer') {
-        if (activeOfficerTab) {
-          filteredTasks = filteredTasks.filter(task =>
-            task.officer_id?.toString() === activeOfficerTab
-          );
-        }
-      }
-    }
-
-    return filteredTasks
-  }, [tasks, departments, activeDepartmentTab, activeSubdepartmentTab, activeSubTab, activeFollowUpFilter, activeManagerTab, activeAssistantTab, activeOfficerTab])
-
-  const getAssistantsForManager = useCallback((managerId: string) => {
-    if (!managerId) return [];
-
-    const managerTasks = tasks.filter(task =>
-      task.task_manager_id?.toString() === managerId &&
-      task.task_assistant_id
-    );
-
-    const assistantIds = [...new Set(
-      managerTasks.map(task => task.task_assistant_id?.toString())
-    )].filter(Boolean);
-
-    return assistantIds.map(assistantId => {
-      const user = tmUsers.get(parseInt(assistantId || '0'));
-      const taskCount = managerTasks.filter(
-        task => task.task_assistant_id?.toString() === assistantId
-      ).length;
-
-      return {
-        id: assistantId,
-        name: user?.name || `Assistant ${assistantId}`,
-        taskCount
-      };
+    return processedTasks.filter(task => {
+      let matches = task && task.department?.id?.toString() === currentDept.id.toString() && (!status || task.status === status);
+      if (!matches) return false;
+      if (activeSubdepartmentTab) matches = matches && task.subdepartment?.id?.toString() === activeSubdepartmentTab;
+      if (activeSubTab === 'wip-stages' && activeFollowUpFilter === 'bcl' && activeManagerTab) matches = matches && task.task_assistant_id?.toString() === activeAssistantTab;
+      if (activeSubTab === 'wip-stages' && activeFollowUpFilter === 'officer' && activeOfficerTab) matches = matches && task.officer_id?.toString() === activeOfficerTab;
+      return matches;
     });
-  }, [tasks, tmUsers]);
+  }, [processedTasks, departments, activeDepartmentTab, activeSubdepartmentTab, activeSubTab, activeFollowUpFilter, activeManagerTab, activeAssistantTab, activeOfficerTab]);
 
-  const getTaskCountForManager = useCallback((managerId: string) => {
-    const managerTasks = getFilteredTasks('in_progress').filter(task =>
-      task.task_manager_id?.toString() === managerId
-    );
-    return managerTasks.length;
-  }, [getFilteredTasks]);
-
-  const getTaskCountForAssistant = useCallback((assistantId: string) => {
-    const assistantTasks = getFilteredTasks('in_progress').filter(task =>
-      task.task_assistant_id?.toString() === assistantId
-    );
-    return assistantTasks.length;
-  }, [getFilteredTasks]);
-
-  const getTaskCountForManagerWithoutAssistant = useCallback((managerId: string) => {
-    const managerOnlyTasks = getFilteredTasks('in_progress').filter(task =>
-      task.task_manager_id?.toString() === managerId && !task.task_assistant_id
-    );
-    return managerOnlyTasks.length;
-  }, [getFilteredTasks]);
-
-  const getTaskCountForOfficer = useCallback((officerId: string) => {
-    const officerTasks = getFilteredTasks('in_progress').filter(task =>
-      task.officer_id?.toString() === officerId
-    );
-    return officerTasks.length;
-  }, [getFilteredTasks]);
+  const getTaskCountForManager = useCallback((managerId: string) => getFilteredProcessedTasks('in_progress').filter(task => task.task_manager_id?.toString() === managerId).length, [getFilteredProcessedTasks]);
+  const getTaskCountForAssistant = useCallback((assistantId: string) => getFilteredProcessedTasks('in_progress').filter(task => task.task_assistant_id?.toString() === assistantId).length, [getFilteredProcessedTasks]);
+  const getTaskCountForManagerWithoutAssistant = useCallback((managerId: string) => getFilteredProcessedTasks('in_progress').filter(task => task.task_manager_id?.toString() === managerId && !task.task_assistant_id).length, [getFilteredProcessedTasks]);
+  const getTaskCountForOfficer = useCallback((officerId: string) => getFilteredProcessedTasks('in_progress').filter(task => task.officer_id?.toString() === officerId).length, [getFilteredProcessedTasks]);
 
   const getWIPTasksByFollowUp = useCallback((followUpFilter: string) => {
-    const wipTasks = getFilteredTasks('in_progress')
-    if (followUpFilter === 'all') return wipTasks
+    const wip = getFilteredProcessedTasks('in_progress');
+    if (followUpFilter === 'all') return wip;
+    return wip.filter(task => task._currentStageInfo?.stageFollowUp?.toLowerCase() === followUpFilter);
+  }, [getFilteredProcessedTasks]);
 
-    return wipTasks.filter(task => {
-      const currentStage = determineCurrentStage(task, stages)
-      if (!currentStage) return false
-      const stageFollowUp = currentStage.follow_up?.toLowerCase() || null
-
-      switch (followUpFilter) {
-        case 'bcl': return stageFollowUp === 'bcl'
-        case 'officer': return stageFollowUp === 'officer'
-        case 'client': return stageFollowUp === 'client'
-        default: return true
-      }
-    })
-  }, [getFilteredTasks, stages, determineCurrentStage])
-
-  const filterTasksBySearchWrapper = useCallback((tasks: any[]) => {
-    return filterTasksBySearch(
-      tasks,
-      globalSearchTerm,
-      enhancedTasksData,
-      taskDependants,
-      companies,
-      getTaskHierarchy,
-      getUserDisplayName
-    );
+  const filterTasksBySearchWrapper = useCallback((tasksToFilter: any[]) => {
+    return filterTasksBySearch(tasksToFilter, globalSearchTerm, enhancedTasksData, taskDependants, companies, getTaskHierarchy, getUserDisplayName);
   }, [globalSearchTerm, enhancedTasksData, taskDependants, companies, getTaskHierarchy, getUserDisplayName]);
 
-  const enquiryTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('enquiry')), [getFilteredTasks, filterTasksBySearchWrapper])
-  const wipTasks = useMemo(() => filterTasksBySearchWrapper(getWIPTasksByFollowUp(activeFollowUpFilter)), [getWIPTasksByFollowUp, activeFollowUpFilter, filterTasksBySearchWrapper])
-  const completedTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('completed')), [getFilteredTasks, filterTasksBySearchWrapper])
+  const enquiryTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredProcessedTasks('enquiry')), [getFilteredProcessedTasks, filterTasksBySearchWrapper]);
+  const wipTasks = useMemo(() => filterTasksBySearchWrapper(getWIPTasksByFollowUp(activeFollowUpFilter)), [getWIPTasksByFollowUp, activeFollowUpFilter, filterTasksBySearchWrapper]);
+  const completedTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredProcessedTasks('completed')), [getFilteredProcessedTasks, filterTasksBySearchWrapper]);
 
   // Enhanced Excel export function
   const handleExport = useCallback(async (tasks: any[], tableType: string) => {
@@ -949,7 +651,7 @@ export default function DepartmentTasksManager({
       if (dependantTasks.length > 0) successMessage += `\n${dependantTasks.length} dependant task(s) also created.`;
       if (targetSubDeptId === 6 && skippedMinors > 0) successMessage += `\nNote: ${skippedMinors} minor dependant(s) were skipped for Alien cases.`;
       toast({ title: "Success", description: successMessage, variant: "default" });
-      await refreshAllData();
+      await refreshAllData(); // Refresh is needed here as new tasks are in a different department/subdepartment
     } catch (error) {
       console.error(`Error pushing case to ${targetSubDeptName}:`, error);
       toast({ title: "Error", description: `Failed to push case: ${error.message}`, variant: "destructive" });
@@ -997,6 +699,10 @@ export default function DepartmentTasksManager({
     } finally { setIsDownloading(false); }
   }, [allDocuments, getTaskHierarchy, stages]);
 
+  /**
+   * OPTIMIZATION: This function now updates the task directly in the local state
+   * instead of triggering a full data reload.
+   */
   const enhancedHandleStageStatusSave = useCallback(async (
     stageId: string,
     taskId: string,
@@ -1004,33 +710,56 @@ export default function DepartmentTasksManager({
     updatedExtractedDetails?: Record<string, any>
   ) => {
     try {
-      if (handleStageStatusSave) await handleStageStatusSave(stageId, taskId, value, updatedExtractedDetails)
-      const task = tasks.find(t => t.id.toString() === taskId.toString())
-      if (!task) return
-      const updatedStages = { ...task.stages, [stageId]: { status: 'completed', date: value, completedAt: new Date().toISOString() } }
-      const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages)
-      const updateData: any = { stages: updatedStages, updated_at: new Date().toISOString() }
-      if (currentStage) { updateData.current_stage_id = currentStage.id; updateData.current_stage_started_at = new Date().toISOString(); }
-      const { error } = await supabase.from('tm_tasks').update(updateData).eq('id', taskId)
-      if (error) throw error
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
+      if (handleStageStatusSave) await handleStageStatusSave(stageId, taskId, value, updatedExtractedDetails);
+      const task = tasks.find(t => t.id.toString() === taskId.toString());
+      if (!task) return;
+
+      const updatedStages = { ...task.stages, [stageId]: { status: 'completed', date: value, completedAt: new Date().toISOString() } };
+      const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages);
+      const updateData: any = { stages: updatedStages, updated_at: new Date().toISOString() };
+      if (currentStage) {
+        updateData.current_stage_id = currentStage.id;
+        updateData.current_stage_started_at = new Date().toISOString();
+      }
+
+      // Use .select().single() to get the updated record back from Supabase
+      const { data: updatedTask, error } = await supabase
+        .from('tm_tasks')
+        .update(updateData)
+        .eq('id', taskId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Update the single task in the local state array
+      setTasks(prevTasks =>
+        prevTasks.map(t => (t.id === updatedTask.id ? updatedTask : t))
+      );
+
+      toast({
+        title: "Success",
+        description: "Stage status updated.",
+        variant: "default"
+      });
     } catch (error) {
-      console.error('Error updating stage status:', error)
-      toast({ title: "Error", description: "Failed to update stage status.", variant: "destructive" })
+      console.error('Error updating stage status:', error);
+      toast({ title: "Error", description: "Failed to update stage status.", variant: "destructive" });
     }
-  }, [handleStageStatusSave, tasks, stages, determineCurrentStage, loadTasksData, activeDepartmentTab, activeSubdepartmentTab])
+  }, [handleStageStatusSave, tasks, stages, determineCurrentStage]);
 
-  const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
-    if (!tasks.length) return []
-
+  const generateEnhancedTableRowsSync = useCallback((tasks: UtilTask[]) => {
+    if (!tasks.length) return [];
+  
     const allStages = stages
       .filter(stage => stage && visibleStageIds.has(stage.id.toString()))
-      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
-    const rows = []
-
+      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+    
+    const rows = [];
+  
     // Stats Section
     rows.push({ key: 'section_header_stats', type: 'section_header', label: 'Statistics', id: 'stats', icon: Briefcase });
-
+  
     if (expandedSections.has('stats')) {
       if (visibleStats.has('stats_completed')) {
         rows.push({
@@ -1042,12 +771,12 @@ export default function DepartmentTasksManager({
               if (!task || !departments.length) return false;
               const dept = departments.find(d => d.id === task.department?.id);
               if (!dept) return false;
-              return true; // Simplified - actual logic is now in EditableStageCell
+              return true;
             });
             const completedStages = applicableStages.filter(stage => task.stages?.[stage.id]?.status === 'completed');
             return `${completedStages.length}/${applicableStages.length}`;
           }
-        })
+        });
       }
       if (visibleStats.has('stats_pending')) {
         rows.push({
@@ -1059,12 +788,12 @@ export default function DepartmentTasksManager({
               if (!task || !departments.length) return false;
               const dept = departments.find(d => d.id === task.department?.id);
               if (!dept) return false;
-              return true; // Simplified - actual logic is now in EditableStageCell
+              return true;
             });
             const pendingStages = applicableStages.filter(stage => !task.stages?.[stage.id] || task.stages?.[stage.id]?.status === 'pending');
             return `${pendingStages.length}/${applicableStages.length}`;
           }
-        })
+        });
       }
       if (visibleStats.has('stats_na')) {
         rows.push({
@@ -1077,18 +806,18 @@ export default function DepartmentTasksManager({
               if (!task || !departments.length) return false;
               const dept = departments.find(d => d.id === task.department?.id);
               if (!dept) return false;
-              return true; // Simplified - actual logic is now in EditableStageCell
+              return true;
             });
             const naStages = totalStages - applicableStages.length;
             return `${naStages}/${totalStages}`;
           }
-        })
+        });
       }
     }
-
+  
     // Stages Section
     rows.push({ key: 'section_header_stages', type: 'section_header', label: 'Stages', id: 'stages', icon: Briefcase });
-
+  
     if (expandedSections.has('stages')) {
       for (const stage of allStages) {
         rows.push({
@@ -1099,17 +828,15 @@ export default function DepartmentTasksManager({
           stageId: stage.id,
           stageOrder: stage.order_num || 0,
           getValue: (task: UtilTask) => {
-            // The actual applicability check is now handled in EditableStageCell
-            // We'll just return the stage data and let EditableStageCell handle the display
             return task.stages?.[stage.id] || null;
           }
-        })
-
+        });
+  
         if (expandedStages.has(stage.id) && stage.documents && stage.documents.length > 0) {
           for (const doc of stage.documents) {
             const kycData = kycDocuments.get(doc.kycId);
             const docDisplayName = kycData?.display_name || kycData?.name || doc.display_name || doc.name || 'Document';
-
+  
             rows.push({
               key: `doc_${stage.id}_${doc.id}`,
               label: docDisplayName,
@@ -1118,17 +845,16 @@ export default function DepartmentTasksManager({
               document: doc,
               isSubRow: true,
               getValue: (task: UtilTask) => {
-                // Check if stage is applicable to task
                 const isApplicable = (() => {
                   if (!task || !departments.length) return false;
                   const dept = departments.find(d => d.id === task.department?.id);
                   if (!dept) return false;
                   const subdept = dept.tm_subdepartments?.find(s => s.id === task.subdepartment?.id);
                   if (!subdept) return false;
-
+  
                   const subdeptStage = subdept.stages?.find(s => s.stage_id === stage.id);
                   if (subdeptStage && !subdeptStage.applicable) return false;
-
+  
                   if (task.class_id) {
                     const cls = subdept.classes?.find(c => c.id.toString() === task.class_id.toString());
                     if (cls) {
@@ -1136,17 +862,17 @@ export default function DepartmentTasksManager({
                       if (classStage && !classStage.applicable) return false;
                     }
                   }
-
+  
                   return true;
                 })();
-
+  
                 if (!isApplicable) return 'N/A';
-
+  
                 const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
                 const isOldDoc = linkedDocument && task.created_at &&
                   isDocumentOlderThanTask(linkedDocument.created_at, task.created_at);
                 const hasIndicator = linkedDocument?.indicator === true;
-
+  
                 return {
                   hasDocument: !!linkedDocument,
                   isOldDocument: isOldDoc,
@@ -1156,10 +882,11 @@ export default function DepartmentTasksManager({
                       (linkedDocument ? 'Linked' : 'Not Linked')
                 };
               }
-            })
-
+            });
+  
             if (expandedDocuments.has(doc.id) && doc.kycId) {
-              const kycFields = await getKycFields(doc);
+              // Get KYC fields synchronously from cache
+              const kycFields = allKycFields[doc.kycId] || [];
               if (kycFields && kycFields.length > 0) {
                 kycFields.forEach(field => {
                   rows.push({
@@ -1172,32 +899,30 @@ export default function DepartmentTasksManager({
                     isSubRow: true,
                     isSubSubRow: true,
                     getValue: (task: UtilTask) => {
-                      // if (!isStageApplicableToTask(stage, task)) return 'N/A'
-
-                      const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
-
-                      if (!linkedDocument || !linkedDocument.extracted_details || linkedDocument.indicator === true) return 'N/A'
-                      const value = linkedDocument.extracted_details[field.fieldName] || linkedDocument.extracted_details[field.id] || 'N/A'
-                      return { value }
+                      const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
+  
+                      if (!linkedDocument || !linkedDocument.extracted_details || linkedDocument.indicator === true) return 'N/A';
+                      const value = linkedDocument.extracted_details[field.fieldName] || linkedDocument.extracted_details[field.id] || 'N/A';
+                      return { value };
                     }
-                  })
-                })
+                  });
+                });
               }
             }
           }
         }
       }
     }
-
-    rows.push({ key: 'section_header_actions', type: 'section_header', label: 'Actions', id: 'actions', icon: Pencil })
-
+  
+    rows.push({ key: 'section_header_actions', type: 'section_header', label: 'Actions', id: 'actions', icon: Pencil });
+  
     if (expandedSections.has('actions')) {
-      rows.push({ key: 'actions_row', type: 'actions', label: 'Actions', id: 'actions' })
+      rows.push({ key: 'actions_row', type: 'actions', label: 'Actions', id: 'actions' });
     }
-
-    return rows
-  }, [stages, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage, departments])
-
+  
+    return rows;
+  }, [stages, expandedSections, expandedStages, expandedDocuments, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage, departments, allKycFields]);
+  
   // Task stage handlers
   const handleStageDocumentUpload = useCallback((task: any, stage: any) => {
     const enrichedTask = {
@@ -1351,52 +1076,39 @@ export default function DepartmentTasksManager({
     setEditDialogOpen(true)
   }
 
-  const handleTaskUpdate = (updatedTask: any) => {
+  const handleTaskUpdate = useCallback((updatedTask: any) => {
     onTaskUpdate?.(updatedTask);
+
+    const reProcessedTask = {
+      ...updatedTask,
+      ...(enhancedTasksData.get(updatedTask.id.toString()) || {}),
+      _currentStageInfo: getCurrentStageStatusWrapper(updatedTask),
+      _immigrationStatusInfo: getEnhancedImmigrationStatusWrapper(updatedTask),
+    };
+
+    setTasks(prev => prev.map(t => (t.id === updatedTask.id ? updatedTask : t)));
+    setProcessedTasks(prev => prev.map(pt => (pt.id === reProcessedTask.id ? reProcessedTask : pt)));
+
     setEditDialogOpen(false);
     setEditingTask(null);
-    loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
-  }
+  }, [onTaskUpdate, enhancedTasksData, getCurrentStageStatusWrapper, getEnhancedImmigrationStatusWrapper]);
+
 
   const handleEnquiryCreated = useCallback(async (newEnquiry: any) => {
-    try {
-      setTasks(prevTasks => [newEnquiry, ...prevTasks])
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
-
-      toast({
-        title: "Success",
-        description: "New enquiry created successfully",
-        variant: "default"
-      })
-    } catch (error) {
-      console.error('Error creating enquiry:', error);
-      toast({
-        title: "Error",
-        description: "Failed to create enquiry",
-        variant: "destructive"
-      });
-    }
-  }, [loadTasksData, activeDepartmentTab, activeSubdepartmentTab])
+    // OPTIMIZATION: Add to raw tasks list, which triggers the pre-processing useEffect.
+    setTasks(prevTasks => [newEnquiry, ...prevTasks]);
+    toast({ title: "Success", description: "New enquiry created successfully" });
+  }, []);
 
   const handleTaskAction = useCallback((action: { type: string; taskId?: string | number;[key: string]: any }) => {
-    switch (action.type) {
-      case 'refresh':
-      case 'refresh-data':
-        refreshAllData()
-        break
-      default:
-        onTaskAction?.(action)
+    if (action.type === 'refresh' || action.type === 'refresh-data') {
+      refreshAllData();
+    } else {
+      onTaskAction?.(action);
     }
-  }, [onTaskAction, refreshAllData])
+  }, [onTaskAction, refreshAllData]);
 
   const renderCellContent = useCallback((row: any, task: any) => {
-    console.log('🔄 renderCellContent called:', {
-      rowType: row.type,
-      rowKey: row.key,
-      stageName: row.stage?.name,
-      taskId: task.id,
-      stageId: row.stage?.id
-    });
     const value = row.getValue ? row.getValue(task) : '';
 
     if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
@@ -1405,30 +1117,17 @@ export default function DepartmentTasksManager({
 
     if (row.type === 'stage' && row.stage && task.stages?.[row.stage.id]) {
       const stageData = task.stages[row.stage.id];
-      console.log('📊 Stage data found:', {
-        stageName: row.stage.name,
-        stageData,
-        hasDate: !!stageData.date
-      });
-
-      return (
-        <div className="flex flex-col items-center gap-0.5">
-          {stageData.date && (
+      if (stageData.date) {
+        return (
+          <div className="flex flex-col items-center gap-0.5">
             <span className="text-sm font-medium text-slate-800">
               {formatDateValue(stageData.date)}
             </span>
-          )}
-        </div>
-      );
+          </div>
+        );
+      }
     }
     if (row.type === 'stage') {
-      console.log('🎛️ Rendering EditableStageCell:', {
-        stageName: row.stage?.name,
-        stageId: row.stage?.id,
-        taskId: task.id,
-        requiresUpload: row.stage?.requires_upload !== false
-      });
-
       const requiresUpload = row.stage?.requires_upload !== false;
 
       return (
@@ -1444,7 +1143,6 @@ export default function DepartmentTasksManager({
           departments={departments}
           onAutomationClick={(e) => {
             e.stopPropagation();
-            console.log('⚡ Automation clicked for stage:', row.stage.name);
             if (row.stage.automation) {
               setSelectedAutomation({
                 ...row.stage.automation,
@@ -1469,14 +1167,14 @@ export default function DepartmentTasksManager({
         return (
           <div className="flex items-center gap-1">
             <span className="text-sm text-slate-700" title={formattedDate}>{formattedDate}</span>
-            {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
+            {isOldDoc && <AlertCircle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
           </div>
         );
       }
       return (
         <div className="flex items-center gap-1">
           <span className="text-sm text-gray-700">{fieldValue}</span>
-          {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
+          {isOldDoc && <AlertCircle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
         </div>
       );
     }
@@ -1486,62 +1184,7 @@ export default function DepartmentTasksManager({
       case 'date': return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
       case 'stat': return <span className="text-sm font-semibold">{value}</span>
 
-      case 'stage':
-        // Check if stage is applicable to task
-        const isStageApplicable = !row.stage.targetEntities || row.stage.targetEntities.length === 0 ||
-          row.stage.targetEntities.some((target: any) => {
-            const matchesClass = target.class_id?.toString() === task.class_id?.toString();
-            const matchesSubclass = !target.subclass_id ||
-              target.subclass_id.toString() === task.subclass_id?.toString();
-            return matchesClass && matchesSubclass;
-          });
-
-        if (!isStageApplicable) {
-          return <span className="text-sm text-gray-400 italic">N/A</span>;
-        }
-
-        // Determine if this stage requires upload based on stage configuration
-        const requiresUpload = row.stage.requires_upload !== false; // Default to true if not specified
-
-        return (
-          <EditableStageCell
-            key={row.stage.id}
-            stage={row.stage}
-            task={task}
-            value={task.stages?.[row.stage.id]?.status}
-            onSave={enhancedHandleStageStatusSave}
-            onDocumentUpload={handleStageDocumentUpload}
-            onShowDocuments={handleViewDocument}
-            requiresUpload={requiresUpload}
-            onAutomationClick={(e) => {
-              e.stopPropagation();
-              if (row.stage.automation) {
-                setSelectedAutomation({
-                  ...row.stage.automation,
-                  stageId: row.stage.id,
-                  taskId: task.id
-                });
-                setAutomationDialogOpen(true);
-              }
-            }}
-            getKycFields={getKycFields}
-            allDocuments={allDocuments}
-          />
-        )
       case 'document':
-        // Check if document is applicable to task
-        const isDocApplicable = !row.document?.targetEntities || row.document.targetEntities.length === 0 ||
-          row.document.targetEntities.some((target: any) => {
-            const matchesClass = target.class_id?.toString() === task.class_id?.toString();
-            const matchesSubclass = !target.subclass_id ||
-              target.subclass_id.toString() === task.subclass_id?.toString();
-            return matchesClass && matchesSubclass;
-          });
-
-        if (!isDocApplicable) {
-          return <span className="text-sm text-gray-400 italic">N/A</span>;
-        }
-
         return (
           <EditableStageCell
             key={`${row.stage.id}_${row.document?.id}`}
@@ -1602,7 +1245,7 @@ export default function DepartmentTasksManager({
 
                   if (error) throw error;
 
-                  // Update tasks list by removing the deleted task
+                  // OPTIMIZATION: Update tasks list by removing the deleted task directly from state
                   setTasks(prevTasks => prevTasks.filter(t => t.id !== taskToDelete.id));
 
                   toast({
@@ -1655,25 +1298,7 @@ export default function DepartmentTasksManager({
       )
       default: return <span className="text-sm text-slate-800">{value}</span>
     }
-  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getKycFields])
-
-  const loadRows = useCallback(async (tasks: any[]) => {
-    if (!tasks || tasks.length === 0) return;
-    setLoading(true);
-    try {
-      const rows = await generateEnhancedTableRows(tasks);
-      setTableRows(rows);
-    } catch (error) {
-      console.error('Error generating table rows:', error);
-      toast({
-        title: "Error",
-        description: "Failed to generate table rows.",
-        variant: "destructive"
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [generateEnhancedTableRows, toast]);
+  }, [handleStageDocumentUpload, handleViewDocument, handleTaskEdit, enhancedHandleStageStatusSave, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getKycFields, loading, departments])
 
   const getSortedTasks = useCallback((tasksToRender: UtilTask[]) => {
     return sortTasks(tasksToRender, sortConfig, companies)
@@ -1681,7 +1306,7 @@ export default function DepartmentTasksManager({
 
   const getCellContentWrapper = useCallback((task: any, headerId: string) => {
     return utilGetCellContent(
-      task,
+      task, // This task object comes from 'processedTasks' and has the pre-calculated fields
       headerId,
       enhancedTasksData,
       taskDependants,
@@ -1689,29 +1314,14 @@ export default function DepartmentTasksManager({
       companies,
       getTaskHierarchy,
       getStaffName,
-      getEnhancedImmigrationStatusWrapper,
-      getCurrentStageStatusWrapper,
-      (task: any) => renderImmigrationStatusCell(task, getEnhancedImmigrationStatusWrapper, expandedImmigrationStatus, toggleImmigrationStatusExpansion),
-      (task: any) => renderCurrentStageStatusCell(task, getCurrentStageStatusWrapper),
+      (taskToRender: any) => renderImmigrationStatusCell(taskToRender, expandedImmigrationStatus, toggleImmigrationStatusExpansion),
+      (taskToRender: any) => renderCurrentStageStatusCell(taskToRender),
       toggleDependantsExpansion,
       setLinkingTask,
       setIsLinkDialogOpen
     );
-  }, [
-    enhancedTasksData,
-    taskDependants,
-    expandedDependants,
-    companies,
-    getTaskHierarchy,
-    getStaffName,
-    getEnhancedImmigrationStatusWrapper,
-    getCurrentStageStatusWrapper,
-    expandedImmigrationStatus,
-    toggleImmigrationStatusExpansion,
-    toggleDependantsExpansion,
-    setLinkingTask,
-    setIsLinkDialogOpen
-  ]);
+  }, [enhancedTasksData, taskDependants, expandedDependants, companies, getTaskHierarchy, getStaffName, expandedImmigrationStatus, toggleImmigrationStatusExpansion, toggleDependantsExpansion]);
+
 
   const requestSort = (key: string) => {
     let direction: 'asc' | 'desc' = 'asc'
@@ -1893,11 +1503,23 @@ export default function DepartmentTasksManager({
 
   const defaultSubdepartments = getDefaultSubdepartments()
 
-  useEffect(() => {
-    if (isTransposedView && tasks && tasks.length > 0) {
-      loadRows(tasks);
+  const getTasksToRender = useMemo(() => {
+    switch (activeSubTab) {
+      case 'enquiries': return enquiryTasks;
+      case 'wip-stages': return wipTasks; 
+      case 'completed': return completedTasks;
+      default: return [];
     }
-  }, [tasks, isTransposedView, loadRows]);
+  }, [activeSubTab, enquiryTasks, wipTasks, completedTasks]);
+
+  const currentTableRows = useMemo(() => {
+    if (!isTransposedView) return [];
+    
+    // Generate rows synchronously using cached data
+    return generateEnhancedTableRowsSync(getTasksToRender);
+  }, [isTransposedView, getTasksToRender, 
+     visibleHeaders, visibleStats, visibleStageIds, 
+     expandedSections, expandedStages, expandedDocuments]);
 
   useEffect(() => {
     if (stages && stages.length > 0) {
@@ -1936,6 +1558,7 @@ export default function DepartmentTasksManager({
       try {
         setDataLoading(prev => ({ ...prev, departments: true, companies: true, documents: true, kycFields: true, users: true }))
 
+        // OPTIMIZATION: Use Promise.all to fetch all initial data concurrently
         const [departmentsData, companiesData, documentsData, kycFieldsData, usersData] = await Promise.all([
           fetchDepartments(),
           fetchCompanies(),
@@ -2001,14 +1624,14 @@ export default function DepartmentTasksManager({
       const currentDept = departments.find(d => d.id.toString() === activeDepartmentTab)
       if (currentDept) {
         const defaultSubs = currentDept.tm_subdepartments?.filter(sub => sub.default_display) || []
-        if (defaultSubs.length > 0) {
+        if (defaultSubs.length > 0 && !activeSubdepartmentTab) {
           setActiveSubdepartmentTab(defaultSubs[0].id.toString())
-        } else {
+        } else if (defaultSubs.length === 0) {
           setActiveSubdepartmentTab("")
         }
       }
     }
-  }, [activeDepartmentTab, departments])
+  }, [activeDepartmentTab, departments, activeSubdepartmentTab]);
 
   useEffect(() => {
     if (activeSubdepartmentTab && tmUsers.size > 0) {
@@ -2016,15 +1639,6 @@ export default function DepartmentTasksManager({
       setSubdepartmentOfficers(staffData.officers);
       setSubdepartmentManagers(staffData.managers);
       setSubdepartmentAssistants(staffData.assistants);
-
-      // If we have an active manager tab but no active assistant tab, and the manager has assistants,
-      // auto-select the first assistant if there's only one
-      if (activeManagerTab && !activeAssistantTab) {
-        const managerAssistants = getAssistantsForManager(activeManagerTab);
-        if (managerAssistants.length === 1) {
-          setActiveAssistantTab(managerAssistants[0].id);
-        }
-      }
     } else {
       setSubdepartmentOfficers([]);
       setSubdepartmentManagers([]);
@@ -2032,26 +1646,40 @@ export default function DepartmentTasksManager({
     }
   }, [
     activeSubdepartmentTab,
-    activeManagerTab,
-    activeAssistantTab,
     getActiveStaffFromSubdepartment,
     tmUsers,
-    getAssistantsForManager
   ]);
+  const getAssistantsForManager = useCallback((managerId: string) => {
+    if (!managerId) return [];
 
+    const managerTasks = tasks.filter(task =>
+      task.task_manager_id?.toString() === managerId &&
+      task.task_assistant_id
+    );
+
+    const assistantIds = [...new Set(
+      managerTasks.map(task => task.task_assistant_id?.toString())
+    )].filter(Boolean);
+
+    return assistantIds.map(assistantId => {
+      const user = tmUsers.get(parseInt(assistantId || '0'));
+      const taskCount = managerTasks.filter(
+        task => task.task_assistant_id?.toString() === assistantId
+      ).length;
+
+      return {
+        id: assistantId,
+        name: user?.name || `Assistant ${assistantId}`,
+        taskCount
+      };
+    });
+  }, [tasks, tmUsers]);
   useEffect(() => {
     if (activeManagerTab) {
       const managerAssistants = getAssistantsForManager(activeManagerTab);
       setSubdepartmentAssistants(managerAssistants);
-
-      // Auto-select the first assistant if there's only one
-      if (managerAssistants.length === 1) {
-        setActiveAssistantTab(managerAssistants[0].id);
-      } else {
-        setActiveAssistantTab(null);
-      }
+      setActiveAssistantTab(null);
     } else {
-      // Reset to all assistants when no manager is selected
       if (activeSubdepartmentTab && tmUsers.size > 0) {
         const staffData = getActiveStaffFromSubdepartment(activeSubdepartmentTab);
         setSubdepartmentAssistants(staffData.assistants);
@@ -2414,132 +2042,111 @@ export default function DepartmentTasksManager({
                         )}
                       </CardHeader>
                       <CardContent className="p-2 sm:p-4">
-                        {activeReport ? (
-                          <div>
-                            <div className="flex items-center justify-between mb-4 p-2 bg-blue-50 border border-blue-200 rounded-lg">
-                              <div>
-                                <h3 className="font-semibold text-blue-800">Viewing Report: {activeReport.name}</h3>
-                                <p className="text-sm text-blue-700">Displaying columns as defined in the selected report.</p>
-                              </div>
-                              <Button variant="outline" onClick={() => setActiveReport(null)}>
-                                <X className="mr-2 h-4 w-4" /> Back to Overall Table
-                              </Button>
-                            </div>
-                            <ReportTable
-                              tasks={tasksToRender}
-                              report={activeReport}
-                              companies={companies}
-                              getStaffName={getStaffName}
-                              getDocumentForTaskStage={getDocumentForTaskStage}
-                              loading={dataLoading.tasks}
-                              stages={stages}
-                              kycDocuments={kycDocuments}
-                              tableHeaders={currentTableHeaders}
-                              enhancedTasksData={enhancedTasksData}
-                              taskDependants={taskDependants}
-                              expandedDependants={expandedDependants}
-                              getTaskHierarchy={getTaskHierarchy}
-                              getEnhancedImmigrationStatus={getEnhancedImmigrationStatus}
-                              getCurrentStageStatus={getCurrentStageStatus}
-                              renderImmigrationStatusCell={renderImmigrationStatusCell}
-                              renderCurrentStageStatusCell={renderCurrentStageStatusCell}
-                              toggleDependantsExpansion={toggleDependantsExpansion}
-                              setLinkingTask={setLinkingTask}
-                              setIsLinkDialogOpen={setIsLinkDialogOpen}
-                            />
-                          </div>
-                        ) : isTransposedView ? (
-                          <EnhancedTable
-                            tasks={tasksToRender}
-                            tableType={title}
-                            ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
-                            visibleHeaders={visibleHeaders}
-                            taskDependants={taskDependants}
-                            expandedDependants={expandedDependants}
-                            expandedSections={expandedSections}
-                            companies={companies}
-                            tableRows={tableRows}
-                            loading={loading}
-                            error={error}
-                            getCellContent={getCellContentWrapper}
-                            renderCellContent={renderCellContent}
-                            toggleSectionExpansion={toggleSectionExpansion}
-                            toggleStageExpansion={toggleStageExpansion}
-                            toggleDocumentExpansion={toggleDocumentExpansion}
-                            getTaskHierarchy={getTaskHierarchy}
-                            getStaffName={getStaffName}
-                            onDeleteTask={async (task) => {
-                              try {
-                                setLoading(true);
-
-                                const { error } = await supabase
-                                  .from('tm_tasks')
-                                  .delete()
-                                  .eq('id', task.id);
-
-                                if (error) throw error;
-
-                                // Update tasks list by removing the deleted task
-                                setTasks(prevTasks => prevTasks.filter(t => t.id !== task.id));
-
-                                toast({
-                                  title: 'Success',
-                                  description: 'Task deleted successfully',
-                                  variant: 'default'
-                                });
-
-                              } catch (error) {
-                                console.error('Error deleting task:', error);
-                                toast({
-                                  title: 'Error',
-                                  description: 'Failed to delete task. Please try again.',
-                                  variant: 'destructive'
-                                });
-                              } finally {
-                                setLoading(false);
-                              }
-                            }}
-                          />
-                        ) : (
-
-                          <StandardTable
-                            tasks={tasksToRender}
-                            tableType={title}
-                            ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
-                            stages={stages}
-                            companies={companies}
-                            visibleHeaders={visibleHeaders}
-                            visibleStageIds={visibleStageIds}
-                            expandedStages={expandedStages}
-                            expandedDocuments={expandedDocuments}
-                            expandedDependants={expandedDependants}
-                            taskDependants={taskDependants}
-                            kycDocuments={kycDocuments}
-                            allDocuments={allDocuments}
-                            sortConfig={sortConfig}
-                            dataLoading={dataLoading}
-                            error={error}
-                            isPushingCase={isPushingCase}
-                            isDownloading={isDownloading}
-                            enhancedTasksData={enhancedTasksData}
-                            getCellContent={getCellContentWrapper}
-                            getSortedTasks={getSortedTasks}
-                            getDocumentForTaskStage={getDocumentForTaskStage}
-                            getTaskHierarchy={getTaskHierarchy}
-                            getStaffName={getStaffName}
-                            requestSort={requestSort}
-                            handleTaskEdit={handleTaskEdit}
-                            handleStageDocumentUpload={handleStageDocumentUpload}
-                            handleViewDocument={handleViewDocument}
-                            handlePushCase={handlePushCase}
-                            handleDownloadZip={handleDownloadZip}
-                            onTaskAction={onTaskAction}
-                            enhancedHandleStageStatusSave={enhancedHandleStageStatusSave}
-                            getKycFields={getKycFields}
-                            toggleStageExpansion={toggleStageExpansion}
-                            toggleDocumentExpansion={toggleDocumentExpansion}
-                          />
-                        )}
+                      {activeReport ? (
+  <div>
+    <div className="flex items-center justify-between mb-4 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+      <div>
+        <h3 className="font-semibold text-blue-800">Viewing Report: {activeReport.name}</h3>
+        <p className="text-sm text-blue-700">Displaying columns as defined in the selected report.</p>
+      </div>
+      <Button variant="outline" onClick={() => setActiveReport(null)}>
+        <X className="mr-2 h-4 w-4" /> Back to Overall Table
+      </Button>
+    </div>
+    <ReportTable
+      tasks={getTasksToRender} // Use computed tasks directly
+      report={activeReport}
+      companies={companies}
+      getStaffName={getStaffName}
+      getDocumentForTaskStage={getDocumentForTaskStage}
+      loading={false} // No loading needed
+      stages={stages}
+      kycDocuments={kycDocuments}
+      tableHeaders={currentTableHeaders}
+      enhancedTasksData={enhancedTasksData}
+      taskDependants={taskDependants}
+      expandedDependants={expandedDependants}
+      getTaskHierarchy={getTaskHierarchy}
+      getEnhancedImmigrationStatus={getEnhancedImmigrationStatusWrapper}
+      getCurrentStageStatus={getCurrentStageStatusWrapper}
+      renderImmigrationStatusCell={renderImmigrationStatusCell}
+      renderCurrentStageStatusCell={renderCurrentStageStatusCell}
+      toggleDependantsExpansion={toggleDependantsExpansion}
+      setLinkingTask={setLinkingTask}
+      setIsLinkDialogOpen={setIsLinkDialogOpen}
+    />
+  </div>
+) : isTransposedView ? (
+  <EnhancedTable
+    tasks={getTasksToRender} // Use computed tasks directly
+    tableType={title}
+    ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
+    visibleHeaders={visibleHeaders}
+    taskDependants={taskDependants}
+    expandedDependants={expandedDependants}
+    expandedSections={expandedSections}
+    companies={companies}
+    tableRows={currentTableRows} // Use computed rows directly
+    loading={false} // No loading needed
+    error={error}
+    getCellContent={getCellContentWrapper}
+    renderCellContent={renderCellContent}
+    toggleSectionExpansion={toggleSectionExpansion}
+    toggleStageExpansion={toggleStageExpansion}
+    toggleDocumentExpansion={toggleDocumentExpansion}
+    getTaskHierarchy={getTaskHierarchy}
+    getStaffName={getStaffName}
+    onDeleteTask={async (task) => {
+      try {
+        const { error } = await supabase.from('tm_tasks').delete().eq('id', task.id);
+        if (error) throw error;
+        setTasks(prevTasks => prevTasks.filter(t => t.id !== task.id));
+        toast({ title: 'Success', description: 'Task deleted successfully', variant: 'default' });
+      } catch (error) {
+        console.error('Error deleting task:', error);
+        toast({ title: 'Error', description: 'Failed to delete task. Please try again.', variant: 'destructive' });
+      }
+    }}
+  />
+) : (
+  <StandardTable
+    tasks={getTasksToRender} // Use computed tasks directly
+    tableType={title}
+    ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
+    stages={stages}
+    companies={companies}
+    visibleHeaders={visibleHeaders}
+    visibleStageIds={visibleStageIds}
+    expandedStages={expandedStages}
+    expandedDocuments={expandedDocuments}
+    expandedDependants={expandedDependants}
+    taskDependants={taskDependants}
+    kycDocuments={kycDocuments}
+    allDocuments={allDocuments}
+    sortConfig={sortConfig}
+    dataLoading={{ tasks: false }} // No loading needed
+    error={error}
+    isPushingCase={isPushingCase}
+    isDownloading={isDownloading}
+    enhancedTasksData={enhancedTasksData}
+    getCellContent={getCellContentWrapper}
+    getSortedTasks={getSortedTasks}
+    getDocumentForTaskStage={getDocumentForTaskStage}
+    getTaskHierarchy={getTaskHierarchy}
+    getStaffName={getStaffName}
+    requestSort={requestSort}
+    handleTaskEdit={handleTaskEdit}
+    handleStageDocumentUpload={handleStageDocumentUpload}
+    handleViewDocument={handleViewDocument}
+    handlePushCase={handlePushCase}
+    handleDownloadZip={handleDownloadZip}
+    onTaskAction={onTaskAction}
+    enhancedHandleStageStatusSave={enhancedHandleStageStatusSave}
+    getKycFields={getKycFields}
+    toggleStageExpansion={toggleStageExpansion}
+    toggleDocumentExpansion={toggleDocumentExpansion}
+  />
+)}
                       </CardContent>
                     </Card>
                   </TabsContent>
@@ -2601,8 +2208,9 @@ export default function DepartmentTasksManager({
           kycDocuments={kycDocuments}
           onLinkSuccess={() => {
             setIsLinkDialogOpen(false);
+            // OPTIMIZATION: Refresh only the single task that was modified
+            refreshTaskInState(linkingTask.id);
             setLinkingTask(null);
-            refreshAllData();
           }}
         />
       )}

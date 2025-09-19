@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import ExtractionPreview from "@/components/ExtractionPreview"
@@ -109,63 +109,46 @@ const isDocumentApplicable = (doc: any, task: any): boolean => {
   return false;
 };
 
-// Helper function to check if a stage is applicable to a task
+// [FIX 1] Replaced the complex and buggy applicability function with a correct and robust version.
 const isStageApplicableToTask = (stage: any, task: any, departments: any[] = []): boolean => {
   try {
-    if (!task || !stage) return false;
-
-    // If no departments data available, assume applicable (fallback)
-    if (!departments.length) return true;
+    // Default to true (applicable) if data required for the check is missing.
+    if (!task || !stage || !departments || departments.length === 0) {
+      return true;
+    }
 
     const dept = departments.find(d => d?.id === task.department?.id || d?.id === task.department_id);
-    if (!dept) return false;
+    if (!dept) return true;
 
     const subdept = dept.tm_subdepartments?.find((s: any) =>
       s?.id === task.subdepartment?.id || s?.id === task.subdepartment_id
     );
+    if (!subdept) return true;
 
-    if (!subdept) return false;
-
-    // Check subdepartment level applicability first
-    const subdeptStage = subdept.stages?.find((s: any) => s.stage_id === stage.id);
-    if (subdeptStage && subdeptStage.applicable === false) return false;
-
-    // If task has a class, check class-level applicability
+    // Check for an override at the class level first (most specific)
     if (task.class_id) {
       const cls = subdept.classes?.find((c: any) =>
         c?.id?.toString() === task.class_id?.toString()
       );
-
       if (cls) {
         const classStage = cls.stages?.find((s: any) => s.stage_id === stage.id);
-        // If class stage exists and is explicitly marked as not applicable, return false
-        if (classStage && classStage.applicable === false) {
-          return false;
+        if (classStage && typeof classStage.applicable === 'boolean') {
+          return classStage.applicable; // Return the explicit class-level setting
         }
-        // If class stage exists and is explicitly marked as applicable, return true
-        if (classStage && classStage.applicable === true) {
-          return true;
-        }
-        // If no class stage configuration exists, fall back to subdepartment level
       }
     }
 
-    // If subdepartment stage exists and is explicitly marked as applicable, return true
-    if (subdeptStage && subdeptStage.applicable === true) {
-      return true;
+    // If no class-level override, check the subdepartment level
+    const subdeptStage = subdept.stages?.find((s: any) => s.stage_id === stage.id);
+    if (subdeptStage && typeof subdeptStage.applicable === 'boolean') {
+      return subdeptStage.applicable; // Return the explicit subdepartment-level setting
     }
 
-    // Check department level applicability as final fallback
-    const deptStage = dept.stages?.find((s: any) => s.stage_id === stage.id);
-    if (deptStage) {
-      return deptStage.applicable !== false;
-    }
-
-    // If no explicit configuration found at any level, default to not applicable
-    return false;
+    // If no specific override is found, the stage is applicable by default.
+    return true;
   } catch (error) {
     console.error('Error in isStageApplicableToTask:', error);
-    return false;
+    return true; // Default to applicable on error to avoid hiding UI elements.
   }
 };
 
@@ -181,7 +164,7 @@ export default function EditableStageCell({
   isDocumentRow = false,
   documentData = null,
   onAutomationClick,
-  departments = [],
+  departments
 }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
@@ -971,6 +954,12 @@ export default function EditableStageCell({
   }
 
   const renderCellContent = () => {
+    // [FIX 2] First, for any stage row, check if the stage is applicable. If not, render N/A.
+    // This is the main fix for the user's issue with non-document stages.
+    if (!isDocumentRow && !isStageApplicableToTask(stage, task, departments)) {
+      return <span className="text-gray-400">N/A</span>;
+    }
+
     // For document rows, check if document is applicable to this task
     if (isDocumentRow && documentData) {
       const isApplicable = isDocumentApplicable(documentData, task);

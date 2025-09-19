@@ -109,12 +109,11 @@ export const calculateAge = (dateOfBirth: string | null): number | null => {
 
   try {
     const birthDate = new Date(dateOfBirth);
-    // Check if the date is valid
     if (isNaN(birthDate.getTime())) {
       console.warn('Invalid date of birth:', dateOfBirth);
       return null;
     }
-    
+
     const today = new Date();
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDiff = today.getMonth() - birthDate.getMonth();
@@ -140,13 +139,7 @@ export const getEnhancedImmigrationStatus = (
   const statusStage = stages.find(s => s.id === statusStageId);
 
   if (!statusStage?.documents?.length) {
-    return {
-      status: "N/A",
-      date: null,
-      type: 'na',
-      documentType: null,
-      daysRemaining: null
-    };
+    return { status: "N/A", date: null, type: 'na', documentType: null, daysRemaining: null };
   }
 
   const stageDocKycIds = new Set(statusStage.documents.map(d => d.kycId));
@@ -157,43 +150,25 @@ export const getEnhancedImmigrationStatus = (
   );
 
   if (!relevantDocs.length) {
-    return {
-      status: "No Status Doc",
-      date: null,
-      type: 'na',
-      documentType: null,
-      daysRemaining: null
-    };
+    return { status: "No Status Doc", date: null, type: 'na', documentType: null, daysRemaining: null };
   }
 
   const dateFields = [
-    'expiry', 'valid', 'date', 'until', 'effective',
-    'expiration', 'expiry_date', 'valid_to', 'valid_until', 'up_to',
-    'effective_date', 'effective_from', 'effective_to', 'with_effect_from'
+    'expiry', 'valid', 'date', 'until', 'effective', 'expiration', 'expiry_date',
+    'valid_to', 'valid_until', 'up_to', 'effective_date', 'effective_from',
+    'effective_to', 'with_effect_from'
   ];
 
   const allDatesWithTypes = relevantDocs.flatMap(doc => {
     if (!doc.extracted_details) return [];
-
     const kycData = kycDocuments.get(doc.document_id);
     const documentTypeName = kycData?.display_name || kycData?.name || 'Document';
-
     const dates = findDatesInObject(doc.extracted_details, dateFields);
-    return dates.map(date => ({
-      date,
-      documentType: documentTypeName,
-      document: doc
-    }));
+    return dates.map(date => ({ date, documentType: documentTypeName, document: doc }));
   });
 
   if (!allDatesWithTypes.length) {
-    return {
-      status: "No Date Found",
-      date: null,
-      type: 'na',
-      documentType: null,
-      daysRemaining: null
-    };
+    return { status: "No Date Found", date: null, type: 'na', documentType: null, daysRemaining: null };
   }
 
   const latestDateInfo = allDatesWithTypes.reduce((latest, current) =>
@@ -204,12 +179,7 @@ export const getEnhancedImmigrationStatus = (
   const timeDiff = latestDateInfo.date.getTime() - today.getTime();
   const daysRemaining = Math.ceil(timeDiff / (1000 * 3600 * 24));
 
-  let statusType = 'na';
-  if (isFuture) {
-    statusType = daysRemaining <= 30 ? 'expiring_soon' : 'active';
-  } else {
-    statusType = 'expired';
-  }
+  let statusType = isFuture ? (daysRemaining <= 30 ? 'expiring_soon' : 'active') : 'expired';
 
   return {
     status: isFuture
@@ -221,192 +191,74 @@ export const getEnhancedImmigrationStatus = (
     daysRemaining: isFuture ? daysRemaining : null
   };
 };
+// OPTIMIZATION: Removed noisy console logs. The logic is sound but should not be run during render.
+// It will be used as a one-time calculation utility instead.
 export const getCurrentStageStatus = (
   task: any,
   stages: any[],
   departments: any[],
   allDocuments: any[] = []
 ) => {
-  console.log('🔍 getCurrentStageStatus called for task:', task.id, 'applicant:', task.applicant_name);
-  
-  // Early return if no stages or task
   if (!stages.length || !task) {
-    console.log('❌ No stages or task found');
-    return {
-      stageName: 'No Stage',
-      stageStatus: 'N/A',
-      stageFollowUp: null
-    };
+    return { stageName: 'No Stage', stageStatus: 'N/A', stageFollowUp: null };
   }
 
-  // Sort stages by order_num for proper sequence
   const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-  console.log('📋 Sorted stages:', sortedStages.map(s => ({ id: s.id, name: s.name, order: s.order_num })));
-  
-  // Helper function to check if a stage is truly completed based on ACTUAL data
+
   const isStageCompleted = (stage: any) => {
-    console.log(`🔄 Checking completion for stage: ${stage.name} (${stage.id})`);
-    
-    // Check if stage has documents requirement
     const requiresDocuments = stage.documents && stage.documents.length > 0;
-    console.log('📄 Stage requires documents:', requiresDocuments);
-    
     if (requiresDocuments) {
-      console.log('🔍 Checking document requirements...');
-      
-      // For document-based stages, check for linked documents
       const linkedDocumentData = task.source_document_id?.[stage.id];
-      console.log('🔗 Linked document data:', linkedDocumentData);
-      const hasLinkedDocument = !!linkedDocumentData;
-      console.log('📎 Has linked document:', hasLinkedDocument);
-      
-      if (!hasLinkedDocument) {
-        console.log('❌ Missing linked document for upload stage');
-        return false;
-      }
-      
-      // Verify the linked document exists and is valid
+      if (!linkedDocumentData) return false;
+
       if (allDocuments.length > 0) {
-        const documentId = typeof linkedDocumentData === 'string' 
-          ? linkedDocumentData 
-          : linkedDocumentData.id;
-        console.log('🔍 Looking for document ID:', documentId);
-        
+        const documentId = typeof linkedDocumentData === 'string' ? linkedDocumentData : linkedDocumentData.id;
         const linkedDoc = allDocuments.find(doc => doc.id === documentId);
-        console.log('📋 Found linked document:', linkedDoc ? { 
-          id: linkedDoc.id, 
-          indicator: linkedDoc.indicator, 
-          created_at: linkedDoc.created_at,
-          document_id: linkedDoc.document_id 
-        } : 'NOT FOUND');
-        
-        // Document should exist and not be marked as indicator-only
-        if (!linkedDoc || linkedDoc.indicator === true) {
-          console.log('❌ Document not found or is indicator-only');
-          return false;
-        }
-        
-        // Check if document is older than task (which makes it invalid)
+        if (!linkedDoc || linkedDoc.indicator === true) return false;
         if (task.created_at && linkedDoc.created_at) {
-          const docDate = new Date(linkedDoc.created_at);
-          const taskDate = new Date(task.created_at);
-          const isOldDoc = docDate < taskDate;
-          console.log('📅 Document age check:', {
-            docDate: docDate.toISOString(),
-            taskDate: taskDate.toISOString(),
-            isOldDoc
-          });
-          if (isOldDoc) {
-            console.log('❌ Document is older than task');
-            return false;
-          }
+          if (new Date(linkedDoc.created_at) < new Date(task.created_at)) return false;
         }
       }
-      
-      console.log('✅ Stage with documents is completed (has valid linked document)');
       return true;
     } else {
-      // For stages without document requirements, check stored stage data
       const stageData = task.stages?.[stage.id];
-      const hasDateOrStatus = stageData && (
-        stageData.status === 'completed' || 
-        stageData.date || 
-        stageData.completedAt
-      );
-      
-      console.log('✅ Stage without documents completion check:', {
-        hasStoredData: !!stageData,
-        hasDateOrStatus,
-        stageData
-      });
-      
-      return hasDateOrStatus;
+      return stageData && (stageData.status === 'completed' || stageData.date || stageData.completedAt);
     }
   };
-  
-  // Find the last completed stage using ACTUAL completion detection
+
   let lastCompletedStage = null;
   let lastCompletedIndex = -1;
-  
-  console.log('🔍 Checking all stages for completion using ACTUAL data...');
   for (let i = 0; i < sortedStages.length; i++) {
     const stage = sortedStages[i];
-    
-    console.log(`\n--- Stage ${i + 1}: ${stage.name} ---`);
-    const completed = isStageCompleted(stage);
-    
-    if (completed) {
-      console.log(`✅ Stage ${stage.name} is COMPLETED`);
+    if (isStageCompleted(stage)) {
       lastCompletedStage = stage;
       lastCompletedIndex = i;
-    } else {
-      console.log(`❌ Stage ${stage.name} is NOT completed`);
     }
   }
-  
-  console.log('\n🎯 Final completion analysis:');
-  console.log('Last completed stage:', lastCompletedStage?.name || 'NONE');
-  console.log('Last completed index:', lastCompletedIndex);
-  
-  // Determine current stage based on completion status
+
   let currentStage;
-  let stageStatus = 'Pending'; // Default fallback
-  
+  let stageStatus = 'Pending';
+
   if (lastCompletedStage === null) {
-    // No stages completed - current stage is the first applicable stage
-    console.log('🎯 No stages completed, finding first applicable stage...');
     currentStage = findFirstApplicableStage(sortedStages, task, departments) || sortedStages[0];
-    // Use the predefined status from the stage configuration
     stageStatus = currentStage?.status || 'Pending';
-    console.log('📍 Current stage (first):', currentStage?.name, 'Status:', stageStatus);
   } else {
-    // Check if there's a next stage after the last completed one
     const nextStageIndex = lastCompletedIndex + 1;
-    console.log('🎯 Last completed stage index:', lastCompletedIndex, 'Next stage index:', nextStageIndex);
-    
     if (nextStageIndex < sortedStages.length) {
-      // Find the next applicable stage
-      console.log('🔍 Finding next applicable stage...');
-      currentStage = findNextApplicableStage(
-        lastCompletedStage, 
-        sortedStages.slice(nextStageIndex), 
-        task, 
-        departments
-      ) || sortedStages[nextStageIndex];
-      
-      // Use the predefined status from the stage configuration
+      currentStage = findNextApplicableStage(lastCompletedStage, sortedStages.slice(nextStageIndex), task, departments) || sortedStages[nextStageIndex];
       stageStatus = currentStage?.status || 'Pending';
-      console.log('📍 Current stage (next):', currentStage?.name, 'Status:', stageStatus);
-      
-      // Check if the current stage is actually completed
-      if (currentStage) {
-        const isCurrentStageCompleted = isStageCompleted(currentStage);
-        if (isCurrentStageCompleted) {
-          stageStatus = 'Completed';
-          console.log('📊 Current stage is actually completed');
-        }
+      if (currentStage && isStageCompleted(currentStage)) {
+        stageStatus = 'Completed';
       }
     } else {
-      // All stages completed - current stage is the last stage
-      console.log('🎯 All stages completed');
       currentStage = lastCompletedStage;
       stageStatus = 'Completed';
     }
   }
-  
-  if (!currentStage) {
-    console.log('❌ No current stage determined');
-    return {
-      stageName: 'No Stage',
-      stageStatus: 'N/A',
-      stageFollowUp: null
-    };
-  }
 
-  console.log('\n🏁 FINAL RESULT:');
-  console.log('Current Stage:', currentStage.name);
-  console.log('Stage Status:', stageStatus);
-  console.log('Stage Follow-up:', currentStage.follow_up);
+  if (!currentStage) {
+    return { stageName: 'No Stage', stageStatus: 'N/A', stageFollowUp: null };
+  }
 
   return {
     stageName: currentStage.name || 'Unknown Stage',
@@ -415,7 +267,6 @@ export const getCurrentStageStatus = (
   };
 };
 
-// Helper function to find the first applicable stage
 const findFirstApplicableStage = (sortedStages: any[], task: any, departments: any[]): any => {
   for (const stage of sortedStages) {
     if (isStageApplicableToTask(stage, task, departments)) {
@@ -425,7 +276,6 @@ const findFirstApplicableStage = (sortedStages: any[], task: any, departments: a
   return null;
 };
 
-// Updated helper function to find the next applicable stage
 const findNextApplicableStage = (currentStage: any, remainingStages: any[], task: any, departments: any[]): any => {
   for (const stage of remainingStages) {
     if (isStageApplicableToTask(stage, task, departments)) {
@@ -435,7 +285,6 @@ const findNextApplicableStage = (currentStage: any, remainingStages: any[], task
   return null;
 };
 
-// Helper function to check if a stage is applicable to a task
 const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boolean => {
   try {
     if (!task || !departments.length) return true;
@@ -443,16 +292,11 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
     const dept = departments.find(d => d.id === task.department?.id || d.id === task.department_id);
     if (!dept) return true;
 
-    const subdept = dept.tm_subdepartments?.find(s => 
-      s.id === task.subdepartment?.id || s.id === task.subdepartment_id
-    );
-
-    // Check subdepartment level applicability
+    const subdept = dept.tm_subdepartments?.find(s => s.id === task.subdepartment?.id || s.id === task.subdepartment_id);
     if (subdept) {
       const subdeptStage = subdept.stages?.find(s => s.stage_id === stage.id);
       if (subdeptStage && subdeptStage.applicable === false) return false;
 
-      // Check class level applicability
       if (task.class_id) {
         const cls = subdept.classes?.find(c => c.id.toString() === task.class_id.toString());
         if (cls) {
@@ -462,7 +306,6 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
       }
     }
 
-    // Check department level applicability
     const deptStage = dept.stages?.find(s => s.stage_id === stage.id);
     if (deptStage && deptStage.applicable === false) return false;
 
@@ -475,11 +318,13 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
 
 export const renderImmigrationStatusCell = (
   task: any,
-  getEnhancedImmigrationStatus: any,
   expandedImmigrationStatus: any,
   toggleImmigrationStatusExpansion: any
 ) => {
-  const statusInfo = getEnhancedImmigrationStatus(task);
+  // OPTIMIZATION: Read pre-calculated status from the task object
+  const statusInfo = task._immigrationStatusInfo;
+  if (!statusInfo) return null;
+
   const isExpanded = expandedImmigrationStatus.has(task.id.toString());
 
   const getColor = (type: string) => {
@@ -494,15 +339,12 @@ export const renderImmigrationStatusCell = (
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <Badge
-          className={`whitespace-normal text-sm ${getColor(statusInfo.type)}`}
-        >
+        <Badge className={`whitespace-normal text-sm ${getColor(statusInfo.type)}`}>
           {statusInfo.status}
         </Badge>
         {statusInfo.type !== 'na' && (
           <Button
-            variant="ghost"
-            size="icon"
+            variant="ghost" size="icon"
             className="h-5 w-5 p-0 text-white hover:text-white"
             onClick={() => toggleImmigrationStatusExpansion(task.id.toString())}
           >
@@ -545,43 +387,20 @@ export const renderImmigrationStatusCell = (
   );
 };
 
-export const renderCurrentStageStatusCell = (
-  task: any,
-  getCurrentStageStatus: any
-) => {
-  const stageStatusInfo = getCurrentStageStatus(task);
-
-  const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'completed': return 'text-white';
-      case 'pending': return 'text-white';
-      case 'in_progress': return 'text-white';
-      case 'to enquire': return 'text-white';
-      case 'to raise bill': return 'text-white';
-      case 'to approve': return 'text-white';
-      case 'to submit': return 'text-white';
-      case 'to review': return 'text-white';
-      case 'to process': return 'text-white';
-      case 'n/a': return 'text-white';
-      default:
-        if (status.toLowerCase().startsWith('to ')) {
-          return 'text-white';
-        }
-        return 'text-white';
-    }
-  };
+export const renderCurrentStageStatusCell = (task: any) => {
+  // OPTIMIZATION: Read pre-calculated status from the task object
+  const stageStatusInfo = task._currentStageInfo;
+  if (!stageStatusInfo) return null;
 
   return (
-    <div className="space-y-2">
-      <span
-        className={`whitespace-normal text-sm ${getStatusColor(stageStatusInfo.stageStatus)}`}
-      >
-        {stageStatusInfo.stageStatus}
-      </span>
-    </div>
+    <span className="whitespace-normal text-sm text-white">
+      {stageStatusInfo.stageStatus}
+    </span>
   );
 };
 
+// OPTIMIZATION: This function is now much faster. It simply reads pre-calculated properties
+// from the enhancedTask object instead of running expensive calculations during render.
 export const getCellContent = (
   task: any,
   headerId: string,
@@ -591,8 +410,6 @@ export const getCellContent = (
   companies: Map<number, string>,
   getTaskHierarchy: any,
   getStaffName: any,
-  getEnhancedImmigrationStatus: any,
-  getCurrentStageStatus: any,
   renderImmigrationStatusCell: any,
   renderCurrentStageStatusCell: any,
   toggleDependantsExpansion: any,
@@ -600,10 +417,10 @@ export const getCellContent = (
   setIsLinkDialogOpen: any
 ) => {
   const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
-  
+
   switch (headerId) {
     case 'id': return task.id;
-    case 'applicant_name': 
+    case 'applicant_name':
       const taskDeps = taskDependants.get(task.id.toString()) || [];
       return (
         <div className="flex items-center justify-between gap-1 w-[300px]">
@@ -613,22 +430,15 @@ export const getCellContent = (
           <div className="flex gap-1">
             {taskDeps.length > 0 && (
               <Button
-                variant="ghost" 
-                size="icon" 
-                className="h-8 w-8 text-white hover:bg-green-100 flex-shrink-0"
+                variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-green-100 flex-shrink-0"
                 title={`${taskDeps.length} dependant(s)`}
                 onClick={() => toggleDependantsExpansion(task.id.toString())}
               >
-                {expandedDependants.has(task.id.toString()) ? 
-                  <Minus className="h-4 w-4" /> : 
-                  <Plus className="h-4 w-4" />
-                }
+                {expandedDependants.has(task.id.toString()) ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
               </Button>
             )}
             <Button
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 text-white hover:bg-blue-100 flex-shrink-0"
+              variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-blue-100 flex-shrink-0"
               title="Link source documents"
               onClick={() => { setLinkingTask(task); setIsLinkDialogOpen(true); }}
             >
@@ -637,54 +447,40 @@ export const getCellContent = (
           </div>
         </div>
       );
-      case 'immigration_document_type': return getEnhancedImmigrationStatus(task).documentType || '-';
-      case 'immigration_expiry_date': {
-        const statusInfo = getEnhancedImmigrationStatus(task);
-        return statusInfo.date ? format(statusInfo.date, 'dd MMM yyyy') : '-';
-      }
-      case 'immigration_status': return renderImmigrationStatusCell(task);
-      case 'current_stage_name': return getCurrentStageStatus(task).stageName || 'N/A';
-      case 'current_stage_status_value': return renderCurrentStageStatusCell(task);
-      case 'current_stage_follow_up': {
-        const statusInfo = getCurrentStageStatus(task);
-        if (!statusInfo.stageFollowUp) return '-';
-        const getFollowUpTextColor = (followUp) => {
-          switch (followUp?.toLowerCase()) {
-            case 'bcl': return 'text-white';
-            case 'officer': return 'text-white';
-            case 'client': return 'text-white';
-            default: return 'text-white';
-          }
-        };
-        return <span className={`whitespace-nowrap text-sm ${getFollowUpTextColor(statusInfo.stageFollowUp)}`}>{statusInfo.stageFollowUp}</span>;
-      }
-      case 'company_name': return companies.get(task.company_id) || 'N/A';
-      case 'job_level': return getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || getTaskHierarchy(task)?.subdepartment?.name || 'N/A';
-      case 'renewal_new': return <span className="text-sm font-semibold">{task.renewal_status || 'New'}</span>;
-      case 'case_status': return <span className="text-sm font-semibold">{task.status || 'pending'}</span>;
-      case 'nationality': return enhancedTask.nationality || 'N/A';
-      case 'age': return enhancedTask.age?.toString() || 'N/A';
-      case 'task_manager':
-        return task.task_manager_id ? (
-          <div className="flex flex-col">
-            <span className="font-medium">{getStaffName(task.task_manager_id)}</span>
-          </div>
-        ) : 'N/A';
-      case 'officer':
-        return task.officer_id ? (
-          <div className="flex flex-col">
-            <span className="font-medium">{getStaffName(task.officer_id)}</span>
-          </div>
-        ) : 'N/A';
-      case 'task_assistant':
-        return task.task_assistant_id ? (
-          <div className="flex flex-col">
-            <span className="font-medium">{getStaffName(task.task_assistant_id)}</span>
-          </div>
-        ) : 'N/A';
-      default: return task[headerId] || 'N/A';
+    case 'immigration_document_type': return enhancedTask._immigrationStatusInfo?.documentType || '-';
+    case 'immigration_expiry_date': {
+      const date = enhancedTask._immigrationStatusInfo?.date;
+      return date ? format(date, 'dd MMM yyyy') : '-';
     }
+    case 'immigration_status': return renderImmigrationStatusCell(enhancedTask);
+    case 'current_stage_name': return enhancedTask._currentStageInfo?.stageName || 'N/A';
+    case 'current_stage_status_value': return renderCurrentStageStatusCell(enhancedTask);
+    case 'current_stage_follow_up': {
+      const followUp = enhancedTask._currentStageInfo?.stageFollowUp;
+      if (!followUp) return '-';
+      const getFollowUpTextColor = (f) => {
+        switch (f?.toLowerCase()) {
+          case 'bcl': return 'text-white';
+          case 'officer': return 'text-white';
+          case 'client': return 'text-white';
+          default: return 'text-white';
+        }
+      };
+      return <span className={`whitespace-nowrap text-sm ${getFollowUpTextColor(followUp)}`}>{followUp}</span>;
+    }
+    case 'company_name': return companies.get(task.company_id) || 'N/A';
+    case 'job_level': return getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || getTaskHierarchy(task)?.subdepartment?.name || 'N/A';
+    case 'renewal_new': return <span className="text-sm font-semibold">{task.renewal_status || 'New'}</span>;
+    case 'case_status': return <span className="text-sm font-semibold">{task.status || 'pending'}</span>;
+    case 'nationality': return enhancedTask.nationality || 'N/A';
+    case 'age': return enhancedTask.age?.toString() || 'N/A';
+    case 'task_manager': return task.task_manager_id ? <span className="font-medium">{getStaffName(task.task_manager_id)}</span> : 'N/A';
+    case 'officer': return task.officer_id ? <span className="font-medium">{getStaffName(task.officer_id)}</span> : 'N/A';
+    case 'task_assistant': return task.task_assistant_id ? <span className="font-medium">{getStaffName(task.task_assistant_id)}</span> : 'N/A';
+    default: return task[headerId] || 'N/A';
+  }
 };
+
 
 export const sortTasks = (tasksToSort: any[], sortConfig: any, companies: Map<number, string>) => {
   let sortableItems = [...tasksToSort]
@@ -695,6 +491,9 @@ export const sortTasks = (tasksToSort: any[], sortConfig: any, companies: Map<nu
           case 'applicant_name': return task.applicant_name?.toLowerCase() || ''
           case 'company_name': return companies.get(task.company_id)?.toLowerCase() || ''
           case 'status': return task.status?.toLowerCase() || ''
+          // Add cases for new pre-calculated fields if sorting is needed
+          case 'current_stage_name': return task._currentStageInfo?.stageName?.toLowerCase() || '';
+          case 'immigration_expiry_date': return task._immigrationStatusInfo?.date || new Date(0);
           default: return task[key] || ''
         }
       }
@@ -734,7 +533,7 @@ export const filterTasksBySearch = (
   return tasks.filter(task => {
     // Get enhanced task data
     const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
-    
+
     const basicFields = [
       task.id?.toString(),
       task.applicant_name,
@@ -750,7 +549,12 @@ export const filterTasksBySearch = (
       getTaskHierarchy(task)?.subclass?.name,
       getUserDisplayName(task.task_manager_id),
       getUserDisplayName(task.officer_id),
-      getUserDisplayName(task.task_assistant_id)
+      getUserDisplayName(task.task_assistant_id),
+      // Include pre-calculated fields in search
+      enhancedTask._currentStageInfo?.stageName,
+      enhancedTask._currentStageInfo?.stageFollowUp,
+      enhancedTask._immigrationStatusInfo?.documentType,
+      enhancedTask._immigrationStatusInfo?.status,
     ].filter(Boolean).join(' ').toLowerCase()
 
     if (basicFields.includes(searchTerm)) return true
