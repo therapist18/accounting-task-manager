@@ -443,7 +443,7 @@ export function EnquiryDialog({
                     r_number,
                     relationships, 
                     references,
-                    employment_history
+                    employment_data
                 `)
                 .eq('individual_type', type)
                 .order('full_name')
@@ -571,91 +571,148 @@ export function EnquiryDialog({
 
     const fetchCompanies = async (individualId: number) => {
         if (!individualId) return;
+        
         console.log(`🏢 [LOG] Fetching companies for individual ID: ${individualId}`);
+        setLoadingCompanies(true);
+        
         try {
-            // Get the individual with their employment history
+            // Get the individual with their employment data
             const { data: individualData, error: individualError } = await supabase
                 .from('registry_individuals')
-                .select('employment_history')
+                .select('employment_data')
                 .eq('id', individualId)
                 .single();
-
+    
             if (individualError) throw individualError;
-
-            const employmentData = individualData?.employment_history || { current: null, history: [] };
+    
+            const employmentData = individualData?.employment_data;
             
-            // Combine current and historical employments
-            const allEmployments = [
-                ...(employmentData.current ? [employmentData.current] : []),
-                ...(employmentData.history || [])
-            ];
-
-            // Get all unique company IDs from employments
-            const companyIds = new Set<string>();
-            const companiesMap = new Map();
-
-            allEmployments.forEach((job: any) => {
-                if (job?.company_id) {
-                    const companyId = job.company_id.toString();
-                    companyIds.add(companyId);
-                    
-                    // Track if this is the current job and if it's bill_to
-                    companiesMap.set(companyId, {
-                        id: companyId,
-                        isCurrent: job === employmentData.current,
-                        isBillTo: job.bill_to === true
-                    });
-                }
-            });
-
-            if (companyIds.size === 0) {
+            // Check if employment_data exists and has associations
+            if (!employmentData?.associations || !Array.isArray(employmentData.associations)) {
+                console.log('📭 [LOG] No employment associations found');
                 setCompanies([]);
                 setSelectedCompany('');
                 setUnderstudies([]);
                 setSelectedUnderstudy('');
                 return;
             }
-
-            // Fetch company details
+    
+            // Filter associations by individual_type = 'Principal' and extract company info
+            const principalAssociations = employmentData.associations
+                .filter((association: any) => 
+                    association?.individual_type === 'Principal' && 
+                    association?.company_id
+                )
+                .map((association: any) => ({
+                    company_id: association.company_id.toString(),
+                    is_current: association.is_current === true,
+                    role: association.role || '',
+                    start_date: association.start_date,
+                    end_date: association.end_date
+                }));
+    
+            console.log(`👔 [LOG] Found ${principalAssociations.length} Principal associations`);
+    
+            if (principalAssociations.length === 0) {
+                console.log('📭 [LOG] No Principal associations found');
+                setCompanies([]);
+                setSelectedCompany('');
+                setUnderstudies([]);
+                setSelectedUnderstudy('');
+                return;
+            }
+    
+            // Get unique company IDs
+            const companyIds = [...new Set(principalAssociations.map(assoc => assoc.company_id))];
+    
+            // Fetch company details in a single query
             const { data: companiesData, error: companiesError } = await supabase
                 .from('acc_portal_company_duplicate')
                 .select('id, company_name, understudy')
-                .in('id', Array.from(companyIds));
-
+                .in('id', companyIds);
+    
             if (companiesError) throw companiesError;
-
+    
+            // Create a map for quick lookup of association data
+            const associationMap = new Map();
+            principalAssociations.forEach(assoc => {
+                const companyId = assoc.company_id;
+                if (!associationMap.has(companyId)) {
+                    associationMap.set(companyId, []);
+                }
+                associationMap.get(companyId).push(assoc);
+            });
+    
             // Enrich company data with employment info
             const companiesWithDetails = (companiesData || []).map(company => {
                 const companyId = company.id?.toString();
-                const employmentInfo = companiesMap.get(companyId) || {};
+                const associations = associationMap.get(companyId) || [];
+                
+                // Determine if any association is current
+                const hasCurrent = associations.some(assoc => assoc.is_current);
+                
+                // For Principal type, we'll consider it as "bill_to" if it's current
+                // You can adjust this logic based on your business rules
+                const isBillTo = hasCurrent;
                 
                 return {
                     id: companyId,
                     company_name: company.company_name || 'Unnamed Company',
-                    is_bill_to: employmentInfo.isBillTo || false,
-                    is_current: employmentInfo.isCurrent || false,
-                    understudy: company.understudy || null
+                    is_bill_to: isBillTo,
+                    is_current: hasCurrent,
+                    understudy: company.understudy || null,
+                    associations: associations // Include all associations for this company
                 };
             });
-
+    
+            console.log(`✅ [LOG] Processed ${companiesWithDetails.length} companies for Principal`);
             setCompanies(companiesWithDetails);
-
-            // Auto-select the first company if only one exists
+    
+            // Auto-select company logic
             if (companiesWithDetails.length === 1) {
-                setSelectedCompany(companiesWithDetails[0].id);
-                fetchUnderstudies(companiesWithDetails[0].id);
+                // If only one company, auto-select it
+                const selectedCompanyId = companiesWithDetails[0].id;
+                setSelectedCompany(selectedCompanyId);
+                fetchUnderstudies(selectedCompanyId);
+                console.log(`🎯 [LOG] Auto-selected single company: ${companiesWithDetails[0].company_name}`);
+            } else if (companiesWithDetails.length > 1) {
+                // If multiple companies, try to select current one or bill_to
+                const currentCompany = companiesWithDetails.find(c => c.is_current && c.is_bill_to);
+                const fallbackCompany = companiesWithDetails.find(c => c.is_current) || 
+                                      companiesWithDetails.find(c => c.is_bill_to);
+                
+                const autoSelectCompany = currentCompany || fallbackCompany;
+                
+                if (autoSelectCompany) {
+                    setSelectedCompany(autoSelectCompany.id);
+                    fetchUnderstudies(autoSelectCompany.id);
+                    console.log(`🎯 [LOG] Auto-selected company: ${autoSelectCompany.company_name}`);
+                } else {
+                    setSelectedCompany('');
+                    setUnderstudies([]);
+                    setSelectedUnderstudy('');
+                    console.log(`⚠️ [LOG] Multiple companies found, no auto-selection made`);
+                }
             } else {
-                setSelectedCompany(companiesWithDetails.find(c => c.is_bill_to)?.id || '');
+                // No companies found
+                setSelectedCompany('');
                 setUnderstudies([]);
                 setSelectedUnderstudy('');
             }
+    
         } catch (error) {
-            console.error('Error fetching companies:', error);
+            console.error('❌ [LOG] Error fetching companies:', error);
             toast({
                 title: "Error",
                 description: "Failed to load companies",
                 variant: "destructive"
             });
+            
+            // Reset state on error
+            setCompanies([]);
+            setSelectedCompany('');
+            setUnderstudies([]);
+            setSelectedUnderstudy('');
         } finally {
             setLoadingCompanies(false);
         }
