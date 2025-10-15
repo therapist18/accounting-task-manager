@@ -23,6 +23,11 @@ const navItems = [
     icon: LayoutDashboard,
   },
   {
+    title: "Tasks Requirements",
+    href: "/dashboard/tasks-requirements",
+    icon: CheckSquare,
+  },
+  {
     title: "Tasks",
     href: "/dashboard/tasks",
     icon: CheckSquare,

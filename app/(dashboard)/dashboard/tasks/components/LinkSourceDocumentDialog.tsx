@@ -2,14 +2,15 @@
 "use client"
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Eye, Loader2, FileText } from "lucide-react";
+import { Eye, Loader2, FileText, Check } from "lucide-react"; // Assuming Checkbox might need an icon
 import { toast } from "@/hooks/use-toast";
 import { format, parseISO } from "date-fns";
 import { supabase } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import ExtractionPreview from "@/components/ExtractionPreview";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+// Import Checkbox from your UI library, e.g., shadcn/ui
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 
 // --- Interface Definitions ---
@@ -22,7 +23,9 @@ interface Task {
   id: string;
   applicant_name: string;
   individual_id: string;
-  source_document_id?: Record<string, SelectedDoc>;
+  // This structure now needs to support multiple documents per stage ID.
+  // The backend should ideally store this as a JSONB column like: { "stage_id_1": [SelectedDoc1, SelectedDoc2] }
+  source_document_id?: Record<string, SelectedDoc[]>; 
   created_at: string;
   class_id?: string;
   subclass_id?: string;
@@ -102,31 +105,20 @@ export function LinkSourceDocumentDialog({
   onLinkSuccess,
   departments = []
 }: LinkSourceDocumentDialogProps) {
-  const [selectedDocs, setSelectedDocs] = useState<Record<string, SelectedDoc>>({});
+  // MODIFICATION: State now holds an array of selected documents for each stage ID.
+  const [selectedDocs, setSelectedDocs] = useState<Record<string, SelectedDoc[]>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<any | null>(null);
   const [isPreviewDialogOpen, setIsPreviewDialogOpen] = useState(false);
 
+  // MODIFICATION: Logic updated to handle and pre-select multiple documents.
   const initialSelectedDocs = useMemo(() => {
     if (!task?.source_document_id || typeof task.source_document_id !== 'object') {
       return {};
     }
-
-    const initialSelections: Record<string, SelectedDoc> = {};
-    const linkedDocInstances = Object.values(task.source_document_id);
-
-    stages.forEach(stage => {
-      const stageDocTypes = new Set(stage.documents?.map(d => d.kycId) || []);
-      if (stageDocTypes.size === 0) return;
-
-      const foundLink = linkedDocInstances.find(linkedDoc => stageDocTypes.has(linkedDoc.document_id));
-
-      if (foundLink) {
-        initialSelections[stage.id] = foundLink;
-      }
-    });
-    return initialSelections;
-  }, [task?.id, JSON.stringify(task?.source_document_id), stages]);
+    // The structure from the database is assumed to be { stageId: [doc1, doc2], ... }
+    return task.source_document_id;
+  }, [task?.id, task?.source_document_id]);
 
   useEffect(() => {
     if (open) {
@@ -140,19 +132,14 @@ export function LinkSourceDocumentDialog({
       .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
   }, [stages, task, departments]);
   
+  // MODIFICATION: handleSave now sends a payload compatible with the new multi-select structure.
   const handleSave = useCallback(async () => {
     setIsLoading(true);
     try {
-      const finalPayload = applicableStages.reduce((acc, stage) => {
-        if (selectedDocs[stage.id]) {
-          acc[stage.id] = selectedDocs[stage.id];
-        }
-        return acc;
-      }, {});
-
+       // The finalPayload is already in the correct format { stageId: [doc1, doc2], ... }
       const { error } = await supabase
         .from('tm_tasks')
-        .update({ source_document_id: finalPayload, updated_at: new Date().toISOString() })
+        .update({ source_document_id: selectedDocs, updated_at: new Date().toISOString() })
         .eq('id', task.id);
 
       if (error) throw error;
@@ -164,9 +151,32 @@ export function LinkSourceDocumentDialog({
     } finally {
       setIsLoading(false);
     }
-  }, [applicableStages, selectedDocs, task.id, onLinkSuccess]);
+  }, [selectedDocs, task.id, onLinkSuccess]);
+
+  // NEW: Callback to handle checkbox state changes for multi-selection.
+  const handleDocSelectionChange = useCallback((stageId: string, doc: Document, isSelected: boolean) => {
+    setSelectedDocs(prev => {
+      const currentSelections = prev[stageId] || [];
+      let newSelections;
+
+      if (isSelected) {
+        // Add the document if it's not already selected
+        if (!currentSelections.some(d => d.id === doc.id)) {
+            newSelections = [...currentSelections, { id: doc.id, document_id: doc.document_id }];
+        } else {
+            newSelections = currentSelections;
+        }
+      } else {
+        // Remove the document
+        newSelections = currentSelections.filter(d => d.id !== doc.id);
+      }
+      
+      return { ...prev, [stageId]: newSelections };
+    });
+  }, []);
 
   const fetchKycDocumentData = useCallback(async (kycId: string) => {
+    // ... (no changes in this function)
     try {
       const { data, error } = await supabase.from('acc_portal_kyc').select('id, fields, name, display_name, document_type').eq('id', kycId).single();
       if (error) throw error;
@@ -178,6 +188,7 @@ export function LinkSourceDocumentDialog({
   }, []);
 
   const handlePreview = useCallback(async (document: Document) => {
+    // ... (no changes in this function)
     setIsLoading(true);
     try {
       const kycId = document.document_id;
@@ -241,7 +252,7 @@ export function LinkSourceDocumentDialog({
           <DialogHeader>
             <DialogTitle>Link Source Documents for: {task?.applicant_name}</DialogTitle>
             <DialogDescription>
-              Select a document for each stage. Already linked documents are selected and locked.
+              Select one or more documents for each stage.
             </DialogDescription>
           </DialogHeader>
           <div className="flex-grow overflow-hidden border-t border-b">
@@ -253,78 +264,63 @@ export function LinkSourceDocumentDialog({
                     .filter(d => d.director_id === task.individual_id && stageDocTypes.has(d.document_id))
                     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-                  const isStageLocked = !!initialSelectedDocs[stage.id];
-
                   return (
                     <div key={stage.id} className="p-4 border rounded-lg">
                       <h3 className="font-semibold text-lg text-slate-800 mb-3">
                         {stage.name}
                       </h3>
                       {availableDocs.length > 0 ? (
-                        <RadioGroup
-                          value={selectedDocs[stage.id]?.id || ''}
-                          onValueChange={(docId) => {
-                            if (isStageLocked) return;
-                            const selectedDoc = availableDocs.find(doc => doc.id === docId);
-                            if (selectedDoc) {
-                              setSelectedDocs(prev => ({
-                                ...prev,
-                                [stage.id]: { id: selectedDoc.id, document_id: selectedDoc.document_id }
-                              }));
-                            }
-                          }}
-                        >
-                          <div className="space-y-2">
-                            {availableDocs.map(doc => {
-                              const isSelected = selectedDocs[stage.id]?.id === doc.id;
-                              const isDisabled = isStageLocked && !isSelected;
-                              return (
-                                <div 
-                                  key={doc.id}
-                                  className={`flex items-center gap-4 p-3 border rounded-md transition-colors ${
-                                    isSelected ? 'bg-blue-50 border-blue-300' : ''
-                                  } ${
-                                    isDisabled ? 'bg-slate-50 opacity-60 cursor-not-allowed' : 'hover:bg-slate-50'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-3 flex-1">
-                                    <RadioGroupItem
-                                      value={doc.id}
-                                      id={`${stage.id}-${doc.id}`}
-                                      disabled={isDisabled}
-                                    />
-                                    <div className="min-w-0">
-                                      <Label 
-                                        htmlFor={`${stage.id}-${doc.id}`}
-                                        className={`font-medium text-slate-900 block truncate ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-                                      >
-                                        {kycDocuments.get(doc.document_id)?.display_name || 'Document'}
-                                      </Label>
-                                      <p className="text-xs text-slate-500 truncate">
-                                        {doc.file_path?.split('/').pop() || 'document'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <Button
-                                      variant="ghost" size="icon"
-                                      className="h-8 w-8 text-green-600 hover:bg-green-100"
-                                      onClick={() => handlePreview(doc)}
-                                      title="Preview Document"
-                                      disabled={isLoading}
+                        // MODIFICATION: Replaced RadioGroup with a div to contain Checkboxes.
+                        <div className="space-y-2">
+                          {availableDocs.map(doc => {
+                            const isSelected = selectedDocs[stage.id]?.some(d => d.id === doc.id) ?? false;
+                            return (
+                              <div 
+                                key={doc.id}
+                                className={`flex items-center gap-4 p-3 border rounded-md transition-colors ${
+                                  isSelected ? 'bg-blue-50 border-blue-300' : 'hover:bg-slate-50'
+                                }`}
+                              >
+                                <div className="flex items-center gap-3 flex-1">
+                                  {/* MODIFICATION: Replaced RadioGroupItem with a Checkbox. */}
+                                  <Checkbox
+                                    id={`${stage.id}-${doc.id}`}
+                                    checked={isSelected}
+                                    onCheckedChange={(checked) => {
+                                      handleDocSelectionChange(stage.id, doc, !!checked);
+                                    }}
+                                  />
+                                  <div className="min-w-0">
+                                    <Label 
+                                      htmlFor={`${stage.id}-${doc.id}`}
+                                      className="font-medium text-slate-900 block truncate cursor-pointer"
                                     >
-                                      {isLoading && previewDocument?.documentId === doc.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
-                                    </Button>
-                                    <div className="text-xs text-slate-500 text-right">
-                                      <p>Uploaded:</p>
-                                      <p>{format(parseISO(doc.created_at), 'dd MMM yyyy')}</p>
-                                    </div>
+                                      {kycDocuments.get(doc.document_id)?.display_name || 'Document'}
+                                    </Label>
+                                    <p className="text-xs text-slate-500 truncate">
+                                      {doc.file_path?.split('/').pop() || 'document'}
+                                    </p>
                                   </div>
                                 </div>
-                              )
-                            })}
-                          </div>
-                        </RadioGroup>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    variant="ghost" size="icon"
+                                    className="h-8 w-8 text-green-600 hover:bg-green-100"
+                                    onClick={() => handlePreview(doc)}
+                                    title="Preview Document"
+                                    disabled={isLoading}
+                                  >
+                                    {isLoading && previewDocument?.documentId === doc.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+                                  </Button>
+                                  <div className="text-xs text-slate-500 text-right">
+                                    <p>Uploaded:</p>
+                                    <p>{format(parseISO(doc.created_at), 'dd MMM yyyy')}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
                       ) : (
                          <div className="text-center py-8 text-slate-500">
                           <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -347,6 +343,7 @@ export function LinkSourceDocumentDialog({
         </DialogContent>
       </Dialog>
       
+      {/* The preview dialog remains unchanged */}
       <Dialog open={isPreviewDialogOpen} onOpenChange={setIsPreviewDialogOpen}>
         <DialogContent className="max-w-7xl w-[95vw] h-[95vh] p-0 flex flex-col">
           {previewDocument ? (

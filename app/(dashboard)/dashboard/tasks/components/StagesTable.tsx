@@ -163,20 +163,20 @@ export function StagesTable({
         sortable: true,
         stage: stage,
         isDefault: config ? config.display : true,
-        render: (value: any, task: any, index: number, stage: any) => {
-          const taskStageStatus = getTaskStageStatus?.(task.id, stage.id);
+render: (value: any, task: any, index: number, stage: any) => {
+  const taskStageStatus = getTaskStageStatus?.(task.id, stage.id);
 
-          return (
-            <EditableStageCell
-              stage={stage}
-              task={task}
-              value={taskStageStatus?.completedAt || taskStageStatus?.date}
-              onSave={handleStageStatusSave}
-              onDocumentUpload={onStageDocumentUpload}
-              onShowDocuments={onShowUploadDialog}
-            />
-          );
-        }
+  return (
+    <EditableStageCell
+      stage={stage}
+      task={task}
+      value={taskStageStatus?.completedAt || taskStageStatus?.date}
+      onSave={handleStageStatusSave}
+      onDocumentUpload={onStageDocumentUpload}
+      onShowDocuments={onShowUploadDialog}
+    />
+  );
+}
       };
     });
 

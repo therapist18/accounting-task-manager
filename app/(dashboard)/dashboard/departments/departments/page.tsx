@@ -640,28 +640,60 @@ export default function Departments() {
       isNewDepartment: !editingDepartmentId && !editingSubdepartmentId,
       hasSubdepartmentsInForm: departmentForm.subdepartments.length
     });
-    console.log('Form Data:', JSON.stringify(departmentForm, null, 2));
+    
+    // Create a deep copy of the form data
+    const cleanDepartmentForm = JSON.parse(JSON.stringify(departmentForm));
+    
+    // Log the full form data before cleaning
+    console.log('=== RAW FORM DATA ===');
+    console.log(JSON.stringify(cleanDepartmentForm, null, 2));
+    
+    // Remove officers_history at all levels
+    const removeOfficersHistory = (obj: any) => {
+      if (!obj || typeof obj !== 'object') return;
+      
+      // Remove officers_history if it exists
+      if ('officers_history' in obj) {
+        console.log('Removing officers_history from object');
+        delete obj.officers_history;
+      }
+      
+      // Recursively check nested objects and arrays
+      Object.values(obj).forEach(value => {
+        if (Array.isArray(value)) {
+          value.forEach(item => removeOfficersHistory(item));
+        } else if (value && typeof value === 'object') {
+          removeOfficersHistory(value);
+        }
+      });
+    };
+    
+    // Clean the form data
+    removeOfficersHistory(cleanDepartmentForm);
+    
+    console.log('=== CLEANED FORM DATA ===');
+    console.log(JSON.stringify(cleanDepartmentForm, null, 2));
 
     try {
       // Scenario 1: Creating a new department
       if (!editingDepartmentId && !editingSubdepartmentId) {
         console.log('→ Creating new department');
-        await createNewDepartment();
+        await createNewDepartment(cleanDepartmentForm);
       }
       // Scenario 2: Editing an existing department (no subdepartments in form)
-      else if (editingDepartmentId && !editingSubdepartmentId && departmentForm.subdepartments.length === 0) {
+      else if (editingDepartmentId && !editingSubdepartmentId && cleanDepartmentForm.subdepartments.length === 0) {
         console.log('→ Updating existing department');
-        await updateExistingDepartment();
+        await updateExistingDepartment(cleanDepartmentForm);
       }
       // Scenario 3: Creating a new subdepartment under existing department
-      else if (editingDepartmentId && !editingSubdepartmentId && departmentForm.subdepartments.length > 0) {
+      else if (editingDepartmentId && !editingSubdepartmentId && cleanDepartmentForm.subdepartments.length > 0) {
         console.log('→ Creating new subdepartment');
-        await createNewSubdepartment();
+        await createNewSubdepartment(cleanDepartmentForm);
       }
       // Scenario 4: Editing an existing subdepartment
       else if (editingSubdepartmentId) {
         console.log('→ Updating existing subdepartment');
-        await updateExistingSubdepartment();
+        await updateExistingSubdepartment(cleanDepartmentForm);
       }
 
       console.log('Save operation completed successfully');
@@ -676,114 +708,125 @@ export default function Departments() {
     }
   };
 
-  // Helper functions (updated to handle officers)
-  const createNewDepartment = async () => {
-    console.log('Creating new department');
+  const createNewDepartment = async (formData: DepartmentForm) => {
+  try {
+    setSaving(true);
+    console.log('Creating new department with data:', formData);
 
-    // Check if department name already exists
-    const { data: existingDept } = await supabase
-      .from('tm_departments')
-      .select('id, name')
-      .ilike('name', departmentForm.name.trim())
-      .limit(1);
+    // Create a clean copy of the data without officerId at the top level
+    const { officerId, subdepartments, ...departmentData } = formData;
 
-    if (existingDept && existingDept.length > 0) {
-      throw new Error('A department with this name already exists');
-    }
-
-    // Get the next order number
-    const { data: maxOrder } = await supabase
-      .from('tm_departments')
-      .select('order')
-      .order('order', { ascending: false })
-      .limit(1);
-
-    const nextOrder = (maxOrder?.[0]?.order || 0) + 1;
-
-    // Prepare officers_history if officer is assigned
-    const officers_history = departmentForm.officerId ? [{
-      id: departmentForm.officerId,
-      start_date: new Date().toISOString()
-    }] : []
-
-    // Create the department
+    // First create the department
     const { data: newDept, error: deptError } = await supabase
       .from('tm_departments')
-      .insert({
-        name: departmentForm.name.trim(),
-        description: departmentForm.description,
-        default_display: departmentForm.default_display,
-        order: nextOrder,
-        officers_history
-      })
-      .select()
+      .insert([departmentData])
+      .select('*')
       .single();
 
-    if (deptError) throw deptError;
-
-    // Create subdepartments if any
-    if (departmentForm.subdepartments.length > 0) {
-      await createSubdepartmentsForDepartment(newDept.id, departmentForm.subdepartments);
-    }
-  };
-
-  const updateExistingDepartment = async () => {
-    console.log('Updating existing department with ID:', editingDepartmentId);
-
-    // Check if another department with this name exists (excluding current)
-    const { data: existingDept } = await supabase
-      .from('tm_departments')
-      .select('id, name')
-      .ilike('name', departmentForm.name.trim())
-      .neq('id', editingDepartmentId)
-      .limit(1);
-
-    if (existingDept && existingDept.length > 0) {
-      throw new Error('Another department with this name already exists');
+    if (deptError) {
+      console.error('Error creating department:', deptError);
+      throw deptError;
     }
 
-    // Get current department data to preserve officer history
-    const { data: currentDept, error: fetchError } = await supabase
-      .from('tm_departments')
-      .select('officers_history')
-      .eq('id', editingDepartmentId)
-      .single();
+    console.log('Department created successfully:', newDept);
 
-    if (fetchError) throw fetchError;
+    // Process subdepartments if any
+    if (subdepartments && subdepartments.length > 0) {
+      for (const subdept of subdepartments) {
+        const { officers = [], taskManagers = [], taskAssistants = [], ...subdeptData } = subdept;
+        
+        // Create the subdepartment
+        const { data: newSubdept, error: subdeptError } = await supabase
+          .from('tm_subdepartments')
+          .insert([{
+            ...subdeptData,
+            department_id: newDept.id,
+            order: subdept.order || 0
+          }])
+          .select('*')
+          .single();
 
-    let officers_history = currentDept?.officers_history || [];
+        if (subdeptError) {
+          console.error('Error creating subdepartment:', subdeptError);
+          continue; // Skip to next subdepartment if one fails
+        }
 
-    // If officer assignment changed, update the history
-    const currentOfficer = getCurrentOfficer(officers_history);
-    if (departmentForm.officerId !== currentOfficer?.id) {
-      // End current officer assignment
-      officers_history = officers_history.map(officer => 
-        !officer.end_date ? { ...officer, end_date: new Date().toISOString() } : officer
-      );
+        console.log('Subdepartment created successfully:', newSubdept);
 
-      // Add new officer if selected
-      if (departmentForm.officerId) {
-        officers_history.push({
-          id: departmentForm.officerId,
-          start_date: new Date().toISOString()
-        });
+        // Handle officer assignments if any
+        if (officers && officers.length > 0) {
+          for (const officerId of officers) {
+            await assignOfficerToDepartment(newSubdept.id, officerId);
+          }
+        }
+
+        // Handle task managers if any
+        if (taskManagers && taskManagers.length > 0) {
+          for (const managerId of taskManagers) {
+            await assignManagerToSubdepartment(newSubdept.id, managerId);
+          }
+        }
+
+        // Handle task assistants if any
+        if (taskAssistants && taskAssistants.length > 0) {
+          for (const assistantId of taskAssistants) {
+            await assignAssistantsToSubdepartment(newSubdept.id, [assistantId]);
+          }
+        }
       }
     }
 
-    // Update the department
-    const { error: updateError } = await supabase
-      .from('tm_departments')
-      .update({
-        name: departmentForm.name.trim(),
-        description: departmentForm.description,
-        default_display: departmentForm.default_display,
-        officers_history,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', editingDepartmentId);
+    // Refresh the departments list
+    await fetchData();
+    toast.success('Department created successfully');
+    return newDept;
 
-    if (updateError) throw updateError;
-  };
+  } catch (error) {
+    console.error('Error creating department:', error);
+    toast.error(`Error creating department: ${error.message}`);
+    throw error;
+  } finally {
+    setSaving(false);
+  }
+};
+const updateExistingDepartment = async (formData: DepartmentForm) => {
+  if (!editingDepartmentId) return;
+
+  try {
+    setSaving(true);
+    console.log('Updating department with ID:', editingDepartmentId);
+
+    // Create a clean copy of the data without officerId at the top level
+    const { officerId, subdepartments, ...departmentData } = formData;
+
+    // Update the department
+    const { data: updatedDept, error: deptError } = await supabase
+      .from('tm_departments')
+      .update(departmentData)
+      .eq('id', editingDepartmentId)
+      .select('*')
+      .single();
+
+    if (deptError) {
+      console.error('Error updating department:', deptError);
+      throw deptError;
+    }
+
+    console.log('Department updated successfully:', updatedDept);
+
+    // Refresh the departments list
+    await fetchData();
+    toast.success('Department updated successfully');
+    return updatedDept;
+
+  } catch (error) {
+    console.error('Error updating department:', error);
+    toast.error(`Error updating department: ${error.message}`);
+    throw error;
+  } finally {
+    setSaving(false);
+  }
+};
 
   const updateExistingSubdepartment = async () => {
     console.log('Updating existing subdepartment with ID:', editingSubdepartmentId);

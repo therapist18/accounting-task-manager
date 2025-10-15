@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AlertTriangle, FileText, Briefcase, Users, Plus, Minus, UserCheck, ChevronDown, ChevronUp } from "lucide-react"
-import { StageUploadDialog } from "./StageUploadDialog"
+import { StageUploadDialog } from "../components/StageUploadDialog"
 
 const CLASS_D_ID = '1750687058159';
 

@@ -1,4 +1,4 @@
-// @ts-nocheck 
+// @ts-nocheck
 "use client"
 
 import React, { useState, useMemo, useCallback, useEffect } from "react"
@@ -887,7 +887,32 @@ const groupedTasks = useMemo(() => {
               .maybeSingle();
 
             if (!requirementsResponse.error && requirementsResponse.data) {
-              classRequirements = requirementsResponse.data;
+              let fetchedData = requirementsResponse.data;
+
+              // Check for the new structure with a 'requirements' array and transform it
+              if (fetchedData.requirements && Array.isArray(fetchedData.requirements)) {
+                const transformedDocuments = fetchedData.requirements.map((req: any) => ({
+                  id: req.kycDocumentId,
+                  selectionId: req.kycDocumentId,
+                  name: req.name,
+                  // Add default applicability flags to ensure they are processed
+                  ap: true,
+                  dp: true,
+                  understudy: true,
+                  display: true,
+                  reference: true
+                }));
+
+                // Reshape the data to match the structure the component expects
+                fetchedData = {
+                  ...fetchedData,
+                  documents_and_fields: transformedDocuments,
+                  client_fields: [], // This structure doesn't contain client_fields
+                  requirements: undefined, // Unset original to avoid confusion
+                };
+              }
+
+              classRequirements = fetchedData;
 
               if (classRequirements.documents_and_fields && Array.isArray(classRequirements.documents_and_fields)) {
                 const applicableDocuments = classRequirements.documents_and_fields.filter((item: any) => {
