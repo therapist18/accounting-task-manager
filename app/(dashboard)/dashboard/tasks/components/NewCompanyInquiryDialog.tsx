@@ -40,6 +40,7 @@ interface NewCompanyInquiryDialogProps {
     onOpenChange: (open: boolean) => void
     onEnquiryCreated: (enquiries: any[]) => void
     departments: any[]
+    selectedDepartmentId?: string
     users: any[]
     officers: any[]
 }
@@ -49,9 +50,17 @@ export function NewCompanyInquiryDialog({
     onOpenChange,
     onEnquiryCreated,
     departments: propDepartments = [],
+    selectedDepartmentId = '',
     users = [],
     officers = []
 }: NewCompanyInquiryDialogProps) {
+    console.log('🔹 [NewCompanyInquiryDialog] Rendering with props:', {
+        open,
+        selectedDepartmentId,
+        departmentsCount: propDepartments.length,
+        usersCount: users.length,
+        officersCount: officers.length
+    });
     // State for company and official selection
     const [companies, setCompanies] = useState<Company[]>([])
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
@@ -77,7 +86,7 @@ export function NewCompanyInquiryDialog({
     const [availableAssistants, setAvailableAssistants] = useState([])
     const [formData, setFormData] = useState({
         job_description: '',
-        department_id: '',
+        department_id: selectedDepartmentId || '',
         subdepartment_id: '',
         class_id: '',
         subclass_id: '',
@@ -165,12 +174,36 @@ export function NewCompanyInquiryDialog({
         }
     }, []);
 
-    // Effect to load companies when the dialog opens
+    // Effect to handle department selection and load companies
     useEffect(() => {
-        if (open && companies.length === 0) {
-            loadCompanies();
+        console.log('🔹 [NewCompanyInquiryDialog] useEffect - open:', open, 'selectedDepartmentId:', selectedDepartmentId);
+        
+        if (open) {
+            if (selectedDepartmentId) {
+                console.log('   [NewCompanyInquiryDialog] Setting selected department:', selectedDepartmentId);
+                setFormData(prev => {
+                    const newData = {
+                        ...prev,
+                        department_id: selectedDepartmentId,
+                        subdepartment_id: '',
+                        class_id: '',
+                        subclass_id: ''
+                    };
+                    console.log('   [NewCompanyInquiryDialog] Updated formData:', newData);
+                    return newData;
+                });
+            } else {
+                console.warn('⚠️ [NewCompanyInquiryDialog] No selectedDepartmentId provided');
+            }
+            
+            if (companies.length === 0) {
+                console.log('   [NewCompanyInquiryDialog] No companies loaded, fetching...');
+                loadCompanies();
+            } else {
+                console.log('   [NewCompanyInquiryDialog] Companies already loaded:', companies.length);
+            }
         }
-    }, [open, companies.length, loadCompanies]);
+    }, [open, selectedDepartmentId, companies.length, loadCompanies]);
 
     // Effect to fetch officials when a company is selected
     useEffect(() => {
@@ -186,19 +219,29 @@ export function NewCompanyInquiryDialog({
 
     // --- Reused Logic from EnquiryDialog (unchanged) ---
     const handleChange = useCallback((field: keyof typeof formData, value: any) => {
+        console.log(`🔄 [NewCompanyInquiryDialog] Form field changed - ${field}:`, value);
+        console.log('   [NewCompanyInquiryDialog] Current form state before change:', formData);
         setFormData(prev => {
+            const newState = {...prev};
+            
             if (field === 'department_id') {
+                console.log(`🏢 [LOG] Department selected. Previous department_id: ${prev.department_id}, New department_id: ${value}`);
                 return { ...prev, department_id: value, subdepartment_id: '', class_id: '', subclass_id: '', officer_id: '', task_manager_id: '', task_assistant_id: '' };
             }
             if (field === 'subdepartment_id') {
+                console.log(`📋 [LOG] Subdepartment selected. Previous subdepartment_id: ${prev.subdepartment_id}, New subdepartment_id: ${value}`);
                 return { ...prev, subdepartment_id: value, class_id: '', subclass_id: '', officer_id: '', task_manager_id: '', task_assistant_id: '' };
             }
             if (field === 'class_id') {
+                console.log(`📚 [LOG] Class selected. Previous class_id: ${prev.class_id}, New class_id: ${value}`);
                 return { ...prev, class_id: value, subclass_id: '' };
             }
             if (field === 'task_manager_id') {
+                console.log(`👔 [LOG] Task manager selected. Previous task_manager_id: ${prev.task_manager_id}, New task_manager_id: ${value}`);
                 return { ...prev, task_manager_id: value, task_assistant_id: '' };
             }
+            
+            console.log(`📝 [LOG] Updating field ${field} to:`, value);
             return { ...prev, [field]: value };
         });
     }, []);
@@ -252,24 +295,47 @@ export function NewCompanyInquiryDialog({
     }, []);
 
     useEffect(() => {
-        const loadDepts = async () => {
-            if (propDepartments.length > 0) setDepartments(propDepartments);
-            else setDepartments(await fetchDepartments());
-        };
-        if (open && departments.length === 0) loadDepts();
-    }, [open, propDepartments, departments.length]);
-
-
-    useEffect(() => {
-        if (!open || !formData.subdepartment_id || localUsers.length === 0) return;
+        console.log('🔔 [LOG] useEffect for subdepartment changes triggered');
+        console.log('   [LOG] Open state:', open);
+        console.log('   [LOG] Current subdepartment_id:', formData.subdepartment_id);
+        console.log('   [LOG] Local users count:', localUsers.length);
+        
+        if (!open || !formData.subdepartment_id || localUsers.length === 0) {
+            console.log('   [LOG] Early return - conditions not met:', {
+                isOpen: open,
+                hasSubdepartment: !!formData.subdepartment_id,
+                hasLocalUsers: localUsers.length > 0
+            });
+            return;
+        }
+        
+        console.log('   [LOG] Finding department with ID:', formData.department_id);
         const dept = departments.find(d => d.id.toString() === formData.department_id);
-        const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
+        console.log('   [LOG] Found department:', dept ? dept.name : 'Not found');
+        
+        if (dept?.tm_subdepartments) {
+            console.log('   [LOG] Available subdepartments in department:', 
+                dept.tm_subdepartments.map((s: any) => ({ id: s.id, name: s.name })));
+        }
+        
+        const subdept = dept?.tm_subdepartments?.find((s: any) => s.id.toString() === formData.subdepartment_id);
+        console.log('   [LOG] Found subdepartment:', subdept ? subdept.name : 'Not found');
+        
         if (subdept) {
+            console.log('   [LOG] Finding active staff for subdepartment...');
             const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
+            console.log('   [LOG] Found active staff:', {
+                officers: activeStaff.officers.length,
+                managers: activeStaff.managers.length,
+                assistants: activeStaff.assistants.length
+            });
+            
             setAvailableOfficers(activeStaff.officers);
             setAvailableManagers(activeStaff.managers);
             setAvailableAssistants([]);
             setFormData(prev => ({ ...prev, officer_id: '', task_manager_id: '', task_assistant_id: '' }));
+        } else {
+            console.log('❌ [LOG] No matching subdepartment found');
         }
     }, [open, formData.subdepartment_id, localUsers, localOfficers, departments, formData.department_id, findActiveStaffForSubdept]);
 
@@ -278,19 +344,60 @@ export function NewCompanyInquiryDialog({
             setAvailableAssistants([]);
             return;
         }
+        console.log('🔔 [LOG] useEffect for task manager changes triggered');
+        console.log('   [LOG] Open state:', open);
+        console.log('   [LOG] Current task_manager_id:', formData.task_manager_id);
+        console.log('   [LOG] Local users count:', localUsers.length);
+        
+        if (!open || !formData.task_manager_id || localUsers.length === 0) {
+            console.log('   [LOG] Early return - conditions not met:', {
+                isOpen: open,
+                hasTaskManager: !!formData.task_manager_id,
+                hasLocalUsers: localUsers.length > 0
+            });
+            return;
+        }
+        
+        console.log('   [LOG] Finding department with ID:', formData.department_id);
         const dept = departments.find(d => d.id.toString() === formData.department_id);
-        const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
+        console.log('   [LOG] Found department:', dept ? dept.name : 'Not found');
+        
+        if (dept?.tm_subdepartments) {
+            console.log('   [LOG] Available subdepartments in department:', 
+                dept.tm_subdepartments.map((s: any) => ({ id: s.id, name: s.name })));
+        }
+        
+        const subdept = dept?.tm_subdepartments?.find((s: any) => s.id.toString() === formData.subdepartment_id);
+        console.log('   [LOG] Found subdepartment:', subdept ? subdept.name : 'Not found');
+        
         if (subdept) {
+            console.log('   [LOG] Finding assistants for task manager...');
             const assistantsForManager = subdept.assistant_history?.filter(a => !a.end_date && a.manager_id?.toString() === formData.task_manager_id).map(a => a.id) || [];
+            console.log('   [LOG] Found assistants:', assistantsForManager);
+            
             setAvailableAssistants(localUsers.filter(user => assistantsForManager.includes(user.id)));
+        } else {
+            console.log('❌ [LOG] No matching subdepartment found');
         }
     }, [formData.task_manager_id, formData.subdepartment_id, departments, localUsers, formData.department_id]);
 
-
     const availableSubdepartments = useMemo(() => {
-        if (!formData.department_id) return [];
+        console.log('🔍 [LOG] Calculating availableSubdepartments...');
+        console.log('   [LOG] Current department_id:', formData.department_id);
+        console.log('   [LOG] Available departments:', departments.map(d => ({ id: d.id, name: d.name })));
+        
+        if (!formData.department_id) {
+            console.log('   [LOG] No department selected, returning empty array');
+            return [];
+        }
+        
         const dept = departments.find(d => d.id.toString() === formData.department_id);
-        return dept?.tm_subdepartments || [];
+        const subdepts = dept?.tm_subdepartments || [];
+        
+        console.log('   [LOG] Found department:', dept ? dept.name : 'Not found');
+        console.log('   [LOG] Available subdepartments:', subdepts.map(s => ({ id: s.id, name: s.name })));
+        
+        return subdepts;
     }, [departments, formData.department_id]);
 
     const availableClasses = useMemo(() => {
@@ -315,7 +422,12 @@ export function NewCompanyInquiryDialog({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        console.log('🔹 [NewCompanyInquiryDialog] Form submitted');
+        console.log('   [NewCompanyInquiryDialog] Selected company:', selectedCompany);
+        console.log('   [NewCompanyInquiryDialog] Form data:', formData);
+        
         if (!selectedCompany) {
+            console.error('❌ [NewCompanyInquiryDialog] No company selected');
             toast({ title: "Validation Error", description: "Please select a company.", variant: "destructive" });
             return;
         }
@@ -324,7 +436,7 @@ export function NewCompanyInquiryDialog({
             return;
         }
         setLoading(true);
-        console.log("🚀 [LOG] Creating company enquiries...");
+        console.log("🚀 [LOG] Creating company enquiry...");
 
         try {
             const now = new Date();
@@ -337,56 +449,61 @@ export function NewCompanyInquiryDialog({
                 },
             };
 
-            const tasksToCreate = Array.from(selectedOfficialIds).map(officialId => {
-                const official = officials.find(d => d.id === officialId);
-                if (!official) return null;
-
+            const directorsDetails = Array.from(selectedOfficialIds).map(officialId => {
+                const official = officials.find(o => o.id === officialId);
                 return {
-                    job_description: formData.job_description || '',
-                    status: 'enquiry',
-                    renewal_status: taskType,
-                    department_id: formData.department_id,
-                    subdepartment_id: formData.subdepartment_id,
-                    individual_id: official.id,
-                    applicant_type: 'principal',
-                    class_id: formData.class_id || null,
-                    subclass_id: formData.subclass_id || null,
-                    date_initiated: new Date(formData.enquiry_date),
-                    applicant_name: official.full_name,
-                    company_id: selectedCompany.id,
-                    principal_member: official.id,
-                    stages: initialStages,
-                    officer_id: formData.officer_id || null,
-                    task_manager_id: formData.task_manager_id || null,
-                    task_assistant_id: formData.task_assistant_id || null,
+                    id: official?.id,
+                    full_name: official?.full_name,
+                    role: official?.role
                 };
-            }).filter(Boolean);
+            });
 
-            if (tasksToCreate.length === 0) {
-                throw new Error("Could not construct any tasks to create.");
-            }
+            const taskToCreate = {
+                job_description: formData.job_description || '',
+                status: 'enquiry',
+                renewal_status: taskType,
+                department_id: formData.department_id,
+                subdepartment_id: formData.subdepartment_id,
+                applicant_type: 'company',
+                class_id: formData.class_id || null,
+                subclass_id: formData.subclass_id || null,
+                date_initiated: new Date(formData.enquiry_date),
+                applicant_name: selectedCompany.company_name,
+                company_id: selectedCompany.id,
+                stages: initialStages,
+                officer_id: formData.officer_id || null,
+                task_manager_id: formData.task_manager_id || null,
+                task_assistant_id: formData.task_assistant_id || null,
+                directors_details: directorsDetails
+            };
 
-            console.log(`📦 [LOG] Submitting ${tasksToCreate.length} tasks to Supabase.`);
-            const { data, error } = await supabase.from('tm_tasks_duplicate').insert(tasksToCreate).select();
+            console.log(`📦 [LOG] Submitting task to Supabase.`);
+            const { data, error } = await supabase.from('tm_tasks_duplicate').insert([taskToCreate]).select();
 
             if (error) throw error;
 
-            console.log('✅ [LOG] Enquiries created successfully!', data);
-            toast({ title: 'Success', description: `${tasksToCreate.length} enquiries created successfully.` });
+            console.log('✅ [LOG] Enquiry created successfully!', data);
+            toast({ title: 'Success', description: `Enquiry for ${selectedCompany.company_name} created successfully.` });
             onEnquiryCreated(data);
             resetForm();
             onOpenChange(false);
 
         } catch (error) {
-            console.error('❌ [LOG] Error creating enquiries:', error);
-            toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to create enquiries', variant: 'destructive' });
+            console.error('❌ [LOG] Error creating enquiry:', error);
+            toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to create enquiry', variant: 'destructive' });
         } finally {
             setLoading(false);
         }
     };
 
     const resetForm = () => {
-        console.log("🧹 [LOG] Resetting form.");
+        console.log("🧹 [NewCompanyInquiryDialog] Resetting form");
+        console.log('   [NewCompanyInquiryDialog] Current state before reset:', { 
+            selectedCompany, 
+            officials, 
+            selectedOfficialIds: Array.from(selectedOfficialIds),
+            formData 
+        });
         setSelectedCompany(null);
         setOfficials([]);
         setSelectedOfficialIds(new Set());
@@ -410,7 +527,7 @@ export function NewCompanyInquiryDialog({
                 <DialogHeader>
                     <DialogTitle>New Company Enquiry</DialogTitle>
                     <DialogDescription>
-                        Create tasks for one or more directors or shareholders of a company.
+                        Create a single task for a company, including selected directors or shareholders.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -461,7 +578,7 @@ export function NewCompanyInquiryDialog({
                                 <Card>
                                     <CardHeader>
                                         <CardTitle className="flex items-center gap-2"><Users className="h-4 w-4" /> Select Officials</CardTitle>
-                                        <CardDescription>Select the directors and shareholders to include.</CardDescription>
+                                        <CardDescription>Select the directors and shareholders to include in the enquiry.</CardDescription>
                                     </CardHeader>
                                     <CardContent>
                                         {loadingOfficials ? (
@@ -604,7 +721,7 @@ export function NewCompanyInquiryDialog({
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Cancel</Button>
                         <Button type="submit" disabled={loading || !selectedCompany || selectedOfficialIds.size === 0}>
-                            {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating...</> : `Create ${selectedOfficialIds.size} Enquiries`}
+                            {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating...</> : `Create Enquiry`}
                         </Button>
                     </DialogFooter>
                 </form>

@@ -303,6 +303,52 @@ export function RequirementsTable({
   const getCurrentRequirements = () => [];
   const fuzzyMatch = (str1, str2) => str1.toLowerCase() === str2.toLowerCase();
 
+  const getDocumentDataForPreview = useCallback((task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number) => {
+    if (!task || !item) return null;
+    
+    // Get the document ID based on the column type
+    let documentId: string | undefined;
+    
+    if (columnType === 'company') {
+      documentId = task.company_documents?.[item.id]?.document_id;
+    } else if (columnType === 'principal') {
+      documentId = task.principal_documents?.[item.id]?.document_id;
+    } else if (columnType === 'dependant' && referenceId) {
+      documentId = task.dependants_documents?.[referenceId]?.[item.id]?.document_id;
+    } else if (columnType === 'understudy') {
+      documentId = task.understudy_documents?.[item.id]?.document_id;
+    } else if (columnType === 'reference' && referenceId) {
+      documentId = task.references_documents?.[referenceId]?.[item.id]?.document_id;
+    }
+    
+    if (!documentId) return null;
+    
+    // Find the document in the documents array
+    const document = documents.find(doc => doc.id === documentId);
+    
+    if (!document) return null;
+    
+    // Return the document data needed for preview
+    return {
+      ...document,
+      fileUrl: document.file_url ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/documents/${document.file_url}` : null,
+      documentType: item.display_name || 'Document',
+      applicantName: columnType === 'company' 
+        ? task.company_name 
+        : columnType === 'principal' 
+          ? task.applicant_name 
+          : columnType === 'dependant' 
+            ? individualNames[referenceId!] || `Dependant ${referenceId}`
+            : columnType === 'understudy'
+              ? 'Understudy'
+              : individualNames[referenceId!] || `Reference ${referenceId}`,
+      taskId: task.id,
+      taskName: task.applicant_name,
+      documentId: item.id,
+      documentName: item.display_name
+    };
+  }, [documents, individualNames]);
+
   return (
     <div className="flex h-[85vh] w-full bg-white">
       <div className="w-64 border-r bg-white flex flex-col">
@@ -320,7 +366,23 @@ export function RequirementsTable({
       <div className="flex-1 flex flex-col border rounded-md bg-background shadow-sm">
         <div className="overflow-auto flex-1">
           <RequirementsTableCombined
-            loading={documentsLoading || loading} error={error} filteredGroupedTasks={filteredGroupedTasks} organizedRequirements={organizedRequirements} expandedDocuments={expandedDocuments} toggleDocumentExpansion={toggleDocumentExpansion} renderDocumentStatus={renderDocumentStatus} renderClientFieldData={renderClientFieldData} renderReferencesData={renderReferencesData} hasReferencesColumn={hasReferencesColumn} individualNames={individualNames} companyData={companyData} getCurrentRequirements={getCurrentRequirements} fuzzyMatch={fuzzyMatch}/>
+            loading={documentsLoading || loading} 
+            error={error} 
+            filteredGroupedTasks={filteredGroupedTasks} 
+            organizedRequirements={organizedRequirements} 
+            expandedDocuments={expandedDocuments} 
+            toggleDocumentExpansion={toggleDocumentExpansion} 
+            renderDocumentStatus={renderDocumentStatus} 
+            getDocumentDataForPreview={getDocumentDataForPreview}
+            renderClientFieldData={renderClientFieldData} 
+            renderReferencesData={renderReferencesData} 
+            hasReferencesColumn={hasReferencesColumn} 
+            individualNames={individualNames} 
+            companyData={companyData} 
+            getCurrentRequirements={getCurrentRequirements} 
+            fuzzyMatch={fuzzyMatch}
+            kycDocuments={new Map()}
+          />
         </div>
       </div>
       {selectedDocumentForPreview && (<Dialog open={documentPreviewOpen} onOpenChange={setDocumentPreviewOpen}><DialogContent className="max-w-6xl max-h-[98vh] p-0"><iframe src={selectedDocumentForPreview.fileUrl} className="w-full h-[95vh]" /></DialogContent></Dialog>)}

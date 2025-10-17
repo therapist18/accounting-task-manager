@@ -5,7 +5,7 @@ import React, { useState, useMemo, useCallback, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
-import { Loader2, Plus, FileText, CheckCheckIcon, Building2 } from "lucide-react"
+import { Plus, FileText } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 
@@ -42,7 +42,6 @@ export default function TasksPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [tasks, setTasks] = useState<UtilTask[]>([]);
   const [stages, setStages] = useState<any[]>([]);
-  const [dataLoading, setDataLoading] = useState({ departments: true, tasks: false });
   const [selectedDepartment, setSelectedDepartment] = useState<string>('');
   const [selectedSubdepartment, setSelectedSubdepartment] = useState<string>('');
   const [selectedClass, setSelectedClass] = useState<string>('');
@@ -63,24 +62,27 @@ export default function TasksPage() {
   // --- Data Fetching Callbacks ---
   const loadTasksAndStages = useCallback(async (departmentId: string, subdepartmentId?: string) => {
     if (!departmentId || departments.length === 0) return;
-    setDataLoading(prev => ({ ...prev, tasks: true }));
     try {
       const tasksData = await fetchTasks(departmentId, subdepartmentId);
       const stagesData = await fetchStages(departmentId, departments);
       setTasks(tasksData);
       setStages(stagesData);
-    } finally {
-      setDataLoading(prev => ({ ...prev, tasks: false }));
+    } catch (error) {
+        console.error("Failed to load tasks and stages:", error);
+        // Optionally, show a toast notification on error
+        toast({
+            title: "Error",
+            description: "Could not load tasks. Please try again.",
+            variant: "destructive",
+        });
     }
   }, [departments]);
 
   // --- Effects ---
   useEffect(() => {
     const performInitialLoad = async () => {
-      setDataLoading({ departments: true, tasks: false });
       const departmentsData = await fetchDepartments();
       setDepartments(departmentsData);
-      setDataLoading(prev => ({ ...prev, departments: false }));
     };
     performInitialLoad();
   }, []);
@@ -116,65 +118,13 @@ export default function TasksPage() {
   const completedTasks = useMemo(() => getFilteredTasks('completed'), [getFilteredTasks]);
 
   const { dept, subdept, cls, subcls } = useMemo(() => {
-    console.log('Finding department with ID:', selectedDepartment);
-    
-    // Find department with loose comparison to handle string/number mismatches
-    const d = departments.find(d => {
-      // Try both string and number comparisons
-      const idAsString = String(d.id);
-      const idAsNumber = Number(d.id);
-      const selectedAsNumber = Number(selectedDepartment);
-      
-      const match = idAsString === selectedDepartment || 
-                   idAsNumber === selectedAsNumber ||
-                   idAsString === String(selectedDepartment);
-      
-      console.log(`Checking department:`, {
-        id: d.id,
-        name: d.name,
-        idAsString,
-        idAsNumber,
-        selectedDepartment,
-        selectedAsNumber,
-        match
-      });
-      
-      return match;
-    });
-    
-    console.log('Found department:', d);
-    
-    // If no department found, try to find by index as a fallback
-    const foundDept = d || (selectedDepartment && departments[Number(selectedDepartment) - 1]);
-    
-    if (!foundDept && selectedDepartment) {
-      console.error('Department not found, available departments:', departments.map(d => ({
-        id: d.id,
-        name: d.name,
-        type: typeof d.id
-      })));
-    }
-    
-    // Safely find subdepartment with loose comparison
-    const sd = foundDept?.tm_subdepartments?.find(s => 
-      String(s.id) === selectedSubdepartment || 
-      Number(s.id) === Number(selectedSubdepartment)
-    );
-    
-    // Safely find class with loose comparison
-    const c = sd?.classes?.find(c => 
-      String(c.id) === selectedClass || 
-      Number(c.id) === Number(selectedClass)
-    );
-    
-    // Safely find subclass with loose comparison
-    const sc = c?.subClasses?.find(sc => 
-      String(sc.id) === selectedSubclass || 
-      Number(sc.id) === Number(selectedSubclass)
-    );
+    const d = departments.find(d => String(d.id) === selectedDepartment);
+    const sd = d?.tm_subdepartments?.find(s => String(s.id) === selectedSubdepartment);
+    const c = sd?.classes?.find(c => String(c.id) === selectedClass);
+    const sc = c?.subClasses?.find(sc => String(sc.id) === selectedSubclass);
     
     return { 
-      dept: foundDept || null, 
+      dept: d || null, 
       subdept: sd || null, 
       cls: c || null, 
       subcls: sc || null 
@@ -234,7 +184,6 @@ export default function TasksPage() {
     }
   };
   
-  // MODIFICATION: Unified handler for both dialogs
   const handleEnquiryCreated = (newEnquiry: UtilTask | UtilTask[]) => {
     const newEnquiries = Array.isArray(newEnquiry) ? newEnquiry : [newEnquiry];
     setTasks(prev => [...newEnquiries, ...prev]);
@@ -260,72 +209,47 @@ export default function TasksPage() {
     setStageUploadDialogOpen(true);
   };
 
-  // Handle new enquiry button click with type-safe department specification check
   const handleNewEnquiryClick = () => {
-    console.log('handleNewEnquiryClick called');
+    console.log('🔹 [handleNewEnquiryClick] Triggered');
+    console.log('   [handleNewEnquiryClick] Selected Department ID:', selectedDepartment);
+    console.log('   [handleNewEnquiryClick] Available Departments:', departments);
     
-    // Debug log all departments and their types
-    console.log('All departments:', departments.map(d => ({
-      id: d.id,
-      name: d.name,
-      type: typeof d.id,
-      specification: d.specification
-    })));
-    
-    // Try to find the department again in case of stale closure
-    const currentDept = departments.find(d => 
-      String(d.id) === String(selectedDepartment) || 
-      Number(d.id) === Number(selectedDepartment)
-    ) || dept; // Fall back to memoized dept if not found
-    
-    console.log('Current department state:', {
-      selectedDepartment,
-      foundDepartment: currentDept,
-      memoizedDept: dept
-    });
-    
-    if (!currentDept) {
-      console.error('No department found for ID:', selectedDepartment);
+    if (!selectedDepartment) {
+      console.warn('⚠️ [handleNewEnquiryClick] No department selected');
       toast({ 
-        title: "Department Not Found", 
-        description: `Could not find department with ID: ${selectedDepartment}. Please try again.`,
+        title: "Department Not Selected", 
+        description: "Please select a department before creating an enquiry.",
         variant: "destructive"
       });
       return;
     }
     
-    // Ensure specification is properly set, default to 'individual' if not specified
+    const currentDept = departments.find(d => String(d.id) === selectedDepartment);
+    console.log('   [handleNewEnquiryClick] Found Department:', currentDept);
+    
+    if (!currentDept) {
+      console.error('❌ [handleNewEnquiryClick] Department not found with ID:', selectedDepartment);
+      toast({ 
+        title: "Department Not Found", 
+        description: `The selected department (ID: ${selectedDepartment}) could not be found.`,
+        variant: "destructive"
+      });
+      return;
+    }
+    
     const specification = (currentDept.specification || 'individual').toLowerCase();
-    const isCompany = specification === 'company';
+    console.log('   [handleNewEnquiryClick] Department Specification:', specification);
     
-    console.log('Department details:', {
-      id: currentDept.id,
-      name: currentDept.name,
-      specification,
-      isCompany
-    });
-    
-    if (isCompany) {
-      console.log('Opening company inquiry dialog');
+    if (specification === 'company') {
+      console.log('   [handleNewEnquiryClick] Opening Company Inquiry Dialog');
       setCompanyInquiryDialogOpen(true);
     } else {
-      console.log('Opening individual enquiry dialog');
+      console.log('   [handleNewEnquiryClick] Opening Individual Enquiry Dialog');
       setEnquiryDialogOpen(true);
     }
   };
 
   // --- Render Logic ---
-  if (dataLoading.departments) {
-    return (
-      <div className="flex-1 flex items-center justify-center h-screen">
-        <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
-          <p className="mt-4 text-muted-foreground">Loading Workspace...</p>
-        </div>
-      </div>
-    );
-  }
-
   const getDisplayTitle = () => {
     if (subcls) return `${subcls.name} (${cls?.name} - ${subdept?.name})`;
     if (cls) return `${cls.name} (${subdept?.name})`;
@@ -371,14 +295,7 @@ export default function TasksPage() {
             </Button>
           </header>
 
-          {dataLoading.tasks ? (
-            <div className="flex items-center justify-center h-96">
-              <div className="text-center">
-                <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
-                <p className="mt-4 text-muted-foreground">Loading tasks...</p>
-              </div>
-            </div>
-          ) : !selectedDepartment ? (
+          {!selectedDepartment ? (
             <Card>
               <CardHeader>
                 <CardTitle>Task Management Dashboard</CardTitle>
@@ -407,13 +324,13 @@ export default function TasksPage() {
               </TabsList>
 
               <TabsContent value="enquiries">
-                <RequirementsTable tasks={enquiryTasks} loading={dataLoading.tasks} error={null} />
+                <RequirementsTable tasks={enquiryTasks} loading={false} error={null} />
               </TabsContent>
               <TabsContent value="wip">
-                <RequirementsTable tasks={wipTasks} loading={dataLoading.tasks} error={null} />
+                <RequirementsTable tasks={wipTasks} loading={false} error={null} />
               </TabsContent>
               <TabsContent value="completed">
-                <RequirementsTable tasks={completedTasks} loading={dataLoading.tasks} error={null} />
+                <RequirementsTable tasks={completedTasks} loading={false} error={null} />
               </TabsContent>
             </Tabs>
           ) : (
@@ -429,21 +346,25 @@ export default function TasksPage() {
             </Card>
           )}
 
-          {/* --- MODIFICATION START: Added both dialogs for conditional rendering --- */}
           <DeleteConfirmationDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen} onConfirm={handleDeleteConfirm} loading={isDeleting} />
           <StageUploadDialog open={stageUploadDialogOpen} onOpenChange={setStageUploadDialogOpen} selectedStageTask={selectedStageTask} />
           
-          {/* Company-specific Enquiry Dialog */}
           <NewCompanyInquiryDialog
             open={companyInquiryDialogOpen}
-            onOpenChange={setCompanyInquiryDialogOpen}
-            onEnquiryCreated={handleEnquiryCreated}
+            onOpenChange={(isOpen) => {
+              console.log('🔹 [CompanyInquiryDialog] Open State Changed:', isOpen);
+              setCompanyInquiryDialogOpen(isOpen);
+            }}
+            onEnquiryCreated={(enquiries) => {
+              console.log('✅ [CompanyInquiryDialog] Enquiry Created:', enquiries);
+              handleEnquiryCreated(enquiries);
+            }}
             departments={departments}
-            users={[]} // Pass actual users if available
-            officers={[]} // Pass actual officers if available
+            selectedDepartmentId={selectedDepartment}
+            users={[]}
+            officers={[]}
           />
 
-          {/* Individual-specific Enquiry Dialog */}
           <EnquiryDialog
             open={enquiryDialogOpen}
             onOpenChange={setEnquiryDialogOpen}
@@ -454,7 +375,6 @@ export default function TasksPage() {
             selectedClass={selectedClass}
             selectedSubclass={selectedSubclass}
           />
-          {/* --- MODIFICATION END --- */}
         </div>
       </main>
     </div>

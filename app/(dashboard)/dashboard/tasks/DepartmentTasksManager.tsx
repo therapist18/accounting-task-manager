@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AutomationDialog } from "@/app/(dashboard)/dashboard/settings/automation/components/AutomationDialog";
-import { Loader2, Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, Zap, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight } from "lucide-react"
+import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, Zap, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { Building, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -137,6 +137,8 @@ export default function DepartmentTasksManager({
   // New states for UI enhancements
   const [areTabsVisible, setAreTabsVisible] = useState(true);
   const [isAllExpanded, setIsAllExpanded] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
 
   useEffect(() => {
     const headers = activeDepartmentTab === '1'
@@ -156,7 +158,6 @@ export default function DepartmentTasksManager({
   const [linkingTask, setLinkingTask] = useState<UtilTask | null>(null);
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
   const [selectedAutomation, setSelectedAutomation] = useState<any>(null);
-  const [dataLoading, setDataLoading] = useState({ departments: true, companies: true, documents: true, kycFields: true, tasks: true, stages: false, users: true })
   const [isClassSelectionOpen, setIsClassSelectionOpen] = useState(false);
   const [selectedTaskForPush, setSelectedTaskForPush] = useState<{
     task: UtilTask;
@@ -170,7 +171,6 @@ export default function DepartmentTasksManager({
   } | null>(null);
   const [availableClasses, setAvailableClasses] = useState<any[]>([]);
   const [tableRows, setTableRows] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
 
@@ -415,16 +415,13 @@ export default function DepartmentTasksManager({
 
   const loadTasksData = useCallback(async (departmentId?: string, subdepartmentId?: string) => {
     try {
-      setDataLoading(prev => ({ ...prev, tasks: true, stages: true }))
       const [tasksData, stagesData] = await Promise.all([
         fetchTasks(departmentId, subdepartmentId),
         departmentId ? fetchStages(departmentId, departments) : Promise.resolve([])
       ])
 
       setTasks(tasksData)
-      setDataLoading(prev => ({ ...prev, tasks: false }))
       setStages(stagesData)
-      setDataLoading(prev => ({ ...prev, stages: false }))
 
     } catch (error) {
       console.error('Error loading tasks data:', error)
@@ -433,7 +430,6 @@ export default function DepartmentTasksManager({
         description: "Failed to load tasks data.",
         variant: "destructive"
       })
-      setDataLoading(prev => ({ ...prev, tasks: false, stages: false }))
     }
   }, [departments])
 
@@ -1583,7 +1579,7 @@ export default function DepartmentTasksManager({
               }}
               className="h-8 w-8 text-red-600 hover:bg-red-100"
               title="Delete Task"
-              disabled={loading}
+              disabled={isDeleting}
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -1594,7 +1590,7 @@ export default function DepartmentTasksManager({
                 if (!taskToDelete) return;
 
                 try {
-                  setLoading(true);
+                  setIsDeleting(true);
                   const { error } = await supabase
                     .from('tm_tasks')
                     .delete()
@@ -1619,12 +1615,12 @@ export default function DepartmentTasksManager({
                     variant: 'destructive'
                   });
                 } finally {
-                  setLoading(false);
+                  setIsDeleting(false);
                   setDeleteDialogOpen(false);
                   setTaskToDelete(null);
                 }
               }}
-              loading={loading}
+              loading={isDeleting}
             />
           </>
           <DropdownMenu>
@@ -1659,7 +1655,6 @@ export default function DepartmentTasksManager({
 
   const loadRows = useCallback(async (tasks: any[]) => {
     if (!tasks || tasks.length === 0) return;
-    setLoading(true);
     try {
       const rows = await generateEnhancedTableRows(tasks);
       setTableRows(rows);
@@ -1670,8 +1665,6 @@ export default function DepartmentTasksManager({
         description: "Failed to generate table rows.",
         variant: "destructive"
       });
-    } finally {
-      setLoading(false);
     }
   }, [generateEnhancedTableRows, toast]);
 
@@ -1934,8 +1927,6 @@ export default function DepartmentTasksManager({
   useEffect(() => {
     const performInitialLoad = async () => {
       try {
-        setDataLoading(prev => ({ ...prev, departments: true, companies: true, documents: true, kycFields: true, users: true }))
-
         const [departmentsData, companiesData, documentsData, kycFieldsData, usersData] = await Promise.all([
           fetchDepartments(),
           fetchCompanies(),
@@ -1951,15 +1942,6 @@ export default function DepartmentTasksManager({
         setTmUsers(usersData);
         setDepartments(departmentsData);
 
-        setDataLoading(prev => ({
-          ...prev,
-          departments: false,
-          companies: false,
-          documents: false,
-          kycFields: false,
-          users: false
-        }));
-
         if (departmentsData.length > 0) {
           const firstDept = departmentsData[0];
           setActiveDepartmentTab(firstDept.id.toString());
@@ -1974,15 +1956,6 @@ export default function DepartmentTasksManager({
           title: "Error",
           description: "Failed to load initial data.",
           variant: "destructive"
-        });
-        setDataLoading({
-          departments: false,
-          companies: false,
-          documents: false,
-          kycFields: false,
-          tasks: false,
-          stages: false,
-          users: false
         });
       }
     };
@@ -2066,28 +2039,6 @@ export default function DepartmentTasksManager({
     setActiveManagerTab(null);
     setActiveAssistantTab(null);
   }, [activeFollowUpFilter]);
-
-  const isAnyDataLoading = Object.values(dataLoading).some(loading => loading)
-
-  if (dataLoading.departments || isAnyDataLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-slate-50/30">
-        <div className="text-center space-y-3">
-          <Loader2 className="h-12 w-12 animate-spin text-slate-600 mx-auto" />
-          <p className="font-semibold text-slate-800">Loading Workspace...</p>
-          <p className="text-sm text-slate-600">
-            {dataLoading.departments ? 'Loading departments...' :
-              dataLoading.companies ? 'Loading companies...' :
-                dataLoading.documents ? 'Loading documents...' :
-                  dataLoading.kycFields ? 'Loading KYC fields...' :
-                    dataLoading.users ? 'Loading users...' :
-                      dataLoading.tasks ? 'Loading tasks...' :
-                        dataLoading.stages ? 'Loading stages...' : 'Finalizing...'}
-          </p>
-        </div>
-      </div>
-    )
-  }
 
   if (!departments.length) {
     return (
@@ -2431,7 +2382,7 @@ export default function DepartmentTasksManager({
                               companies={companies}
                               getStaffName={getStaffName}
                               getDocumentForTaskStage={getDocumentForTaskStage}
-                              loading={dataLoading.tasks}
+                              loading={false}
                               stages={stages}
                               kycDocuments={kycDocuments}
                               tableHeaders={currentTableHeaders}
@@ -2459,7 +2410,7 @@ export default function DepartmentTasksManager({
                             expandedSections={expandedSections}
                             companies={companies}
                             tableRows={tableRows}
-                            loading={loading}
+                            loading={false}
                             error={error}
                             getCellContent={getCellContentWrapper}
                             renderCellContent={renderCellContent}
@@ -2470,7 +2421,7 @@ export default function DepartmentTasksManager({
                             getStaffName={getStaffName}
                             onDeleteTask={async (task) => {
                               try {
-                                setLoading(true);
+                                setIsDeleting(true);
 
                                 const { error } = await supabase
                                   .from('tm_tasks')
@@ -2496,7 +2447,7 @@ export default function DepartmentTasksManager({
                                   variant: 'destructive'
                                 });
                               } finally {
-                                setLoading(false);
+                                setIsDeleting(false);
                               }
                             }}
                           />
@@ -2517,7 +2468,6 @@ export default function DepartmentTasksManager({
                             kycDocuments={kycDocuments}
                             allDocuments={allDocuments}
                             sortConfig={sortConfig}
-                            dataLoading={dataLoading}
                             error={error}
                             isPushingCase={isPushingCase}
                             isDownloading={isDownloading}

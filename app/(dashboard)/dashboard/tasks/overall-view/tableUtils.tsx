@@ -476,9 +476,12 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
 export const renderImmigrationStatusCell = (
   task: any,
   getEnhancedImmigrationStatus: any,
-  expandedImmigrationStatus: any,
+  expandedImmigrationStatus: Set<string> | null | undefined,
   toggleImmigrationStatusExpansion: any
 ) => {
+  if (!expandedImmigrationStatus) {
+    return null; // or return a default state if needed
+  }
   const statusInfo = getEnhancedImmigrationStatus(task);
   const isExpanded = expandedImmigrationStatus.has(task.id.toString());
 
