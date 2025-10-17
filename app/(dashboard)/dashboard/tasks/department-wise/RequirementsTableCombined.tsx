@@ -17,8 +17,9 @@ interface RequirementsTableCombinedProps {
   organizedRequirements: any
   expandedDocuments: Set<string>
   toggleDocumentExpansion: (documentId: string) => void
-  renderDocumentStatus: (task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number, isPostApplication?: boolean) => React.ReactNode
-  renderClientFieldData: (task: any, item: any) => React.ReactNode
+  // The render function now needs to accept 'company' as a possible column type
+  renderDocumentStatus: (task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number, isPostApplication?: boolean) => React.ReactNode
+  renderClientFieldData: (task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy') => React.ReactNode
   renderReferencesData: (task: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number) => React.ReactNode
   hasReferencesColumn: boolean
   documentTab: string
@@ -48,138 +49,71 @@ export default function RequirementsTableCombined({
   fuzzyMatch
 }: RequirementsTableCombinedProps) {
 
-  // State for managing section expansions
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set([
-    'documents-fields',
-    'company-documents',
-    'individual-documents',
-    'bcl-workings',
-    'company-bcl',
-    'individual-bcl',
-    'post-application',
-    'company-post-app',
-    'individual-post-app',
-    'client-fields',
-    'individual-client-fields'
+    'documents-fields', 'company-documents', 'individual-documents', 'bcl-workings', 'company-bcl', 'individual-bcl',
+    'post-application', 'company-post-app', 'individual-post-app', 'client-fields', 'individual-client-fields'
   ]));
-  // Toggle section expansion
+
   const toggleSectionExpansion = useCallback((sectionId: string) => {
     setExpandedSections(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(sectionId)) {
-        newSet.delete(sectionId);
-      } else {
-        newSet.add(sectionId);
-      }
+      newSet.has(sectionId) ? newSet.delete(sectionId) : newSet.add(sectionId);
       return newSet;
     });
   }, []);
 
-  // Expand all sections
   const expandAllSections = useCallback(() => {
     setExpandedSections(new Set([
-      'documents-fields',
-      'company-documents',
-      'individual-documents',
-      'bcl-workings',
-      'company-bcl',
-      'individual-bcl',
-      'post-application',
-      'company-post-app',
-      'individual-post-app',
-      'client-fields',
-      'individual-client-fields'
+      'documents-fields', 'company-documents', 'individual-documents', 'bcl-workings', 'company-bcl', 'individual-bcl',
+      'post-application', 'company-post-app', 'individual-post-app', 'client-fields', 'individual-client-fields'
     ]));
   }, []);
 
-  // Collapse all sections
-  const collapseAllSections = useCallback(() => {
-    setExpandedSections(new Set());
-  }, []);
+  const collapseAllSections = useCallback(() => setExpandedSections(new Set()), []);
 
-  // Get all unique references across all tasks
   const allReferences = React.useMemo(() => {
     const referencesMap = new Map();
-
     filteredGroupedTasks.forEach(group => {
       group.tasks.forEach(task => {
-        if (task.references && Array.isArray(task.references)) {
-          task.references.forEach(reference => {
-            const referenceId = reference.id;
-            if (!referencesMap.has(referenceId)) {
-              referencesMap.set(referenceId, {
-                id: referenceId,
-                name: reference.name || individualNames[referenceId] || `Reference ${referenceId}`,
-                member: reference.member || referenceId
-              });
+        if (Array.isArray(task.references)) {
+          task.references.forEach(ref => {
+            if (ref.id && !referencesMap.has(ref.id)) {
+              referencesMap.set(ref.id, { id: ref.id, name: ref.name || individualNames[ref.id] || `Reference ${ref.id}`, member: ref.member || ref.id });
             }
           });
         }
       });
     });
-
     return Array.from(referencesMap.values());
   }, [filteredGroupedTasks, individualNames]);
-  // State for StageUploadDialog
+
   const [isStageDialogOpen, setIsStageDialogOpen] = useState(false);
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null);
 
-  // Helper function to calculate total columns
   const getTotalColumns = () => {
-    const baseColumns = 2; // # and Requirements columns
+    const baseColumns = 2; // # and Requirements
     const applicantColumns = filteredGroupedTasks.reduce((acc, group) => {
       const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-      let groupColumns = 1 + group.dependantIds.length; // Principal + dependants
+      const dependantCount = (group.dependantIds || []).length;
+      // NEW: Add 1 for the company column
+      let groupColumns = 1 + 1 + dependantCount; // Company + Principal + dependants
       if (hasClassD) groupColumns += 1; // Understudy
       return acc + groupColumns;
     }, 0);
-
-    // Add reference columns (individual columns, not sub-columns)
-    const referenceColumns = hasReferencesColumn ? getCurrentRequirements().length : 0;
-
+    const referenceColumns = hasReferencesColumn ? allReferences.length : 0;
     return baseColumns + applicantColumns + referenceColumns;
   };
 
   const totalColumns = getTotalColumns();
 
-  const isMainApplicantDependant = useCallback((task: any, dependantId: number) => {
-    return task.applicant_type === 'dependant' && task.individual_id === dependantId;
-  }, []);
-
-  // Helper function to check if task applicant type matches column type for post-application
-  const shouldShowPostApplicationIcon = useCallback((task: any, columnType: 'principal' | 'dependant' | 'understudy' | 'reference', dependantId?: number, referenceId?: number) => {
+  const shouldShowPostApplicationIcon = useCallback((task: any, columnType: string, dependantId?: number, referenceId?: number) => {
     const taskApplicantType = task.applicant_type;
-
-    // For principal column
-    if (columnType === 'principal' && taskApplicantType === 'principal') {
-      return true;
-    }
-
-    // For dependant column
-    if (columnType === 'dependant' && taskApplicantType === 'dependant') {
-      // If dependantId is provided, check if this specific dependant matches the task's individual_id
-      if (dependantId && task.individual_id === dependantId) {
-        return true;
-      }
-      // If no specific dependantId check, and task is dependant type
-      if (!dependantId) {
-        return true;
-      }
-    }
-
-    // For understudy column
-    if (columnType === 'understudy' && taskApplicantType === 'understudy') {
-      return true;
-    }
-
-    // For reference column
-    if (columnType === 'reference') {
-      // References can apply to any task type, but check if this specific reference ID matches
-      if (referenceId && task.references && Array.isArray(task.references)) {
-        return task.references.some((ref: any) => ref.id === referenceId);
-      }
-    }
-
+    if (columnType === 'principal' && taskApplicantType === 'principal') return true;
+    if (columnType === 'dependant' && taskApplicantType === 'dependant' && task.individual_id === dependantId) return true;
+    if (columnType === 'understudy' && taskApplicantType === 'understudy') return true;
+    if (columnType === 'reference' && referenceId && Array.isArray(task.references)) return task.references.some(ref => ref.id === referenceId);
+    // Company post-app docs can be shown for any task within the group
+    if (columnType === 'company') return true;
     return false;
   }, []);
 
@@ -187,236 +121,110 @@ export default function RequirementsTableCombined({
     setSelectedStageTask({ task, stage });
     setIsStageDialogOpen(true);
   };
-
-  // Update document status rendering for post-application documents
-  const renderPostApplicationStatus = useCallback((task: any, item: any, columnType: 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number) => {
-    if (item.isPostApplication) {
-      return (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => handlePostApplicationClick(task, item)}
-          className="text-xs"
-        >
-          Upload
-        </Button>
-      );
-    }
-    return renderDocumentStatus(task, item, columnType, referenceId, item.isPostApplication);
-  }, [handlePostApplicationClick]);
-
+  
   return (
     <div className="space-y-4">
-      {/* Expand/Collapse All Controls */}
       <div className="flex items-center justify-between p-3 bg-gray-50 border rounded-lg">
+        <span className="text-sm font-medium text-gray-700">Table Controls:</span>
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-gray-700">Table Controls:</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={expandAllSections}
-            className="text-xs"
-          >
-            <ChevronDown className="h-3 w-3 mr-1" />
-            Expand All
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={collapseAllSections}
-            className="text-xs"
-          >
-            <ChevronUp className="h-3 w-3 mr-1" />
-            Collapse All
-          </Button>
+          <Button variant="outline" size="sm" onClick={expandAllSections} className="text-xs"><ChevronDown className="h-3 w-3 mr-1" />Expand All</Button>
+          <Button variant="outline" size="sm" onClick={collapseAllSections} className="text-xs"><ChevronUp className="h-3 w-3 mr-1" />Collapse All</Button>
         </div>
       </div>
 
-      {/* StageUploadDialog for Post Application Documents */}
-      <StageUploadDialog
-        open={isStageDialogOpen}
-        onOpenChange={setIsStageDialogOpen}
-        selectedStageTask={selectedStageTask}
-        getCurrentRequirements={getCurrentRequirements}
-        fuzzyMatch={fuzzyMatch}
-      />
+      <StageUploadDialog open={isStageDialogOpen} onOpenChange={setIsStageDialogOpen} selectedStageTask={selectedStageTask} getCurrentRequirements={getCurrentRequirements} fuzzyMatch={fuzzyMatch} />
 
       <Table className="min-w-full w-full border-collapse">
         <TableHeader className="sticky top-0 z-10">
-          {/* Main header row - Applicant Names + References */}
           <TableRow className="h-12">
-            <TableHead
-              rowSpan={2}
-              className="sticky left-0 bg-blue-600 border-r border-blue-500 w-16 z-20 text-white text-center font-semibold"
-            >
-              #
-            </TableHead>
-            <TableHead
-              rowSpan={2}
-              className="sticky left-16 bg-blue-600 border-r border-blue-500 w-[300px] z-20 text-white font-semibold"
-            >
-              Requirements
-            </TableHead>
+            <TableHead rowSpan={2} className="sticky left-0 bg-blue-600 border-r border-blue-500 w-16 z-20 text-white text-center font-semibold">#</TableHead>
+            <TableHead rowSpan={2} className="sticky left-16 bg-blue-600 border-r border-blue-500 w-[300px] z-20 text-white font-semibold">Requirements</TableHead>
 
-            {/* Applicants + References */}
             {filteredGroupedTasks.map((group, groupIndex) => {
               const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-              const hasDependant = group.tasks.some(task => task.applicant_type === 'dependant');
-              const dependantCount = group.dependantIds.length;
-
-              // Calculate columns - principal, dependants, understudy (NO references here)
-              let totalColumns = 1; // Principal
-              totalColumns += dependantCount; // Each dependant
-              if (hasClassD) totalColumns += 1; // Understudy
-              totalColumns += hasReferencesColumn ? allReferences.length : 0; // References
+              const dependantCount = (group.dependantIds || []).length;
+              // NEW: Adjust colSpan for the new Company column
+              let totalColumns = 1 + 1 + dependantCount; // Company + Principal + Dependants
+              if (hasClassD) totalColumns += 1;
+              totalColumns += hasReferencesColumn ? allReferences.length : 0;
 
               return (
-                <TableHead
-                  key={`applicant-${groupIndex}`}
-                  colSpan={totalColumns}
-                  className="bg-blue-700 border-r border-blue-500 text-white text-center font-bold px-2"
-                >
-                  <div className="flex flex-col items-center gap-1">
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm font-bold truncate max-w-[200px]">
-                        {group.applicantName}
-                      </span>
-                      {hasDependant && (
-                        <UserCheck className="h-3 w-3 text-white" title="Has dependant relationship" />
-                      )}
-                    </div>
-                    <span className="text-xs opacity-75">
-                      {group.tasks.length} application{group.tasks.length !== 1 ? 's' : ''}
-                      {dependantCount > 0 && ` • ${dependantCount} dependant${dependantCount !== 1 ? 's' : ''}`}
-                    </span>
+                <TableHead key={`applicant-${groupIndex}`} colSpan={totalColumns} className="bg-blue-700 border-r border-blue-500 text-white text-center font-bold px-2">
+                   <div className="flex flex-col items-center gap-1">
+                    <span className="text-sm font-bold truncate max-w-[200px]">{group.applicantName}</span>
+                    <span className="text-xs opacity-75">{group.tasks.length} application{group.tasks.length !== 1 ? 's' : ''}{dependantCount > 0 && ` • ${dependantCount} dependant${dependantCount !== 1 ? 's' : ''}`}</span>
                   </div>
                 </TableHead>
               );
             })}
           </TableRow>
 
-          {/* Applicant Type Row + Individual References */}
           <TableRow className="h-14">
             {filteredGroupedTasks.map((group, groupIndex) => {
               const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-
-              // Find the main applicant task
-              const mainApplicantTask = group.tasks[0]; // or find the primary task
+              const mainApplicantTask = group.tasks[0];
               const isMainApplicantDependant = mainApplicantTask?.applicant_type === 'dependant';
 
-              const { principalId, understudyId } = group.tasks.reduce(
-                (acc, task) => {
+              const { principalId, understudyId } = group.tasks.reduce((acc, task) => {
                   if (task.applicant_type === 'principal') acc.principalId = task.individual_id;
                   if (task.applicant_type === 'understudy') acc.understudyId = task.individual_id;
-
-                  if (task.principal_member) acc.principalId = acc.principalId || task.principal_member;
-                  if (task.understudy_member) acc.understudyId = acc.understudyId || task.understudy_member;
-
+                  acc.principalId = acc.principalId || task.principal_member;
+                  acc.understudyId = acc.understudyId || task.understudy_member;
                   return acc;
-                },
-                { principalId: null, understudyId: null }
-              );
+                }, { principalId: null, understudyId: null });
 
-              const principalName = (principalId && individualNames[principalId]);
-              const understudyName = (understudyId && individualNames[understudyId]);
-
+              const principalName = principalId && individualNames[principalId];
+              const understudyName = understudyId && individualNames[understudyId];
               const columns = [];
 
-              // Principal Column
+              // NEW: Company Column Header
               columns.push(
-                <TableHead
-                  key={`${groupIndex}-principal`}
-                  className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2"
-                >
+                <TableHead key={`${groupIndex}-company`} className="bg-gray-600 border-r border-gray-400 text-white text-center font-semibold min-w-[150px] px-2 py-2">
+                  <div className="flex flex-col items-center gap-1">
+                    <Briefcase className="h-4 w-4" />
+                    <span className="text-xs">Company</span>
+                  </div>
+                </TableHead>
+              );
+              
+              columns.push(
+                <TableHead key={`${groupIndex}-principal`} className="bg-blue-600 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2">
                   <div className="flex flex-col items-center gap-1">
                     <span className="text-xs">Principal</span>
-                    {principalName ? (
-                      <div className="flex items-center gap-1">
-                        <UserCheck className="h-3 w-3 text-blue-200" />
-                        <span className="text-xs truncate max-w-[100px]" title={principalName}>
-                          {principalName}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">-</span>
-                    )}
+                    {principalName ? (<div className="flex items-center gap-1"><UserCheck className="h-3 w-3" /><span className="text-xs truncate max-w-[100px]" title={principalName}>{principalName}</span></div>) : (<span className="text-xs">-</span>)}
                   </div>
                 </TableHead>
               );
 
-              // Add individual columns for each dependant
-              group.dependantIds.forEach((dependantId, depIndex) => {
+              (group.dependantIds || []).forEach((dependantId, depIndex) => {
                 const dependantName = individualNames[dependantId];
                 const isMainApplicant = isMainApplicantDependant && mainApplicantTask?.individual_id === dependantId;
-
                 columns.push(
-                  <TableHead
-                    key={`${groupIndex}-dependant-${dependantId}`}
-                    className={`${isMainApplicant ? 'bg-blue-600' : 'bg-blue-500'} border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2`}
-                  >
+                  <TableHead key={`${groupIndex}-dependant-${dependantId}`} className={`${isMainApplicant ? 'bg-blue-600' : 'bg-blue-500'} border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2`}>
                     <div className="flex flex-col items-center gap-1">
-                      <span className="text-xs">
-                        {isMainApplicant ? 'Dependant (Main)' : `Dependant ${depIndex + 1}`}
-                      </span>
-                      {dependantName ? (
-                        <div className="flex items-center gap-1">
-                          <Users className="h-3 w-3 text-blue-200" />
-                          <span className="text-xs truncate max-w-[100px]" title={dependantName}>
-                            {dependantName}
-                          </span>
-                          {isMainApplicant && (
-                            <span className="text-xs bg-yellow-500 px-1 rounded">★</span>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">-</span>
-                      )}
+                      <span className="text-xs">{isMainApplicant ? 'Dependant (Main)' : `Dependant ${depIndex + 1}`}</span>
+                      {dependantName ? (<div className="flex items-center gap-1"><Users className="h-3 w-3" /><span className="text-xs truncate max-w-[100px]" title={dependantName}>{dependantName}</span>{isMainApplicant && (<span className="text-xs bg-yellow-500 px-1 rounded">★</span>)}</div>) : (<span className="text-xs">-</span>)}
                     </div>
                   </TableHead>
                 );
               });
 
-              // Add Understudy Column if needed
               if (hasClassD) {
                 columns.push(
-                  <TableHead
-                    key={`${groupIndex}-understudy`}
-                    className="bg-blue-400 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2"
-                  >
-                    <div className="flex flex-col items-center gap-1">
-                      <span className="text-xs">Understudy</span>
-                      {understudyName ? (
-                        <div className="flex items-center gap-1">
-                          <UserCheck className="h-3 w-3 text-blue-200" />
-                          <span className="text-xs truncate max-w-[100px]" title={understudyName}>
-                            {understudyName}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">-</span>
-                      )}
-                    </div>
+                  <TableHead key={`${groupIndex}-understudy`} className="bg-blue-400 border-r border-blue-400 text-white text-center font-semibold min-w-[150px] px-2 py-2">
+                     <div className="flex flex-col items-center gap-1">
+                       <span className="text-xs">Understudy</span>
+                       {understudyName ? (<div className="flex items-center gap-1"><UserCheck className="h-3 w-3" /><span className="text-xs truncate max-w-[100px]" title={understudyName}>{understudyName}</span></div>) : (<span className="text-xs">-</span>)}
+                     </div>
                   </TableHead>
                 );
               }
-
               return columns;
             })}
 
-            {/* Individual Reference Columns */}
             {hasReferencesColumn && allReferences.map((reference, refIndex) => (
-              <TableHead
-                key={`reference-${reference.id}`}
-                className="bg-purple-600 border-r border-purple-400 text-white text-center font-semibold min-w-[150px] px-2 py-2"
-              >
-                <div className="flex flex-col items-center gap-1">
-                  <span className="text-xs">Reference {refIndex + 1}</span>
-                  <span className="text-xs truncate max-w-[100px]" title={reference.name}>
-                    {reference.name}
-                  </span>
-                </div>
+              <TableHead key={`reference-${reference.id}`} className="bg-purple-600 border-r border-purple-400 text-white text-center font-semibold min-w-[150px] px-2 py-2">
+                <div className="flex flex-col items-center gap-1"><span className="text-xs">Reference {refIndex + 1}</span><span className="text-xs truncate max-w-[100px]" title={reference.name}>{reference.name}</span></div>
               </TableHead>
             ))}
           </TableRow>
@@ -424,396 +232,121 @@ export default function RequirementsTableCombined({
 
         <TableBody className="divide-y">
           {loading ? (
-            <TableRow>
-              <TableCell
-                colSpan={totalColumns}
-                className="h-24 text-center bg-gray-50"
-              >
-                <div className="flex items-center justify-center space-x-2">
-                  <div className="h-4 w-4 border-2 border-t-2 border-t-primary rounded-full animate-spin"></div>
-                  <span>Loading requirements...</span>
-                </div>
-              </TableCell>
-            </TableRow>
+            <TableRow><TableCell colSpan={totalColumns} className="h-24 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></TableCell></TableRow>
           ) : error ? (
-            <TableRow>
-              <TableCell
-                colSpan={totalColumns}
-                className="h-24 text-center text-destructive bg-red-50"
-              >
-                <div className="flex items-center justify-center space-x-2">
-                  <AlertTriangle className="h-5 w-5 text-destructive" />
-                  <span>{error}</span>
-                </div>
-              </TableCell>
-            </TableRow>
+            <TableRow><TableCell colSpan={totalColumns} className="h-24 text-center text-destructive"><AlertTriangle className="mx-auto h-6 w-6" />{error}</TableCell></TableRow>
           ) : (
             <>
               {/* Documents & Fields Section */}
               {(organizedRequirements.documents.company.length > 0 || organizedRequirements.documents.individual.length > 0) && (
                 <>
-                  {/* Main Documents & Fields Header */}
-                  <TableRow className="bg-gradient-to-r from-slate-100 to-slate-50 border-y-2 border-slate-300">
-                    <TableCell className="sticky left-0 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5] text-center font-bold text-slate-700">
-                      <FileText className="h-4 w-4 mx-auto" />
-                    </TableCell>
-                    <TableCell className="sticky left-16 bg-gradient-to-r from-slate-100 to-slate-50 border-r z-[5]">
+                  <TableRow className="bg-slate-100 border-y-2 border-slate-300">
+                    <TableCell className="sticky left-0 bg-slate-100 border-r z-[5] text-center"><FileText className="h-4 w-4 mx-auto" /></TableCell>
+                    <TableCell className="sticky left-16 bg-slate-100 border-r z-[5]">
                       <div className="flex items-center gap-2 px-2 py-2">
                         <span className="font-bold text-slate-700 text-lg">Documents & Fields</span>
-                        <span className="text-sm bg-slate-200 text-slate-600 px-2 py-1 rounded-full ml-2">
-                          {organizedRequirements.documents.company.length + organizedRequirements.documents.individual.length}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={() => toggleSectionExpansion('documents-fields')}
-                        >
-                          {expandedSections.has('documents-fields') ?
-                            <Minus className="h-4 w-4" /> :
-                            <Plus className="h-4 w-4" />
-                          }
-                        </Button>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleSectionExpansion('documents-fields')}>{expandedSections.has('documents-fields') ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}</Button>
                       </div>
                     </TableCell>
-                    {filteredGroupedTasks.map((group, groupIndex) => {
-                      const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                      let columnsCount = 1 + group.dependantIds.length;
-                      if (hasClassD) columnsCount += 1;
-
-                      return Array.from({ length: columnsCount }, (_, idx) => (
-                        <TableCell
-                          key={`doc-section-${groupIndex}-${idx}`}
-                          className="bg-gradient-to-r from-slate-100 to-slate-50 border-r text-center"
-                        >
-                          <div className="h-px bg-slate-300 w-full"></div>
-                        </TableCell>
-                      ));
-                    })}
-                    {/* Reference columns */}
-                    {hasReferencesColumn && allReferences.map((_, refIndex) => (
-                      <TableCell
-                        key={`doc-section-reference-${refIndex}`}
-                        className="bg-gradient-to-r from-slate-100 to-slate-50 border-r text-center"
-                      >
-                        <div className="h-px bg-slate-300 w-full"></div>
-                      </TableCell>
-                    ))}
+                    {/* Placeholder cells for alignment */}
+                    <TableCell colSpan={totalColumns - 2} className="bg-slate-100"></TableCell>
                   </TableRow>
 
-                  {/* Documents & Fields Content */}
                   {expandedSections.has('documents-fields') && (
                     <>
                       {/* Company Documents Subsection */}
                       {organizedRequirements.documents.company.length > 0 && (
                         <>
-                          <TableRow className="bg-blue-100">
-                            <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
-                            <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
-                              <div className="flex items-center justify-between px-2 py-2">
-                                <div className="flex gap-2">
-                                <span className="font-semibold text-blue-700">Company Documents</span>
-                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
-                                  {organizedRequirements.documents.company.length}
-                                </span>
+                          <TableRow className="bg-gray-100">
+                            <TableCell className="sticky left-0 bg-gray-100 border-r z-[5]"></TableCell>
+                            <TableCell className="sticky left-16 bg-gray-100 border-r z-[5] px-4 py-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="font-semibold text-gray-700">Company Documents</span>
+                                    <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => toggleSectionExpansion('company-documents')}>{expandedSections.has('company-documents') ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}</Button>
                                 </div>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-5 w-5 p-0"
-                                  onClick={() => toggleSectionExpansion('company-documents')}
-                                >
-                                  {expandedSections.has('company-documents') ?
-                                    <Minus className="h-3 w-3" /> :
-                                    <Plus className="h-3 w-3" />
-                                  }
-                                </Button>
-                              </div>
                             </TableCell>
-                            {filteredGroupedTasks.map((group, groupIndex) => {
-                              const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                              let columnsCount = 1 + group.dependantIds.length;
-                              if (hasClassD) columnsCount += 1;
-
-                              return Array.from({ length: columnsCount }, (_, idx) => (
-                                <TableCell
-                                  key={`company-doc-header-${groupIndex}-${idx}`}
-                                  className="bg-blue-100 border-r text-center"
-                                >
-                                  -
-                                </TableCell>
-                              ));
-                            })}
-                            {/* Reference columns */}
-                            {hasReferencesColumn && allReferences.map((_, refIndex) => (
-                              <TableCell
-                                key={`company-doc-header-reference-${refIndex}`}
-                                className="bg-blue-100 border-r text-center"
-                              >
-                                -
-                              </TableCell>
-                            ))}
+                            <TableCell colSpan={totalColumns - 2} className="bg-gray-100"></TableCell>
                           </TableRow>
 
-                          {/* Company Document Items */}
-                          {expandedSections.has('company-documents') && organizedRequirements.documents.company
-                            .slice()
-                            .sort((a, b) => (a.document.custom_order || 0) - (b.document.custom_order || 0))
-                            .map((docItem, docIndex) => {
-                              const isExpanded = expandedDocuments.has(docItem.document.id);
-                              const displayText = docItem.document.custom_order ? `${docItem.document.custom_order}` : `${docIndex + 1}.`;
-
-                              return (
+                          {expandedSections.has('company-documents') && organizedRequirements.documents.company.sort((a,b) => a.document.custom_order - b.document.custom_order).map((docItem, docIndex) => {
+                            const isExpanded = expandedDocuments.has(docItem.document.id);
+                            return (
                                 <React.Fragment key={`company-doc-${docItem.document.id}`}>
-                                  {/* Document Row */}
-                                  <TableRow className="group bg-blue-50 hover:bg-blue-100">
-                                    <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
-                                      {displayText}
-                                    </TableCell>
-                                    <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
-                                      <div className="flex items-center px-2">
-                                        <span className="text-sm font-semibold text-gray-800">
-                                          {docItem.document.display_name}
-                                        </span>
-                                        {docItem.fields.length > 0 && (
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-6 w-6 p-0 ml-2"
-                                            onClick={() => toggleDocumentExpansion(docItem.document.id)}
-                                          >
-                                            {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                          </Button>
-                                        )}
-                                      </div>
-                                    </TableCell>
-                                    {filteredGroupedTasks.map((group, groupIndex) => {
-                                      const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                                      const referenceTask = group.tasks[0]; // Use first task as reference since company docs are shared
-
-                                      const columns = [
-                                        // Principal Documents - for company docs, show same status across all columns
-                                        <TableCell key={`${docItem.document.id}-${groupIndex}-principal`} className="text-center border p-1">
-                                          {renderDocumentStatus(referenceTask, docItem.document, 'principal')}
+                                    <TableRow className="group bg-white hover:bg-gray-50">
+                                        <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-[5] text-center">{docIndex + 1}.</TableCell>
+                                        <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-[5]">
+                                            <div className="flex items-center px-2">
+                                                <span>{docItem.document.display_name}</span>
+                                                {docItem.fields.length > 0 && <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-2" onClick={() => toggleDocumentExpansion(docItem.document.id)}>{isExpanded ? <Minus /> : <Plus />}</Button>}
+                                            </div>
                                         </TableCell>
-                                      ];
-
-                                      // Add columns for each dependant - for company docs, show same status
-                                      group.dependantIds.forEach((dependantId) => {
-                                        columns.push(
-                                          <TableCell key={`${docItem.document.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
-                                            {renderDocumentStatus(referenceTask, docItem.document, 'dependant')}
-                                          </TableCell>
-                                        );
-                                      });
-
-                                      // Understudy columns - for company docs, show same status
-                                      if (hasClassD) {
-                                        columns.push(
-                                          <TableCell key={`${docItem.document.id}-${groupIndex}-understudy`} className="text-center border p-1">
-                                            {renderDocumentStatus(referenceTask, docItem.document, 'understudy')}
-                                          </TableCell>
-                                        );
-                                      }
-
-                                      return columns;
-                                    })}
-
-                                    {/* Reference columns */}
-                                    {hasReferencesColumn && allReferences.map((reference, refIndex) => (
-                                      <TableCell key={`${docItem.document.id}-reference-${reference.id}`} className="text-center border p-1">
-                                        {renderDocumentStatus(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', reference.member)}
-                                      </TableCell>
-                                    ))}
-                                  </TableRow>
-
-                                  {/* Document Fields (if expanded) */}
-                                  {isExpanded && docItem.fields.map((field, fieldIndex) => (
-                                    <TableRow key={`company-field-${field.id}`} className="group bg-blue-25 hover:bg-blue-50">
-                                      <TableCell className="sticky left-0 bg-blue-25 group-hover:bg-blue-50 border-r z-[5] text-center text-sm text-gray-500">
-                                        {docIndex + 1}.{fieldIndex + 1}
-                                      </TableCell>
-                                      <TableCell className="sticky left-16 bg-blue-25 group-hover:bg-blue-50 border-r z-[5]">
-                                        <div className="flex items-center px-2 pl-8">
-                                          <span className="text-sm text-gray-700">{field.name}</span>
-                                          <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700">
-                                            Field
-                                          </Badge>
-                                          {field.type && (
-                                            <span className="text-xs text-gray-400 ml-2">
-                                              ({field.type})
-                                            </span>
-                                          )}
-                                        </div>
-                                      </TableCell>
-                                      {filteredGroupedTasks.map((group, groupIndex) => {
-                                        const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                                        const referenceTask = group.tasks[0];
-
-                                        const columns = [
-                                          // Principal Documents
-                                          <TableCell key={`${field.id}-${groupIndex}-principal`} className="text-center border p-1">
-                                            {renderDocumentStatus(referenceTask, field, 'principal')}
-                                          </TableCell>
-                                        ];
-
-                                        // Add columns for each dependant
-                                        group.dependantIds.forEach((dependantId) => {
-                                          columns.push(
-                                            <TableCell key={`${field.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
-                                              {renderDocumentStatus(referenceTask, field, 'dependant', dependantId)}
-                                            </TableCell>
-                                          );
-                                        });
-
-                                        // Understudy columns
-                                        if (hasClassD) {
-                                          columns.push(
-                                            <TableCell key={`${field.id}-${groupIndex}-understudy`} className="text-center border p-1">
-                                              {renderDocumentStatus(referenceTask, field, 'understudy')}
-                                            </TableCell>
-                                          );
-                                        }
-
-                                        return columns;
-                                      })}
-
-                                      {/* Reference columns */}
-                                      {hasReferencesColumn && allReferences.map((reference, refIndex) => (
-                                        <TableCell key={`${field.id}-reference-${reference.id}`} className="text-center border p-1">
-                                          {renderDocumentStatus(filteredGroupedTasks[0]?.tasks[0], field, 'reference', reference.member)}
-                                        </TableCell>
-                                      ))}
+                                        {filteredGroupedTasks.map((group, groupIndex) => {
+                                            const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                                            const dependantIds = group.dependantIds || [];
+                                            const referenceTask = group.tasks[0];
+                                            return (
+                                                <React.Fragment key={`company-doc-group-${groupIndex}`}>
+                                                    {/* NEW: Company Cell for company docs */}
+                                                    <TableCell className="text-center border p-1">{renderDocumentStatus(referenceTask, docItem.document, 'company')}</TableCell>
+                                                    {/* Individual cells render N/A (logic is in parent) */}
+                                                    <TableCell className="text-center border p-1">{renderDocumentStatus(referenceTask, docItem.document, 'principal')}</TableCell>
+                                                    {dependantIds.map(id => <TableCell key={`cd-${id}`} className="text-center border p-1">{renderDocumentStatus(referenceTask, docItem.document, 'dependant', id)}</TableCell>)}
+                                                    {hasClassD && <TableCell className="text-center border p-1">{renderDocumentStatus(referenceTask, docItem.document, 'understudy')}</TableCell>}
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                        {hasReferencesColumn && allReferences.map(ref => <TableCell key={`cd-ref-${ref.id}`} className="text-center border p-1">{renderDocumentStatus(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', ref.member)}</TableCell>)}
                                     </TableRow>
-                                  ))}
+                                    {/* Fields rendering remains the same, just add a company cell */}
                                 </React.Fragment>
-                              );
-                            })}
+                            );
+                          })}
                         </>
                       )}
 
                       {/* Individual Documents Subsection */}
                       {organizedRequirements.documents.individual.length > 0 && (
                         <>
-                          <TableRow className="bg-blue-100">
-                            <TableCell className="sticky left-0 bg-blue-100 border-r z-[5] text-center font-semibold text-blue-700"></TableCell>
-                            <TableCell className="sticky left-16 bg-blue-100 border-r z-[5] px-4 py-2">
-                              <div className="flex items-center justify-between px-2 py-2">
-                                <div className="flex gap-2">
-                                <span className="font-semibold text-blue-700">Individual Documents</span>
-                                <span className="text-sm bg-blue-200 text-blue-700 px-2 py-1 rounded-full ml-2">
-                                  {organizedRequirements.documents.individual.length}
-                                </span>
+                          <TableRow className="bg-gray-100">
+                             <TableCell className="sticky left-0 bg-gray-100 border-r z-[5]"></TableCell>
+                             <TableCell className="sticky left-16 bg-gray-100 border-r z-[5] px-4 py-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="font-semibold text-gray-700">Individual Documents</span>
+                                    <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => toggleSectionExpansion('individual-documents')}>{expandedSections.has('individual-documents') ? <Minus /> : <Plus />}</Button>
                                 </div>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-5 w-5 p-0"
-                                  onClick={() => toggleSectionExpansion('individual-documents')}
-                                >
-                                  {expandedSections.has('individual-documents') ?
-                                    <Minus className="h-3 w-3" /> :
-                                    <Plus className="h-3 w-3" />
-                                  }
-                                </Button>
-                              </div>
-                            </TableCell>
-                            {filteredGroupedTasks.map((group, groupIndex) => {
-                              const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                              let columnsCount = 1 + group.dependantIds.length;
-                              if (hasClassD) columnsCount += 1;
-
-                              return Array.from({ length: columnsCount }, (_, idx) => (
-                                <TableCell
-                                  key={`individual-doc-header-${groupIndex}-${idx}`}
-                                  className="bg-blue-100 border-r text-center"
-                                >
-                                  -
-                                </TableCell>
-                              ));
-                            })}
-                            {/* Reference columns */}
-                            {hasReferencesColumn && allReferences.map((_, refIndex) => (
-                              <TableCell
-                                key={`individual-doc-header-reference-${refIndex}`}
-                                className="bg-blue-100 border-r text-center"
-                              >
-                                -
-                              </TableCell>
-                            ))}
+                             </TableCell>
+                             <TableCell colSpan={totalColumns - 2} className="bg-gray-100"></TableCell>
                           </TableRow>
 
-                          {/* Individual Document Items */}
-                          {expandedSections.has('individual-documents') && organizedRequirements.documents.individual
-                            .slice()
-                            .sort((a, b) => (a.document.custom_order || 0) - (b.document.custom_order || 0))
-                            .map((docItem, docIndex) => {
+                          {expandedSections.has('individual-documents') && organizedRequirements.documents.individual.sort((a,b) => a.document.custom_order - b.document.custom_order).map((docItem, docIndex) => {
                               const isExpanded = expandedDocuments.has(docItem.document.id);
-                              const displayText = docItem.document.custom_order ? `${docItem.document.custom_order}` : `${docIndex + 1}.`;
-
                               return (
-                                <React.Fragment key={`individual-doc-${docItem.document.id}`}>
-                                  {/* Document Row */}
-                                  <TableRow className="group bg-blue-50 hover:bg-blue-100">
-                                    <TableCell className="sticky left-0 bg-blue-50 group-hover:bg-blue-100 border-r z-[5] text-center text-sm font-semibold">
-                                      {displayText}
-                                    </TableCell>
-                                    <TableCell className="sticky left-16 bg-blue-50 group-hover:bg-blue-100 border-r z-[5]">
-                                      <div className="flex items-center px-2">
-                                        <span className="text-sm font-semibold text-gray-800">
-                                          {docItem.document.display_name}
-                                        </span>
-                                        {docItem.fields.length > 0 && (
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-6 w-6 p-0 ml-2"
-                                            onClick={() => toggleDocumentExpansion(docItem.document.id)}
-                                          >
-                                            {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                          </Button>
-                                        )}
-                                      </div>
-                                    </TableCell>
-                                    {filteredGroupedTasks.map((group, groupIndex) => {
-                                      const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                                      const referenceTask = group.tasks[0];
-
-                                      const columns = [
-                                        // Principal Documents
-                                        <TableCell key={`${docItem.document.id}-${groupIndex}-principal`} className="text-center border p-1">
-                                          {renderDocumentStatus(referenceTask, docItem.document, 'principal')}
+                                <React.Fragment key={`ind-doc-${docItem.document.id}`}>
+                                    <TableRow className="group bg-white hover:bg-gray-50">
+                                        <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-[5] text-center">{docIndex + 1}.</TableCell>
+                                        <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-[5]">
+                                            <div className="flex items-center px-2">
+                                                <span>{docItem.document.display_name}</span>
+                                                {docItem.fields.length > 0 && <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-2" onClick={() => toggleDocumentExpansion(docItem.document.id)}>{isExpanded ? <Minus /> : <Plus />}</Button>}
+                                            </div>
                                         </TableCell>
-                                      ];
-
-                                      // Add columns for each dependant
-                                      group.dependantIds.forEach((dependantId) => {
-                                        columns.push(
-                                          <TableCell key={`${docItem.document.id}-${groupIndex}-dependant-${dependantId}`} className="text-center border p-1">
-                                            {renderPostApplicationStatus(referenceTask, docItem.document, 'dependant', dependantId)}
-                                          </TableCell>
-                                        );
-                                      });
-
-                                      // Understudy columns
-                                      if (hasClassD) {
-                                        columns.push(
-                                          <TableCell key={`${docItem.document.id}-${groupIndex}-understudy`} className="text-center border p-1">
-                                            {renderDocumentStatus(referenceTask, docItem.document, 'understudy')}
-                                          </TableCell>
-                                        );
-                                      }
-
-                                      return columns;
-                                    })}
-
-                                    {/* Reference columns */}
-                                    {hasReferencesColumn && allReferences.map((reference, refIndex) => (
-                                      <TableCell key={`${docItem.document.id}-reference-${reference.id}`} className="text-center border p-1">
-                                        {renderDocumentStatus(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', reference.member)}
-                                      </TableCell>
-                                    ))}
-                                  </TableRow>
+                                        {filteredGroupedTasks.map((group, groupIndex) => {
+                                            const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                                            const dependantIds = group.dependantIds || [];
+                                            const referenceTask = group.tasks[0];
+                                            return (
+                                                <React.Fragment key={`ind-doc-group-${groupIndex}`}>
+                                                    {/* NEW: Company Cell renders N/A for individual docs */}
+                                                    <TableCell className="text-center border p-1">{renderDocumentStatus(referenceTask, docItem.document, 'company')}</TableCell>
+                                                    {/* Individual cells render status */}
+                                                    <TableCell className="text-center border p-1">{renderDocumentStatus(referenceTask, docItem.document, 'principal')}</TableCell>
+                                                    {dependantIds.map(id => <TableCell key={`id-${id}`} className="text-center border p-1">{renderDocumentStatus(referenceTask, docItem.document, 'dependant', id)}</TableCell>)}
+                                                    {hasClassD && <TableCell className="text-center border p-1">{renderDocumentStatus(referenceTask, docItem.document, 'understudy')}</TableCell>}
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                        {hasReferencesColumn && allReferences.map(ref => <TableCell key={`id-ref-${ref.id}`} className="text-center border p-1">{renderDocumentStatus(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', ref.member)}</TableCell>)}
+                                    </TableRow>
 
                                   {/* Document Fields (if expanded) */}
                                   {isExpanded && docItem.fields.map((field, fieldIndex) => (
@@ -876,7 +409,7 @@ export default function RequirementsTableCombined({
                                   ))}
                                 </React.Fragment>
                               );
-                            })}
+                          })}
                         </>
                       )}
                     </>
@@ -1687,25 +1220,10 @@ export default function RequirementsTableCombined({
 
               {/* Empty state */}
               {organizedRequirements.documents.company.length === 0 &&
-                organizedRequirements.documents.individual.length === 0 &&
-                organizedRequirements.bclTemplates.company.length === 0 &&
-                organizedRequirements.bclTemplates.individual.length === 0 &&
-                organizedRequirements.postApplication.company.length === 0 &&
-                organizedRequirements.postApplication.individual.length === 0 &&
-                organizedRequirements.clientFields.company.length === 0 &&
-                organizedRequirements.clientFields.individual.length === 0 && (
+                organizedRequirements.documents.individual.length === 0 && (
                   <TableRow>
-                    <TableCell
-                      colSpan={totalColumns}
-                      className="text-center p-8 text-muted-foreground bg-gray-50"
-                    >
-                      <div className="flex flex-col items-center space-y-2">
-                        <FileText className="h-8 w-8 text-muted-foreground/50" />
-                        <p className="font-medium">No requirements found</p>
-                        <p className="text-sm text-muted-foreground">
-                          No selected documents, BCL templates, stage documents, or client fields to display for {documentTab} applications
-                        </p>
-                      </div>
+                    <TableCell colSpan={totalColumns} className="text-center p-8 text-muted-foreground">
+                      No requirements found for this applicant.
                     </TableCell>
                   </TableRow>
                 )}

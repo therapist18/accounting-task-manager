@@ -15,7 +15,7 @@ import {
   fetchStages,
   type Task as UtilTask,
   type Department,
-} from  "../tasks/utils/taskManagerData"
+} from "../tasks/utils/taskManagerData"
 
 import { StagesTable } from "../tasks/components/StagesTable"
 import { NewTaskDialog } from "../tasks/components/new-task-dialog"
@@ -50,18 +50,18 @@ export default function TasksPage() {
   const [selectedTaskForUpload, setSelectedTaskForUpload] = useState<UtilTask | null>(null);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
-const [selectedTaskForDocuments, setSelectedTaskForDocuments] = useState<UtilTask | null>(null);
-const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
+  const [selectedTaskForDocuments, setSelectedTaskForDocuments] = useState<UtilTask | null>(null);
+  const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
 
   // --- Data Fetching Callbacks ---
   const loadTasksAndStages = useCallback(async (departmentId: string, subdepartmentId?: string) => {
     if (!departmentId || departments.length === 0) return;
     setDataLoading(prev => ({ ...prev, tasks: true }));
     try {
-        const tasksData = await fetchTasks(departmentId, subdepartmentId);
-        const stagesData = await fetchStages(departmentId, departments);
-        setTasks(tasksData);
-        setStages(stagesData);
+      const tasksData = await fetchTasks(departmentId, subdepartmentId);
+      const stagesData = await fetchStages(departmentId, departments);
+      setTasks(tasksData);
+      setStages(stagesData);
     } finally {
       setDataLoading(prev => ({ ...prev, tasks: false }));
     }
@@ -167,7 +167,7 @@ const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
       setDeleteDialogOpen(true);
     }
   };
-  
+
   const handleDeleteConfirm = async () => {
     if (!taskToDelete) return;
     setIsDeleting(true);
@@ -189,12 +189,12 @@ const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
     setTasks(prev => [newEnquiry, ...prev]);
     toast({ title: "Success", description: "New enquiry created." });
   };
-  
+
   const handleStageStatusSave = async (stageId: string, taskId: string, date: string) => {
     const task = tasks.find(t => t.id.toString() === taskId);
     if (!task) return;
-    
-    const updatedStages = { ...task.stages, [stageId]: { date, status: 'completed', completedAt: new Date().toISOString() }};
+
+    const updatedStages = { ...task.stages, [stageId]: { date, status: 'completed', completedAt: new Date().toISOString() } };
     const { error } = await supabase.from('tm_tasks').update({ stages: updatedStages }).eq('id', taskId);
 
     if (error) {
@@ -208,15 +208,15 @@ const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
     setSelectedStageTask({ task, stage });
     setStageUploadDialogOpen(true);
   };
-  
+
   const handleShowUploadDialog = (task: UtilTask) => {
     setSelectedTaskForUpload(task);
     setShowUploadDialog(true);
   };
   const handleViewDocuments = (task: UtilTask) => {
-  setSelectedTaskForUpload(task);
-  setShowUploadDialog(true);
-};
+    setSelectedTaskForUpload(task);
+    setShowUploadDialog(true);
+  };
 
   const handleSort = (key: string) => {
     let direction: 'asc' | 'desc' = 'asc';
@@ -225,7 +225,7 @@ const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
     }
     setSortConfig({ key, direction });
   };
-  
+
   // --- Render Logic ---
   if (dataLoading.departments) {
     return (
@@ -259,7 +259,7 @@ const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
         onClassClick={handleClassClick}
         onSubclassClick={handleSubclassClick}
         expandedItems={expandedItems}
-        onToggleExpand={(key) => setExpandedItems(prev => ({...prev, [key]: !prev[key]}))}
+        onToggleExpand={(key) => setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))}
       />
 
       <main className="flex-1 overflow-hidden">
@@ -274,11 +274,11 @@ const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
           </header>
 
           {dataLoading.tasks ? (
-             <div className="flex items-center justify-center h-96">
-                <div className="text-center">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
-                    <p className="mt-4 text-muted-foreground">Loading tasks...</p>
-                </div>
+            <div className="flex items-center justify-center h-96">
+              <div className="text-center">
+                <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
+                <p className="mt-4 text-muted-foreground">Loading tasks...</p>
+              </div>
             </div>
           ) : !selectedDepartment ? (
             <Card>
@@ -287,115 +287,65 @@ const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
                 <CardDescription>Select a department from the sidebar to get started</CardDescription>
               </CardHeader>
               <CardContent className="p-4 text-center py-8">
-                  <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground">Choose a department to view and manage tasks.</p>
+                <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">Choose a department to view and manage tasks.</p>
               </CardContent>
             </Card>
           ) : (selectedClass || selectedSubclass) ? (
-            <Tabs defaultValue="enquiries" className="space-y-4">
+            <Tabs defaultValue="stages" className="space-y-4">
               <TabsList>
-                <TabsTrigger value="enquiries">Enquiries ({enquiryTasks.length})</TabsTrigger>
-                <TabsTrigger value="work-in-progress">Work in Progress ({wipTasks.length})</TabsTrigger>
-                <TabsTrigger value="completed">Completed ({completedTasks.length})</TabsTrigger>
+                <TabsTrigger value="stages"><FileText className="h-4 w-4 mr-2" />Stages</TabsTrigger>
+                <TabsTrigger value="upload-requirements"><CheckCheckIcon className="h-4 w-4 mr-2" />Requirements Checklist</TabsTrigger>
               </TabsList>
-              
-              <TabsContent value="enquiries" className="space-y-4">
-                 <Card>
+
+              <TabsContent value="stages">
+                <Card>
                   <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      <span>Enquiries - {getDisplayTitle()}</span>
-                      <Button onClick={() => setEnquiryDialogOpen(true)} className="flex items-center gap-2">
-                        <Plus className="h-4 w-4" /> New Enquiry
-                      </Button>
-                    </CardTitle>
-                    <CardDescription>Manage client enquiries and move them to work in progress.</CardDescription>
+                    <CardTitle>Stages Progress - {getDisplayTitle()}</CardTitle>
+                    <CardDescription>Track tasks through various stages of completion.</CardDescription>
                   </CardHeader>
                   <CardContent className="p-4">
-                    <EnquiryTable
-                      tasks={enquiryTasks}
+                    <StagesTable
+                      tasks={wipTasks}
                       loading={dataLoading.tasks}
                       onTaskAction={handleTaskAction}
                       onStageDocumentUpload={handleStageDocumentUpload}
                       handleStageStatusSave={handleStageStatusSave}
+                      onShowUploadDialog={handleViewDocuments}
                     />
                   </CardContent>
                 </Card>
               </TabsContent>
 
-              <TabsContent value="work-in-progress" className="space-y-4">
-                 <Tabs defaultValue="stages" className="space-y-4">
-                  <TabsList>
-                    <TabsTrigger value="stages"><FileText className="h-4 w-4 mr-2" />Stages</TabsTrigger>
-                    <TabsTrigger value="upload-requirements"><CheckCheckIcon className="h-4 w-4 mr-2" />Requirements Checklist</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="stages">
-                    <Card>
-                      <CardHeader>
-                          <CardTitle>Stages Progress - {getDisplayTitle()}</CardTitle>
-                          <CardDescription>Track tasks through various stages of completion.</CardDescription>
-                      </CardHeader>
-                      <CardContent className="p-4">
-                          <StagesTable
-                              tasks={wipTasks}
-                              loading={dataLoading.tasks}
-                              onTaskAction={handleTaskAction}
-                              onStageDocumentUpload={handleStageDocumentUpload}
-                              handleStageStatusSave={handleStageStatusSave}
-                              onShowUploadDialog={handleViewDocuments}
-                          />
-                      </CardContent>
-                    </Card>
-                  </TabsContent>
-
-                   <TabsContent value="upload-requirements">
-                    <Card>
-                      <CardHeader>
-                          <CardTitle>Requirements Checklist - {getDisplayTitle()}</CardTitle>
-                          <CardDescription>Manage document requirements for this selection.</CardDescription>
-                      </CardHeader>
-                      <CardContent className="p-4">
-                          <RequirementsTable
-                              tasks={wipTasks}
-                              loading={dataLoading.tasks}
-                              onTaskAction={handleTaskAction}
-                              onShowUploadDialog={handleShowUploadDialog}
-                              requirements={getCurrentRequirements()}
-                          />
-                      </CardContent>
-                    </Card>
-                  </TabsContent>
-                </Tabs>
-              </TabsContent>
-              
-              <TabsContent value="completed">
+              <TabsContent value="upload-requirements">
                 <Card>
-                    <CardHeader>
-                        <CardTitle>Completed Tasks - {getDisplayTitle()}</CardTitle>
-                        <CardDescription>View successfully completed tasks.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="p-4">
-                         <StagesTable
-                            tasks={completedTasks}
-                            loading={dataLoading.tasks}
-                            onTaskAction={handleTaskAction}
-                        />
-                    </CardContent>
+                  <CardHeader>
+                    <CardTitle>Requirements Checklist - {getDisplayTitle()}</CardTitle>
+                    <CardDescription>Manage document requirements for this selection.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-4">
+                    <RequirementsTable
+                      tasks={wipTasks}
+                      loading={dataLoading.tasks}
+                      onTaskAction={handleTaskAction}
+                      onShowUploadDialog={handleShowUploadDialog}
+                      requirements={getCurrentRequirements()}
+                    />
+                  </CardContent>
                 </Card>
               </TabsContent>
-
             </Tabs>
           ) : (
-             <Card>
-                <CardHeader>
-                    <CardTitle>{getDisplayTitle()}</CardTitle>
-                    <CardDescription>Select a class or subclass from the sidebar to view tasks.</CardDescription>
-                </CardHeader>
-                <CardContent className="p-4 text-center py-8">
-                     <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                     <p className="text-muted-foreground">No class selected.</p>
-                </CardContent>
-             </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>{getDisplayTitle()}</CardTitle>
+                <CardDescription>Select a class or subclass from the sidebar to view tasks.</CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 text-center py-8">
+                <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">No class selected.</p>
+              </CardContent>
+            </Card>
           )}
 
           {/* Dialogs */}
@@ -404,17 +354,17 @@ const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
           <DeleteConfirmationDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen} onConfirm={handleDeleteConfirm} loading={isDeleting} />
           <StageUploadDialog open={stageUploadDialogOpen} onOpenChange={setStageUploadDialogOpen} selectedStageTask={selectedStageTask} />
           <UploadRequirementsDialog
-  open={showUploadDialog}
-  onClose={() => setShowUploadDialog(false)}
-  task={selectedTaskForUpload}
-  requirements={getCurrentRequirements()}
-  onUploadComplete={() => {
-    // Refresh the tasks data when upload is complete
-    if (selectedDepartment) {
-      loadTasksAndStages(selectedDepartment, selectedSubdepartment);
-    }
-  }}
-/>
+            open={showUploadDialog}
+            onClose={() => setShowUploadDialog(false)}
+            task={selectedTaskForUpload}
+            requirements={getCurrentRequirements()}
+            onUploadComplete={() => {
+              // Refresh the tasks data when upload is complete
+              if (selectedDepartment) {
+                loadTasksAndStages(selectedDepartment, selectedSubdepartment);
+              }
+            }}
+          />
         </div>
       </main>
     </div>
