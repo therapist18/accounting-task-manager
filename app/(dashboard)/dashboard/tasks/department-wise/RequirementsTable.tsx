@@ -6,23 +6,55 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { BarChart3, Briefcase, ChevronLeft, ChevronRight, Eye, EyeOff, FileText, Loader2, Search, Upload } from "lucide-react"
-import { format, parseISO } from "date-fns"
+import { Briefcase, FileText, Loader2, Search, Upload, Eye } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
-import { cn } from "@/lib/utils"
-import { getTableFields } from "../../departments/documents+fields/components/formFields"
 import { toast } from "@/hooks/use-toast"
 import { FileUploadComponent } from "../components/FileUploadComponent"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import ExtractionPreview from "@/components/ExtractionPreview"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import RequirementsTableCombined from "./RequirementsTableCombined"
+
+// --- MODIFICATION: Placeholder for the Letter Template Dialog ---
+const LetterTemplateDialog = ({ open, onOpenChange, letterData, individualNames }) => {
+  if (!letterData) return null;
+
+  const { task, document, columnType, applicantId } = letterData;
+
+  let applicantName = "the applicant";
+  if (columnType === 'principal') applicantName = individualNames[task.principal_member || task.individual_id] || 'Principal';
+  else if (columnType === 'dependant') applicantName = individualNames[applicantId] || `Dependant ${applicantId}`;
+  else if (columnType === 'understudy') applicantName = individualNames[task.understudy_member] || 'Understudy';
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl w-full">
+        <DialogHeader>
+          <DialogTitle>Generate: {document?.display_name}</DialogTitle>
+          <DialogDescription>
+            Generating letter for {applicantName}. Please fill in the required details below.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-4 space-y-4">
+          <h3 className="font-semibold">Template Details</h3>
+          {/* This is where your actual template engine and form would go */}
+          <div className="p-4 border rounded-md bg-gray-50 text-sm">
+            <p className="text-gray-600">Your dynamic letter template for '{document?.name}' would be rendered here.</p>
+            <p className="mt-2 text-gray-600">It would include input fields for any variables needed to generate the final document.</p>
+          </div>
+          <div className="flex justify-end">
+            <Button>Generate & Save</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 
 interface RequirementsTableProps {
   tasks: any[]
   loading: boolean
   error: string | null
   activeTab?: string
-  documentTab?: "company" | "individual"
 }
 
 type ApplicantType = 'principal' | 'dependant' | 'understudy' | 'company' | 'reference';
@@ -40,7 +72,6 @@ export function RequirementsTable({
   loading,
   error,
   activeTab = "work-in-progress",
-  documentTab = "individual"
 }: RequirementsTableProps) {
   const [documents, setDocuments] = useState<any[]>([])
   const [documentsLoading, setDocumentsLoading] = useState(true)
@@ -55,8 +86,11 @@ export function RequirementsTable({
   const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
   const [selectedDocumentForPreview, setSelectedDocumentForPreview] = useState<any>(null);
   const [companyData, setCompanyData] = useState<Record<number, any>>({});
-  const [taskReferences, setTaskReferences] = useState<Record<string, any[]>>({});
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
+
+  // --- MODIFICATION: State for the new letter dialog ---
+  const [isLetterDialogOpen, setIsLetterDialogOpen] = useState(false);
+  const [selectedLetterData, setSelectedLetterData] = useState(null);
 
   const parseSelectionId = useCallback((selectionId: string) => {
     const cleanId = selectionId.replace(/_\d+_\d+$/, '');
@@ -194,8 +228,9 @@ export function RequirementsTable({
     }
   }, [searchedGroupedTasks, selectedApplicant]);
 
+  // --- MODIFICATION: Separate "Letters" from other document types ---
   const organizedRequirements = useMemo(() => {
-    const documentsMap = new Map<string, { document: any; fields: any[]; category: 'company' | 'individual'; }>();
+    const documentsMap = new Map<string, { document: any; fields: any[]; category: 'company' | 'individual' | 'letter'; }>();
     const allTasks = filteredGroupedTasks.flatMap(g => g.tasks);
 
     allTasks.forEach(task => {
@@ -209,19 +244,28 @@ export function RequirementsTable({
 
         if (docDef && !documentsMap.has(docId)) {
           const itemWithSettings = { ...item, ...docDef, selectionId: item.id };
+          let category: 'company' | 'individual' | 'letter' = 'individual';
+          if (docDef.main_category === 'Letters') {
+            category = 'letter';
+          } else if (docDef.category === 'company-docs') {
+            category = 'company';
+          }
+
           documentsMap.set(docId, { 
             document: itemWithSettings, 
             fields: [], 
-            category: docDef.category === 'company-docs' ? 'company' : 'individual' 
+            category: category
           });
         }
       });
     });
-
+    
+    const allDocs = Array.from(documentsMap.values());
     return {
       documents: {
-        company: Array.from(documentsMap.values()).filter(i => i.category === 'company'),
-        individual: Array.from(documentsMap.values()).filter(i => i.category === 'individual'),
+        company: allDocs.filter(i => i.category === 'company'),
+        individual: allDocs.filter(i => i.category === 'individual'),
+        letters: allDocs.filter(i => i.category === 'letter'),
       }
     };
   }, [filteredGroupedTasks, taskClassRequirements, documents, parseSelectionId]);
@@ -231,6 +275,12 @@ export function RequirementsTable({
   const handleUploadAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => { setSelectedUploadData({ task, document: item, columnType, applicantId }); setUploadDialogOpen(true); }, []);
   const handleUploadComplete = useCallback(() => { setUploadDialogOpen(false); if (filteredTasks.length > 0) Promise.all([fetchAllIndividualData(filteredTasks), fetchAllCompanyDocuments(filteredTasks)]); }, [filteredTasks, fetchAllIndividualData, fetchAllCompanyDocuments]);
   
+  // --- MODIFICATION: Handler for the new Generate Letter button ---
+  const handleGenerateLetterAction = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => {
+    setSelectedLetterData({ task, document: item, columnType, applicantId });
+    setIsLetterDialogOpen(true);
+  }, []);
+
   const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number): DocumentStatus => {
     const isCompanyDocument = item.category === 'company-docs' || item.category === 'company';
     const baseStatus = { documents: [], count: 0 };
@@ -260,8 +310,10 @@ export function RequirementsTable({
     return { ...baseStatus, documents: foundDocuments, count: foundDocuments.length, type };
   }, [allCompanyDocuments, allIndividualDocuments]);
 
+  // --- MODIFICATION: Render the new Generate button conditionally ---
   const renderDocumentStatus = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number) => {
     const status = getDocumentStatusForColumn(task, item, columnType, applicantId);
+    const isLetter = item.main_category === 'Letters';
 
     const handleViewClick = async () => {
       if (status.documents.length === 0) return;
@@ -282,6 +334,9 @@ export function RequirementsTable({
 
     return (
       <div className="flex items-center justify-center gap-1 h-full">
+        {isLetter && (
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-50" onClick={() => handleGenerateLetterAction(task, item, columnType, applicantId)} title={`Generate ${item.display_name}`}><FileText className="h-4 w-4" /></Button>
+        )}
         <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-amber-600 hover:bg-amber-50" onClick={() => handleUploadAction(task, item, columnType, applicantId)} title={`Upload ${item.display_name}`}><Upload className="h-4 w-4" /></Button>
         {status.type === 'view' && (
           <div className="flex items-center gap-1">
@@ -291,31 +346,20 @@ export function RequirementsTable({
         )}
       </div>
     );
-  }, [getDocumentStatusForColumn, handleUploadAction, documents]);
+  }, [getDocumentStatusForColumn, handleUploadAction, handleGenerateLetterAction, documents]);
 
   const renderClientFieldData = useCallback(() => <div className="text-center"><span className="text-gray-400 text-xs">-</span></div>, []);
   const renderReferencesData = useCallback(() => <div className="text-center p-2"><span className="text-gray-400 text-xs">N/A</span></div>, []);
   const getCurrentRequirements = () => [];
   const fuzzyMatch = (str1, str2) => str1.toLowerCase() === str2.toLowerCase();
 
-  // --- MODIFICATION START: Corrected function to retrieve uploaded document data ---
-  const getDocumentDataForPreview = useCallback((task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number) => {
-    // This function re-uses the logic from `getDocumentStatusForColumn`, which is already
-    // correctly finding the uploaded documents from the `allCompanyDocuments` and `allIndividualDocuments` states.
+  const getDocumentDataForPreview = useCallback((task: any, item: any, columnType: ApplicantType, referenceId?: number) => {
     const status = getDocumentStatusForColumn(task, item, columnType, referenceId);
-
-    // If the status is 'view', it means we found at least one uploaded document.
-    // We return the most recent one (the first in the sorted list), which contains
-    // the `extracted_details` field needed by the child component.
     if (status.type === 'view' && status.documents.length > 0) {
       return status.documents[0];
     }
-    
-    // If no document has been uploaded for this slot, return null. The child component
-    // will correctly render a '-' placeholder.
     return null;
   }, [getDocumentStatusForColumn]);
-  // --- MODIFICATION END ---
 
   const currentClassRequirements = useMemo(() => {
     const firstTask = filteredGroupedTasks[0]?.tasks?.[0];
@@ -363,6 +407,14 @@ export function RequirementsTable({
       </div>
       {selectedDocumentForPreview && (<Dialog open={documentPreviewOpen} onOpenChange={setDocumentPreviewOpen}><DialogContent className="max-w-6xl max-h-[98vh] p-0"><iframe src={selectedDocumentForPreview.fileUrl} className="w-full h-[95vh]" /></DialogContent></Dialog>)}
       <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}><DialogContent className="max-w-6xl w-[90vw] max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Upload {(selectedUploadData?.document?.display_name || 'Document')}</DialogTitle></DialogHeader><FileUploadComponent open={uploadDialogOpen} onOpenChange={setUploadDialogOpen} task={selectedUploadData?.task} document={selectedUploadData?.document} columnType={selectedUploadData?.columnType} applicantId={selectedUploadData?.applicantId} individualNames={individualNames} onUploadComplete={handleUploadComplete}/></DialogContent></Dialog>
+      
+      {/* --- MODIFICATION: Render the new Letter Template Dialog --- */}
+      <LetterTemplateDialog 
+        open={isLetterDialogOpen}
+        onOpenChange={setIsLetterDialogOpen}
+        letterData={selectedLetterData}
+        individualNames={individualNames}
+      />
     </div>
   );
 }

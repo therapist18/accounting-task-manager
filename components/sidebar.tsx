@@ -69,36 +69,46 @@ const navItems = [
         href: "/dashboard/departments/departments",
         icon: LayoutDashboard,
       },
-       {
+      {
         title: "Stages",
         href: "/dashboard/departments/stages",
         icon: Cog,
       },
-       {
+      {
         title: "Rates",
         href: "/dashboard/departments/rates",
         icon: Calculator,
       },
-       {
+      {
         title: "GOVT Upload Req",
         href: "/dashboard/departments/upload-requirements",
         icon: FileText,
       },
-       {
+      {
         title: "Guidelines",
         href: "/dashboard/departments/guidelines",
         icon: FileText,
       },
-       {
+      {
         title: "Job Specific Questions",
         href: "/dashboard/departments/job-specific-questions",
         icon: FileText,
       },
-       {
+      {
         title: "Documents + Fields",
         href: "/dashboard/departments/documents+fields",
         icon: FileText,
       },
+    ],
+  },
+  {
+    category: "Templates",
+    items: [
+      {
+        title: "Letters",
+        href: "/dashboard/templates/letters",
+        icon: FileText,
+      }
     ],
   },
   {
@@ -163,8 +173,8 @@ export function AppSidebar() {
                       <span>{item.category}</span>
                       <ChevronDown
                         className={`h-4 w-4 transition-transform ${openCategories.includes(item.category)
-                            ? "rotate-180"
-                            : ""
+                          ? "rotate-180"
+                          : ""
                           }`}
                       />
                     </SidebarMenuButton>

@@ -22,9 +22,10 @@ interface RequirementsTableCombinedProps {
     documents: {
       company: any[],
       individual: any[],
+      letters: any[], // --- MODIFICATION: Added letters to the type definition ---
     }
   }
-  classRequirements: any[] // This is the prop we need to inspect
+  classRequirements: any[] 
   expandedDocuments: Set<string>
   toggleDocumentExpansion: (documentId: string) => void
   renderDocumentStatus: (task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number, isPostApplication?: boolean) => React.ReactNode
@@ -46,7 +47,7 @@ export default function RequirementsTableCombined({
   error,
   filteredGroupedTasks,
   organizedRequirements,
-  classRequirements, // <-- The data in question
+  classRequirements,
   expandedDocuments,
   toggleDocumentExpansion,
   renderDocumentStatus,
@@ -62,51 +63,38 @@ export default function RequirementsTableCombined({
   kycDocuments
 }: RequirementsTableCombinedProps) {
 
-  // ======================= LOG 1: Inspect incoming props =======================
-  // This is the most important log. It shows what data the parent component is sending.
-  // Check if `classRequirements` has data here. It should look like the JSON payload.
-  console.log("--- RequirementsTableCombined mounted or props changed ---");
-  console.log("LOG 1: Raw `classRequirements` prop received:", classRequirements);
-  console.log("LOG 1: Raw `organizedRequirements` prop received:", organizedRequirements);
-  // ============================= END OF LOG ===================================
-
   const [isStageDialogOpen, setIsStageDialogOpen] = useState(false);
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null);
   const [expandedSections, setExpandedSections] = useState({
     company: true,
     individual: true,
+    letters: true, // --- MODIFICATION: Added state for the new section ---
   });
   const [previewDocument, setPreviewDocument] = useState<any>(null);
 
-  // This `useMemo` depends directly on the `classRequirements` prop
   const classDocsAndFields = useMemo(() => classRequirements?.[0]?.documents_and_fields || [], [classRequirements]);
 
-  // ======================= LOG 2: Check processed data =======================
-  // This log will show what `classDocsAndFields` becomes after the `useMemo`.
-  // If LOG 1 shows an empty or incorrect `classRequirements`, this will be empty.
-  console.log("LOG 2: Processed `classDocsAndFields` from useMemo:", classDocsAndFields);
-  // ============================= END OF LOG ===================================
-
-
   const handleViewDocument = async (document: any) => {
-    if (!document || document.indicator === true) { return; }
-    const kycId = document.document_id;
+    if (!document || !document.file_path) { 
+        toast({ title: "No file available", description: "A file has not been uploaded for this item yet.", variant: "destructive" });
+        return; 
+    }
+    const kycId = document.document_id || document.kyc_document_id;
     const kycData = kycDocuments.get(kycId);
-    if (!kycData) { return; }
-
-    const documentName = kycData.display_name || kycData.name || 'Document';
-    const kycFields = kycData.fields || [];
+    
+    const documentName = document.acc_portal_kyc?.display_name || document.acc_portal_kyc?.name || 'Document';
+    const kycFields = kycData?.fields || [];
     const fields = kycFields.map((field: any) => ({ id: field.id || field.fieldName, name: field.fieldName || field.name, type: field.fieldType || field.type }));
 
     const bucketName = 'kyc-documents';
-    const filePath = document.file_path?.startsWith(bucketName) ? document.file_path : `${bucketName}/${document.file_path}`;
+    const filePath = document.file_path.startsWith(bucketName) ? document.file_path : `${bucketName}/${document.file_path}`;
     const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
-    const fileName = document.file_path?.split('/').pop() || documentName;
+    const fileName = document.file_path.split('/').pop() || documentName;
 
-    setPreviewDocument({ documentId: document.id, documentName, fileUrl, fileName, extractedData: document.extracted_details || {}, fields, file: { name: fileName, url: fileUrl }, type: kycData.documentType || 'document' });
+    setPreviewDocument({ documentId: document.id, documentName, fileUrl, fileName, extractedData: document.extracted_details || {}, fields, file: { name: fileName, url: fileUrl }, type: kycData?.documentType || 'document' });
   };
 
-  const toggleSectionExpansion = (section: 'company' | 'individual') => {
+  const toggleSectionExpansion = (section: 'company' | 'individual' | 'letters') => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
@@ -232,10 +220,6 @@ export default function RequirementsTableCombined({
   };
 
   const renderDocumentSection = (documents: any[], sectionName: string, classDocsAndFields: any[]) => {
-    // Kept the old logs here for context
-    console.log(`[renderDocumentSection - ${sectionName}] Received documents:`, documents);
-    console.log(`[renderDocumentSection - ${sectionName}] Received classDocsAndFields:`, classDocsAndFields);
-
     return documents
       .filter(docItem => !!docItem?.document?.id)
       .sort((a, b) => (a.document.custom_order || 999) - (b.document.custom_order || 999))
@@ -495,8 +479,22 @@ export default function RequirementsTableCombined({
                   {expandedSections.individual && renderDocumentSection(organizedRequirements.documents.individual, 'individual', classDocsAndFields)}
                 </>
               )}
+              
+              {/* --- MODIFICATION: Render the new Letters section --- */}
+              {organizedRequirements.documents.letters.length > 0 && (
+                <>
+                  <TableRow className="bg-gray-100 hover:bg-gray-200 cursor-pointer" onClick={() => toggleSectionExpansion('letters')}>
+                    <TableCell colSpan={totalColumns} className="px-4 py-2 font-semibold text-gray-700">
+                      <div className="flex items-center gap-2">
+                        {expandedSections.letters ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />} Letters
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                  {expandedSections.letters && renderDocumentSection(organizedRequirements.documents.letters, 'letters', classDocsAndFields)}
+                </>
+              )}
 
-              {organizedRequirements.documents.company.length === 0 && organizedRequirements.documents.individual.length === 0 && (
+              {organizedRequirements.documents.company.length === 0 && organizedRequirements.documents.individual.length === 0 && organizedRequirements.documents.letters.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={totalColumns} className="text-center p-8 text-muted-foreground">
                     No requirements found for this applicant.
