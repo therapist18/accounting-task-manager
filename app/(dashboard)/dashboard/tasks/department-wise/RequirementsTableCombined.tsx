@@ -18,14 +18,16 @@ interface RequirementsTableCombinedProps {
   loading: boolean
   error: string | null
   filteredGroupedTasks: any[]
-  organizedRequirements: any
+  organizedRequirements: {
+    documents: {
+      company: any[],
+      individual: any[],
+    }
+  }
   expandedDocuments: Set<string>
   toggleDocumentExpansion: (documentId: string) => void
-  // PROP REVERTED: Now just returns the React Node to display (e.g., a badge or an upload button).
   renderDocumentStatus: (task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number, isPostApplication?: boolean) => React.ReactNode
-  // NEW PROP: Specifically for getting document data to pass to the previewer. Returns null if no document.
   getDocumentDataForPreview: (task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number) => any | null
-  // NEW PROP: Returns a simple text representation ('Yes', 'No', 'N/A') for the data export.
   getDocumentStatusText: (task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number) => string
   renderClientFieldData: (task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy') => React.ReactNode
   renderReferencesData: (task: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number) => React.ReactNode
@@ -34,8 +36,9 @@ interface RequirementsTableCombinedProps {
   companyData: Record<number, any>
   getCurrentRequirements: () => any[]
   fuzzyMatch: (str1: string, str2: string, threshold?: number) => boolean
-  kycDocuments: Map<string, any> // Needed for the previewer
+  kycDocuments: Map<string, any>
 }
+
 
 export default function RequirementsTableCombined({
   loading,
@@ -82,8 +85,8 @@ export default function RequirementsTableCombined({
     const kycFields = kycData.fields || [];
     const fields = kycFields.map((field: any) => ({
       id: field.id || field.fieldName,
-      name: field.fieldName,
-      type: field.fieldType,
+      name: field.fieldName || field.name,
+      type: field.fieldType || field.type,
     }));
 
     const bucketName = 'kyc-documents';
@@ -234,6 +237,144 @@ export default function RequirementsTableCombined({
     XLSX.writeFile(workbook, "Requirements_Data_Export.xlsx");
   };
 
+  const renderDocumentSection = (documents: any[], sectionName: string) => {
+    return documents
+      // FIX 1: Prevent crashes by filtering out items with a missing nested document or ID.
+      .filter(docItem => {
+        if (!docItem?.document?.id) {
+          // This warning will help debug data issues in the parent component.
+          console.warn(`[RequirementsTableCombined] Filtered out an invalid document item without a nested '.document.id' in section "${sectionName}":`, docItem);
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => (a.document.custom_order || 999) - (b.document.custom_order || 999))
+      .map((docItem, docIndex) => {
+
+        const isExpanded = expandedDocuments.has(docItem.document.id);
+
+        // FIX 2: Create a robust way to determine which fields to render.
+        const whitelistedFields = docItem.fields; // This is the whitelist from the requirement.
+        const allPossibleFields = docItem.document.fields || []; // All fields for the doc type.
+
+        let fieldsToRender;
+        // If a whitelist exists and has content, use it to filter the master list of fields.
+        if (Array.isArray(whitelistedFields) && whitelistedFields.length > 0) {
+            const whitelistedFieldIds = new Set(whitelistedFields.map(f => f.id));
+            fieldsToRender = allPossibleFields.filter(field => whitelistedFieldIds.has(field.id));
+        } else {
+            // FALLBACK: If the whitelist is missing or empty, show all available fields for the doc type.
+            // This ensures the expand icon always appears if fields exist.
+            fieldsToRender = allPossibleFields;
+        }
+        
+        const hasFields = fieldsToRender.length > 0;
+
+        return (
+          <React.Fragment key={`${sectionName}-doc-fragment-${docItem.document.id}`}>
+            <TableRow className="group bg-white hover:bg-gray-50">
+              <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-[5] text-center">{docIndex + 1}.</TableCell>
+              <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-[5]">
+                <div className="flex items-center px-2">
+                  <span>{docItem.document.display_name}</span>
+                  {/* The button now correctly appears based on the robust `hasFields` logic */}
+                  {hasFields && (
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-2" onClick={() => toggleDocumentExpansion(docItem.document.id)}>
+                      {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                    </Button>
+                  )}
+                </div>
+              </TableCell>
+              
+              {filteredGroupedTasks.map((group, groupIndex) => {
+                const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                const dependantIds = group.dependantIds || [];
+                const task = group.tasks[0];
+                return (
+                  <React.Fragment key={`${sectionName}-doc-group-${groupIndex}`}>
+                    {[
+                      { type: 'company' }, { type: 'principal' },
+                      ...dependantIds.map(id => ({ type: 'dependant', id })),
+                      ...(hasClassD ? [{ type: 'understudy' }] : [])
+                    ].map(col => {
+                      const docForPreview = getDocumentDataForPreview(task, docItem.document, col.type, col.id);
+                      const statusNode = renderDocumentStatus(task, docItem.document, col.type, col.id);
+                      return (
+                        <TableCell key={`${sectionName}-d-${col.type}-${col.id || groupIndex}`} className="text-center border p-1">
+                          {docForPreview ? (
+                            <div className="cursor-pointer" onClick={() => handleViewDocument(docForPreview)} title="Click to view document">
+                              {statusNode}
+                            </div>
+                          ) : ( statusNode )}
+                        </TableCell>
+                      );
+                    })}
+                  </React.Fragment>
+                );
+              })}
+              {hasReferencesColumn && allReferences.map(ref => {
+                const docForPreview = getDocumentDataForPreview(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', ref.member);
+                const statusNode = renderDocumentStatus(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', ref.member);
+                return (
+                  <TableCell key={`${sectionName}-d-ref-${ref.id}`} className="text-center border p-1">
+                     {docForPreview ? (
+                      <div className="cursor-pointer" onClick={() => handleViewDocument(docForPreview)} title="Click to view document">
+                        {statusNode}
+                      </div>
+                    ) : ( statusNode )}
+                  </TableCell>
+                )
+              })}
+            </TableRow>
+
+            {/* FIX 3: Iterate over `fieldsToRender` and show extracted data. */}
+            {isExpanded && hasFields && fieldsToRender.map((field, fieldIndex) => {
+              return (
+                <TableRow key={`${sectionName}-field-${docItem.document.id}-${field.id}`} className="bg-gray-50 hover:bg-gray-100">
+                  <TableCell className="sticky left-0 bg-gray-50 hover:bg-gray-100 border-r z-[5] text-center text-sm text-gray-500">{`${docIndex + 1}.${fieldIndex + 1}`}</TableCell>
+                  <TableCell className="sticky left-16 bg-gray-50 hover:bg-gray-100 border-r z-[5] pl-8 text-sm">{field.name || field.fieldName}</TableCell>
+                  
+                  {filteredGroupedTasks.map((group, groupIndex) => {
+                    const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                    const dependantIds = group.dependantIds || [];
+                    const task = group.tasks[0];
+                    return (
+                      <React.Fragment key={`${sectionName}-field-group-${groupIndex}`}>
+                        {[
+                          { type: 'company' }, { type: 'principal' },
+                          ...dependantIds.map(id => ({ type: 'dependant', id })),
+                          ...(hasClassD ? [{ type: 'understudy' }] : [])
+                        ].map(col => {
+                          const docData = getDocumentDataForPreview(task, docItem.document, col.type, col.id);
+                          const extractedData = docData?.extracted_details || {};
+                          const fieldValue = extractedData[field.name] || extractedData[field.id] || '-';
+                          return (
+                            <TableCell key={`${sectionName}-df-${col.type}-${col.id || groupIndex}`} className="text-center border p-1 text-sm">
+                              {fieldValue}
+                            </TableCell>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
+                  {hasReferencesColumn && allReferences.map(ref => {
+                    const docData = getDocumentDataForPreview(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', ref.member);
+                    const extractedData = docData?.extracted_details || {};
+                    const fieldValue = extractedData[field.name] || extractedData[field.id] || '-';
+                    return (
+                      <TableCell key={`${sectionName}-df-ref-${ref.id}`} className="text-center border p-1 text-sm">
+                        {fieldValue}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              );
+            })}
+          </React.Fragment>
+        );
+      });
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -345,6 +486,7 @@ export default function RequirementsTableCombined({
           {loading ? (<TableRow><TableCell colSpan={totalColumns} className="h-24 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></TableCell></TableRow>)
           : error ? (<TableRow><TableCell colSpan={totalColumns} className="h-24 text-center text-destructive"><AlertTriangle className="mx-auto h-6 w-6" />{error}</TableCell></TableRow>)
           : (<>
+              {/* COMPANY DOCUMENTS SECTION */}
               {organizedRequirements.documents.company.length > 0 && (
                 <>
                   <TableRow className="bg-gray-100 hover:bg-gray-200 cursor-pointer" onClick={() => toggleSectionExpansion('company')}>
@@ -354,70 +496,11 @@ export default function RequirementsTableCombined({
                       </div>
                     </TableCell>
                   </TableRow>
-                  {expandedSections.company && organizedRequirements.documents.company.sort((a,b) => (a.document.custom_order || 999) - (b.document.custom_order || 999)).map((docItem, docIndex) => {
-                    const isExpanded = expandedDocuments.has(docItem.document.id);
-                    return (
-                      <TableRow key={`company-doc-${docItem.document.id}`} className="group bg-white hover:bg-gray-50">
-                        <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-[5] text-center">{docIndex + 1}.</TableCell>
-                        <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-[5]">
-                          <div className="flex items-center px-2">
-                            <span>{docItem.document.display_name}</span>
-                            {docItem.fields.length > 0 && 
-                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-2" onClick={() => toggleDocumentExpansion(docItem.document.id)}>
-                                {isExpanded ? <Minus /> : <Plus />}
-                              </Button>
-                            }
-                          </div>
-                        </TableCell>
-                        {filteredGroupedTasks.map((group, groupIndex) => {
-                          const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                          const dependantIds = group.dependantIds || [];
-                          const task = group.tasks[0];
-                          return (
-                            <React.Fragment key={`company-doc-group-${groupIndex}`}>
-                              {[
-                                { type: 'company' },
-                                { type: 'principal' },
-                                ...dependantIds.map(id => ({ type: 'dependant', id })),
-                                ...(hasClassD ? [{ type: 'understudy' }] : [])
-                              ].map(col => {
-                                const docForPreview = getDocumentDataForPreview(task, docItem.document, col.type, col.id);
-                                const statusNode = renderDocumentStatus(task, docItem.document, col.type, col.id);
-                                return (
-                                  <TableCell key={`cd-${col.type}-${col.id || groupIndex}`} className="text-center border p-1">
-                                    {docForPreview ? (
-                                      <div className="cursor-pointer" onClick={() => handleViewDocument(docForPreview)} title="Click to view document">
-                                        {statusNode}
-                                      </div>
-                                    ) : (
-                                      statusNode
-                                    )}
-                                  </TableCell>
-                                );
-                              })}
-                            </React.Fragment>
-                          );
-                        })}
-                        {hasReferencesColumn && allReferences.map(ref => {
-                          const docForPreview = getDocumentDataForPreview(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', ref.member);
-                          const statusNode = renderDocumentStatus(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', ref.member);
-                          return (
-                            <TableCell key={`cd-ref-${ref.id}`} className="text-center border p-1">
-                               {docForPreview ? (
-                                <div className="cursor-pointer" onClick={() => handleViewDocument(docForPreview)} title="Click to view document">
-                                  {statusNode}
-                                </div>
-                              ) : (
-                                statusNode
-                              )}
-                            </TableCell>
-                          )
-                        })}
-                      </TableRow>
-                    );
-                  })}
+                  {expandedSections.company && renderDocumentSection(organizedRequirements.documents.company, 'company')}
                 </>
               )}
+
+              {/* INDIVIDUAL DOCUMENTS SECTION */}
               {organizedRequirements.documents.individual.length > 0 && (
                 <>
                   <TableRow className="bg-gray-100 hover:bg-gray-200 cursor-pointer" onClick={() => toggleSectionExpansion('individual')}>
@@ -427,70 +510,11 @@ export default function RequirementsTableCombined({
                       </div>
                     </TableCell>
                   </TableRow>
-                  {expandedSections.individual && organizedRequirements.documents.individual.sort((a,b) => (a.document.custom_order || 999) - (b.document.custom_order || 999)).map((docItem, docIndex) => {
-                    const isExpanded = expandedDocuments.has(docItem.document.id);
-                    return (
-                      <TableRow key={`ind-doc-${docItem.document.id}`} className="group bg-white hover:bg-gray-50">
-                        <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-[5] text-center">{docIndex + 1}.</TableCell>
-                        <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-[5]">
-                          <div className="flex items-center px-2">
-                            <span>{docItem.document.display_name}</span>
-                            {docItem.fields.length > 0 && 
-                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-2" onClick={() => toggleDocumentExpansion(docItem.document.id)}>
-                                {isExpanded ? <Minus /> : <Plus />}
-                              </Button>
-                            }
-                          </div>
-                        </TableCell>
-                        {filteredGroupedTasks.map((group, groupIndex) => {
-                          const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                          const dependantIds = group.dependantIds || [];
-                          const task = group.tasks[0];
-                          return (
-                            <React.Fragment key={`ind-doc-group-${groupIndex}`}>
-                              {[
-                                { type: 'company' },
-                                { type: 'principal' },
-                                ...dependantIds.map(id => ({ type: 'dependant', id })),
-                                ...(hasClassD ? [{ type: 'understudy' }] : [])
-                              ].map(col => {
-                                const docForPreview = getDocumentDataForPreview(task, docItem.document, col.type, col.id);
-                                const statusNode = renderDocumentStatus(task, docItem.document, col.type, col.id);
-                                return (
-                                  <TableCell key={`id-${col.type}-${col.id || groupIndex}`} className="text-center border p-1">
-                                    {docForPreview ? (
-                                      <div className="cursor-pointer" onClick={() => handleViewDocument(docForPreview)} title="Click to view document">
-                                        {statusNode}
-                                      </div>
-                                    ) : (
-                                      statusNode
-                                    )}
-                                  </TableCell>
-                                );
-                              })}
-                            </React.Fragment>
-                          );
-                        })}
-                        {hasReferencesColumn && allReferences.map(ref => {
-                          const docForPreview = getDocumentDataForPreview(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', ref.member);
-                          const statusNode = renderDocumentStatus(filteredGroupedTasks[0]?.tasks[0], docItem.document, 'reference', ref.member);
-                          return (
-                            <TableCell key={`id-ref-${ref.id}`} className="text-center border p-1">
-                               {docForPreview ? (
-                                <div className="cursor-pointer" onClick={() => handleViewDocument(docForPreview)} title="Click to view document">
-                                  {statusNode}
-                                </div>
-                              ) : (
-                                statusNode
-                              )}
-                            </TableCell>
-                          )
-                        })}
-                      </TableRow>
-                    );
-                  })}
+                  {expandedSections.individual && renderDocumentSection(organizedRequirements.documents.individual, 'individual')}
                 </>
               )}
+
+              {/* NO REQUIREMENTS MESSAGE */}
               {organizedRequirements.documents.company.length === 0 && organizedRequirements.documents.individual.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={totalColumns} className="text-center p-8 text-muted-foreground">
