@@ -30,10 +30,8 @@ import {
   getClientFieldAllocationStatus as getClientFieldAllocationStatusUtil
 } from "./components/utils"
 
-// Memoized components to prevent unnecessary re-renders
 const MemoizedCheckbox = memo(OptimizedCheckbox)
 const MemoizedTruncatedText = memo(TruncatedText)
-
 
 export default function DocumentsFields() {
   // ... (all state declarations remain the same)
@@ -77,11 +75,8 @@ export default function DocumentsFields() {
   const renderCountRef = useRef(0)
   const lastFetchTimeRef = useRef(0)
 
-  // =========================================================================
-  // MODIFICATION 1: Update fetchData to handle the new nested structure
-  // =========================================================================
   const fetchData = useCallback(async () => {
-    // ... (logic for timeout, abort controller, and fetching departments/documents is unchanged)
+    // ... (initial logic is the same)
     const now = Date.now()
     if (now - lastFetchTimeRef.current < 1000) return
     lastFetchTimeRef.current = now
@@ -124,7 +119,6 @@ export default function DocumentsFields() {
       if (documentsResponse.error) throw documentsResponse.error
       if (requirementsResponse.error) throw requirementsResponse.error
 
-       // ... (transforming departments and processing documents remains the same)
       const transformedDepartments = (deptsResponse.data || []).map((dept: any) => ({
         ...dept,
         subdepartments: (dept.tm_subdepartments || [])
@@ -154,41 +148,42 @@ export default function DocumentsFields() {
       const documentSettings: Record<string, any> = {}
       const clientFieldSettings: Record<string, any> = {}
 
-      // FLATTEN the nested data structure for the UI state
+      // MODIFICATION: FLATTEN the nested data from Supabase for efficient UI state management
       requirementsResponse.data?.forEach((req: any) => {
+        if (!req.class_id) return;
+        
         // Process nested documents and fields
         if (Array.isArray(req.documents_and_fields)) {
           req.documents_and_fields.forEach((docAllocation: any) => {
             if (docAllocation?.id) {
-              const { fields, ...docProps } = docAllocation
-              const docKey = `${docProps.id}_${req.class_id}`
-              documentSettings[docKey] = docProps
+              const { fields, ...docProps } = docAllocation;
+              const docKey = `${docProps.id}_${req.class_id}`;
+              documentSettings[docKey] = docProps;
 
               // Process nested fields within the document
               if (Array.isArray(fields)) {
                 fields.forEach((fieldAllocation: any) => {
                   if (fieldAllocation?.id) {
-                    const fieldKey = `${docAllocation.id}-${fieldAllocation.id}_${req.class_id}`
-                    documentSettings[fieldKey] = fieldAllocation
+                    const fieldKey = `${docAllocation.id}-${fieldAllocation.id}_${req.class_id}`;
+                    documentSettings[fieldKey] = fieldAllocation;
                   }
-                })
+                });
               }
             }
-          })
+          });
         }
         
         // Client fields remain flat
         if (Array.isArray(req.client_fields)) {
           req.client_fields.forEach((item: any) => {
             if (item?.id !== undefined) {
-              const clientFieldKey = `${item.id}_${req.class_id}`
-              clientFieldSettings[clientFieldKey] = item
+              const clientFieldKey = `${item.id}_${req.class_id}`;
+              clientFieldSettings[clientFieldKey] = item;
             }
-          })
+          });
         }
-      })
-      
-      // ... (generating available columns logic remains the same)
+      });
+      // ... (rest of the function remains the same)
       const columns: ColumnVisibilityOption[] = []
       transformedDepartments.forEach((dept: any) => {
         dept.subdepartments?.forEach((subdept: any) => {
@@ -228,8 +223,6 @@ export default function DocumentsFields() {
           }
         })
       })
-
-      // ... (batch state updates remain the same)
       startTransition(() => {
         setDepartments(transformedDepartments)
         setDocuments(processedDocuments)
@@ -240,7 +233,6 @@ export default function DocumentsFields() {
         if (transformedDepartments.length > 0) {
           setActiveTab(transformedDepartments[0].id)
         }
-
         const categoryKeys = Object.keys(groupDocumentsByCategory(
           processedDocuments.filter(doc => doc.category === CATEGORY_MAPPING[documentTab])
         ))
@@ -259,145 +251,129 @@ export default function DocumentsFields() {
     return () => controller.abort()
   }, [documentTab])
 
-  // ... (refreshData can be simplified or removed if full fetchData is fast enough, but let's update it for consistency)
   const refreshData = useMemo(
-    () => debounce(async () => {
-        // This function would also need the same flattening logic as fetchData
-        // For simplicity, we can just re-call the main fetch
-        await fetchData()
-    }, DEBOUNCE_DELAY),
+    () => debounce(fetchData, DEBOUNCE_DELAY),
     [fetchData]
-  )
+  );
 
-
-  // =========================================================================
-  // MODIFICATION 2: Update handleSaveAllChanges to create the nested structure
-  // =========================================================================
+  // MODIFICATION: Replace the entire function with a corrected version
   const handleSaveAllChanges = useCallback(async () => {
-    if (!hasUnsavedChanges) return
-    setIsSaving(true)
+    if (!hasUnsavedChanges) return;
+    setIsSaving(true);
 
     try {
-      const changesByClassId: Record<string, {
-        documents: Record<string, any>;
-        clientFields: Record<string, any>;
-      }> = {}
+      const changesByClassId = {};
 
-      // Group flat pending changes by class_id (logic remains similar)
-      const processChanges = (changes: Record<string, any>, target: 'documents' | 'clientFields') => {
-        Object.entries(changes).forEach(([allocationKey, changeData]) => {
-          const keyParts = allocationKey.split('_')
-          const classId = keyParts.pop() // The last part is always the classId
-          const entityId = keyParts.join('_') // The rest is the entityId (docId or docId-fieldId)
-          
-          if (!classId) return;
+      // 1. Group all pending changes by their classId.
+      const groupChanges = (changeType) => {
+        const source = pendingChanges[changeType];
+        Object.entries(source).forEach(([allocationKey, changeData]) => {
+          const firstUnderscoreIndex = allocationKey.indexOf('_');
+          if (firstUnderscoreIndex === -1) return;
+
+          const entityId = allocationKey.substring(0, firstUnderscoreIndex);
+          const classId = allocationKey.substring(firstUnderscoreIndex + 1);
 
           if (!changesByClassId[classId]) {
-            changesByClassId[classId] = { documents: {}, clientFields: {} }
+            changesByClassId[classId] = { documents: {}, clientFields: {} };
           }
           
-          changesByClassId[classId][target][entityId] = {
-            id: entityId,
-            ...changeData,
-            updated_at: new Date().toISOString()
-          }
-        })
-      }
+          changesByClassId[classId][changeType][entityId] = changeData;
+        });
+      };
       
-      processChanges(pendingChanges.documents, 'documents')
-      processChanges(pendingChanges.clientFields, 'clientFields')
-
-      // Save each class_id's changes
+      groupChanges('documents');
+      groupChanges('clientFields');
+      
+      // 2. For each classId, fetch existing data, merge changes, and upsert.
       const savePromises = Object.entries(changesByClassId).map(async ([classId, classChanges]) => {
         const { data: existingData, error: fetchError } = await supabase
           .from('tm_class_requirements')
           .select('documents_and_fields, client_fields')
           .eq('class_id', classId)
-          .maybeSingle()
+          .maybeSingle();
 
-        if (fetchError && fetchError.code !== 'PGRST116') throw fetchError
+        if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
 
-        // NESTING LOGIC STARTS HERE
-        const documentsToSave = new Map<string, any>()
-        const existingDocuments = new Map((existingData?.documents_and_fields || []).map(doc => [doc.id, doc]))
+        // 3. Build the nested document structure
+        const documentsMap = new Map((existingData?.documents_and_fields || []).map(doc => [doc.id, doc]));
 
-        // Merge existing data first
-        existingDocuments.forEach((doc, docId) => documentsToSave.set(docId, doc))
-
-        // Process pending document and field changes
-        Object.values(classChanges.documents).forEach(change => {
-          const [docId, fieldId] = change.id.split('-')
+        Object.entries(classChanges.documents).forEach(([entityId, changeProps]) => {
+          // A document ID is a 36-char UUID. Anything longer is a field ID.
+          const isField = entityId.length > 37 && entityId[36] === '-';
+          let docId, fieldId;
           
-          const { id, ...changeProps } = change
-          
-          const docData = documentsToSave.get(docId) || { id: docId, fields: [] }
-
-          if (fieldId) { // This is a field allocation
-            const fieldIndex = docData.fields.findIndex(f => f.id === fieldId)
-            if (fieldIndex > -1) {
-              docData.fields[fieldIndex] = { ...docData.fields[fieldIndex], id: fieldId, ...changeProps }
-            } else {
-              docData.fields.push({ id: fieldId, ...changeProps })
-            }
-          } else { // This is a document allocation
-            documentsToSave.set(docId, { ...docData, ...changeProps })
+          if (isField) {
+            docId = entityId.substring(0, 36);
+            fieldId = entityId.substring(37);
+          } else {
+            docId = entityId;
+            fieldId = null;
           }
-        })
 
-        const updatedDocuments = Array.from(documentsToSave.values())
+          const docData = documentsMap.get(docId) || { id: docId, fields: [] };
 
-        // Client fields remain flat, just merge them
-        const existingClientFields = new Map((existingData?.client_fields || []).map(field => [field.id, field]))
-        Object.values(classChanges.clientFields).forEach(change => {
-            const key = change.id.split('_')[0] // The original key before classId was appended
-            existingClientFields.set(key, {...existingClientFields.get(key), ...change})
-        })
-        const updatedClientFields = Array.from(existingClientFields.values());
+          if (fieldId) { // It's a field change
+            const fieldIndex = docData.fields.findIndex(f => f.id === fieldId);
+            const fieldChanges = { id: fieldId, updated_at: new Date().toISOString(), ...changeProps };
+            
+            if (fieldIndex > -1) {
+              docData.fields[fieldIndex] = { ...docData.fields[fieldIndex], ...fieldChanges };
+            } else {
+              docData.fields.push(fieldChanges);
+            }
+          } else { // It's a document change
+            const docChanges = { updated_at: new Date().toISOString(), ...changeProps };
+            documentsMap.set(docId, { ...docData, ...docChanges });
+          }
+        });
 
-        // Save to database
-        const recordData = {
+        // 4. Merge client field changes (they remain flat)
+        const clientFieldsMap = new Map((existingData?.client_fields || []).map(field => [field.id, field]));
+        Object.entries(classChanges.clientFields).forEach(([entityId, changeProps]) => {
+          const fieldChanges = { id: entityId, updated_at: new Date().toISOString(), ...changeProps };
+          clientFieldsMap.set(entityId, { ...clientFieldsMap.get(entityId), ...fieldChanges });
+        });
+
+        const finalPayload = {
           class_id: classId,
-          documents_and_fields: updatedDocuments,
-          client_fields: updatedClientFields,
+          documents_and_fields: Array.from(documentsMap.values()),
+          client_fields: Array.from(clientFieldsMap.values()),
           updated_at: new Date().toISOString(),
-        }
+        };
 
         const { error: upsertError } = await supabase
           .from('tm_class_requirements')
-          .upsert(recordData, { onConflict: 'class_id' })
+          .upsert(finalPayload, { onConflict: 'class_id' });
 
-        if (upsertError) throw upsertError
-      })
+        if (upsertError) throw upsertError;
+      });
 
-      await Promise.all(savePromises)
+      await Promise.all(savePromises);
 
-      setPendingChanges({ documents: {}, clientFields: {} })
-      setHasUnsavedChanges(false)
-      await refreshData()
+      setPendingChanges({ documents: {}, clientFields: {} });
+      setHasUnsavedChanges(false);
+      await refreshData();
 
       toast({
         title: "Success",
         description: `Changes saved successfully.`,
         variant: "default",
-      })
+      });
 
     } catch (error) {
-      console.error('Error saving changes:', error)
+      console.error('Error saving changes:', error);
       toast({
         title: "Error",
-        description: "Failed to save changes. Please try again.",
+        description: `Failed to save changes: ${error.message}`,
         variant: "destructive",
-      })
+      });
     } finally {
-      setIsSaving(false)
+      setIsSaving(false);
     }
-  }, [pendingChanges, hasUnsavedChanges, refreshData])
-
-  // =========================================================================
-  // NO OTHER CHANGES REQUIRED BELOW THIS LINE
-  // All other functions work with the flattened state and do not need modification.
-  // =========================================================================
-  // ... (the rest of the component, including handleDisplayToggle, render functions, and JSX, remains unchanged)
+  }, [pendingChanges, hasUnsavedChanges, refreshData]);
+  
+  // ... (the rest of the component remains exactly the same)
   const getColumnKey = useCallback((subdeptId: number, clsIndex: number | null, subclsIndex: number | null = null) => {
     return getColumnKeyUtil(subdeptId, clsIndex, subclsIndex)
   }, [])
@@ -648,31 +624,26 @@ export default function DocumentsFields() {
     const allocationKey = `${allocationId}_${class_id_part}`;
 
     setPendingChanges(prev => {
-        const currentStatus = getAllocationStatus(allocationId, subdeptId, classIndex, subclassIndex, columnType);
+        const originalStatus = documentAllocations[allocationKey]?.[columnType] ?? false;
         const newDocuments = { ...prev.documents };
 
-        if (checked !== currentStatus) {
-            newDocuments[allocationKey] = {
-                ...(newDocuments[allocationKey] || {}),
-                [columnType]: checked,
-            };
-        } else {
-            // If the change reverts to the original state, remove it from pending
-            if (newDocuments[allocationKey]) {
-                delete newDocuments[allocationKey][columnType];
-                if (Object.keys(newDocuments[allocationKey]).length === 0) {
-                    delete newDocuments[allocationKey];
-                }
-            }
+        const currentPending = newDocuments[allocationKey] ? { ...newDocuments[allocationKey] } : {};
+        currentPending[columnType] = checked;
+
+        if (checked === originalStatus) {
+            delete currentPending[columnType];
         }
 
-        return {
-            ...prev,
-            documents: newDocuments,
-        };
+        if (Object.keys(currentPending).length === 0) {
+            delete newDocuments[allocationKey];
+        } else {
+            newDocuments[allocationKey] = currentPending;
+        }
+
+        return { ...prev, documents: newDocuments };
     });
     setHasUnsavedChanges(true);
-}, [currentDepartment, getAllocationStatus]);
+}, [currentDepartment, documentAllocations]);
 
 
   const handleClientFieldToggle = useCallback((
@@ -699,18 +670,27 @@ export default function DocumentsFields() {
     const allocationKey = `${fieldId}_${class_id_part}`;
 
 
-    setPendingChanges(prev => ({
-      ...prev,
-      clientFields: {
-        ...prev.clientFields,
-        [allocationKey]: {
-          ...(prev.clientFields[allocationKey] || {}),
-          [columnType]: checked,
+    setPendingChanges(prev => {
+        const originalStatus = clientFieldAllocations[allocationKey]?.[columnType] ?? false;
+        const newClientFields = { ...prev.clientFields };
+
+        const currentPending = newClientFields[allocationKey] ? { ...newClientFields[allocationKey] } : {};
+        currentPending[columnType] = checked;
+
+        if (checked === originalStatus) {
+            delete currentPending[columnType];
         }
-      }
-    }))
+
+        if (Object.keys(currentPending).length === 0) {
+            delete newClientFields[allocationKey];
+        } else {
+            newClientFields[allocationKey] = currentPending;
+        }
+
+        return { ...prev, clientFields: newClientFields };
+    });
     setHasUnsavedChanges(true)
-  }, [currentDepartment])
+  }, [currentDepartment, clientFieldAllocations]);
 
   const renderColumnHeaders = useCallback(() => {
     return visibleColumns.map(column => {
@@ -1069,9 +1049,9 @@ export default function DocumentsFields() {
       </div>
     )
   }
-
+  
   return (
-      <div className="w-full min-h-screen">
+    <div className="w-full min-h-screen">
       <div className="mx-auto p-4">
         <div className="flex justify-between items-center mb-4">
           <div>
