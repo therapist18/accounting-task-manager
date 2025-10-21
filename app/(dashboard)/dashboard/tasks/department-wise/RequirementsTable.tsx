@@ -194,7 +194,6 @@ export function RequirementsTable({
     }
   }, [searchedGroupedTasks, selectedApplicant]);
 
-  // --- MODIFICATION START: Corrected Logic for Object Creation ---
   const organizedRequirements = useMemo(() => {
     const documentsMap = new Map<string, { document: any; fields: any[]; category: 'company' | 'individual'; }>();
     const allTasks = filteredGroupedTasks.flatMap(g => g.tasks);
@@ -209,10 +208,7 @@ export function RequirementsTable({
         const docDef = documents.find(d => d.id === docId);
 
         if (docDef && !documentsMap.has(docId)) {
-          // This is the crucial fix. We spread the base document definition (`docDef`)
-          // LAST, so its `id` (the pure UUID) overwrites any `id` from the `item` object.
           const itemWithSettings = { ...item, ...docDef, selectionId: item.id };
-          
           documentsMap.set(docId, { 
             document: itemWithSettings, 
             fields: [], 
@@ -229,7 +225,6 @@ export function RequirementsTable({
       }
     };
   }, [filteredGroupedTasks, taskClassRequirements, documents, parseSelectionId]);
-  // --- MODIFICATION END ---
 
   const handleSelectApplicant = (applicantName: string) => setSelectedApplicant(applicantName);
   const toggleDocumentExpansion = useCallback((docId: string) => setExpandedDocuments(prev => { const newSet = new Set(prev); newSet.has(docId) ? newSet.delete(docId) : newSet.add(docId); return newSet; }), []);
@@ -239,7 +234,7 @@ export function RequirementsTable({
   const getDocumentStatusForColumn = useCallback((task: any, item: any, columnType: ApplicantType, applicantId?: number): DocumentStatus => {
     const isCompanyDocument = item.category === 'company-docs' || item.category === 'company';
     const baseStatus = { documents: [], count: 0 };
-    const requiredDocId = item.id; // This is now guaranteed to be the pure UUID.
+    const requiredDocId = item.id; 
 
     if ((columnType === 'company' && !isCompanyDocument) || (columnType !== 'company' && isCompanyDocument)) {
         return { ...baseStatus, type: 'na' };
@@ -303,51 +298,31 @@ export function RequirementsTable({
   const getCurrentRequirements = () => [];
   const fuzzyMatch = (str1, str2) => str1.toLowerCase() === str2.toLowerCase();
 
+  // --- MODIFICATION START: Corrected function to retrieve uploaded document data ---
   const getDocumentDataForPreview = useCallback((task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number) => {
-    if (!task || !item) return null;
-    
-    // Get the document ID based on the column type
-    let documentId: string | undefined;
-    
-    if (columnType === 'company') {
-      documentId = task.company_documents?.[item.id]?.document_id;
-    } else if (columnType === 'principal') {
-      documentId = task.principal_documents?.[item.id]?.document_id;
-    } else if (columnType === 'dependant' && referenceId) {
-      documentId = task.dependants_documents?.[referenceId]?.[item.id]?.document_id;
-    } else if (columnType === 'understudy') {
-      documentId = task.understudy_documents?.[item.id]?.document_id;
-    } else if (columnType === 'reference' && referenceId) {
-      documentId = task.references_documents?.[referenceId]?.[item.id]?.document_id;
+    // This function re-uses the logic from `getDocumentStatusForColumn`, which is already
+    // correctly finding the uploaded documents from the `allCompanyDocuments` and `allIndividualDocuments` states.
+    const status = getDocumentStatusForColumn(task, item, columnType, referenceId);
+
+    // If the status is 'view', it means we found at least one uploaded document.
+    // We return the most recent one (the first in the sorted list), which contains
+    // the `extracted_details` field needed by the child component.
+    if (status.type === 'view' && status.documents.length > 0) {
+      return status.documents[0];
     }
     
-    if (!documentId) return null;
-    
-    // Find the document in the documents array
-    const document = documents.find(doc => doc.id === documentId);
-    
-    if (!document) return null;
-    
-    // Return the document data needed for preview
-    return {
-      ...document,
-      fileUrl: document.file_url ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/documents/${document.file_url}` : null,
-      documentType: item.display_name || 'Document',
-      applicantName: columnType === 'company' 
-        ? task.company_name 
-        : columnType === 'principal' 
-          ? task.applicant_name 
-          : columnType === 'dependant' 
-            ? individualNames[referenceId!] || `Dependant ${referenceId}`
-            : columnType === 'understudy'
-              ? 'Understudy'
-              : individualNames[referenceId!] || `Reference ${referenceId}`,
-      taskId: task.id,
-      taskName: task.applicant_name,
-      documentId: item.id,
-      documentName: item.display_name
-    };
-  }, [documents, individualNames]);
+    // If no document has been uploaded for this slot, return null. The child component
+    // will correctly render a '-' placeholder.
+    return null;
+  }, [getDocumentStatusForColumn]);
+  // --- MODIFICATION END ---
+
+  const currentClassRequirements = useMemo(() => {
+    const firstTask = filteredGroupedTasks[0]?.tasks?.[0];
+    if (!firstTask) return [];
+    const requirements = taskClassRequirements[firstTask.id];
+    return requirements ? [requirements] : [];
+  }, [filteredGroupedTasks, taskClassRequirements]);
 
   return (
     <div className="flex h-[85vh] w-full bg-white">
@@ -370,6 +345,7 @@ export function RequirementsTable({
             error={error} 
             filteredGroupedTasks={filteredGroupedTasks} 
             organizedRequirements={organizedRequirements} 
+            classRequirements={currentClassRequirements}
             expandedDocuments={expandedDocuments} 
             toggleDocumentExpansion={toggleDocumentExpansion} 
             renderDocumentStatus={renderDocumentStatus} 
