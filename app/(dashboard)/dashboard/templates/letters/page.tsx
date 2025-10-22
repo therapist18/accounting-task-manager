@@ -5,11 +5,10 @@ import React, { useState, useMemo, useCallback, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { PlusCircle, FileText, Loader2, Settings, ChevronRight } from "lucide-react"
-import { toast } from "@/hooks/use-toast"
+import { toast } from "@/components/ui/use-toast" // Corrected toast import
 import { supabase } from "@/lib/supabase/client"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
-// Adjust these import paths to match your project structure
 import { DepartmentSidebar } from "../../departments/main-shared-components/department-sidebar"
 import { fetchDepartments } from "../../departments/departments/database"
 import DocumentTemplateManager from "./document-template-manager"
@@ -28,7 +27,10 @@ export default function LettersPage() {
   const [letterTypes, setLetterTypes] = useState<any[]>([]);
   const [selectedLetter, setSelectedLetter] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // --- MODIFICATION: State for Dialog and Editing ---
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<any | null>(null);
   const [templateVersion, setTemplateVersion] = useState(0);
 
   // --- Initial Data Fetching for Sidebar ---
@@ -70,7 +72,7 @@ export default function LettersPage() {
           .single();
 
         if (requirementsError) {
-          if (requirementsError.code === 'PGRST116') { // Code for "zero rows returned"
+          if (requirementsError.code === 'PGRST116') {
              setLetterTypes([]);
              return;
           }
@@ -109,30 +111,32 @@ export default function LettersPage() {
     };
 
     fetchLetterTypesForClass();
-  }, [selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
+  }, [selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass, constructedClassId]);
 
 
   // --- Event Handlers for Sidebar ---
-  const handleDeptClick = (deptId: string) => {
-    setSelectedDepartment(deptId);
-    setSelectedSubdepartment(''); setSelectedClass(''); setSelectedSubclass('');
+  const handleDeptClick = (deptId: string) => { setSelectedDepartment(deptId); setSelectedSubdepartment(''); setSelectedClass(''); setSelectedSubclass(''); };
+  const handleSubdeptClick = (deptId: string, subdeptId: string) => { setSelectedDepartment(deptId); setSelectedSubdepartment(subdeptId); setSelectedClass(''); setSelectedSubclass(''); };
+  const handleClassClick = (deptId: string, subdeptId: string, classId: string) => { setSelectedDepartment(deptId); setSelectedSubdepartment(subdeptId); setSelectedClass(classId); setSelectedSubclass(''); };
+  const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => { setSelectedDepartment(deptId); setSelectedSubdepartment(subdeptId); setSelectedClass(classId); setSelectedSubclass(subclassId); };
+
+  // --- MODIFICATION: Event Handlers for Content & Dialog ---
+  const handleTemplateUpdate = () => setTemplateVersion(v => v + 1);
+
+  const handleCreateNewTemplate = () => {
+    setEditingTemplate(null); // Ensure we're not in edit mode
+    setTemplateDialogOpen(true);
   };
-  const handleSubdeptClick = (deptId: string, subdeptId: string) => {
-    setSelectedDepartment(deptId); setSelectedSubdepartment(subdeptId);
-    setSelectedClass(''); setSelectedSubclass('');
-  };
-  const handleClassClick = (deptId: string, subdeptId: string, classId: string) => {
-    setSelectedDepartment(deptId); setSelectedSubdepartment(subdeptId); setSelectedClass(classId);
-    setSelectedSubclass('');
-  };
-  const handleSubclassClick = (deptId: string, subdeptId: string, classId: string, subclassId: string) => {
-    setSelectedDepartment(deptId); setSelectedSubdepartment(subdeptId); setSelectedClass(classId); setSelectedSubclass(subclassId);
+  
+  const handleEditTemplate = (template: any) => {
+    setEditingTemplate(template); // Set the template to edit
+    setTemplateDialogOpen(true);
   };
 
-  // --- Event Handlers for Content & Dialog ---
-  const handleTemplateUpdate = () => setTemplateVersion(v => v + 1);
-  const openTemplateDialog = () => setTemplateDialogOpen(true);
-  const closeTemplateDialog = () => setTemplateDialogOpen(false);
+  const closeTemplateDialog = () => {
+    setTemplateDialogOpen(false);
+    setEditingTemplate(null); // Always reset on close
+  };
 
   // --- Memoized Breadcrumb ---
   const breadcrumb = useMemo(() => {
@@ -170,21 +174,13 @@ export default function LettersPage() {
           <div className="flex justify-center items-center h-2/3"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
         ) : !selectedClass && !selectedSubclass ? (
           <Card className="mt-8">
-            <CardHeader>
-              <CardTitle>Select a Class</CardTitle>
-              <CardDescription>Choose a class or subclass from the sidebar to view its associated letter types.</CardDescription>
-            </CardHeader>
-            <CardContent className="text-center py-12">
-              <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            </CardContent>
+            <CardHeader><CardTitle>Select a Class</CardTitle><CardDescription>Choose a class or subclass from the sidebar to view its associated letter types.</CardDescription></CardHeader>
+            <CardContent className="text-center py-12"><FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" /></CardContent>
           </Card>
         ) : (
           <div className="grid grid-cols-12 gap-6 h-[calc(100%-80px)]">
             <Card className="col-span-4 h-full flex flex-col">
-              <CardHeader>
-                <CardTitle>Letter Types</CardTitle>
-                <CardDescription>Letters required for this class.</CardDescription>
-              </CardHeader>
+              <CardHeader><CardTitle>Letter Types</CardTitle><CardDescription>Letters required for this class.</CardDescription></CardHeader>
               <CardContent className="flex-1 overflow-hidden p-2">
                 <ScrollArea className="h-full">
                   {isLoading ? (
@@ -205,10 +201,12 @@ export default function LettersPage() {
 
             <div className="col-span-8 h-full">
               {selectedLetter ? (
+                // --- MODIFICATION: Pass new handlers to the display area ---
                 <TemplateDisplayArea
-                  key={selectedLetter.id}
+                  key={`${selectedLetter.id}-${templateVersion}`} // Key update ensures re-fetch
                   selectedLetter={selectedLetter}
-                  onCreateNew={openTemplateDialog}
+                  onCreateNew={handleCreateNewTemplate}
+                  onEdit={handleEditTemplate} // Pass the edit handler
                   templateVersion={templateVersion}
                 />
               ) : (
@@ -225,12 +223,15 @@ export default function LettersPage() {
       </main>
 
       {selectedLetter && (
+        // --- MODIFICATION: Pass the template data to the manager ---
         <DocumentTemplateManager
           document={selectedLetter}
           isOpen={templateDialogOpen}
           onClose={closeTemplateDialog}
           onTemplateUpdate={handleTemplateUpdate}
           classId={constructedClassId}
+          // If editingTemplate exists, pass it in an array to initialize the manager
+          initialTemplates={editingTemplate ? [editingTemplate] : []}
         />
       )}
     </div>
@@ -238,7 +239,8 @@ export default function LettersPage() {
 }
 
 
-function TemplateDisplayArea({ selectedLetter, onCreateNew, templateVersion }) {
+// --- MODIFICATION: Accept and use the onEdit handler ---
+function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVersion }) {
   const [templates, setTemplates] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -285,13 +287,15 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, templateVersion }) {
                 <Card key={template.id} className="shadow-sm">
                   <CardHeader>
                     <CardTitle className="flex justify-between items-center text-lg">
-                      {template.name}
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
+                      {/* Note: The DB column is `file_name`, not `name` */}
+                      {template.file_name}
+                      {/* --- MODIFICATION: Attach the onEdit handler --- */}
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => onEdit(template)}>
                         <Settings className="h-4 w-4" />
                       </Button>
                     </CardTitle>
                     <CardDescription>
-                      {template.description || "No description provided."}
+                      {template.description || `Type: ${template.file_type === 'text/html' ? 'Text Editor' : 'DOCX File'}`}
                     </CardDescription>
                   </CardHeader>
                 </Card>
