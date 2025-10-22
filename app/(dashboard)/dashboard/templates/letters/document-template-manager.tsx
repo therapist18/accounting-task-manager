@@ -1,4 +1,4 @@
-  // @ts-nocheck
+// @ts-nocheck
   "use client";
   import React, { useRef, useState, useEffect } from "react";
   import { useToast } from "@/components/ui/use-toast";
@@ -74,7 +74,7 @@
       }
     }, [isOpen, initialTemplates]);
 
-const extractPlaceholders = async (source: { type: 'file', content: File } | { type: 'text', content: string }): Promise<string[]> => {
+    const extractPlaceholders = async (source: { type: 'file', content: File } | { type: 'text', content: string }): Promise<string[]> => {
         setIsProcessing(true);
         try {
             const matches = new Set<string>();
@@ -341,6 +341,23 @@ const uploadAndSaveAll = async () => {
       }
       toast({ title: "Template Removed" });
     };
+
+    const getTemplatePreviewUrl = (template: DocumentTemplate) => {
+      if (!template) return '';
+  
+      if (template.file_path) {
+        const { data } = supabase.storage.from('templates').getPublicUrl(template.file_path);
+        return `https://docs.google.com/gview?url=${data.publicUrl}&embedded=true`;
+      }
+  
+      const file = templateFiles.get(template.id);
+      if (file) {
+        const blobUrl = URL.createObjectURL(file);
+        return `https://docs.google.com/gview?url=${blobUrl}&embedded=true`;
+      }
+  
+      return '';
+    };
       
     return (
       <>
@@ -416,7 +433,15 @@ const uploadAndSaveAll = async () => {
                       </div>
                       <div className="space-y-2 flex-1 flex flex-col">
                         <Label>Content</Label>
-                        {currentTemplate.content !== undefined ? (
+                        {currentTemplate.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? (
+                          <div className="w-full h-full border rounded-md">
+                            <iframe
+                              src={getTemplatePreviewUrl(currentTemplate)}
+                              className="w-full h-full"
+                              title={currentTemplate.name}
+                            ></iframe>
+                          </div>
+                        ) : currentTemplate.content !== undefined ? (
                           <TemplateEditor
                             key={currentTemplate.id}
                             initialContent={currentTemplate.content}
@@ -501,4 +526,4 @@ const uploadAndSaveAll = async () => {
         </Dialog>
       </>
     );
-  }
+  } 
