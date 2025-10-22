@@ -43,7 +43,7 @@ interface DocumentTemplateManagerProps {
 
 const PLACEHOLDER_TYPES = [
   { value: 'text', label: 'Text' }, { value: 'date', label: 'Date' }, { value: 'number', label: 'Number' },
-  { value: 'select', label: 'Dropdown' }, { value: 'array', label: 'Array/List' },
+  { value: 'select', label: 'Dropdown' }, { value: 'array', label: 'Array/List' }, { value: 'image', label: 'Image' },
 ];
 
 type Placeholder = {
@@ -74,40 +74,31 @@ export default function DocumentTemplateManager({ document, isOpen, onClose, onT
     }
   }, [isOpen, document.templates]);
 
-
-  // --- FULLY REVISED AND CORRECTED FUNCTION ---
-  const extractPlaceholders = async (source: { type: 'file', content: File } | { type: 'text', content: string }): Promise<string[]> => {
+const extractPlaceholders = async (source: { type: 'file', content: File } | { type: 'text', content: string }): Promise<string[]> => {
     setIsProcessing(true);
     try {
       const matches = new Set<string>();
 
       if (source.type === 'file') {
-        // For .docx files, use the robust InspectModule for accurate detection
         const arrayBuffer = await source.content.arrayBuffer();
         const zip = new PizZip(arrayBuffer);
         const inspectModule = new InspectModule();
-        // Attach the module to the Docxtemplater instance
         new Docxtemplater(zip, { modules: [inspectModule] });
-        // Get the list of all tags the module found
         const tags = inspectModule.getAllTags();
-        // The keys of the tags object are the placeholder names
         Object.keys(tags).forEach(tag => matches.add(tag));
       } else {
-        // For text content from the editor, the regex approach is sufficient
-        let textToParse = '';
-        if (typeof window !== 'undefined') {
-          const tempDiv = document.createElement('div');
-          tempDiv.innerHTML = source.content;
-          textToParse = tempDiv.textContent || tempDiv.innerText || '';
-        } else {
-          textToParse = source.content.replace(/<[^>]*>?/gm, '');
-        }
+        // Handle text content without using DOM methods
+        const textToParse = source.content
+          .replace(/<[^>]*>?/gm, '') // Remove HTML tags
+          .replace(/\s+/g, ' ') // Normalize whitespace
+          .trim();
 
-        const placeholderRegex = /{{\s*([^{}\s]+)\s*}}/g;
+        const placeholderRegex = /{{\s*([^{}\s]+)\s*}}|{\s*([^{}\s]+)\s*}/g;
         let match;
         while ((match = placeholderRegex.exec(textToParse)) !== null) {
-          if (match[1]) {
-            matches.add(match[1]);
+          const placeholder = match[1] || match[2];
+          if (placeholder) {
+            matches.add(placeholder.trim());
           }
         }
       }
@@ -124,8 +115,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose, onT
       setIsProcessing(false);
     }
   };
-
-  const autoGeneratePlaceholders = (extracted: string[]): Placeholder[] => extracted.map((name, index) => ({ id: `auto_${Date.now()}_${index}`, name, description: ``, type: 'text', required: true }));
+    const autoGeneratePlaceholders = (extracted: string[]): Placeholder[] => extracted.map((name, index) => ({ id: `auto_${Date.now()}_${index}`, name, description: ``, type: 'text', required: true }));
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -182,7 +172,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose, onT
     setTemplates(updatedTemplates);
   };
 
-  const handleRescanPlaceholders = async () => {
+   const handleRescanPlaceholders = async () => {
     if (!currentTemplate || currentTemplate.content === undefined) return;
     const extracted = await extractPlaceholders({ type: 'text', content: currentTemplate.content });
     const updatedTemplates = [...templates];
@@ -249,8 +239,8 @@ export default function DocumentTemplateManager({ document, isOpen, onClose, onT
         }
 
         const templateData = {
-          name: template.name, document_id: document.id, file_path: filePath, content: template.content,
-          file_name: template.file_name, file_type: template.file_type, file_size: template.file_size,
+          file_name: template.name, document_id: document.id, file_path: filePath, content: template.content,
+          file_type: template.file_type, file_size: template.file_size,
           placeholders: template.placeholders || [], updated_at: new Date().toISOString(), created_by: user?.id,
           class_id: classId ? [classId] : undefined,
         };
@@ -294,7 +284,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose, onT
     toast({ title: "Template Removed" });
   };
     
-  // ... Rest of the component JSX remains unchanged ...
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
@@ -305,7 +294,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose, onT
           </DialogHeader>
 
           <div className="grid grid-cols-12 gap-6 py-4 flex-1 overflow-y-auto">
-            {/* --- Column 1: Add & Queue --- */}
+            {/* Column 1: Add & Queue */}
             <div className="col-span-3 flex flex-col gap-6 h-full">
               <Card>
                 <CardHeader><CardTitle className="text-lg">Add New Template</CardTitle></CardHeader>
@@ -347,7 +336,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose, onT
               </Card>
             </div>
 
-            {/* --- Column 2: Editor --- */}
+            {/* Column 2: Editor */}
             <div className="col-span-5 h-full">
               {currentTemplate ? (
                 <Card className="h-full flex flex-col">
@@ -395,7 +384,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose, onT
               )}
             </div>
 
-            {/* --- Column 3: Placeholders --- */}
+            {/* Column 3: Placeholders */}
             <div className="col-span-4 h-full">
               <Card className="h-full flex flex-col">
                 <CardHeader className="flex flex-row items-center justify-between">
@@ -442,7 +431,8 @@ export default function DocumentTemplateManager({ document, isOpen, onClose, onT
           <DialogHeader><DialogTitle>{isEditingPlaceholder !== null ? 'Edit' : 'Add'} Placeholder</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="space-y-2"><Label htmlFor="name">Name (no spaces, e.g., client_name)</Label><Input id="name" value={newPlaceholder.name} onChange={(e) => setNewPlaceholder({ ...newPlaceholder, name: e.target.value.replace(/\s+/g, '_') })} /></div>
-            <div className="space-y-2"><Label htmlFor="description">Description</Label><Textarea id="description" placeholder="A short description for this field" value={newPlaceholder.description} onChange={(e) => setNewPlaceholder({ ...neweholder, description: e.target.value })} /></div>
+            {/* --- FIX: Corrected a typo from `neweholder` to `newPlaceholder`. --- */}
+            <div className="space-y-2"><Label htmlFor="description">Description</Label><Textarea id="description" placeholder="A short description for this field" value={newPlaceholder.description} onChange={(e) => setNewPlaceholder({ ...newPlaceholder, description: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2"><Label htmlFor="type">Type</Label><Select value={newPlaceholder.type} onValueChange={(v) => setNewPlaceholder({ ...newPlaceholder, type: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PLACEHOLDER_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select></div>
               <div className="flex items-end"><div className="flex items-center space-x-2"><Checkbox id="required" checked={newPlaceholder.required} onCheckedChange={(c) => setNewPlaceholder({ ...newPlaceholder, required: !!c })} /><Label htmlFor="required">Required field</Label></div></div>
