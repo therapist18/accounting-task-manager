@@ -80,6 +80,11 @@ const navItems = [
         icon: Calculator,
       },
       {
+        title: "Webdata",
+        href: "/dashboard/departments/webdata",
+        icon: FileText,
+      },
+      {
         title: "GOVT Upload Req",
         href: "/dashboard/departments/upload-requirements",
         icon: FileText,

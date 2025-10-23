@@ -8,8 +8,8 @@ import { Label } from '@/components/ui/label'
 import { Upload, Trash2, RotateCw, AlertTriangle, CheckCircle, XCircle } from 'lucide-react'
 import { performExtraction } from '@/lib/extractionUtils'
 import { ExtractionPreview } from './ExtractionPreview'
-import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
+import supabase from '@/lib/supabase/client'
 
 interface DocumentField {
   id: string

@@ -30,7 +30,7 @@ import { DepartmentSidebar } from "../departments/main-shared-components/departm
 import { EnquiryDialog } from "../tasks/components/EnquiryDialog"
 import { NewCompanyInquiryDialog } from "../tasks/components/NewCompanyInquiryDialog"
 import { DeleteConfirmationDialog } from "../tasks/components/DeleteConfirmationDialog"
-import { RequirementsTable } from "../tasks/department-wise/RequirementsTable"
+import { RequirementsTable } from "./RequirementsTable"
 import { EnquiryTable } from "../tasks/components/EnquiryTable"
 import { StageUploadDialog } from "../tasks/components/StageUploadDialog"
 import { fetchDepartments } from "../departments/departments/database"

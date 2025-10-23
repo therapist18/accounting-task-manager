@@ -9,9 +9,9 @@ import { Badge } from "@/components/ui/badge"
 import { Briefcase, FileText, Loader2, Search, Upload, Eye } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import { FileUploadComponent } from "../components/FileUploadComponent"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import RequirementsTableCombined from "./RequirementsTableCombined"
+import { FileUploadComponent } from "../tasks/components/FileUploadComponent"
 
 // --- MODIFICATION: Placeholder for the Letter Template Dialog ---
 const LetterTemplateDialog = ({ open, onOpenChange, letterData, individualNames }) => {

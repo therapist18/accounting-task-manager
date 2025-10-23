@@ -4,8 +4,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save } from "lucide-react"
-import { StageUploadDialog } from "../components/StageUploadDialog"
+import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, Badge, CheckCircle2, XCircle } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import * as XLSX from 'xlsx'
@@ -20,17 +19,16 @@ import html2canvas from 'html2canvas';
 import jsPDF from "jspdf"
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
-// --- FIX: Replace 'html-to-docx' with the browser-compatible 'html-docx-js' ---
 import htmlDocx from 'html-docx-js/dist/html-docx';
 import TemplateEditor from "@/components/TemplateEditor";
+import { Separator } from "@/components/ui/separator"
+import TemplateGenerationDialog from "./TemplateGenerationDialog"
+import { StageUploadDialog } from "../tasks/components/StageUploadDialog"
 
-// --- FIX: Updated helper function to use html-docx-js ---
 const generateDocxBlobFromHtml = (html: string) => {
-  // This library directly converts an HTML string into a Blob.
   const blob = htmlDocx.asBlob(html);
   return blob;
 };
-
 
 const CLASS_D_ID = '1750687058159';
 
@@ -45,219 +43,6 @@ function deepEqual(obj1, obj2) {
   }
   return true;
 }
-
-const TemplateGenerationDialog = ({
-  isOpen,
-  onClose,
-  template,
-  personData,
-  companyData,
-  documentName,
-  onSave,
-}) => {
-  const [formData, setFormData] = useState({});
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [previewContent, setPreviewContent] = useState('');
-
-  const populateContent = useCallback((data) => {
-    if (!template?.content) return '';
-    let content = template.content;
-    Object.keys(data).forEach(key => {
-      const regex = new RegExp(`\\{${key}\\}`, 'g');
-      content = content.replace(regex, data[key] || '');
-    });
-    return content;
-  }, [template]);
-
-  useEffect(() => {
-    if (template) {
-      const combinedData = { ...companyData, ...personData };
-      const initialFormData = {};
-      const combinedDataKeys = Object.keys(combinedData);
-
-      (template.placeholders || []).forEach(placeholder => {
-        const pName = placeholder.name.toLowerCase().replace(/_/g, '');
-        let foundValue = '';
-        for (const key of combinedDataKeys) {
-          const cKey = key.toLowerCase().replace(/[\s_]/g, '');
-          if (pName === cKey) {
-            foundValue = combinedData[key];
-            break;
-          }
-        }
-        initialFormData[placeholder.name] = foundValue;
-      });
-      setFormData(initialFormData);
-      
-      if (template.file_type === 'text/html') {
-        const initialContent = populateContent(initialFormData);
-        setPreviewContent(initialContent);
-      }
-    }
-  }, [template, personData, companyData, populateContent]);
-
-  const handleInputChange = (placeholderName, value) => {
-    const updatedFormData = { ...formData, [placeholderName]: value };
-    setFormData(updatedFormData);
-    if (template.file_type === 'text/html') {
-      setPreviewContent(populateContent(updatedFormData));
-    }
-  };
-
-  const generateAndDownload = async (outputType = 'word') => {
-    setIsGenerating(true);
-    try {
-      if (template.file_type === 'text/html') {
-        const finalHtml = previewContent;
-
-        if (outputType === 'pdf') {
-          const element = document.createElement('div');
-          element.innerHTML = finalHtml;
-          element.style.width = '210mm';
-          element.style.padding = '20mm';
-          element.style.backgroundColor = 'white';
-          element.style.color = 'black';
-          document.body.appendChild(element);
-
-          const canvas = await html2canvas(element, { scale: 2 });
-          const imgData = canvas.toDataURL('image/png');
-          const pdf = new jsPDF('p', 'mm', 'a4');
-          const pdfWidth = pdf.internal.pageSize.getWidth();
-          const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-          pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-          pdf.save(`${documentName}.pdf`);
-          document.body.removeChild(element);
-
-        } else { // word
-          // --- FIX: Use the corrected function to get the blob ---
-          const fileBlob = generateDocxBlobFromHtml(finalHtml);
-          saveAs(fileBlob, `${documentName}.docx`);
-        }
-
-      } else { // docx template
-        const response = await supabase.storage.from('templates').getPublicUrl(template.file_path);
-        if(!response.data.publicUrl) throw new Error("Could not get public URL for template.");
-        
-        const fetchResponse = await fetch(response.data.publicUrl);
-        const arrayBuffer = await fetchResponse.arrayBuffer();
-        const zip = new PizZip(arrayBuffer);
-        const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
-        doc.setData(formData);
-        doc.render();
-        const out = doc.getZip().generate({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-
-        saveAs(out, `${documentName}.docx`);
-      }
-    } catch (error) {
-      console.error("Error generating document:", error);
-      toast({ title: "Failed to generate document", description: error.message, variant: 'destructive' });
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleSaveLetter = async () => {
-    setIsGenerating(true);
-    try {
-      let fileBlob;
-      const fileName = `${documentName}.docx`;
-      const fileType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-
-      if (template.file_type === 'text/html') {
-        // --- FIX: Use the corrected function here as well ---
-        fileBlob = generateDocxBlobFromHtml(previewContent);
-      } else {
-        const response = await supabase.storage.from('templates').getPublicUrl(template.file_path);
-        if(!response.data.publicUrl) throw new Error("Could not get public URL for template.");
-        
-        const fetchResponse = await fetch(response.data.publicUrl);
-        const arrayBuffer = await fetchResponse.arrayBuffer();
-        const zip = new PizZip(arrayBuffer);
-        const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
-        doc.render(formData);
-        fileBlob = doc.getZip().generate({ type: 'blob', mimeType: fileType });
-      }
-
-      const file = new File([fileBlob], fileName, { type: fileType });
-      onSave(file);
-      onClose();
-    } catch (error) {
-      console.error("Error saving letter:", error);
-      toast({ title: "Failed to save letter", description: error.message, variant: 'destructive' });
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-screen-xl h-[90vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle>Generate: {documentName}</DialogTitle>
-          <DialogDescription>Using template: {template.file_name}. Edit fields on the left and see a live preview on the right.</DialogDescription>
-        </DialogHeader>
-        <div className="flex-grow overflow-hidden grid grid-cols-12 gap-6 p-4">
-          <div className="col-span-4 space-y-4 overflow-y-auto pr-4">
-            <h3 className="font-semibold text-lg">Template Fields</h3>
-            {(template.placeholders || []).map(p => (
-              <div key={p.id}>
-                <Label htmlFor={p.name} className="text-sm">{p.description || p.name}</Label>
-                <Input
-                  id={p.name}
-                  value={formData[p.name] || ''}
-                  onChange={e => handleInputChange(p.name, e.target.value)}
-                  placeholder={`Enter value for ${p.name}`}
-                  className="mt-1"
-                />
-              </div>
-            ))}
-          </div>
-          <div className="col-span-8 border rounded-md flex flex-col">
-            {template.file_type === 'text/html' ? (
-              <TemplateEditor
-                initialContent={previewContent}
-                onChange={(html) => setPreviewContent(html)}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full bg-muted/50 p-8 text-center">
-                <FileText className="h-16 w-16 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-medium">DOCX Template Preview</h3>
-                <p className="text-sm text-muted-foreground mt-1 max-w-md">
-                  Live editing is not available for .docx files. Fill in the fields on the left and use the download buttons to generate the final document.
-                </p>
-                <Button variant="outline" className="mt-6" onClick={() => generateAndDownload('word')} disabled={isGenerating}>
-                  <Download className="mr-2 h-4 w-4" /> Download Preview
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isGenerating}>Cancel</Button>
-          <Button onClick={handleSaveLetter} variant="default" disabled={isGenerating}>
-            {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />} Save Letter
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" disabled={isGenerating}>
-                {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />} Download As
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem onClick={() => generateAndDownload('word')}>Word (.docx)</DropdownMenuItem>
-              {template.file_type === 'text/html' && 
-                <DropdownMenuItem onClick={() => generateAndDownload('pdf')}>PDF</DropdownMenuItem>
-              }
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
 
 interface RequirementsTableCombinedProps {
   loading: boolean
@@ -293,35 +78,7 @@ interface RequirementsTableCombinedProps {
   documentTemplates: Map<string, any[]>
 }
 
-
-export default function RequirementsTableCombined({
-  loading,
-  error,
-  filteredGroupedTasks,
-  organizedRequirements,
-  classRequirements,
-  expandedDocuments,
-  toggleDocumentExpansion,
-  renderDocumentStatus,
-  getDocumentDataForPreview,
-  getDocumentStatusText,
-  renderClientFieldData,
-  renderReferencesData,
-  hasReferencesColumn,
-  individualNames,
-  companyData,
-  getCurrentRequirements,
-  fuzzyMatch,
-  kycDocuments,
-  documentTypes,
-  mainTab,
-  handleUploadSubmit,
-  handleDeleteDocument,
-  handleRetryExtraction,
-  handleSaveEditedDocument,
-  documentTemplates,
-}: RequirementsTableCombinedProps) {
-
+export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, toggleDocumentExpansion, renderDocumentStatus, getDocumentDataForPreview, getDocumentStatusText, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, handleSaveEditedDocument, documentTemplates }: RequirementsTableCombinedProps) {
   const [isStageDialogOpen, setIsStageDialogOpen] = useState(false);
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null);
   const [expandedSections, setExpandedSections] = useState({
@@ -350,7 +107,7 @@ export default function RequirementsTableCombined({
         .order('file_name', { ascending: true });
 
       if (error) throw error;
-      
+
       setAvailableTemplates(prev => new Map(prev).set(documentId, templates || []));
       return templates || [];
     } catch (error) {
@@ -378,7 +135,7 @@ export default function RequirementsTableCombined({
 
     setSelectedLetterInfo(letterInfo);
     setShowTemplateSelector(true);
-    
+
     const templates = await fetchDocumentTemplates(docItem.document.id);
     if (!templates || templates.length === 0) {
       toast({
@@ -389,12 +146,12 @@ export default function RequirementsTableCombined({
     }
   };
 
-   const handleTemplateSelected = (template) => {
-      setSelectedTemplate(template);
-      setShowTemplateSelector(false);
-      setShowTemplateGenerator(true);
+  const handleTemplateSelected = (template) => {
+    setSelectedTemplate(template);
+    setShowTemplateSelector(false);
+    setShowTemplateGenerator(true);
   };
-  
+
   const handleSaveGeneratedLetter = (file) => {
     if (!selectedLetterInfo) return;
 
@@ -402,18 +159,13 @@ export default function RequirementsTableCombined({
     const isCompanyDoc = colType === 'company';
 
     const uploadData = {
-        files: [file],
-        document_id: document.id,
-        company_id: isCompanyDoc ? task.company_id : undefined,
-        individual_id: !isCompanyDoc ? (colType === 'principal' ? task.individual_id : colId) : undefined,
-        task_id: task.id,
+      files: [file],
+      document_id: document.id,
+      company_id: isCompanyDoc ? task.company_id : undefined,
+      individual_id: !isCompanyDoc ? (colType === 'principal' ? task.individual_id : colId) : undefined,
+      task_id: task.id,
     };
     handleUploadSubmit(uploadData);
-  };
-
-  const handleOpenUploadModal = (doc: any, person: any, fields: any, isAllKepUpload = false) => {
-    setSelectedDocForUpload({ doc, person, fields, isAllKepUpload });
-    setShowUploadModal(true);
   };
 
   const handleViewDocuments = (documents: any[], docInfo: any, person: any) => {
@@ -579,60 +331,60 @@ export default function RequirementsTableCombined({
         }
 
         const hasFields = fieldsToRender.length > 0;
-         if (sectionName === 'letters') {
-            return (
-              <TableRow key={`letter-doc-${docItem.document.id}`} className="group bg-white hover:bg-gray-50">
-                <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-[5] text-center">{docIndex + 1}.</TableCell>
-                <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-[5] px-4">{docItem.document.display_name}</TableCell>
-                {filteredGroupedTasks.map((group, groupIndex) => {
-                  const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
-                  const dependantIds = group.dependantIds || [];
-                  const task = group.tasks[0];
-                  return (
-                    <React.Fragment key={`letter-group-${groupIndex}`}>
-                      {[
-                        { type: 'company' }, { type: 'principal' },
-                        ...dependantIds.map(id => ({ type: 'dependant', id })),
-                        ...(hasClassD ? [{ type: 'understudy' }] : [])
-                      ].map(col => {
-                        const docCategory = docItem.document.category;
-                        let isApplicableForColumn = false;
-                        let cellContent;
+        if (sectionName === 'letters') {
+          return (
+            <TableRow key={`letter-doc-${docItem.document.id}`} className="group bg-white hover:bg-gray-50">
+              <TableCell className="sticky left-0 bg-white group-hover:bg-gray-50 border-r z-[5] text-center">{docIndex + 1}.</TableCell>
+              <TableCell className="sticky left-16 bg-white group-hover:bg-gray-50 border-r z-[5] px-4">{docItem.document.display_name}</TableCell>
+              {filteredGroupedTasks.map((group, groupIndex) => {
+                const hasClassD = group.tasks.some(task => task.class_id === CLASS_D_ID);
+                const dependantIds = group.dependantIds || [];
+                const task = group.tasks[0];
+                return (
+                  <React.Fragment key={`letter-group-${groupIndex}`}>
+                    {[
+                      { type: 'company' }, { type: 'principal' },
+                      ...dependantIds.map(id => ({ type: 'dependant', id })),
+                      ...(hasClassD ? [{ type: 'understudy' }] : [])
+                    ].map(col => {
+                      const docCategory = docItem.document.category;
+                      let isApplicableForColumn = false;
+                      let cellContent;
 
-                        if (col.type === 'company') {
-                            isApplicableForColumn = docCategory === 'company-docs';
-                        } else {
-                            isApplicableForColumn = docCategory !== 'company-docs';
-                        }
-                        
-                        if (!isApplicableForColumn) {
-                          cellContent = <span className="text-xs text-gray-500">N/A</span>;
-                        } else {
-                          const docForPreview = getDocumentDataForPreview(task, docItem.document, col.type, col.id);
-                          if (docForPreview) {
-                            cellContent = renderDocumentStatus(task, docItem.document, col.type, col.id);
-                          } else {
-                            cellContent = (
-                              <Button variant="outline" size="sm" onClick={() => handleOpenTemplateSelector(docItem, task, col.type, col.id)}>
-                                <Wand2 className="mr-2 h-4 w-4" /> Generate
-                              </Button>
-                            );
-                          }
-                        }
+                      if (col.type === 'company') {
+                        isApplicableForColumn = docCategory === 'company-docs';
+                      } else {
+                        isApplicableForColumn = docCategory !== 'company-docs';
+                      }
 
-                        return (
-                          <TableCell key={`letter-cell-${col.type}-${col.id || groupIndex}`} className="text-center border p-1">
-                            {cellContent}
-                          </TableCell>
-                        );
-                      })}
-                    </React.Fragment>
-                  );
-                })}
-                {hasReferencesColumn && allReferences.map(ref => <TableCell key={`letter-ref-${ref.id}`} />)}
-              </TableRow>
-            );
-          }
+                      if (!isApplicableForColumn) {
+                        cellContent = <span className="text-xs text-gray-500">N/A</span>;
+                      } else {
+                        const docForPreview = getDocumentDataForPreview(task, docItem.document, col.type, col.id);
+                        if (docForPreview) {
+                          cellContent = renderDocumentStatus(task, docItem.document, col.type, col.id);
+                        } else {
+                          cellContent = (
+                            <Button variant="outline" size="sm" onClick={() => handleOpenTemplateSelector(docItem, task, col.type, col.id)}>
+                              <Wand2 className="mr-2 h-4 w-4" /> Generate
+                            </Button>
+                          );
+                        }
+                      }
+
+                      return (
+                        <TableCell key={`letter-cell-${col.type}-${col.id || groupIndex}`} className="text-center border p-1">
+                          {cellContent}
+                        </TableCell>
+                      );
+                    })}
+                  </React.Fragment>
+                );
+              })}
+              {hasReferencesColumn && allReferences.map(ref => <TableCell key={`letter-ref-${ref.id}`} />)}
+            </TableRow>
+          );
+        }
 
         return (
           <React.Fragment key={`${sectionName}-doc-fragment-${docItem.document.id}`}>
@@ -890,6 +642,7 @@ export default function RequirementsTableCombined({
           template={selectedTemplate}
           personData={selectedLetterInfo.personData}
           companyData={selectedLetterInfo.companyData}
+          extractedData={selectedLetterInfo.extractedData} // NEW: Pass extracted data
           documentName={selectedLetterInfo.document.display_name}
           onSave={handleSaveGeneratedLetter}
         />
