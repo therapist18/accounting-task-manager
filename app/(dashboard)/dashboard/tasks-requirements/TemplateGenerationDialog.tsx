@@ -28,17 +28,67 @@ function generateDocxBlobFromHtml(htmlContent, title) {
     return new Blob([sourceHTML], { type: 'application/msword' });
 }
 
-const parseJsonValue = (data, path) => {
-    if (!data || !path) return undefined;
-    if (path.includes('->>') || path.includes('->')) {
-        const parts = path.split(/(->>|->)/);
-        const column = parts[0].trim().replace(/['"]/g, '');
-        const jsonPath = parts[2].trim().replace(/['"]/g, '');
-        const jsonData = data[column];
-        if (!jsonData || typeof jsonData !== 'object') return undefined;
-        return jsonPath.split('.').reduce((acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined), jsonData);
+const parseJsonValue = (data: any, path: string): any => {
+    if (!path || !data) {
+        return '';
     }
-    return path.split('.').reduce((acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined), data);
+
+    try {
+        // Handle JSON path notation (e.g., 'extracted_details->>\'passport_number\'')
+        if (path.includes('->>')) {
+            let [parent, ...rest] = path.split('->>');
+            const key = rest.join('->>').replace(/['"]/g, '').trim();
+            parent = parent.trim();
+
+            if (parent === 'extracted_details' && data.extracted_details) {
+                const extracted = data.extracted_details;
+                
+                // 1. Try direct match
+                if (key in extracted) {
+                    return extracted[key];
+                }
+
+                // 2. Try case-insensitive match
+                const lowerKey = key.toLowerCase();
+                const foundKey = Object.keys(extracted).find(k => k.toLowerCase() === lowerKey);
+                if (foundKey) {
+                    return extracted[foundKey];
+                }
+
+                // 3. NEW: Smart search for relevant keywords in keys
+                const keywords = lowerKey.replace(/_/g, ' ').split(' ');
+                const smartFoundKey = Object.keys(extracted).find(k => {
+                    const lowerK = k.toLowerCase();
+                    // Check if the key contains a relevant term (e.g., 'passport', 'number', 'expiry', 'date')
+                    return keywords.some(word => word.length > 3 && lowerK.includes(word));
+                });
+
+                if (smartFoundKey) {
+                     console.log(`  - Found smart match for '${key}': Used key '${smartFoundKey}'`);
+                    return extracted[smartFoundKey];
+                }
+                
+                return '';
+            }
+            
+            const parentObj = parseJsonValue(data, parent);
+            if (parentObj && typeof parentObj === 'object') {
+                return parentObj[key] || '';
+            }
+            return '';
+        }
+        
+        // Handle dot notation and direct property access as before
+        if (path.includes('.')) {
+            return path.split('.').reduce((obj, part) => obj && obj[part], data) || '';
+        }
+        
+        return data[path] || '';
+
+    } catch (error) {
+        console.error(`Error parsing JSON path '${path}':`, error);
+        return '';
+    }
 };
 
 const normalizeString = (str) => {
@@ -120,258 +170,88 @@ const getPlaceholderValue = useCallback((placeholder) => {
     console.log('='.repeat(80));
     console.log('Placeholder object:', JSON.stringify(placeholder, null, 2));
     const ids = placeholder.master_field_ids || (placeholder.master_field_id ? [placeholder.master_field_id] : []);
-    const targetDocumentId = placeholder.document_id; // A specific instance of a document
-    
-    // Log document linking information
-    if (targetDocumentId) {
-        console.log(`  🔗 Placeholder is linked to specific document ID: ${targetDocumentId}`);
-    } else if (ids.length > 0) {
-        console.log(`  🔄 Placeholder is linked to master field IDs: ${ids.join(', ')}`);
-        
-        // Log master field details if available
-        ids.forEach(id => {
-            const masterFieldId = parseInt(id, 10);
-            if (!isNaN(masterFieldId) && masterFields?.has(masterFieldId)) {
-                const field = masterFields.get(masterFieldId);
-                console.log(`    📋 Master Field ${masterFieldId}: ${field.label || field.field_key}`);
-                if (field.sources?.length) {
-                    console.log(`      Sources: ${field.sources.map(s => 
-                        `${s.table}${s.document_id ? ` (Doc Types: ${JSON.stringify(s.document_id)})` : ''}`
-                    ).join(', ')}`);
-                }
-            }
-        });
-    }
+    const targetDocumentId = placeholder.document_id;
 
-    console.log('\n🔍 Available Data:');
-    console.log('- Master Fields:', masterFields ? `Available (${masterFields.size} fields)` : 'Not available');
-    console.log('- Source Data Cache:', sourceDataCache ? `Available (${Object.keys(sourceDataCache).length} tables)` : 'Not available');
-    console.log('- Entity ID Map:', entityIdMap ? JSON.stringify(entityIdMap, null, 2) : 'Not available');
-    
     if (ids.length > 0 && masterFields && sourceDataCache && entityIdMap) {
         const values = ids.flatMap(id => {
             const masterFieldId = parseInt(id, 10);
-            if (isNaN(masterFieldId) || !masterFields.has(masterFieldId)) {
-                console.log(`  ⚠️ Invalid or missing master field ID: ${id}`);
-                return [];
-            }
+            if (isNaN(masterFieldId) || !masterFields.has(masterFieldId)) return [];
 
             const masterField = masterFields.get(masterFieldId);
-            if (!masterField?.sources) {
-                console.log(`  ⚠️ Master field ${masterFieldId} has no sources`);
-                return [];
-            }
+            if (!masterField?.sources) return [];
 
             const targetEntityType = placeholder.entity_type || 'principal';
             const entityId = entityIdMap[targetEntityType];
-
-            if (!entityId) {
-                console.log(`  ⚠️ No entity ID found for type: ${targetEntityType}`);
-                return [];
-            }
-
-            console.log(`\n🔧 Processing master field ID: ${masterFieldId}`);
-            console.log('Field details:', {
-                key: masterField.field_key,
-                label: masterField.label,
-                sources: masterField.sources?.length || 0
-            });
+            if (!entityId) return [];
             
             return masterField.sources.flatMap((source, sourceIndex) => {
-                console.log(`\n  🔄 Source ${sourceIndex + 1}/${masterField.sources.length}:`);
-                console.log('  - Type:', source.type);
-                console.log('  - Table:', source.table);
-                console.log('  - Path:', source.path);
-                
-                // Fix document_id handling - ensure it's a proper array of UUIDs
-                if (source.document_id) {
-                    let docIds: string[] = [];
-                    
-                    // Convert to string if it's an array of characters
-                    const docIdStr = Array.isArray(source.document_id) 
-                        ? source.document_id.join('') 
-                        : String(source.document_id);
-                    
-                    // First try to split by comma if present
-                    if (docIdStr.includes(',')) {
-                        docIds = docIdStr.split(',').map(id => id.trim()).filter(Boolean);
-                    } 
-                    // If no commas, try to split by UUID pattern (8-4-4-4-12)
-                    else if (docIdStr.length > 36) { // Minimum length for 2 UUIDs without separators
-                        // This regex matches UUIDs in the format xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-                        const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi;
-                        const matches = docIdStr.match(uuidRegex);
-                        if (matches) {
-                            docIds = [...new Set(matches)]; // Remove duplicates
-                        } else {
-                            // If no matches, try to split into chunks of 36 characters (UUID length with dashes)
-                            const chunkSize = 36;
-                            for (let i = 0; i < docIdStr.length; i += chunkSize) {
-                                const chunk = docIdStr.substring(i, i + chunkSize);
-                                if (chunk.length >= 32) { // Minimum length for a UUID without dashes
-                                    // Try to format as UUID if it's just the hex
-                                    const formatted = chunk.length === 32 
-                                        ? `${chunk.substring(0,8)}-${chunk.substring(8,12)}-${chunk.substring(12,16)}-${chunk.substring(16,20)}-${chunk.substring(20)}`
-                                        : chunk;
-                                    docIds.push(formatted);
-                                }
-                            }
-                        }
-                    } 
-                    // If it's a single UUID or couldn't be split, use as is
-                    else {
-                        docIds = [docIdStr];
-                    }
-                    
-                    // Clean up and store the processed document IDs
-                    source.document_id = docIds.filter(id => id && id.trim() !== '');
-                    console.log('  - Processed Document IDs:', source.document_id);
-                }
-                console.log('  - Document IDs:', source.document_id || 'Any');
-                
-                if (source.table && sourceDataCache[source.table]) {
-                    const tableData = sourceDataCache[source.table];
-                    console.log(`  - Table data (${Object.keys(tableData).length} records):`, 
-                        Object.values(tableData).map((d: any) => ({
-                            id: d.id,
-                            document_id: d.document_id,
-                            extracted: Object.keys(d.extracted_details || {}).length > 0 ? 'Yes' : 'No'
-                        })));
-                }
                 if (source.type === 'documents' && sourceDataCache[source.table]) {
-                    // Get all documents for the entity from the cache
-                    console.log(`  📂 Fetching documents from table: ${source.table}`);
-                    let allEntityDocuments = Object.values(sourceDataCache[source.table] || {});
-                    console.log(`  - Found ${allEntityDocuments.length} total documents in table`);
+                    const allEntityDocuments = Object.values(sourceDataCache[source.table] || {});
                     
-                    // Log first few documents for debugging
-                    allEntityDocuments.slice(0, 3).forEach((doc: any, i) => {
-                        console.log(`    ${i + 1}. ID: ${doc.id}, Document ID: ${doc.document_id}, ` +
-                                  `Extracted: ${Object.keys(doc.extracted_details || {}).length} fields`);
-                    });
-                    if (allEntityDocuments.length > 3) {
-                        console.log(`    ...and ${allEntityDocuments.length - 3} more`);
-                    }
-                    
-                    // Filter by document type if specified in the source
-                    console.log('\n  🔍 Filtering documents...');
-                    let candidateDocuments = allEntityDocuments;
-                    
-                    if (source.document_id) {
-                        // At this point, document_id should be an array of strings (UUIDs)
-                        const docIds = Array.isArray(source.document_id) ? 
-                            source.document_id.map(id => String(id).trim()).filter(Boolean) : 
-                            [String(source.document_id).trim()];
-                        
-                        console.log(`  - Filtering for document IDs:`, docIds);
-                        console.log(`  - Total documents before filtering: ${allEntityDocuments.length}`);
-                        
-                        const beforeCount = allEntityDocuments.length;
-                        const allowedIdsSet = new Set(docIds);
-                        
-                        candidateDocuments = allEntityDocuments.filter(doc => 
-                            doc.document_id && allowedIdsSet.has(doc.document_id.trim())
-                        );
-                        
-                        console.log(`  - Filtered from ${beforeCount} to ${candidateDocuments.length} documents`);
-                        
-                        // Log document IDs that were found/not found
-                        if (candidateDocuments.length === 0) {
-                            console.log('  ❌ No matching documents found. Available document IDs:', 
-                                allEntityDocuments.map(d => d.document_id).filter(Boolean));
-                        } else {
-                            console.log('  ✅ Found matching documents with IDs:', 
-                                candidateDocuments.map(d => d.document_id));
-                        }
-                    } else {
-                        console.log('  - No document type filter applied');
-                    }
-                    
-                    // Log document details for debugging
-                    if (candidateDocuments.length > 0) {
-                        console.log(`    📄 Available documents (${candidateDocuments.length}):`);
-                        candidateDocuments.forEach((doc, idx) => {
-                            const docDate = getDocumentDate(doc);
-                            console.log(`      ${idx + 1}. ID: ${doc.id}, ` +
-                                      `Document ID: ${doc.document_id}, ` +
-                                      `Type: ${doc.document_type || 'N/A'}, ` +
-                                      `Date: ${docDate.date ? `${docDate.field}=${docDate.date.toISOString()}` : 'N/A'}`);
-                            
-                            // Log extracted details if available
-                            if (doc.extracted_details) {
-                                console.log(`         Extracted: ${JSON.stringify(doc.extracted_details, (k, v) => 
-                                    v !== null && v !== undefined ? v : undefined, 2).replace(/\n/g, '\n         ')}`);
-                            }
-                        });
-                        console.log(`    - Found ${candidateDocuments.length} documents of required type(s)`);
-                    }
-                    // If no candidates, this source cannot provide a value
+                    const docIds = Array.isArray(source.document_id) ? source.document_id.map(String) : [];
+                    const candidateDocuments = allEntityDocuments.filter(doc => 
+                        doc.document_id && docIds.includes(doc.document_id)
+                    );
+
                     if (candidateDocuments.length === 0) {
-                        console.log('❌ NO MATCHING DOCUMENTS FOUND!');
-                        console.log('- Document types expected:', source.document_id || 'Any');
-                        console.log('- Available document types in table:', 
-                            [...new Set(allEntityDocuments.map((d: any) => d.document_id))]);
+                        console.log(`❌ No documents found matching required types: [${docIds.join(', ')}]`);
                         return [];
                     }
 
-                    // PRIORITY 1: Use the exact document if specified
-                    console.log('\n  🔎 Document Selection:');
-                    if (targetDocumentId) {
-                        console.log(`  - Looking for specific document ID: ${targetDocumentId}`);
-                        console.log(`  🎯 Looking for specific document instance ID: ${targetDocumentId}`);
-                        const specificDoc = candidateDocuments.find(doc => doc.id === targetDocumentId);
-                        if (specificDoc) {
-                            console.log(`    ✅ Found exact document match`);
-                            return parseJsonValue(specificDoc, source.path) || [];
-                        }
-                        console.log(`    ⚠️ Specified document not found, falling back to latest document`);
-                    }
+                    // PRIORITY: Find the most recent document based on issue/effective dates
+                    const documentsWithDates = candidateDocuments
+                        .map(doc => ({ doc, ...getDocumentDate(doc) }))
+                        .filter(d => d.date);
 
-                    // PRIORITY 2: Find the most recent document based on issue/effective dates
-                    console.log('\n  📅 Finding most recent document by date...');
-                    console.log(`  - Documents to check: ${candidateDocuments.length}`);
-                    const documentsWithDates = candidateDocuments.map(doc => ({
-                        doc,
-                        ...getDocumentDate(doc)
-                    })).filter(d => d.date);
+                    let docToProcess = null;
 
                     if (documentsWithDates.length > 0) {
-                        console.log(`  - Found ${documentsWithDates.length} documents with valid dates`);
-                        documentsWithDates.forEach((d, i) => {
-                            console.log(`    ${i + 1}. ID: ${d.doc.id}, ${d.field}: ${d.date.toISOString()}`);
-                        });
-                        // Sort by date descending (newest first)
-                        documentsWithDates.sort((a, b) => b.date - a.date);
-                        const latestDoc = documentsWithDates[0];
-                        console.log(`    ✅ Found latest document (ID: ${latestDoc.doc.id}) with ${latestDoc.field} = ${latestDoc.date.toISOString()}`);
+                        documentsWithDates.sort((a, b) => b.date.getTime() - a.date.getTime());
+                        docToProcess = documentsWithDates[0].doc;
+                        console.log(`✅ Selected latest document (ID: ${docToProcess.id}) based on date field '${documentsWithDates[0].field}'.`);
+                    } else if (candidateDocuments.length > 0) {
+                        // Fallback to the first available document if no dates are found
+                        docToProcess = candidateDocuments[0];
+                        console.log(`ℹ️ No date fields found. Falling back to first available document (ID: ${docToProcess.id}).`);
+                    }
+
+                    if (docToProcess) {
+                        // ======================================================================
+                        // NEW DIAGNOSTIC LOGGING STARTS HERE
+                        // ======================================================================
+                        console.log(`\n🕵️‍♂️ DEEP DIVE on Document ID: ${docToProcess.id}`);
+                        console.log(`    Searching for path: "${source.path}"`);
+
+                        if (docToProcess.extracted_details && Object.keys(docToProcess.extracted_details).length > 0) {
+                            console.log('    [SUCCESS] Document has `extracted_details` object.');
+                            console.log('    EXTRACTED DETAILS CONTENT:', JSON.stringify(docToProcess.extracted_details, null, 2));
+
+                            const pathKey = (source.path.split("->>'")[1] || '').replace(/['"]/g, '');
+                            if (pathKey) {
+                                if (docToProcess.extracted_details.hasOwnProperty(pathKey)) {
+                                    console.log(`    [INFO] Direct key '${pathKey}' exists. Value: "${docToProcess.extracted_details[pathKey]}"`);
+                                } else {
+                                    console.warn(`    [WARNING] Direct key '${pathKey}' does NOT exist.`);
+                                    console.log(`    Available keys are: [${Object.keys(docToProcess.extracted_details).join(', ')}]`);
+                                }
+                            }
+                        } else {
+                            console.error(`    [FATAL] Document ${docToProcess.id} has NO 'extracted_details' or it is empty.`);
+                        }
+                        // ======================================================================
+                        // NEW DIAGNOSTIC LOGGING ENDS HERE
+                        // ======================================================================
                         
-                        // Get and log the resolved value
-                        const resolvedValue = parseJsonValue(latestDoc.doc, source.path);
-                        console.log(`    📝 Resolved value from document ${latestDoc.doc.id}:`, 
-                            JSON.stringify(resolvedValue, null, 2).replace(/\n/g, '\n    '));
-                            
+                        const resolvedValue = parseJsonValue(docToProcess, source.path);
+                        console.log(`    📝 Resolved value:`, resolvedValue || '"" (empty string)');
                         return resolvedValue || [];
                     }
 
-                    // If no dates found, fall back to created_at or first document
-                    console.log('\n  ℹ️ No date fields found in any document');
-                    console.log('  - Falling back to first available document');
-                    if (candidateDocuments.length > 0) {
-                        console.log(`  - Selected document ID: ${candidateDocuments[0].id}`);
-                        const firstDoc = candidateDocuments[0];
-                        console.log(`    📄 Using first available document (ID: ${firstDoc.id})`);
-                        const resolvedValue = parseJsonValue(firstDoc, source.path);
-                        console.log(`    📝 Resolved value from document ${firstDoc.id}:`, 
-                            JSON.stringify(resolvedValue, null, 2).replace(/\n/g, '\n    '));
-                        return resolvedValue || [];
-                    }
                 } else if (source.table && sourceDataCache[source.table]) {
-                    // Handle non-document sources
+                    // Handle non-document sources (this logic remains the same)
                     const allRecords = Object.values(sourceDataCache[source.table] || {});
                     const linkingVariable = source.linking_variable || 'id';
-                    const record = allRecords.find(rec => 
-                        String(rec[linkingVariable]) === String(entityId)
-                    );
+                    const record = allRecords.find(rec => String(rec[linkingVariable]) === String(entityId));
                     if (record) {
                         return parseJsonValue(record, source.path) || [];
                     }
@@ -382,29 +262,16 @@ const getPlaceholderValue = useCallback((placeholder) => {
 
         if (values.length > 0) {
             const finalValue = values.join(' ');
-            console.log(`  ✅ FINAL RESOLVED VALUE for {${placeholder.name}}:`);
-            console.log(`  ┌${'─'.repeat(50)}`);
-            console.log(`  │ Value: "${finalValue}"`);
-            console.log(`  │ Source: Master Field`);
-            console.log(`  │ Document IDs: ${targetDocumentId || 'Auto-selected'}`);
-            if (targetDocumentId) {
-                console.log(`  │ Specific Document: ${targetDocumentId}`);
-            }
-            console.log(`  └${'─'.repeat(50)}`);
+            console.log(`✅ FINAL RESOLVED VALUE: "${finalValue}"`);
             return { value: finalValue, source: 'Master Field' };
         } else {
             console.log(`  ⚠️ No valid values found for placeholder`);
         }
-    } else {
-        console.log(`  ℹ️ No master field IDs found, falling back to smart match`);
     }
 
     // Fallback to simple smart match
-    const match = smartFieldMatch(placeholder.name);
-    if (match.value) {
-        console.log(`  🔍 Smart matched value: "${match.value}" from ${match.source}`);
-    }
-    return match;
+    console.log(`  ℹ️ No master field IDs found or value not resolved, falling back to smart match`);
+    return smartFieldMatch(placeholder.name);
 }, [masterFields, entityIdMap, sourceDataCache, smartFieldMatch]);
 
     useEffect(() => {

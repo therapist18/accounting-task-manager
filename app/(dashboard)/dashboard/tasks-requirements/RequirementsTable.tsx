@@ -12,6 +12,7 @@ import { toast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import RequirementsTableCombined from "./RequirementsTableCombined"
 import { FileUploadComponent } from "../tasks/components/FileUploadComponent"
+import { ExtractionPreview } from "@/components/ExtractionPreview"
 
 // --- MODIFICATION: Placeholder for the Letter Template Dialog ---
 const LetterTemplateDialog = ({ open, onOpenChange, letterData, individualNames }) => {
@@ -87,6 +88,16 @@ export function RequirementsTable({
   const [selectedDocumentForPreview, setSelectedDocumentForPreview] = useState<any>(null);
   const [companyData, setCompanyData] = useState<Record<number, any>>({});
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
+  const [previewDocument, setPreviewDocument] = useState<{
+    documents: Array<{
+      fileUrl: string;
+      extractedData: any;
+      fields: any[];
+      name?: string;
+      uploadedAt?: string;
+    }>;
+    currentIndex: number;
+  } | null>(null);
 
   // --- MODIFICATION: State for the new letter dialog ---
   const [isLetterDialogOpen, setIsLetterDialogOpen] = useState(false);
@@ -317,14 +328,40 @@ export function RequirementsTable({
 
     const handleViewClick = async () => {
       if (status.documents.length === 0) return;
-      const docToPreview = status.documents[0];
+      
       try {
-        const { data, error } = await supabase.storage.from('kyc-documents').createSignedUrl(docToPreview.file_path, 3600);
-        if (error) throw error;
-        setSelectedDocumentForPreview({ fileUrl: data.signedUrl });
+        // Create an array of document previews with signed URLs
+        const documentPreviews = await Promise.all(status.documents.map(async (doc) => {
+          const { data, error } = await supabase.storage
+            .from('kyc-documents')
+            .createSignedUrl(doc.file_path, 3600);
+          
+          if (error) throw error;
+          
+          return {
+            fileUrl: data.signedUrl,
+            extractedData: doc.extracted_data || {},
+            fields: doc.document_fields || [],
+            // Include any other document metadata you want to pass
+            name: doc.name || 'Document',
+            uploadedAt: doc.uploaded_at || new Date().toISOString()
+          };
+        }));
+        
+        // Set the first document as the initially active one
+        setPreviewDocument({
+          documents: documentPreviews,
+          currentIndex: 0
+        });
+        
         setDocumentPreviewOpen(true);
       } catch (err) {
-        toast({ title: 'Error', description: 'Failed to load document preview.', variant: 'destructive' });
+        console.error('Error loading document previews:', err);
+        toast({ 
+          title: 'Error', 
+          description: 'Failed to load document previews. Please try again.', 
+          variant: 'destructive' 
+        });
       }
     };
     
@@ -405,7 +442,20 @@ export function RequirementsTable({
           />
         </div>
       </div>
-      {selectedDocumentForPreview && (<Dialog open={documentPreviewOpen} onOpenChange={setDocumentPreviewOpen}><DialogContent className="max-w-6xl max-h-[98vh] p-0"><iframe src={selectedDocumentForPreview.fileUrl} className="w-full h-[95vh]" /></DialogContent></Dialog>)}
+      {previewDocument && previewDocument.documents.length > 0 && (
+        <ExtractionPreview
+          open={documentPreviewOpen}
+          onOpenChange={setDocumentPreviewOpen}
+          documents={previewDocument.documents}
+          initialIndex={previewDocument.currentIndex}
+          onDocumentChange={(index) => {
+            setPreviewDocument(prev => prev ? {
+              ...prev,
+              currentIndex: index
+            } : null);
+          }}
+        />
+      )}
       <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}><DialogContent className="max-w-6xl w-[90vw] max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Upload {(selectedUploadData?.document?.display_name || 'Document')}</DialogTitle></DialogHeader><FileUploadComponent open={uploadDialogOpen} onOpenChange={setUploadDialogOpen} task={selectedUploadData?.task} document={selectedUploadData?.document} columnType={selectedUploadData?.columnType} applicantId={selectedUploadData?.applicantId} individualNames={individualNames} onUploadComplete={handleUploadComplete}/></DialogContent></Dialog>
       
       {/* --- MODIFICATION: Render the new Letter Template Dialog --- */}

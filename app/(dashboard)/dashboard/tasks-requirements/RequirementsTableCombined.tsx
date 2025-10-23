@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save, Badge, CheckCircle2, XCircle } from "lucide-react"
+import { AlertTriangle, Briefcase, Users, Plus, Minus, UserCheck, Loader2, Download, FileText, FileUp, Trash2, RefreshCw, Wand2, Save } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import * as XLSX from 'xlsx'
@@ -13,15 +13,7 @@ import UploadModal from "@/components/UploadModal"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/components/ui/use-toast"
-import { Label } from "@/components/ui/label"
-import { Input } from "@/components/ui/input"
-import html2canvas from 'html2canvas';
-import jsPDF from "jspdf"
-import PizZip from 'pizzip';
-import Docxtemplater from 'docxtemplater';
 import htmlDocx from 'html-docx-js/dist/html-docx';
-import TemplateEditor from "@/components/TemplateEditor";
-import { Separator } from "@/components/ui/separator"
 import TemplateGenerationDialog from "./TemplateGenerationDialog"
 import { StageUploadDialog } from "../tasks/components/StageUploadDialog"
 
@@ -44,48 +36,23 @@ function deepEqual(obj1, obj2) {
   return true;
 }
 
-interface RequirementsTableCombinedProps {
-  loading: boolean
-  error: string | null
-  filteredGroupedTasks: any[]
-  organizedRequirements: {
-    documents: {
-      company: any[],
-      individual: any[],
-      letters: any[],
-    }
-  }
-  classRequirements: any[]
-  expandedDocuments: Set<string>
-  toggleDocumentExpansion: (documentId: string) => void
-  renderDocumentStatus: (task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number, isPostApplication?: boolean) => React.ReactNode
-  getDocumentDataForPreview: (task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number) => any | null
-  getDocumentStatusText: (task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy' | 'reference', referenceId?: number) => string
-  renderClientFieldData: (task: any, item: any, columnType: 'company' | 'principal' | 'dependant' | 'understudy') => React.ReactNode
-  renderReferencesData: (task: any, columnType: 'principal' | 'dependant' | 'understudy', dependantId?: number) => React.ReactNode
-  hasReferencesColumn: boolean
-  individualNames: Record<number, string>
-  companyData: Record<number, any>
-  getCurrentRequirements: () => any[]
-  fuzzyMatch: (str1: string, str2: string, threshold?: number) => boolean
-  kycDocuments: Map<string, any>
-  documentTypes: any[]
-  mainTab: string
-  handleUploadSubmit: (data: any) => void
-  handleDeleteDocument: (doc: any) => void
-  handleRetryExtraction: (doc: any) => void
-  handleSaveEditedDocument: (doc: any) => void
-  documentTemplates: Map<string, any[]>
-}
+// --- ROBUST HELPER FUNCTION TO VALIDATE AND CLEAN UUIDS ---
+const parseAndCleanUUIDs = (input: any): string[] => {
+    if (!input) return [];
+    
+    // Standard UUID regex
+    const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+    
+    // Convert input to a single string, handle arrays by joining them
+    const inputString = Array.isArray(input) ? input.join(',') : String(input);
+    
+    const matches = inputString.match(uuidRegex) || [];
+    
+    // Return a unique set of valid UUIDs
+    return [...new Set(matches)];
+};
 
-interface JobField {
-  id: number;
-  field_key: string;
-  label: string;
-  sources?: Array<{ table: string; path: string; }>;
-}
-
-export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, toggleDocumentExpansion, renderDocumentStatus, getDocumentDataForPreview, getDocumentStatusText, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, handleSaveEditedDocument, documentTemplates }: RequirementsTableCombinedProps) {
+export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, toggleDocumentExpansion, renderDocumentStatus, getDocumentDataForPreview, getDocumentStatusText, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, handleSaveEditedDocument, documentTemplates }: any) {
   const [isStageDialogOpen, setIsStageDialogOpen] = useState(false);
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null);
   const [expandedSections, setExpandedSections] = useState({
@@ -103,7 +70,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [availableTemplates, setAvailableTemplates] = useState<Map<string, any[]>>(new Map());
   const [isPreparingTemplate, setIsPreparingTemplate] = useState(false);
-  const [masterFields, setMasterFields] = useState<Map<number, JobField>>(new Map());
+  const [masterFields, setMasterFields] = useState<Map<number, any>>(new Map());
 
   const classDocsAndFields = useMemo(() => classRequirements?.[0]?.documents_and_fields || [], [classRequirements]);
 
@@ -152,132 +119,100 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       console.log("✅ Step 1: Entity ID Map created", entityIdMap);
 
       const templates = await fetchDocumentTemplates(docItem.document.id);
-      console.log(`✅ Step 2: Found ${templates.length} available templates.`, templates);
+      console.log(`✅ Step 2: Found ${templates.length} available templates.`);
       if (!templates || templates.length === 0) {
         toast({ title: 'No Templates Found', description: `No templates are available for: ${docItem.document.display_name}.`, variant: 'destructive' });
         return;
       }
+      
+      const queriesToRun = new Map();
 
-      const tablesToQuery = new Map<string, Set<number>>();
       templates.forEach(template => {
         (template.placeholders || []).forEach(placeholder => {
-          const ids = placeholder.master_field_ids || (placeholder.master_field_id ? [placeholder.master_field_id] : []);
+          const pids = placeholder.master_field_ids || (placeholder.master_field_id ? [placeholder.master_field_id] : []);
+          pids.forEach(id => {
+            const masterField = masterFields.get(parseInt(id, 10));
+            if (masterField?.sources) {
+              const entityId = entityIdMap[placeholder.entity_type || 'principal'];
+              if (entityId) {
+                masterField.sources.forEach(source => {
+                  const { table, linking_variable, document_id } = source;
+                  if (!table) return;
 
-          if (ids.length > 0) {
-            ids.forEach(id => {
-              const masterFieldId = parseInt(id, 10);
-              if (isNaN(masterFieldId)) return;
+                  if (!queriesToRun.has(table)) {
+                    queriesToRun.set(table, { docIds: new Set(), links: new Map() });
+                  }
+                  const tableQueries = queriesToRun.get(table);
 
-              const masterField = masterFields.get(masterFieldId);
-              if (masterField?.sources) {
-                const targetEntityType = placeholder.entity_type || 'principal';
-                const entityId = entityIdMap[targetEntityType];
-                if (entityId) {
-                  masterField.sources.forEach(source => {
-                    if (!tablesToQuery.has(source.table)) tablesToQuery.set(source.table, new Set());
-                    tablesToQuery.get(source.table)!.add(entityId);
-                  });
-                }
+                  if (document_id) {
+                    parseAndCleanUUIDs(document_id).forEach(uuid => tableQueries.docIds.add(uuid));
+                  }
+                  
+                  const linkVar = linking_variable || 'id';
+                  if (!tableQueries.links.has(linkVar)) {
+                    tableQueries.links.set(linkVar, new Set());
+                  }
+                  tableQueries.links.get(linkVar).add(entityId);
+                });
               }
-            });
-          }
+            }
+          });
         });
       });
-      console.log("✅ Step 3: Analyzed templates. Required data sources:", Object.fromEntries(tablesToQuery));
+
+      console.log("✅ Step 3: Analyzed templates. Required data sources:", 
+        Object.fromEntries(Array.from(queriesToRun.entries()).map(([table, { docIds, links }]) => 
+            [table, { docIds: [...docIds], links: Object.fromEntries(Array.from(links.entries()).map(([lv, ids]) => [lv, [...ids]])) }]
+        ))
+      );
 
       console.log("⏳ Step 4: Fetching data from Supabase...");
-      const sourceDataCache: Record<string, Record<number, any>> = {
-        'tm_tasks': { [task.id]: task }
-      };
+      const sourceDataCache: Record<string, Record<number, any>> = { 'tm_tasks': { [task.id]: task } };
 
-      for (const [table, idsSet] of tablesToQuery.entries()) {
-        const ids = Array.from(idsSet);
-        if (ids.length > 0) {
-          console.log(`  - Querying table '${table}' for IDs: [${ids.join(', ')}]`);
+      for (const [table, { docIds, links }] of queriesToRun.entries()) {
+        const records = new Map();
+        
+        console.log(`  - Querying table '${table}'...`);
 
-          // For document tables, we want to filter by document_id if specified in any source
-          const documentIdSources = Array.from(masterFields.values())
-            .flatMap(field =>
-              (field.sources || [])
-                .filter(s => s.table === table && s.document_id)
-                .map(s => ({
-                  fieldId: field.id,
-                  documentIds: Array.isArray(s.document_id) ? s.document_id : [s.document_id]
-                }))
-            );
-
-          let query = supabase.from(table).select('*');
-          let linkingVariable = 'id'; // Default linking variable
-          
-          if (documentIdSources.length > 0) {
-            // Get all unique document IDs from all sources
-            const allDocumentIds = [...new Set(
-              documentIdSources.flatMap(s => s.documentIds)
-            )].filter(Boolean);
-            
-            if (allDocumentIds.length > 0) {
-              console.log(`  - Filtering by document_ids:`, allDocumentIds);
-              query = query.in('document_id', allDocumentIds);
-            } else {
-              // Fall back to entity ID if no document IDs found
-              linkingVariable = 'id'; // Default to 'id' for backward compatibility
-              console.log(`  - No document IDs found, falling back to linking variable '${linkingVariable}'`);
-              query = query.in(linkingVariable, ids);
-            }
-          } else {
-            // For non-document tables, use the default linking variable
-            const fieldSources = Array.from(masterFields.values())
-              .flatMap(field =>
-                (field.sources || [])
-                  .filter(s => s.table === table)
-                  .map(s => ({ fieldId: field.id, source: s }))
-              );
-            
-            linkingVariable = fieldSources[0]?.source?.linking_variable || 'id';
-            console.log(`  - Using linking variable '${linkingVariable}' for table '${table}'`);
-            query = query.in(linkingVariable, ids);
-          }
-
-          const { data, error } = await query;
-
-          if (error) {
-            console.warn(`  - ⚠️ Could not fetch data from ${table}`, error);
-            continue;
-          }
-
-          console.log(`  - ✅ Success! Fetched ${data.length} records from '${table}'.`);
-
-          // Cache the records using the ID field that was used for the query
-          const key = documentIdSources.length > 0 ? 'document_id' : linkingVariable;
-          sourceDataCache[table] = (data || []).reduce((acc, record) => {
-            const id = record[key];
-            if (id !== undefined) {
-              acc[id] = record;
-            }
-            return acc;
-          }, {});
+        if (docIds.size > 0) {
+            console.log(`    - by document_id:`, [...docIds]);
+            const { data, error } = await supabase.from(table).select('*').in('document_id', [...docIds]);
+            if (error) console.error(`    - ❌ ERROR fetching by document_id:`, error);
+            else (data || []).forEach(rec => records.set(rec.id, rec));
         }
+
+        for (const [linkVar, entityIdsSet] of links.entries()) {
+            const entityIds = [...entityIdsSet];
+            if (entityIds.length > 0) {
+                console.log(`    - by linking_variable '${linkVar}':`, entityIds);
+                const { data, error } = await supabase.from(table).select('*').in(linkVar, entityIds);
+                if (error) {
+                    console.error(`    - ❌ ERROR fetching by ${linkVar}:`, error);
+                    toast({ title: `Failed to fetch from ${table}`, description: error.message, variant: "destructive" });
+                } else {
+                    (data || []).forEach(rec => records.set(rec.id, rec));
+                }
+            }
+        }
+        
+        sourceDataCache[table] = Array.from(records.values()).reduce((acc, rec) => {
+            acc[rec.id] = rec;
+            return acc;
+        }, {});
+        console.log(`  - ✅ Success! Fetched and cached ${records.size} unique records from '${table}'.`);
       }
+
       console.log("✅ Step 4: Data fetching complete. Final source data cache:", sourceDataCache);
-
-      const taskWithDocs = { ...task, documents: Array.isArray(task.documents) ? task.documents : [] };
-      const personId = entityIdMap.principal || entityIdMap.dependant || entityIdMap.understudy;
-      const personDocs = personId ? taskWithDocs.documents.filter(d => d.director_id === personId) : [];
-      const companyDocs = entityIdMap.company ? taskWithDocs.documents.filter(d => d.company_id === entityIdMap.company) : [];
-      const getDetails = (docs) => docs.reduce((acc, doc) => ({ ...acc, ...(doc.extracted_details || {}) }), {});
-      console.log("✅ Step 5: Assembled fallback data from extracted details.");
-
+      
       const letterInfo = {
         document: docItem.document,
         task: task,
         masterFields: masterFields,
         entityIdMap: entityIdMap,
         sourceDataCache: sourceDataCache,
-        personData: getDetails(personDocs),
-        companyData: getDetails(companyDocs),
-        extractedData: getDetails([...personDocs, ...companyDocs]),
+        personData: {}, companyData: {}, extractedData: {},
       };
-      console.log("✅ Step 6: Final data package prepared for dialog:", letterInfo);
+      console.log("✅ Step 5: Final data package prepared for dialog.");
 
       setSelectedLetterInfo(letterInfo);
       setShowTemplateSelector(true);
@@ -291,6 +226,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     }
   };
 
+  // ... The rest of your component code remains exactly the same ...
   const handleTemplateSelected = (template) => {
     setSelectedTemplate(template);
     setShowTemplateSelector(false);

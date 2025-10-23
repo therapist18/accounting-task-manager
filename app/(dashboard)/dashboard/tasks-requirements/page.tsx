@@ -224,7 +224,7 @@ export default function TasksPage() {
       return;
     }
     
-    const currentDept = departments.find(d => String(d.id) === selectedDepartment);
+    const currentDept = departments.find(d => String(d.id) === selectedDepartment || d.id === Number(selectedDepartment));
     console.log('   [handleNewEnquiryClick] Found Department:', currentDept);
     
     if (!currentDept) {
