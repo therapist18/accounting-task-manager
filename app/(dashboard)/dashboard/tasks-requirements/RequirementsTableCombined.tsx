@@ -107,7 +107,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
 
   const classDocsAndFields = useMemo(() => classRequirements?.[0]?.documents_and_fields || [], [classRequirements]);
 
- useEffect(() => {
+  useEffect(() => {
     const fetchMasterFields = async () => {
       try {
         const { data, error } = await supabase.from('tm_job_fields').select('*');
@@ -139,7 +139,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     }
   };
 
- const handleOpenTemplateSelector = async (docItem, task, colType, colId) => {
+  const handleOpenTemplateSelector = async (docItem, task, colType, colId) => {
     console.log("🚀 Starting template generation process...", { document: docItem.document.display_name, task_id: task.id, colType, colId });
     setIsPreparingTemplate(true);
     try {
@@ -162,7 +162,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
       templates.forEach(template => {
         (template.placeholders || []).forEach(placeholder => {
           const ids = placeholder.master_field_ids || (placeholder.master_field_id ? [placeholder.master_field_id] : []);
-          
+
           if (ids.length > 0) {
             ids.forEach(id => {
               const masterFieldId = parseInt(id, 10);
@@ -190,47 +190,74 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         'tm_tasks': { [task.id]: task }
       };
 
-   for (const [table, idsSet] of tablesToQuery.entries()) {
-  const ids = Array.from(idsSet);
-  if (ids.length > 0) {
-    console.log(`  - Querying table '${table}' for IDs: [${ids.join(', ')}]`);
-    
-    // Get the field sources that reference this table to find the linking_variable
-    const fieldSources = Array.from(masterFields.values())
-      .flatMap(field => 
-        (field.sources || [])
-          .filter(s => s.table === table)
-          .map(s => ({ fieldId: field.id, source: s }))
-      );
+      for (const [table, idsSet] of tablesToQuery.entries()) {
+        const ids = Array.from(idsSet);
+        if (ids.length > 0) {
+          console.log(`  - Querying table '${table}' for IDs: [${ids.join(', ')}]`);
 
-    // If we have sources, use the first one's linking_variable, otherwise default to 'id'
-    const linkingVariable = fieldSources[0]?.source?.linking_variable || 'id';
-    
-    console.log(`  - Using linking variable '${linkingVariable}' for table '${table}'`);
-    
-    // Build the query
-    const { data, error } = await supabase
-      .from(table)
-      .select('*')
-      .in(linkingVariable, ids);
-    
-    if (error) {
-      console.warn(`  - ⚠️ Could not fetch data from ${table}`, error);
-      continue;
-    }
-    
-    console.log(`  - ✅ Success! Fetched ${data.length} records from '${table}'.`);
-    
-    // Cache the records using the ID field that was used for the query
-    sourceDataCache[table] = (data || []).reduce((acc, record) => {
-      const key = record[linkingVariable];
-      if (key !== undefined) {
-        acc[key] = record;
+          // For document tables, we want to filter by document_id if specified in any source
+          const documentIdSources = Array.from(masterFields.values())
+            .flatMap(field =>
+              (field.sources || [])
+                .filter(s => s.table === table && s.document_id)
+                .map(s => ({
+                  fieldId: field.id,
+                  documentIds: Array.isArray(s.document_id) ? s.document_id : [s.document_id]
+                }))
+            );
+
+          let query = supabase.from(table).select('*');
+          let linkingVariable = 'id'; // Default linking variable
+          
+          if (documentIdSources.length > 0) {
+            // Get all unique document IDs from all sources
+            const allDocumentIds = [...new Set(
+              documentIdSources.flatMap(s => s.documentIds)
+            )].filter(Boolean);
+            
+            if (allDocumentIds.length > 0) {
+              console.log(`  - Filtering by document_ids:`, allDocumentIds);
+              query = query.in('document_id', allDocumentIds);
+            } else {
+              // Fall back to entity ID if no document IDs found
+              linkingVariable = 'id'; // Default to 'id' for backward compatibility
+              console.log(`  - No document IDs found, falling back to linking variable '${linkingVariable}'`);
+              query = query.in(linkingVariable, ids);
+            }
+          } else {
+            // For non-document tables, use the default linking variable
+            const fieldSources = Array.from(masterFields.values())
+              .flatMap(field =>
+                (field.sources || [])
+                  .filter(s => s.table === table)
+                  .map(s => ({ fieldId: field.id, source: s }))
+              );
+            
+            linkingVariable = fieldSources[0]?.source?.linking_variable || 'id';
+            console.log(`  - Using linking variable '${linkingVariable}' for table '${table}'`);
+            query = query.in(linkingVariable, ids);
+          }
+
+          const { data, error } = await query;
+
+          if (error) {
+            console.warn(`  - ⚠️ Could not fetch data from ${table}`, error);
+            continue;
+          }
+
+          console.log(`  - ✅ Success! Fetched ${data.length} records from '${table}'.`);
+
+          // Cache the records using the ID field that was used for the query
+          const key = documentIdSources.length > 0 ? 'document_id' : linkingVariable;
+          sourceDataCache[table] = (data || []).reduce((acc, record) => {
+            const id = record[key];
+            if (id !== undefined) {
+              acc[id] = record;
+            }
+            return acc;
+          }, {});
+        }
       }
-      return acc;
-    }, {});
-  }
-}
       console.log("✅ Step 4: Data fetching complete. Final source data cache:", sourceDataCache);
 
       const taskWithDocs = { ...task, documents: Array.isArray(task.documents) ? task.documents : [] };

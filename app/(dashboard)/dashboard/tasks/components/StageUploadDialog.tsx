@@ -190,26 +190,18 @@ export function StageUploadDialog({
   // Ref Hooks
   const documentFieldsCache = useRef(new Map())
   const blobUrlsRef = useRef<Set<string>>(new Set())
-
-  console.log('[StageUploadDialog] Props Check', { task: selectedStageTask?.task, stage: selectedStageTask?.stage });
-
   const linkedDocumentForStage = useMemo(() => {
     const sourceIdMap = selectedStageTask?.task?.source_document_id;
     const stageId = selectedStageTask?.stage?.id;
-
-    console.log('[StageUploadDialog] Linking Logic - Inputs', { sourceIdMap, stageId });
-
     if (!sourceIdMap || typeof sourceIdMap !== 'object' || !stageId) {
         return null;
     }
     const linkedDoc = sourceIdMap[stageId] || null;
-    console.log('[StageUploadDialog] Linking Logic - Result', { linkedDoc });
     return linkedDoc;
   }, [selectedStageTask?.task?.source_document_id, selectedStageTask?.stage?.id]);
 
   const isStageLocked = useMemo(() => {
     const locked = !!linkedDocumentForStage;
-    console.log('[StageUploadDialog] Is Stage Locked?', locked);
     return locked;
   }, [linkedDocumentForStage]);
 
