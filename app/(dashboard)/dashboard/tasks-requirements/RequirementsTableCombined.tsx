@@ -78,6 +78,13 @@ interface RequirementsTableCombinedProps {
   documentTemplates: Map<string, any[]>
 }
 
+interface JobField {
+  id: number;
+  field_key: string;
+  label: string;
+  sources?: Array<{ table: string; path: string; }>;
+}
+
 export default function RequirementsTableCombined({ loading, error, filteredGroupedTasks, organizedRequirements, classRequirements, expandedDocuments, toggleDocumentExpansion, renderDocumentStatus, getDocumentDataForPreview, getDocumentStatusText, renderClientFieldData, renderReferencesData, hasReferencesColumn, individualNames, companyData, getCurrentRequirements, fuzzyMatch, kycDocuments, documentTypes, mainTab, handleUploadSubmit, handleDeleteDocument, handleRetryExtraction, handleSaveEditedDocument, documentTemplates }: RequirementsTableCombinedProps) {
   const [isStageDialogOpen, setIsStageDialogOpen] = useState(false);
   const [selectedStageTask, setSelectedStageTask] = useState<{ task: any, stage: any } | null>(null);
@@ -95,8 +102,25 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const [selectedLetterInfo, setSelectedLetterInfo] = useState(null);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [availableTemplates, setAvailableTemplates] = useState<Map<string, any[]>>(new Map());
+  const [isPreparingTemplate, setIsPreparingTemplate] = useState(false);
+  const [masterFields, setMasterFields] = useState<Map<number, JobField>>(new Map());
 
   const classDocsAndFields = useMemo(() => classRequirements?.[0]?.documents_and_fields || [], [classRequirements]);
+
+ useEffect(() => {
+    const fetchMasterFields = async () => {
+      try {
+        const { data, error } = await supabase.from('tm_job_fields').select('*');
+        if (error) throw error;
+        const fieldsMap = new Map(data.map(field => [field.id, field]));
+        setMasterFields(fieldsMap);
+      } catch (error) {
+        console.error("Failed to fetch master fields:", error);
+        toast({ title: "Could not load master fields", variant: "destructive" });
+      }
+    };
+    fetchMasterFields();
+  }, []);
 
   const fetchDocumentTemplates = async (documentId: string) => {
     try {
@@ -105,9 +129,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         .select('*')
         .eq('document_id', documentId)
         .order('file_name', { ascending: true });
-
       if (error) throw error;
-
       setAvailableTemplates(prev => new Map(prev).set(documentId, templates || []));
       return templates || [];
     } catch (error) {
@@ -117,32 +139,128 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     }
   };
 
-  const handleOpenTemplateSelector = async (docItem, task, colType, colId) => {
-    const taskWithDocs = { ...task, documents: Array.isArray(task.documents) ? task.documents : [] };
-    const personId = colType === 'principal' ? task.individual_id : colType === 'dependant' ? colId : colType === 'understudy' ? task.understudy_id : null;
-    const personDocs = personId ? taskWithDocs.documents.filter(d => d.individual_id === personId) : [];
-    const companyDocs = taskWithDocs.documents.filter(d => d.company_id === task.company_id);
-    const getDetails = (docs) => docs.reduce((acc, doc) => ({ ...acc, ...(doc.extracted_details || {}) }), {});
+ const handleOpenTemplateSelector = async (docItem, task, colType, colId) => {
+    console.log("🚀 Starting template generation process...", { document: docItem.document.display_name, task_id: task.id, colType, colId });
+    setIsPreparingTemplate(true);
+    try {
+      const entityIdMap = {
+        principal: task.individual_id,
+        company: task.company_id,
+        dependant: colType === 'dependant' ? colId : undefined,
+        understudy: colType === 'understudy' ? colId || task.understudy_id : undefined,
+      };
+      console.log("✅ Step 1: Entity ID Map created", entityIdMap);
 
-    const letterInfo = {
-      document: docItem.document,
-      task: task,
-      colType,
-      colId,
-      personData: getDetails(personDocs),
-      companyData: getDetails(companyDocs),
-    };
+      const templates = await fetchDocumentTemplates(docItem.document.id);
+      console.log(`✅ Step 2: Found ${templates.length} available templates.`, templates);
+      if (!templates || templates.length === 0) {
+        toast({ title: 'No Templates Found', description: `No templates are available for: ${docItem.document.display_name}.`, variant: 'destructive' });
+        return;
+      }
 
-    setSelectedLetterInfo(letterInfo);
-    setShowTemplateSelector(true);
+      const tablesToQuery = new Map<string, Set<number>>();
+      templates.forEach(template => {
+        (template.placeholders || []).forEach(placeholder => {
+          const ids = placeholder.master_field_ids || (placeholder.master_field_id ? [placeholder.master_field_id] : []);
+          
+          if (ids.length > 0) {
+            ids.forEach(id => {
+              const masterFieldId = parseInt(id, 10);
+              if (isNaN(masterFieldId)) return;
 
-    const templates = await fetchDocumentTemplates(docItem.document.id);
-    if (!templates || templates.length === 0) {
-      toast({
-        title: 'No Templates Found',
-        description: `No templates are available for: ${docItem.document.display_name}.`,
-        variant: 'destructive'
+              const masterField = masterFields.get(masterFieldId);
+              if (masterField?.sources) {
+                const targetEntityType = placeholder.entity_type || 'principal';
+                const entityId = entityIdMap[targetEntityType];
+                if (entityId) {
+                  masterField.sources.forEach(source => {
+                    if (!tablesToQuery.has(source.table)) tablesToQuery.set(source.table, new Set());
+                    tablesToQuery.get(source.table)!.add(entityId);
+                  });
+                }
+              }
+            });
+          }
+        });
       });
+      console.log("✅ Step 3: Analyzed templates. Required data sources:", Object.fromEntries(tablesToQuery));
+
+      console.log("⏳ Step 4: Fetching data from Supabase...");
+      const sourceDataCache: Record<string, Record<number, any>> = {
+        'tm_tasks': { [task.id]: task }
+      };
+
+   for (const [table, idsSet] of tablesToQuery.entries()) {
+  const ids = Array.from(idsSet);
+  if (ids.length > 0) {
+    console.log(`  - Querying table '${table}' for IDs: [${ids.join(', ')}]`);
+    
+    // Get the field sources that reference this table to find the linking_variable
+    const fieldSources = Array.from(masterFields.values())
+      .flatMap(field => 
+        (field.sources || [])
+          .filter(s => s.table === table)
+          .map(s => ({ fieldId: field.id, source: s }))
+      );
+
+    // If we have sources, use the first one's linking_variable, otherwise default to 'id'
+    const linkingVariable = fieldSources[0]?.source?.linking_variable || 'id';
+    
+    console.log(`  - Using linking variable '${linkingVariable}' for table '${table}'`);
+    
+    // Build the query
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .in(linkingVariable, ids);
+    
+    if (error) {
+      console.warn(`  - ⚠️ Could not fetch data from ${table}`, error);
+      continue;
+    }
+    
+    console.log(`  - ✅ Success! Fetched ${data.length} records from '${table}'.`);
+    
+    // Cache the records using the ID field that was used for the query
+    sourceDataCache[table] = (data || []).reduce((acc, record) => {
+      const key = record[linkingVariable];
+      if (key !== undefined) {
+        acc[key] = record;
+      }
+      return acc;
+    }, {});
+  }
+}
+      console.log("✅ Step 4: Data fetching complete. Final source data cache:", sourceDataCache);
+
+      const taskWithDocs = { ...task, documents: Array.isArray(task.documents) ? task.documents : [] };
+      const personId = entityIdMap.principal || entityIdMap.dependant || entityIdMap.understudy;
+      const personDocs = personId ? taskWithDocs.documents.filter(d => d.director_id === personId) : [];
+      const companyDocs = entityIdMap.company ? taskWithDocs.documents.filter(d => d.company_id === entityIdMap.company) : [];
+      const getDetails = (docs) => docs.reduce((acc, doc) => ({ ...acc, ...(doc.extracted_details || {}) }), {});
+      console.log("✅ Step 5: Assembled fallback data from extracted details.");
+
+      const letterInfo = {
+        document: docItem.document,
+        task: task,
+        masterFields: masterFields,
+        entityIdMap: entityIdMap,
+        sourceDataCache: sourceDataCache,
+        personData: getDetails(personDocs),
+        companyData: getDetails(companyDocs),
+        extractedData: getDetails([...personDocs, ...companyDocs]),
+      };
+      console.log("✅ Step 6: Final data package prepared for dialog:", letterInfo);
+
+      setSelectedLetterInfo(letterInfo);
+      setShowTemplateSelector(true);
+      console.log("🏁 Process complete. Opening template selector.");
+
+    } catch (error) {
+      console.error("❌FATAL ERROR during template data preparation:", error);
+      toast({ title: "Error preparing template data", description: error.message, variant: "destructive" });
+    } finally {
+      setIsPreparingTemplate(false);
     }
   };
 
@@ -155,14 +273,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const handleSaveGeneratedLetter = (file) => {
     if (!selectedLetterInfo) return;
 
-    const { document, task, colType, colId } = selectedLetterInfo;
-    const isCompanyDoc = colType === 'company';
+    const { document, task } = selectedLetterInfo;
+    const isCompanyDoc = selectedLetterInfo.entityIdMap.company && !selectedLetterInfo.entityIdMap.principal && !selectedLetterInfo.entityIdMap.dependant;
 
     const uploadData = {
       files: [file],
       document_id: document.id,
-      company_id: isCompanyDoc ? task.company_id : undefined,
-      individual_id: !isCompanyDoc ? (colType === 'principal' ? task.individual_id : colId) : undefined,
+      company_id: selectedLetterInfo.entityIdMap.company,
+      individual_id: selectedLetterInfo.entityIdMap.principal || selectedLetterInfo.entityIdMap.dependant || selectedLetterInfo.entityIdMap.understudy,
       task_id: task.id,
     };
     handleUploadSubmit(uploadData);
@@ -365,8 +483,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                           cellContent = renderDocumentStatus(task, docItem.document, col.type, col.id);
                         } else {
                           cellContent = (
-                            <Button variant="outline" size="sm" onClick={() => handleOpenTemplateSelector(docItem, task, col.type, col.id)}>
-                              <Wand2 className="mr-2 h-4 w-4" /> Generate
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenTemplateSelector(docItem, task, col.type, col.id)}
+                              disabled={isPreparingTemplate}
+                            >
+                              {isPreparingTemplate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                              Generate
                             </Button>
                           );
                         }
@@ -640,11 +764,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
           isOpen={showTemplateGenerator}
           onClose={() => setShowTemplateGenerator(false)}
           template={selectedTemplate}
-          personData={selectedLetterInfo.personData}
-          companyData={selectedLetterInfo.companyData}
-          extractedData={selectedLetterInfo.extractedData} // NEW: Pass extracted data
           documentName={selectedLetterInfo.document.display_name}
           onSave={handleSaveGeneratedLetter}
+          masterFields={selectedLetterInfo.masterFields}
+          entityIdMap={selectedLetterInfo.entityIdMap}
+          sourceDataCache={selectedLetterInfo.sourceDataCache}
+          personData={selectedLetterInfo.personData}
+          companyData={selectedLetterInfo.companyData}
+          extractedData={selectedLetterInfo.extractedData}
         />
       )}
 

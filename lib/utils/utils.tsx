@@ -101,7 +101,7 @@ export const formatDateForDisplay = (dateInput) => {
 };
 
 export const EXPIRY_FIELD_PATTERNS = ['dateofexpiry', 'expirydate', 'validto', 'untill', 'witheffectto', 'expirationdate'];
-export const ISSUE_DATE_FIELDS = ['issue_date', 'issued_at', 'date_of_issue', 'With_Effect_From', 'from', 'dates']; 
+export const ISSUE_DATE_FIELDS = ['effect_from', 'from', 'valid_from', 'with effect_from', 'date_issued', 'issued_date', 'issued_at', 'date_of_issue', 'Date_of_Issue'];
 
 export const normalizeKey = (key) => {
     if (typeof key !== 'string') return '';

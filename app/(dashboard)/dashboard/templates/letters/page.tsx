@@ -4,13 +4,23 @@
 import React, { useState, useMemo, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { PlusCircle, FileText, Loader2, Settings, ChevronRight } from "lucide-react"
+import { PlusCircle, FileText, Loader2, Settings, ChevronRight, Trash2 } from "lucide-react"
 import { toast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { ScrollArea } from "@/components/ui/scroll-area"
 // --- MODIFICATION: Import Tabs components and Badge for the new UI ---
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 import { DepartmentSidebar } from "../../departments/main-shared-components/department-sidebar"
 import { fetchDepartments } from "../../departments/departments/database"
@@ -237,15 +247,79 @@ export default function LettersPage() {
 }
 
 // --- NEW COMPONENT: A reusable card for displaying a single template ---
-function TemplateCard({ template, onEdit }) {
+function TemplateCard({ template, onEdit, onDelete }) {
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  const handleDelete = async () => {
+    try {
+      setIsDeleting(true);
+      await onDelete(template.id);
+      setShowDeleteDialog(false);
+    } catch (error) {
+      console.error('Error deleting template:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete template',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <Card key={template.id} className="shadow-sm">
       <CardHeader>
         <CardTitle className="flex justify-between items-center text-lg">
           {template.file_name}
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => onEdit(template)}>
-            <Settings className="h-4 w-4" />
-          </Button>
+          <div className="flex gap-1">
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => onEdit(template)}>
+              <Settings className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowDeleteDialog(true);
+              }}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+          
+          <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete the "{template.file_name}" template. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction 
+                  onClick={handleDelete}
+                  className="bg-destructive hover:bg-destructive/90"
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : 'Delete'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </CardTitle>
         <CardDescription className="flex flex-col gap-2">
           <div className="flex">
@@ -340,20 +414,90 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
               <div className="space-y-4">
                 <TabsContent value="all">
                   {categorizedTemplates.categorized.all.map(template => (
-                    <TemplateCard key={template.id} template={template} onEdit={onEdit} />
+                    <TemplateCard 
+                      key={template.id} 
+                      template={template} 
+                      onEdit={onEdit}
+                      onDelete={async (templateId) => {
+                        try {
+                          const { error } = await supabase
+                            .from('acc_portal_templates')
+                            .delete()
+                            .eq('id', templateId);
+
+                          if (error) throw error;
+                          
+                          // Refresh templates after deletion
+                          setTemplateVersion(v => v + 1);
+                          toast({
+                            title: 'Success',
+                            description: 'Template deleted successfully',
+                          });
+                        } catch (error) {
+                          console.error('Error deleting template:', error);
+                          throw error;
+                        }
+                      }}
+                    />
                   ))}
                 </TabsContent>
                 {categorizedTemplates.tabs.map(tab => (
                   <TabsContent key={tab} value={tab}>
                     {categorizedTemplates.categorized[tab].map(template => (
-                      <TemplateCard key={template.id} template={template} onEdit={onEdit} />
+                      <TemplateCard 
+                        key={template.id} 
+                        template={template} 
+                        onEdit={onEdit}
+                        onDelete={async (templateId) => {
+                          try {
+                            const { error } = await supabase
+                              .from('acc_portal_templates')
+                              .delete()
+                              .eq('id', templateId);
+
+                            if (error) throw error;
+                            
+                            setTemplateVersion(v => v + 1);
+                            toast({
+                              title: 'Success',
+                              description: 'Template deleted successfully',
+                            });
+                          } catch (error) {
+                            console.error('Error deleting template:', error);
+                            throw error;
+                          }
+                        }}
+                      />
                     ))}
                   </TabsContent>
                 ))}
                 {categorizedTemplates.categorized.uncategorized.length > 0 && (
                   <TabsContent value="uncategorized">
                     {categorizedTemplates.categorized.uncategorized.map(template => (
-                      <TemplateCard key={template.id} template={template} onEdit={onEdit} />
+                      <TemplateCard 
+                        key={template.id} 
+                        template={template} 
+                        onEdit={onEdit}
+                        onDelete={async (templateId) => {
+                          try {
+                            const { error } = await supabase
+                              .from('acc_portal_templates')
+                              .delete()
+                              .eq('id', templateId);
+
+                            if (error) throw error;
+                            
+                            setTemplateVersion(v => v + 1);
+                            toast({
+                              title: 'Success',
+                              description: 'Template deleted successfully',
+                            });
+                          } catch (error) {
+                            console.error('Error deleting template:', error);
+                            throw error;
+                          }
+                        }}
+                      />
                     ))}
                   </TabsContent>
                 )}

@@ -1,6 +1,6 @@
 // @ts-nocheck
 "use client";
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useMemo } from "react";
 import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,9 +10,11 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-// --- MODIFICATION: Import DropdownMenu components for the multi-select UI ---
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown } from "lucide-react";
+// --- MODIFICATION: Import Popover and Command for the Master Field Picker ---
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search } from "lucide-react";
 import { DocumentTemplate as BaseDocumentTemplate } from "./types";
 import { TableHeader, Table, TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
 import supabase from "@/lib/supabase/client";
@@ -29,15 +31,18 @@ type EntityType = 'company' | 'principal' | 'director' | 'shareholder' | 'depend
 interface DocumentTemplate extends BaseDocumentTemplate {
   content?: string;
   isDirty?: boolean;
-  entity_types?: EntityType[]; // Changed from entity_type: EntityType
+  entity_types?: EntityType[]; // This is for the overall template
+}
+
+// --- MODIFICATION: JobField interface to hold master field data ---
+interface JobField {
+  id: number;
+  field_key: string;
+  label: string;
 }
 
 interface DocumentTemplateManagerProps {
-  document: {
-    id: string;
-    name: string;
-    display_name?: string;
-  };
+  document: { id: string; name: string; display_name?: string; };
   initialTemplates?: DocumentTemplate[];
   isOpen: boolean;
   onClose: () => void;
@@ -51,18 +56,153 @@ const PLACEHOLDER_TYPES = [
 ];
 
 const ENTITY_TYPES: { value: EntityType; label: string }[] = [
-    { value: 'company', label: 'Company' },
-    { value: 'principal', label: 'Principal' },
-    { value: 'director', label: 'Director' },
-    { value: 'shareholder', label: 'Shareholder' },
-    { value: 'dependent', label: 'Dependent' },
-    { value: 'employee', label: 'Employee' },
+    { value: 'company', label: 'Company' }, { value: 'principal', label: 'Principal' },
+    { value: 'director', label: 'Director' }, { value: 'shareholder', label: 'Shareholder' },
+    { value: 'dependent', label: 'Dependent' }, { value: 'employee', label: 'Employee' },
 ];
 
+// --- MODIFICATION: Placeholder type now includes master_field_id and its own entity_type ---
 type Placeholder = {
   id: string; name: string; description?: string; type: 'text' | 'number' | 'date' | 'select' | 'array';
   required: boolean; options?: string[];
+  entity_type: EntityType; // Which entity this placeholder belongs to
+  master_field_ids?: number[]; // Array of linked master field IDs
+  // Date field configuration
+  date_config?: {
+    useCurrentDate: boolean; // If true, uses current date automatically
+    defaultDate?: string;    // Default date if useCurrentDate is false
+    format?: string;         // Date format (e.g., 'YYYY-MM-DD', 'MM/DD/YYYY')
+  };
 };
+
+// --- MODIFICATION: Updated component for picking multiple master fields ---
+function MasterFieldPicker({
+  masterFields,
+  selectedFieldIds = [],
+  onSelect,
+  onRemove,
+  onClear,
+}: {
+  masterFields: JobField[];
+  selectedFieldIds?: number[];
+  onSelect: (fieldId: number) => void;
+  onRemove: (fieldId: number) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const selectedFields = useMemo(() =>
+    masterFields.filter(f => selectedFieldIds.includes(f.id)),
+  [masterFields, selectedFieldIds]);
+
+  const filteredFields = useMemo(() => {
+    if (!search) return masterFields;
+    const searchLower = search.toLowerCase();
+    return masterFields.filter(field =>
+      field.label.toLowerCase().includes(searchLower) ||
+      field.field_key.toLowerCase().includes(searchLower)
+    );
+  }, [masterFields, search]);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between">
+              <span className="truncate">
+                {selectedFields.length > 0
+                  ? `${selectedFields.length} field${selectedFields.length > 1 ? 's' : ''} selected`
+                  : "Select master fields..."}
+              </span>
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+            <Command>
+              <CommandInput
+                placeholder="Search master fields..."
+                value={search}
+                onValueChange={setSearch}
+              />
+              <CommandList>
+                <CommandEmpty>No master fields found.</CommandEmpty>
+                <CommandGroup className="max-h-[300px] overflow-y-auto">
+                  {filteredFields.map((field) => {
+                    const isSelected = selectedFieldIds.includes(field.id);
+                    return (
+                      <CommandItem
+                        key={field.id}
+                        value={field.label}
+                        onSelect={() => {
+                          if (isSelected) {
+                            onRemove(field.id);
+                          } else {
+                            onSelect(field.id);
+                          }
+                        }}
+                        className="cursor-pointer"
+                      >
+                        <div className="flex items-center">
+                          <div className={`mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary ${isSelected ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}>
+                            {isSelected && <Check className="h-3 w-3" />}
+                          </div>
+                          <div>
+                            <div className="font-medium">{field.label}</div>
+                            <div className="text-xs text-muted-foreground">{field.field_key}</div>
+                          </div>
+                        </div>
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+        {selectedFields.length > 0 && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClear();
+            }}
+          >
+            <X className="h-4 w-4 text-muted-foreground" />
+          </Button>
+        )}
+      </div>
+
+      {/* Selected fields chips */}
+      {selectedFields.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {selectedFields.map(field => (
+            <Badge
+              key={field.id}
+              variant="secondary"
+              className="flex items-center gap-1.5 pr-1.5"
+            >
+              <Link2 className="h-3 w-3" />
+              <span className="max-w-[200px] truncate">{field.label}</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove(field.id);
+                }}
+                className="ml-1 rounded-full p-0.5 hover:bg-muted"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function DocumentTemplateManager({ document, isOpen, onClose,initialTemplates, onTemplateUpdate, classId }: DocumentTemplateManagerProps) {
   const { toast } = useToast();
@@ -71,18 +211,71 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPlaceholderFormOpen, setIsPlaceholderFormOpen] = useState(false);
   const [isEditingPlaceholder, setIsEditingPlaceholder] = useState<number | null>(null);
-  const [newPlaceholder, setNewPlaceholder] = useState<any>({ name: '', description: '', type: 'text', required: true });
+  // --- MODIFICATION: Default state for a new placeholder ---
+  const [newPlaceholder, setNewPlaceholder] = useState<{
+    name: string;
+    description: string;
+    type: string;
+    required: boolean;
+    entity_type: EntityType;
+    master_field_ids?: number[];
+    date_config?: {
+      useCurrentDate: boolean;
+      defaultDate?: string;
+      format?: string;
+    };
+  }>({
+    name: '',
+    description: '',
+    type: 'text',
+    required: true,
+    entity_type: 'principal',
+    master_field_ids: [],
+    date_config: {
+      useCurrentDate: true,
+      format: 'YYYY-MM-DD'
+    }
+  });
   const [templateFiles, setTemplateFiles] = useState<Map<string, File>>(new Map());
+  const [masterFields, setMasterFields] = useState<JobField[]>([]);
+  const [placeholderSearch, setPlaceholderSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentTemplate = (currentTemplateIndex !== null && templates[currentTemplateIndex]) ? templates[currentTemplateIndex] : null;
+  const masterFieldMap = useMemo(() => new Map(masterFields.map(f => [f.id, f.label])), [masterFields]);
+
+  const filteredPlaceholders = useMemo(() => {
+    if (!currentTemplate?.placeholders) return [];
+    if (!placeholderSearch) return currentTemplate.placeholders;
+    const searchLower = placeholderSearch.toLowerCase();
+    return currentTemplate.placeholders.filter(p =>
+      p.name.toLowerCase().includes(searchLower) ||
+      p.type.toLowerCase().includes(searchLower) ||
+      p.entity_type.toLowerCase().includes(searchLower) ||
+      (p.master_field_ids || []).some(id =>
+        masterFieldMap.get(id)?.toLowerCase().includes(searchLower)
+      )
+    );
+  }, [currentTemplate?.placeholders, placeholderSearch, masterFieldMap]);
+
+  // --- MODIFICATION: Fetch master fields when the dialog opens ---
+  const fetchMasterFields = async () => {
+    try {
+      const { data, error } = await supabase.from('tm_job_fields').select('id, field_key, label').order('label');
+      if (error) throw error;
+      setMasterFields(data || []);
+    } catch (error) {
+      console.error('Error fetching master fields:', error);
+      toast({ title: 'Could not load master fields', variant: 'destructive' });
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
-       // --- MODIFICATION: Ensure entity_types is always an array when loading initial data ---
-      const initialData = initialTemplates?.map(t => ({ 
-        ...t, 
+      fetchMasterFields(); // Fetch master fields on open
+      const initialData = initialTemplates?.map(t => ({
+        ...t,
         name: t.file_name,
-        entity_types: Array.isArray(t.entity_types) ? t.entity_types : [] 
+        entity_types: Array.isArray(t.entity_types) ? t.entity_types : []
       })) || [];
       setTemplates(initialData.map(t => ({ ...t, isDirty: false })));
       setCurrentTemplateIndex(initialData.length > 0 ? 0 : null);
@@ -93,7 +286,8 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   }, [isOpen, initialTemplates]);
 
   const extractPlaceholders = async (source: { type: 'file', content: File } | { type: 'text', content: string }): Promise<string[]> => {
-      setIsProcessing(true);
+    // ... (no changes in this function)
+    setIsProcessing(true);
       try {
           const matches = new Set<string>();
           if (source.type === 'file') {
@@ -127,10 +321,19 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   const autoGeneratePlaceholders = (extracted: string[]): Placeholder[] => extracted.map((name, index) => {
       const isImage = name.startsWith('%') && name.endsWith('%');
       const cleanName = isImage ? name.substring(1, name.length - 1) : name;
-      return { id: `auto_${Date.now()}_${index}`, name: cleanName, description: ``, type: isImage ? 'image' : 'text', required: true };
+      return {
+        id: `auto_${Date.now()}_${index}`,
+        name: cleanName,
+        description: ``,
+        type: isImage ? 'image' : 'text',
+        required: true,
+        entity_type: 'principal',
+        master_field_ids: []
+      };
   });
 
   const mergePlaceholders = (existingPlaceholders: Placeholder[], extractedNames: string[]): Placeholder[] => {
+      // ... (logic needs to be updated to preserve new fields)
       const existingMap = new Map(existingPlaceholders.map(p => [p.name, p]));
       const updatedPlaceholders: Placeholder[] = [];
       const processedNames = new Set<string>();
@@ -139,14 +342,26 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
           const cleanName = isImageTag ? name.substring(1, name.length - 1) : name;
           if (processedNames.has(cleanName)) continue;
           const existingPlaceholder = existingMap.get(cleanName);
-          if (existingPlaceholder) updatedPlaceholders.push(existingPlaceholder);
-          else updatedPlaceholders.push({ id: `auto_${Date.now()}_${updatedPlaceholders.length}`, name: cleanName, description: '', type: isImageTag ? 'image' : 'text', required: true });
+          if (existingPlaceholder) {
+            updatedPlaceholders.push(existingPlaceholder);
+          } else {
+            updatedPlaceholders.push({
+                id: `auto_${Date.now()}_${updatedPlaceholders.length}`,
+                name: cleanName,
+                description: '',
+                type: isImageTag ? 'image' : 'text',
+                required: true,
+                entity_type: 'principal',
+                master_field_id: undefined
+            });
+          }
           processedNames.add(cleanName);
       }
       return updatedPlaceholders;
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // ... (no changes in this function)
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.type !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return toast({ title: 'Invalid file type', variant: 'destructive' });
@@ -156,6 +371,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   };
 
   const addNewFileTemplate = (file: File, extractedPlaceholders: string[]) => {
+    // ... (no changes in this function)
     const tempId = `temp_file_${Date.now()}`;
     const newTemplate: DocumentTemplate = {
       id: tempId, document_id: document.id,
@@ -173,6 +389,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   };
 
   const addNewTextTemplate = () => {
+    // ... (no changes in this function)
     const tempId = `temp_text_${Date.now()}`;
     const newTemplate: DocumentTemplate = {
       id: tempId, document_id: document.id,
@@ -187,6 +404,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   };
 
   const handleEditorChange = (html: string) => {
+    // ... (no changes in this function)
     if (currentTemplateIndex === null) return;
     const updatedTemplates = [...templates];
     updatedTemplates[currentTemplateIndex].content = html;
@@ -195,14 +413,15 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   };
 
   const handleTemplateNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // ... (no changes in this function)
     if (currentTemplateIndex === null) return;
     const updatedTemplates = [...templates];
     updatedTemplates[currentTemplateIndex].name = e.target.value;
     setTemplates(updatedTemplates);
   };
 
-  // --- MODIFICATION: New handler to toggle entity types in the array ---
   const handleEntityTypeToggle = (entityType: EntityType) => {
+    // ... (no changes in this function)
     if (currentTemplateIndex === null) return;
     const updatedTemplates = [...templates];
     const currentTypes = updatedTemplates[currentTemplateIndex].entity_types || [];
@@ -214,6 +433,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   };
 
   const handleRescanPlaceholders = async () => {
+    // ... (no changes in this function)
     if (!currentTemplate || currentTemplate.content === undefined) return;
     const extracted = await extractPlaceholders({ type: 'text', content: currentTemplate.content });
     const updatedTemplates = [...templates];
@@ -227,40 +447,85 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   const handleEditorBlur = () => { if (currentTemplate?.isDirty) handleRescanPlaceholders(); };
 
   const savePlaceholder = () => {
+    // --- MODIFICATION: Save new placeholder fields ---
     if (!newPlaceholder.name.trim() || currentTemplateIndex === null) return;
     const updatedTemplates = [...templates];
     const targetTemplate = updatedTemplates[currentTemplateIndex];
     const updatedPlaceholders = [...(targetTemplate.placeholders || [])];
+
     const placeholder: Placeholder = {
       id: isEditingPlaceholder !== null ? updatedPlaceholders[isEditingPlaceholder].id : `ph_${Date.now()}`,
-      name: newPlaceholder.name.trim(), description: newPlaceholder.description.trim(),
-      type: newPlaceholder.type, required: newPlaceholder.required, options: newPlaceholder.options,
+      name: newPlaceholder.name.trim(),
+      description: newPlaceholder.description.trim(),
+      type: newPlaceholder.type,
+      required: newPlaceholder.required,
+      options: newPlaceholder.options,
+      entity_type: newPlaceholder.entity_type,
+      master_field_ids: Array.isArray(newPlaceholder.master_field_ids)
+        ? [...newPlaceholder.master_field_ids]
+        : [],
+      date_config: newPlaceholder.date_config
     };
-    if (isEditingPlaceholder !== null) updatedPlaceholders[isEditingPlaceholder] = placeholder;
-    else updatedPlaceholders.push(placeholder);
+
+    if (isEditingPlaceholder !== null) {
+      updatedPlaceholders[isEditingPlaceholder] = placeholder;
+    } else {
+      updatedPlaceholders.push(placeholder);
+    }
+
     targetTemplate.placeholders = updatedPlaceholders;
     setTemplates(updatedTemplates);
     setIsPlaceholderFormOpen(false);
-    setNewPlaceholder({ name: '', description: '', type: 'text', required: true, options: [] });
+
+    // Reset the form with proper default values
+    setNewPlaceholder({
+      name: '',
+      description: '',
+      type: 'text',
+      required: true,
+      entity_type: 'principal',
+      master_field_ids: [],
+      date_config: {
+        useCurrentDate: true,
+        format: 'YYYY-MM-DD'
+      }
+    });
+
     setIsEditingPlaceholder(null);
   };
 
   const editPlaceholder = (index: number) => {
-    const placeholder = currentTemplate?.placeholders?.[index];
+    if (!currentTemplate || currentTemplateIndex === null) return;
+    const placeholder = currentTemplate.placeholders?.[index];
     if (!placeholder) return;
-    setNewPlaceholder({ ...placeholder, description: placeholder.description || '', options: placeholder.options || [] });
-    setIsPlaceholderFormOpen(true);
+
+    setNewPlaceholder({
+      name: placeholder.name,
+      description: placeholder.description || '',
+      type: placeholder.type,
+      required: placeholder.required,
+      entity_type: placeholder.entity_type,
+      master_field_ids: Array.isArray(placeholder.master_field_ids)
+        ? [...placeholder.master_field_ids]
+        : [],
+      options: placeholder.options || [],
+      date_config: placeholder.date_config
+    });
+
     setIsEditingPlaceholder(index);
+    setIsPlaceholderFormOpen(true);
   };
 
-  const removePlaceholder = (index: number) => {
-    if (currentTemplateIndex === null) return;
-    const updatedTemplates = [...templates];
-    updatedTemplates[currentTemplateIndex].placeholders = updatedTemplates[currentTemplateIndex].placeholders?.filter((_, i) => i !== index);
-    setTemplates(updatedTemplates);
-  };
+const removePlaceholder = (index: number) => {
+  if (currentTemplateIndex === null) return;
+  const updatedTemplates = [...templates];
+  updatedTemplates[currentTemplateIndex].placeholders = updatedTemplates[currentTemplateIndex].placeholders?.filter((_, i) => i !== index);
+  setTemplates(updatedTemplates);
+};
 
   const uploadAndSaveAll = async () => {
+    // --- MODIFICATION: The placeholders data will automatically include the new fields ---
+    // No direct changes needed here, as the state already holds the correct structure.
     setIsProcessing(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -280,10 +545,9 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
           content: template.content, file_type: template.file_type, file_size: template.file_size,
           placeholders: template.placeholders || [], updated_at: new Date().toISOString(),
           created_by: user?.id, class_id: classId ? [classId] : undefined,
-          // --- MODIFICATION: Save the entity_types array. This should go to a JSON/JSONB column. ---
           entity_types: template.entity_types || [],
         };
-        
+
         let error;
         if (template.id.startsWith('temp_')) {
           ({ error } = await supabase.from('acc_portal_templates').insert(templateData));
@@ -305,6 +569,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   };
 
   const deleteTemplate = async (index: number) => {
+    // ... (no changes in this function)
     const templateToDelete = templates[index];
     if (!templateToDelete) return;
     if (!templateToDelete.id.startsWith('temp_')) {
@@ -324,6 +589,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   };
 
   const getTemplatePreviewUrl = (template: DocumentTemplate) => {
+    // ... (no changes in this function)
     if (!template) return '';
     if (template.file_path) {
       const { data } = supabase.storage.from('templates').getPublicUrl(template.file_path);
@@ -336,18 +602,18 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
     }
     return '';
   };
-    
+
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
         <DialogContent className="max-w-screen h-[90vh] flex flex-col">
+          {/* ... (DialogHeader and first column are unchanged) ... */}
           <DialogHeader>
             <DialogTitle>Template Manager: {document.display_name || document.name}</DialogTitle>
             <DialogDescription>Create and manage templates by uploading a DOCX file or using the rich text editor.</DialogDescription>
           </DialogHeader>
 
           <div className="grid grid-cols-12 gap-6 py-4 flex-1 overflow-y-auto">
-            {/* Column 1: Add & Queue */}
             <div className="col-span-3 flex flex-col gap-6 h-full">
               <Card>
                 <CardHeader><CardTitle className="text-lg">Add New Template</CardTitle></CardHeader>
@@ -370,7 +636,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
                             <div className="truncate">
                               <p className="font-medium truncate">{tpl.name}</p>
                               <div className="flex items-center flex-wrap gap-1 mt-1">
-                                {/* --- MODIFICATION: Display multiple badges for each selected entity type --- */}
                                 {tpl.entity_types?.map(et => <Badge key={et} variant="secondary" className="capitalize">{et}</Badge>)}
                                 <p className="text-xs text-muted-foreground">{tpl.placeholders?.length || 0} fields</p>
                               </div>
@@ -385,9 +650,9 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
               </Card>
             </div>
 
-            {/* Column 2: Editor */}
             <div className="col-span-5 h-full">
               {currentTemplate ? (
+                // ... (Template Editor section is unchanged) ...
                 <Card className="h-full flex flex-col">
                   <CardHeader className="flex flex-row justify-between items-center">
                     <div><CardTitle>Template Editor</CardTitle><CardDescription>Edit the name, type, and content below.</CardDescription></div>
@@ -397,17 +662,16 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2"><Label htmlFor="template-name">Template Name</Label><Input id="template-name" value={currentTemplate.name || ''} onChange={handleTemplateNameChange} /></div>
                         <div className="space-y-2"><Label htmlFor="entity-type">Template For</Label>
-                          {/* --- MODIFICATION: Replaced Select with DropdownMenu for multi-select --- */}
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="outline" className="w-full justify-between">
                                 <span className="truncate pr-2">
-                                  {currentTemplate.entity_types?.length > 0 ? currentTemplate.entity_types.join(', ') : "Select entities..."}
+                                  {currentTemplate.entity_types?.length > 0 ? currentTemplate.entity_types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(', ') : "Select entities..."}
                                 </span>
                                 <ChevronDown className="h-4 w-4 opacity-50" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent className="w-full">
+                            <DropdownMenuContent className="w-[--radix-popover-trigger-width]">
                               {ENTITY_TYPES.map(t => (
                                 <DropdownMenuCheckboxItem key={t.value} checked={currentTemplate.entity_types?.includes(t.value)} onCheckedChange={() => handleEntityTypeToggle(t.value)}>
                                   {t.label}
@@ -436,38 +700,77 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
               )}
             </div>
 
-            {/* Column 3: Placeholders */}
+            {/* --- MODIFICATION: Updated Placeholders section with Search Bar and Default Height --- */}
             <div className="col-span-4 h-full">
               <Card className="h-full flex flex-col">
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div><CardTitle>Placeholders</CardTitle><CardDescription>Fields for the selected template.</CardDescription></div>
-                  <Button variant="outline" size="sm" onClick={() => setIsPlaceholderFormOpen(true)} disabled={!currentTemplate}><PlusCircle className="mr-2 h-4 w-4" /> Add</Button>
+                <CardHeader>
+                  <div className="flex flex-row items-center justify-between">
+                    <div><CardTitle>Placeholders</CardTitle><CardDescription>Fields for the selected template.</CardDescription></div>
+                    <Button variant="outline" size="sm" onClick={() => setIsPlaceholderFormOpen(true)} disabled={!currentTemplate}><PlusCircle className="mr-2 h-4 w-4" /> Add</Button>
+                  </div>
+                  <div className="relative pt-4">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search placeholders..."
+                      value={placeholderSearch}
+                      onChange={(e) => setPlaceholderSearch(e.target.value)}
+                      disabled={!currentTemplate || !currentTemplate.placeholders?.length}
+                      className="pl-9"
+                    />
+                  </div>
                 </CardHeader>
-                <CardContent className="flex-1 overflow-y-auto">
+                <CardContent className="flex-1 overflow-y-auto min-h-[400px]">
                   {currentTemplate?.placeholders?.length > 0 ? (
-                    <Table>
-                      <TableHeader><TableRow><TableHead>Field</TableHead><TableHead>Type</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
-                      <TableBody>
-                        {currentTemplate.placeholders.map((p, index) => (
-                          <TableRow key={p.id}>
-                            <TableCell><div className="font-mono text-sm font-medium">{`{${p.name}}`}</div></TableCell>
-                            <TableCell><Badge variant="outline" className="capitalize">{p.type}</Badge></TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-1">
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => editPlaceholder(index)}><Pencil className="h-3.5 w-3.5" /></Button>
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => removePlaceholder(index)}><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                    filteredPlaceholders.length > 0 ? (
+                      <Table className="border max-h-[calc(100vh - 300px)]">
+                        <TableHeader className="bg-gray-100"><TableRow>
+                          <TableHead className="border-r font-bold text-gray-700">Field</TableHead>
+                          <TableHead className="border-r font-bold text-gray-700">Type</TableHead>
+                          <TableHead className="border-r font-bold text-gray-700">Entity</TableHead>
+                          <TableHead className="border-r font-bold text-gray-700">Linked Master Field</TableHead>
+                          <TableHead className="text-right border-r font-bold text-gray-700">Actions</TableHead>
+                        </TableRow></TableHeader>
+                        <TableBody>
+                          {filteredPlaceholders.map((p) => {
+                            const originalIndex = currentTemplate.placeholders.findIndex(orig => orig.id === p.id);
+                            return (
+                              <TableRow key={p.id}>
+                                <TableCell className="border-r"><div className="font-mono text-sm font-medium">{`{${p.name}}`}</div></TableCell>
+                                <TableCell className="border-r"><Badge variant="outline" className="capitalize">{p.type}</Badge></TableCell>
+                                <TableCell className="border-r"><Badge variant="outline" className="capitalize">{p.entity_type}</Badge></TableCell>
+                                <TableCell className="border-r">
+                                  {p.master_field_ids && p.master_field_ids.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {p.master_field_ids.map((fieldId) => (
+                                        <Badge key={fieldId} variant="secondary" className="font-normal">
+                                          <Link2 className="h-3 w-3 mr-1"/>
+                                          {masterFieldMap.get(fieldId) || `ID: ${fieldId}`}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <Badge variant="outline" className="font-normal text-muted-foreground">Not Linked</Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex justify-end gap-1">
+                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => editPlaceholder(originalIndex)}><Pencil className="h-3.5 w-3.5" /></Button>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => removePlaceholder(originalIndex)}><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <div className="text-center p-6 h-full flex items-center justify-center"><p className="text-sm text-muted-foreground">No placeholders match your search.</p></div>
+                    )
                   ) : ( <div className="text-center p-6 h-full flex items-center justify-center"><p className="text-sm text-muted-foreground">No placeholders found.</p></div>)}
                 </CardContent>
               </Card>
             </div>
           </div>
-
           <DialogFooter>
             <Button variant="outline" onClick={onClose} disabled={isProcessing}>Cancel</Button>
             <Button onClick={uploadAndSaveAll} disabled={isProcessing || templates.length === 0}>{isProcessing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Saving...</> : <><Save className="mr-2 h-4 w-4" />Save All Templates</>}</Button>
@@ -475,7 +778,7 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
         </DialogContent>
       </Dialog>
 
-      {/* Placeholder Form Dialog */}
+      {/* --- MODIFICATION: Updated Placeholder Form Dialog --- */}
       <Dialog open={isPlaceholderFormOpen} onOpenChange={setIsPlaceholderFormOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>{isEditingPlaceholder !== null ? 'Edit' : 'Add'} Placeholder</DialogTitle></DialogHeader>
@@ -484,8 +787,96 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
             <div className="space-y-2"><Label htmlFor="description">Description</Label><Textarea id="description" placeholder="A short description for this field" value={newPlaceholder.description} onChange={(e) => setNewPlaceholder({ ...newPlaceholder, description: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2"><Label htmlFor="type">Type</Label><Select value={newPlaceholder.type} onValueChange={(v) => setNewPlaceholder({ ...newPlaceholder, type: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PLACEHOLDER_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select></div>
-              <div className="flex items-end"><div className="flex items-center space-x-2"><Checkbox id="required" checked={newPlaceholder.required} onCheckedChange={(c) => setNewPlaceholder({ ...newPlaceholder, required: !!c })} /><Label htmlFor="required">Required field</Label></div></div>
+              <div className="space-y-2"><Label>Entity</Label><Select value={newPlaceholder.entity_type} onValueChange={(v) => setNewPlaceholder({ ...newPlaceholder, entity_type: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ENTITY_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select></div>
             </div>
+            {newPlaceholder.type === 'date' && (
+              <div className="space-y-4 border-t pt-4">
+                <div className="space-y-2">
+                  <Label>Date Configuration</Label>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="use-current-date"
+                      checked={newPlaceholder.date_config?.useCurrentDate ?? true}
+                      onCheckedChange={(checked) =>
+                        setNewPlaceholder({
+                          ...newPlaceholder,
+                          date_config: {
+                            ...newPlaceholder.date_config,
+                            useCurrentDate: checked === true
+                          }
+                        })
+                      }
+                    />
+                    <Label htmlFor="use-current-date">Use current date automatically</Label>
+                  </div>
+                </div>
+                {!(newPlaceholder.date_config?.useCurrentDate) && (
+                  <div className="space-y-2">
+                    <Label htmlFor="default-date">Default Date</Label>
+                    <Input
+                      id="default-date"
+                      type="date"
+                      value={newPlaceholder.date_config?.defaultDate || ''}
+                      onChange={(e) =>
+                        setNewPlaceholder({
+                          ...newPlaceholder,
+                          date_config: {
+                            ...newPlaceholder.date_config,
+                            defaultDate: e.target.value
+                          }
+                        })
+                      }
+                    />
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label htmlFor="date-format">Date Format</Label>
+                  <Select
+                    value={newPlaceholder.date_config?.format || 'YYYY-MM-DD'}
+                    onValueChange={(value) =>
+                      setNewPlaceholder({
+                        ...newPlaceholder,
+                        date_config: {
+                          ...newPlaceholder.date_config,
+                          format: value
+                        }
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select date format" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="YYYY-MM-DD">YYYY-MM-DD (2023-12-31)</SelectItem>
+                      <SelectItem value="MM/DD/YYYY">MM/DD/YYYY (12/31/2023)</SelectItem>
+                      <SelectItem value="DD/MM/YYYY">DD/MM/YYYY (31/12/2023)</SelectItem>
+                      <SelectItem value="MMMM D, YYYY">MMMM D, YYYY (December 31, 2023)</SelectItem>
+                      <SelectItem value="D MMMM YYYY">D MMMM YYYY (31 December 2023)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>Link to Master Field (Optional)</Label>
+              <MasterFieldPicker
+                  masterFields={masterFields}
+                  selectedFieldIds={newPlaceholder.master_field_ids || []}
+                  onSelect={(id) => setNewPlaceholder({
+                    ...newPlaceholder,
+                    master_field_ids: [...(newPlaceholder.master_field_ids || []), id]
+                  })}
+                  onRemove={(id) => setNewPlaceholder({
+                    ...newPlaceholder,
+                    master_field_ids: (newPlaceholder.master_field_ids || []).filter(fieldId => fieldId !== id)
+                  })}
+                  onClear={() => setNewPlaceholder({
+                    ...newPlaceholder,
+                    master_field_ids: []
+                  })}
+              />
+            </div>
+            <div className="flex items-center space-x-2 pt-2"><Checkbox id="required" checked={newPlaceholder.required} onCheckedChange={(c) => setNewPlaceholder({ ...newPlaceholder, required: !!c })} /><Label htmlFor="required">Required field</Label></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setIsPlaceholderFormOpen(false)}>Cancel</Button><Button onClick={savePlaceholder} disabled={!newPlaceholder.name.trim()}>{isEditingPlaceholder !== null ? 'Update' : 'Add'} Placeholder</Button></DialogFooter>
         </DialogContent>
