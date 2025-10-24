@@ -64,11 +64,11 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
   const [selectedDocForUpload, setSelectedDocForUpload] = useState<any>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewingDocuments, setPreviewingDocuments] = useState<any>(null);
-  const [showTemplateSelector, setShowTemplateSelector] = useState(false);
+  
+  // State for the unified template generation dialog
   const [showTemplateGenerator, setShowTemplateGenerator] = useState(false);
   const [selectedLetterInfo, setSelectedLetterInfo] = useState(null);
-  const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [availableTemplates, setAvailableTemplates] = useState<Map<string, any[]>>(new Map());
+  
   const [isPreparingTemplate, setIsPreparingTemplate] = useState(false);
   const [masterFields, setMasterFields] = useState<Map<number, any>>(new Map());
 
@@ -97,16 +97,14 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         .eq('document_id', documentId)
         .order('file_name', { ascending: true });
       if (error) throw error;
-      setAvailableTemplates(prev => new Map(prev).set(documentId, templates || []));
       return templates || [];
     } catch (error) {
       console.error('Error fetching document templates:', error);
-      setAvailableTemplates(prev => new Map(prev).set(documentId, []));
       return [];
     }
   };
 
-  const handleOpenTemplateSelector = async (docItem, task, colType, colId) => {
+  const handleOpenTemplateGenerator = async (docItem, task, colType, colId) => {
     console.log("🚀 Starting template generation process...", { document: docItem.document.display_name, task_id: task.id, colType, colId });
     setIsPreparingTemplate(true);
     try {
@@ -210,13 +208,16 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         masterFields: masterFields,
         entityIdMap: entityIdMap,
         sourceDataCache: sourceDataCache,
+        availableTemplates: templates,
+        // Pre-select template if only one exists, otherwise null to trigger selection screen
+        selectedTemplate: templates.length === 1 ? templates[0] : null,
         personData: {}, companyData: {}, extractedData: {},
       };
       console.log("✅ Step 5: Final data package prepared for dialog.");
 
       setSelectedLetterInfo(letterInfo);
-      setShowTemplateSelector(true);
-      console.log("🏁 Process complete. Opening template selector.");
+      setShowTemplateGenerator(true); // Directly open the main dialog
+      console.log("🏁 Process complete. Opening template generation dialog.");
 
     } catch (error) {
       console.error("❌FATAL ERROR during template data preparation:", error);
@@ -224,13 +225,6 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
     } finally {
       setIsPreparingTemplate(false);
     }
-  };
-
-  // ... The rest of your component code remains exactly the same ...
-  const handleTemplateSelected = (template) => {
-    setSelectedTemplate(template);
-    setShowTemplateSelector(false);
-    setShowTemplateGenerator(true);
   };
 
   const handleSaveGeneratedLetter = (file) => {
@@ -449,7 +443,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleOpenTemplateSelector(docItem, task, col.type, col.id)}
+                              onClick={() => handleOpenTemplateGenerator(docItem, task, col.type, col.id)}
                               disabled={isPreparingTemplate}
                             >
                               {isPreparingTemplate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
@@ -680,53 +674,12 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         </Dialog>
       )}
 
-      {showTemplateSelector && selectedLetterInfo?.document?.id && (
-        <Dialog open={showTemplateSelector} onOpenChange={setShowTemplateSelector}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Select a Template for {selectedLetterInfo.document?.display_name || 'Document'}</DialogTitle>
-              <DialogDescription>
-                Choose which template you want to use to generate this document.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="py-4 space-y-2 max-h-[60vh] overflow-y-auto">
-              {availableTemplates.get(selectedLetterInfo.document.id)?.length > 0 ? (
-                availableTemplates.get(selectedLetterInfo.document.id).map(template => (
-                  <button
-                    key={template.id}
-                    className="w-full text-left p-4 border rounded-md hover:bg-muted/50 transition-colors"
-                    onClick={() => handleTemplateSelected(template)}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="font-medium">{template.file_name}</div>
-                      <div className="text-xs px-2 py-1 bg-muted rounded-full">
-                        {template.file_type === 'text/html' ? 'HTML Editor' : 'DOCX File'}
-                      </div>
-                    </div>
-                    <div className="mt-2 text-xs text-muted-foreground flex items-center gap-2">
-                      <span>Updated: {new Date(template.updated_at || template.created_at).toLocaleDateString()}</span>
-                    </div>
-                  </button>
-                ))
-              ) : (
-                <div className="text-center p-8 border-2 border-dashed rounded-lg">
-                  <FileText className="mx-auto h-12 w-12 text-muted-foreground" />
-                  <h3 className="mt-2 text-sm font-medium text-foreground">No templates available</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Please create a template for this document type first.
-                  </p>
-                </div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {showTemplateGenerator && selectedTemplate && selectedLetterInfo && (
+      {showTemplateGenerator && selectedLetterInfo && (
         <TemplateGenerationDialog
           isOpen={showTemplateGenerator}
           onClose={() => setShowTemplateGenerator(false)}
-          template={selectedTemplate}
+          template={selectedLetterInfo.selectedTemplate} // This is the pre-selected one, or null
+          availableTemplates={selectedLetterInfo.availableTemplates} // The full list
           documentName={selectedLetterInfo.document.display_name}
           onSave={handleSaveGeneratedLetter}
           masterFields={selectedLetterInfo.masterFields}

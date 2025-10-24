@@ -64,7 +64,7 @@ interface FieldCardState {
   id: string // For React key prop
   field_key: string
   label: string
-  type: "text" | "date" | "number" | "select"
+  type: "text" | "date" | "number" | "select" | "image"
   is_required: boolean
   optionsText: string
   // Data source related state
@@ -379,7 +379,13 @@ export function AddFieldDialog({ open, onOpenChange, onSuccess }: AddFieldDialog
                 <div className="space-y-2">
                   <Label htmlFor={`type-${card.id}`}>Type</Label>
                   <ComboBox value={card.type} onValueChange={(v) => handleCardChange(index, { type: v as any })}
-                    options={[{ value: 'text', label: 'Text' }, { value: 'date', label: 'Date' }, { value: 'number', label: 'Number' }, { value: 'select', label: 'Select' }]}
+                    options={[
+                      { value: 'text', label: 'Text' },
+                      { value: 'date', label: 'Date' },
+                      { value: 'number', label: 'Number' },
+                      { value: 'select', label: 'Select' },
+                      { value: 'image', label: 'Image' }
+                    ]}
                   />
                 </div>
 

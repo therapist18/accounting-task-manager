@@ -14,7 +14,7 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 // --- MODIFICATION: Import Popover and Command for the Master Field Picker ---
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search } from "lucide-react";
+import { Loader2, PlusCircle, Trash2, FileText, Pencil, Save, RefreshCw, ChevronDown, Check, ChevronsUpDown, Link2, X, Search, View } from "lucide-react";
 import { DocumentTemplate as BaseDocumentTemplate } from "./types";
 import { TableHeader, Table, TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
 import supabase from "@/lib/supabase/client";
@@ -67,12 +67,6 @@ type Placeholder = {
   required: boolean; options?: string[];
   entity_type: EntityType; // Which entity this placeholder belongs to
   master_field_ids?: number[]; // Array of linked master field IDs
-  // Date field configuration
-  date_config?: {
-    useCurrentDate: boolean; // If true, uses current date automatically
-    defaultDate?: string;    // Default date if useCurrentDate is false
-    format?: string;         // Date format (e.g., 'YYYY-MM-DD', 'MM/DD/YYYY')
-  };
 };
 
 // --- MODIFICATION: Updated component for picking multiple master fields ---
@@ -215,26 +209,18 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   const [newPlaceholder, setNewPlaceholder] = useState<{
     name: string;
     description: string;
-    type: string;
+    type: 'text' | 'number' | 'date' | 'select' | 'array';
     required: boolean;
     entity_type: EntityType;
     master_field_ids?: number[];
-    date_config?: {
-      useCurrentDate: boolean;
-      defaultDate?: string;
-      format?: string;
-    };
+    options?: string[];
   }>({
     name: '',
     description: '',
     type: 'text',
     required: true,
     entity_type: 'principal',
-    master_field_ids: [],
-    date_config: {
-      useCurrentDate: true,
-      format: 'YYYY-MM-DD'
-    }
+    master_field_ids: []
   });
   const [templateFiles, setTemplateFiles] = useState<Map<string, File>>(new Map());
   const [masterFields, setMasterFields] = useState<JobField[]>([]);
@@ -242,6 +228,44 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentTemplate = (currentTemplateIndex !== null && templates[currentTemplateIndex]) ? templates[currentTemplateIndex] : null;
   const masterFieldMap = useMemo(() => new Map(masterFields.map(f => [f.id, f.label])), [masterFields]);
+
+  // --- MODIFICATION: State for managing horizontal panel visibility ---
+  const [panelsVisible, setPanelsVisible] = useState({
+    left: true,
+    middle: true,
+    right: true,
+  });
+
+  // --- MODIFICATION: Handler to toggle panel visibility, preventing the last panel from being hidden ---
+  const togglePanel = (panel: 'left' | 'middle' | 'right') => {
+    const currentlyVisibleCount = Object.values(panelsVisible).filter(Boolean).length;
+    if (currentlyVisibleCount === 1 && panelsVisible[panel]) {
+      toast({ title: "Cannot hide the last visible panel." });
+      return;
+    }
+    setPanelsVisible(prev => ({ ...prev, [panel]: !prev[panel] }));
+  };
+
+  // --- MODIFICATION: useMemo hook to calculate dynamic grid classes based on panel visibility ---
+  const panelClasses = useMemo(() => {
+    const { left, middle, right } = panelsVisible;
+    const visibleCount = [left, middle, right].filter(Boolean).length;
+
+    if (visibleCount === 3) return { left: 'col-span-3', middle: 'col-span-5', right: 'col-span-4' };
+    if (visibleCount === 2) {
+      if (!left) return { left: 'hidden', middle: 'col-span-7', right: 'col-span-5' };
+      if (!middle) return { left: 'hidden', middle: 'hidden', right: 'col-span-12' }; // Corrected logic
+      if (!right) return { left: 'col-span-4', middle: 'col-span-8', right: 'hidden' };
+    }
+    if (visibleCount === 1) {
+      if (left) return { left: 'col-span-12', middle: 'hidden', right: 'hidden' };
+      if (middle) return { left: 'hidden', middle: 'col-span-12', right: 'hidden' };
+      if (right) return { left: 'hidden', middle: 'hidden', right: 'col-span-12' };
+    }
+    // Fallback for no panels, though togglePanel prevents this
+    return { left: 'hidden', middle: 'hidden', right: 'hidden' };
+  }, [panelsVisible]);
+
 
   const filteredPlaceholders = useMemo(() => {
     if (!currentTemplate?.placeholders) return [];
@@ -464,7 +488,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
       master_field_ids: Array.isArray(newPlaceholder.master_field_ids)
         ? [...newPlaceholder.master_field_ids]
         : [],
-      date_config: newPlaceholder.date_config
     };
 
     if (isEditingPlaceholder !== null) {
@@ -509,7 +532,6 @@ export default function DocumentTemplateManager({ document, isOpen, onClose,init
         ? [...placeholder.master_field_ids]
         : [],
       options: placeholder.options || [],
-      date_config: placeholder.date_config
     });
 
     setIsEditingPlaceholder(index);
@@ -607,14 +629,23 @@ const removePlaceholder = (index: number) => {
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
         <DialogContent className="max-w-screen h-[90vh] flex flex-col">
-          {/* ... (DialogHeader and first column are unchanged) ... */}
           <DialogHeader>
             <DialogTitle>Template Manager: {document.display_name || document.name}</DialogTitle>
             <DialogDescription>Create and manage templates by uploading a DOCX file or using the rich text editor.</DialogDescription>
           </DialogHeader>
 
+          {/* --- MODIFICATION: Layout control toolbar --- */}
+          <div className="flex items-center gap-2 px-6 py-2 border-b border-t">
+            <View className="h-4 w-4 text-muted-foreground" />
+            <Label className="mr-2">View Panels:</Label>
+            <Button variant={panelsVisible.left ? 'secondary' : 'ghost'} size="sm" onClick={() => togglePanel('left')}>Templates</Button>
+            <Button variant={panelsVisible.middle ? 'secondary' : 'ghost'} size="sm" onClick={() => togglePanel('middle')}>Editor</Button>
+            <Button variant={panelsVisible.right ? 'secondary' : 'ghost'} size="sm" onClick={() => togglePanel('right')}>Placeholders</Button>
+          </div>
+
           <div className="grid grid-cols-12 gap-6 py-4 flex-1 overflow-y-auto">
-            <div className="col-span-3 flex flex-col gap-6 h-full">
+            {/* --- MODIFICATION: Left Panel with dynamic classes --- */}
+            <div className={`${panelClasses.left} flex flex-col gap-6 h-full transition-all duration-300`}>
               <Card>
                 <CardHeader><CardTitle className="text-lg">Add New Template</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
@@ -650,9 +681,9 @@ const removePlaceholder = (index: number) => {
               </Card>
             </div>
 
-            <div className="col-span-5 h-full">
+            {/* --- MODIFICATION: Middle Panel with dynamic classes --- */}
+            <div className={`${panelClasses.middle} h-full transition-all duration-300`}>
               {currentTemplate ? (
-                // ... (Template Editor section is unchanged) ...
                 <Card className="h-full flex flex-col">
                   <CardHeader className="flex flex-row justify-between items-center">
                     <div><CardTitle>Template Editor</CardTitle><CardDescription>Edit the name, type, and content below.</CardDescription></div>
@@ -694,14 +725,17 @@ const removePlaceholder = (index: number) => {
                   </CardContent>
                 </Card>
               ) : (
-                <div className="h-full flex items-center justify-center text-center border-2 border-dashed rounded-lg">
-                  <div><h3 className="text-lg font-medium">No Template Selected</h3><p className="text-sm text-muted-foreground mt-1">Add or select a template to begin editing.</p></div>
-                </div>
+                 panelsVisible.middle && (
+                  <div className="h-full flex items-center justify-center text-center border-2 border-dashed rounded-lg">
+                    <div><h3 className="text-lg font-medium">No Template Selected</h3><p className="text-sm text-muted-foreground mt-1">Add or select a template to begin editing.</p></div>
+                  </div>
+                 )
               )}
             </div>
 
-            {/* --- MODIFICATION: Updated Placeholders section with Search Bar and Default Height --- */}
-            <div className="col-span-4 h-full">
+            {/* --- MODIFICATION: Right Panel with dynamic classes --- */}
+            <div className={`${panelClasses.right} h-full transition-all duration-300`}>
+             {panelsVisible.right && (
               <Card className="h-full flex flex-col">
                 <CardHeader>
                   <div className="flex flex-row items-center justify-between">
@@ -769,6 +803,7 @@ const removePlaceholder = (index: number) => {
                   ) : ( <div className="text-center p-6 h-full flex items-center justify-center"><p className="text-sm text-muted-foreground">No placeholders found.</p></div>)}
                 </CardContent>
               </Card>
+             )}
             </div>
           </div>
           <DialogFooter>
@@ -778,101 +813,107 @@ const removePlaceholder = (index: number) => {
         </DialogContent>
       </Dialog>
 
-      {/* --- MODIFICATION: Updated Placeholder Form Dialog --- */}
+      {/* Placeholder Form Dialog */}
       <Dialog open={isPlaceholderFormOpen} onOpenChange={setIsPlaceholderFormOpen}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>{isEditingPlaceholder !== null ? 'Edit' : 'Add'} Placeholder</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{isEditingPlaceholder !== null ? 'Edit' : 'Add'} Placeholder</DialogTitle>
+          </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="space-y-2"><Label htmlFor="name">Name (no spaces, e.g., client_name)</Label><Input id="name" value={newPlaceholder.name} onChange={(e) => setNewPlaceholder({ ...newPlaceholder, name: e.target.value.replace(/\s+/g, '_') })} /></div>
-            <div className="space-y-2"><Label htmlFor="description">Description</Label><Textarea id="description" placeholder="A short description for this field" value={newPlaceholder.description} onChange={(e) => setNewPlaceholder({ ...newPlaceholder, description: e.target.value })} /></div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label htmlFor="type">Type</Label><Select value={newPlaceholder.type} onValueChange={(v) => setNewPlaceholder({ ...newPlaceholder, type: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PLACEHOLDER_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select></div>
-              <div className="space-y-2"><Label>Entity</Label><Select value={newPlaceholder.entity_type} onValueChange={(v) => setNewPlaceholder({ ...newPlaceholder, entity_type: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ENTITY_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-2">
+              <Label htmlFor="name">Name (no spaces, e.g., client_name)</Label>
+              <Input 
+                id="name" 
+                value={newPlaceholder.name} 
+                onChange={(e) => setNewPlaceholder({ ...newPlaceholder, name: e.target.value.replace(/\s+/g, '_') })} 
+              />
             </div>
-            {newPlaceholder.type === 'date' && (
-              <div className="space-y-4 border-t pt-4">
-                <div className="space-y-2">
-                  <Label>Date Configuration</Label>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="use-current-date"
-                      checked={newPlaceholder.date_config?.useCurrentDate ?? true}
-                      onCheckedChange={(checked) =>
-                        setNewPlaceholder({
-                          ...newPlaceholder,
-                          date_config: {
-                            ...newPlaceholder.date_config,
-                            useCurrentDate: checked === true
-                          }
-                        })
-                      }
-                    />
-                    <Label htmlFor="use-current-date">Use current date automatically</Label>
-                  </div>
-                </div>
-                {!(newPlaceholder.date_config?.useCurrentDate) && (
-                  <div className="space-y-2">
-                    <Label htmlFor="default-date">Default Date</Label>
-                    <Input
-                      id="default-date"
-                      type="date"
-                      value={newPlaceholder.date_config?.defaultDate || ''}
-                      onChange={(e) =>
-                        setNewPlaceholder({
-                          ...newPlaceholder,
-                          date_config: {
-                            ...newPlaceholder.date_config,
-                            defaultDate: e.target.value
-                          }
-                        })
-                      }
-                    />
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <Label htmlFor="date-format">Date Format</Label>
-                  <Select
-                    value={newPlaceholder.date_config?.format || 'YYYY-MM-DD'}
-                    onValueChange={(value) =>
-                      setNewPlaceholder({
-                        ...newPlaceholder,
-                        date_config: {
-                          ...newPlaceholder.date_config,
-                          format: value
-                        }
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select date format" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="YYYY-MM-DD">YYYY-MM-DD (2023-12-31)</SelectItem>
-                      <SelectItem value="MM/DD/YYYY">MM/DD/YYYY (12/31/2023)</SelectItem>
-                      <SelectItem value="DD/MM/YYYY">DD/MM/YYYY (31/12/2023)</SelectItem>
-                      <SelectItem value="MMMM D, YYYY">MMMM D, YYYY (December 31, 2023)</SelectItem>
-                      <SelectItem value="D MMMM YYYY">D MMMM YYYY (31 December 2023)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="description">Description</Label>
+              <Textarea 
+                id="description" 
+                placeholder="A short description for this field" 
+                value={newPlaceholder.description} 
+                onChange={(e) => setNewPlaceholder({ ...newPlaceholder, description: e.target.value })} 
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="type">Type</Label>
+                <Select 
+                  value={newPlaceholder.type} 
+                  onValueChange={(v) => setNewPlaceholder({ ...newPlaceholder, type: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PLACEHOLDER_TYPES.map(t => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Entity</Label>
+                <Select 
+                  value={newPlaceholder.entity_type} 
+                  onValueChange={(v) => setNewPlaceholder({ ...newPlaceholder, entity_type: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ENTITY_TYPES.map(t => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            {newPlaceholder.type === 'select' && (
+              <div className="space-y-2">
+                <Label>Options (one per line)</Label>
+                <Textarea
+                  placeholder="Option 1
+Option 2
+Option 3"
+                  value={newPlaceholder.options?.join('\n') || ''}
+                  onChange={(e) =>
+                    setNewPlaceholder({
+                      ...newPlaceholder,
+                      options: e.target.value.split('\n').filter(Boolean),
+                    })
+                  }
+                  rows={4}
+                />
               </div>
             )}
+            
             <div className="space-y-2">
               <Label>Link to Master Field (Optional)</Label>
               <MasterFieldPicker
-                  masterFields={masterFields}
-                  selectedFieldIds={newPlaceholder.master_field_ids || []}
-                  onSelect={(id) => setNewPlaceholder({
-                    ...newPlaceholder,
-                    master_field_ids: [...(newPlaceholder.master_field_ids || []), id]
-                  })}
-                  onRemove={(id) => setNewPlaceholder({
-                    ...newPlaceholder,
-                    master_field_ids: (newPlaceholder.master_field_ids || []).filter(fieldId => fieldId !== id)
-                  })}
-                  onClear={() => setNewPlaceholder({
-                    ...newPlaceholder,
-                    master_field_ids: []
+                masterFields={masterFields}
+                selectedFieldIds={newPlaceholder.master_field_ids || []}
+                onSelect={(id) => setNewPlaceholder({
+                  ...newPlaceholder,
+                  master_field_ids: [...(newPlaceholder.master_field_ids || []), id]
+                })}
+                onRemove={(id) => setNewPlaceholder({
+                  ...newPlaceholder,
+                  master_field_ids: (newPlaceholder.master_field_ids || []).filter(fieldId => fieldId !== id)
+                })}
+                onClear={() => setNewPlaceholder({
+                  ...newPlaceholder,
+                  master_field_ids: []
                   })}
               />
             </div>

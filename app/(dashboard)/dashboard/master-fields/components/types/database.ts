@@ -6,7 +6,7 @@ export interface Database {
             id: string
             field_key: string
             label: string
-            type: "text" | "date" | "number" | "select"
+            type: "text" | "date" | "number" | "select" | "image"
             is_required: boolean
             sources: JobFieldSource[]
             options: any
@@ -17,7 +17,7 @@ export interface Database {
             id?: string
             field_key: string
             label: string
-            type: "text" | "date" | "number" | "select"
+            type: "text" | "date" | "number" | "select" | "image"
             is_required?: boolean
             sources?: JobFieldSource[]
             options?: any
@@ -28,7 +28,7 @@ export interface Database {
             id?: string
             field_key?: string
             label?: string
-            type?: "text" | "date" | "number" | "select"
+            type?: "text" | "date" | "number" | "select" | "image"
             is_required?: boolean
             sources?: JobFieldSource[]
             options?: any
@@ -44,9 +44,10 @@ export interface Database {
     table: string
     path: string
     priority: number
+    document_id?: string[] | null
+    linking_variable?: "id" | "director_id" | null
   }
   
   export type JobField = Database["public"]["Tables"]["tm_job_fields"]["Row"]
   export type JobFieldInsert = Database["public"]["Tables"]["tm_job_fields"]["Insert"]
   export type JobFieldUpdate = Database["public"]["Tables"]["tm_job_fields"]["Update"]
-  
