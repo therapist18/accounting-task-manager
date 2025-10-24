@@ -210,7 +210,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         sourceDataCache: sourceDataCache,
         availableTemplates: templates,
         // Pre-select template if only one exists, otherwise null to trigger selection screen
-        selectedTemplate: templates.length === 1 ? templates[0] : null,
+        template: templates.length === 1 ? templates[0] : null,
         personData: {}, companyData: {}, extractedData: {},
       };
       console.log("✅ Step 5: Final data package prepared for dialog.");
@@ -678,7 +678,7 @@ export default function RequirementsTableCombined({ loading, error, filteredGrou
         <TemplateGenerationDialog
           isOpen={showTemplateGenerator}
           onClose={() => setShowTemplateGenerator(false)}
-          template={selectedLetterInfo.selectedTemplate} // This is the pre-selected one, or null
+          template={selectedLetterInfo.template} // This is the pre-selected one, or null
           availableTemplates={selectedLetterInfo.availableTemplates} // The full list
           documentName={selectedLetterInfo.document.display_name}
           onSave={handleSaveGeneratedLetter}
