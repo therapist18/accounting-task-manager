@@ -13,7 +13,7 @@
     import { useToast } from "@/components/ui/use-toast";
     import { AlignCenter, AlignLeft, AlignRight, CheckCircle2, Download, Expand, FileText, FileUp, Image as ImageIcon, Link2, Loader2, Pencil, Shrink, Wand2 } from "lucide-react";
     import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-
+    import html2pdf from 'html2pdf.js';
 
     const ISSUE_DATE_FIELDS = ['effect_from', 'from', 'valid_from', 'with effect_from', 'date_issued', 'issued_date', 'issued_at', 'date_of_issue', 'Date_of_Issue'];
 
@@ -254,11 +254,70 @@
             }
         };
 
-        const generateAndDownload = async (outputType = 'word') => {
-            setIsGenerating(true);
-            // ... (Generation logic)
-            setIsGenerating(false);
-        };
+ const generateAndDownload = async (outputType = 'word') => {
+    setIsGenerating(true);
+    try {
+        const fileName = `${documentName}_${formatDate(new Date(), 'YYYYMMDD')}`;
+        const contentElement = document.createElement('div');
+        contentElement.innerHTML = previewContent;
+
+        if (outputType === 'word') {
+            const fileBuffer = await htmlToDocx(previewContent, null, {
+                orientation: 'portrait',
+                margins: {
+                    top: 720,
+                    right: 720,
+                    bottom: 720,
+                    left: 720
+                }
+            });
+
+            const blob = new Blob([fileBuffer], {
+                type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${fileName}.docx`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else if (outputType === 'pdf') {
+            const opt = {
+                margin: 0.5,
+                filename: `${fileName}.pdf`,
+                image: {
+                    type: 'jpeg',
+                    quality: 0.98
+                },
+                html2canvas: {
+                    scale: 2
+                },
+                jsPDF: {
+                    unit: 'in',
+                    format: 'letter',
+                    orientation: 'portrait'
+                }
+            };
+            html2pdf().from(contentElement).set(opt).save();
+        }
+
+        toast({
+            title: "Download Started",
+            description: `Your ${outputType} document is being downloaded.`,
+            variant: "success",
+        });
+
+    } catch (error) {
+        console.error("Error generating document:", error);
+        toast({
+            title: "Generation Failed",
+            description: "An unexpected error occurred while generating the document.",
+            variant: "destructive",
+        });
+    } finally {
+        setIsGenerating(false);
+    }
+};
 
         const completionStats = useMemo(() => {
             const placeholders = selectedTemplate?.placeholders || [];
