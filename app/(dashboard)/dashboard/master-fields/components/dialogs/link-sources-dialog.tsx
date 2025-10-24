@@ -67,7 +67,7 @@ type SourceCardState = JobFieldSource & {
   fields: TableColumn[]
   loadingFields: boolean
   document_id?: string[] | null
-  linking_variable?: "id" | "director_id" | null
+  linking_variable?: "id" | "director_id" | "kyc_document_id" | null
 }
 
 function MultiSelectDocumentTypes({
@@ -93,13 +93,13 @@ function MultiSelectDocumentTypes({
   const filteredOptions = useMemo(() => {
     if (!search) return options
     const searchLower = search.toLowerCase()
-    return options.filter(option => 
+    return options.filter(option =>
       option.label.toLowerCase().includes(searchLower) ||
       option.value.toLowerCase().includes(searchLower)
     )
   }, [options, search])
 
-  const selectedItems = useMemo(() => 
+  const selectedItems = useMemo(() =>
     options.filter(option => selectedValues.includes(option.value)),
     [options, selectedValues]
   )
@@ -251,7 +251,7 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
           setLoadingDocumentTypes(true)
           const { data, error } = await supabase.from("acc_portal_kyc").select("id, display_name")
           if (error) throw error
-          
+
           // --- FIX APPLIED HERE ---
           // Added `|| ""` to ensure the label is always a string, even if
           // `display_name` from the database is null. This prevents the crash.
@@ -259,9 +259,9 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
             value: doc.id,
             label: doc.display_name || "",
           }));
-          
+
           setDocumentTypes(formattedDocTypes);
-          
+
           // Initialize selected document types from existing sources
           const docSource = sources.find(s => s.source_type === "document");
           if (docSource?.document_id) {
@@ -341,7 +341,7 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
   const updateSource = (index: number, updates: Partial<SourceCardState>) => {
     setSources(prev => {
       const updated = prev.map((source, i) => (i === index ? { ...source, ...updates } : source));
-      
+
       // Update selectedDocumentTypes when document_id changes
       if ('document_id' in updates) {
         const docSource = updated.find(s => s.source_type === "document");
@@ -351,10 +351,10 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
           setSelectedDocumentTypes([]);
         }
       }
-      
+
       return updated;
     });
-    
+
     if ("table" in updates && updates.table) {
       fetchFieldsForSource(index, updates.table)
     }
@@ -431,7 +431,7 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
   }
 
   if (!field) return null
-  
+
   const getSelectedFieldFromPath = (path: string) => (path ? path.split("->")[0] : "")
 
   return (
@@ -489,30 +489,30 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
                       />
                     </div>
                   </div>
-{source.source_type === "document" && (
-  <div className="space-y-2">
-    <Label>Document Types</Label>
-    <MultiSelectDocumentTypes
-      options={documentTypes}
-      selectedValues={source.document_id || []}
-      onSelect={(value) => {
-        updateSource(index, { 
-          document_id: [...(source.document_id || []), value] 
-        })
-      }}
-      onRemove={(value) => {
-        updateSource(index, { 
-          document_id: (source.document_id || []).filter(id => id !== value) 
-        })
-      }}
-      onClear={() => {
-        updateSource(index, { document_id: [] })
-      }}
-      placeholder="Select document types..."
-      emptyMessage="No document types found."
-    />
-  </div>
-)}
+                  {source.source_type === "document" && (
+                    <div className="space-y-2">
+                      <Label>Document Types</Label>
+                      <MultiSelectDocumentTypes
+                        options={documentTypes}
+                        selectedValues={source.document_id || []}
+                        onSelect={(value) => {
+                          updateSource(index, {
+                            document_id: [...(source.document_id || []), value]
+                          })
+                        }}
+                        onRemove={(value) => {
+                          updateSource(index, {
+                            document_id: (source.document_id || []).filter(id => id !== value)
+                          })
+                        }}
+                        onClear={() => {
+                          updateSource(index, { document_id: [] })
+                        }}
+                        placeholder="Select document types..."
+                        emptyMessage="No document types found."
+                      />
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <Label>Linking Variable</Label>
@@ -522,6 +522,7 @@ export function LinkSourcesDialog({ open, onOpenChange, field, onSuccess }: Link
                       options={[
                         { value: "id", label: "ID" },
                         { value: "director_id", label: "Director ID" },
+                        { value: "kyc_document_id", label: "KYC Document ID" },
                       ]}
                       placeholder="Select a linking variable..."
                     />
