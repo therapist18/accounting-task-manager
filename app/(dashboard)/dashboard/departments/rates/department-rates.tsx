@@ -894,8 +894,11 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
 
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet(`${currentDept.name} Rates`, {
-        properties: { outlineProperties: { summaryBelow: false } },
+        properties: { outlineProperties: { summaryBelow: false, summaryRight: false } },
       });
+
+      // Set outline levels
+      worksheet.properties.outlineLevels = { row: 3, column: 0 };
 
       // --- METADATA HEADER ---
       worksheet.mergeCells('A1:E1');
@@ -951,7 +954,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
         const row = worksheet.addRow([]);
         row.outlineLevel = level;
         let currentCellIndex = 1;
-        
+
         // Skip if entry is not valid
         if (!entry || typeof entry !== 'object') {
           console.warn('Invalid entry:', entry);
@@ -1019,67 +1022,139 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
         console.log(`Processing subdepartment: ${subdeptName}`, subdeptData);
         const subdeptPrefix = `${subdeptIndex + 1}`;
         let entryCounter = 0;
-        
-        // Add subdepartment row if it has direct entries
-        if (subdeptData.direct && subdeptData.direct.length > 0) {
+
+        // Add subdepartment row if it has direct entries or classes
+        const hasDirectEntries = subdeptData.direct && subdeptData.direct.length > 0;
+        const hasClasses = subdeptData.classes && Object.keys(subdeptData.classes).length > 0;
+
+        if (hasDirectEntries || hasClasses) {
           const subdeptRow = worksheet.addRow([]);
           subdeptRow.getCell(1).value = subdeptPrefix;
           subdeptRow.getCell(2).value = subdeptName;
-          subdeptRow.outlineLevel = 1;
-          subdeptRow.eachCell(c => styleCell(c, { 
-            font: { bold: true }, 
-            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } } 
+          subdeptRow.outlineLevel = 0; // Top level (1)
+          subdeptRow.eachCell(c => styleCell(c, {
+            font: { bold: true },
+            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } }
           }));
-          
-          // Add direct entries for subdepartment
-          subdeptData.direct.forEach(entry => {
-            addRateEntryRow(entry, `${subdeptPrefix}.${++entryCounter}`, 1);
-          });
-        }
 
-        // Process classes within subdepartment
-        if (subdeptData.classes && Object.keys(subdeptData.classes).length > 0) {
-          Object.entries(subdeptData.classes).forEach(([className, classData]) => {
-            console.log(`Exporting class: ${className} in ${subdeptName}`, classData);
-            const classPrefix = `${subdeptPrefix}.${++entryCounter}`;
-            
-            // Add class row
-            const classRow = worksheet.addRow([]);
-            classRow.getCell(1).value = classPrefix;
-            classRow.getCell(2).value = className;
-            classRow.outlineLevel = 1;
-            classRow.eachCell(c => styleCell(c, { 
-              font: { bold: true, italic: true }, 
-              fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } } 
-            }));
-            
-            // Add class direct entries
-            if (classData.direct && classData.direct.length > 0) {
-              classData.direct.forEach(entry => {
-                addRateEntryRow(entry, `${classPrefix}.${++entryCounter}`, 2);
-              });
-            }
-            
-            // Process subclasses
-            if (classData.subclasses && Object.keys(classData.subclasses).length > 0) {
-              Object.entries(classData.subclasses).forEach(([subclassName, subclassEntries]) => {
-                const subclassPrefix = `${classPrefix}.${++entryCounter}`;
-                const subclassRow = worksheet.addRow([]);
-                subclassRow.getCell(1).value = subclassPrefix;
-                subclassRow.getCell(2).value = subclassName;
-                subclassRow.outlineLevel = 2;
-                
-                // Add subclass entries
-                if (Array.isArray(subclassEntries)) {
-                  subclassEntries.forEach(entry => {
-                    addRateEntryRow(entry, `${subclassPrefix}.${++entryCounter}`, 3);
+          // Add direct entries for subdepartment if they exist
+          if (hasDirectEntries) {
+            subdeptData.direct.forEach(entry => {
+              addRateEntryRow(entry, `${subdeptPrefix}.${++entryCounter}`, 0);
+            });
+          }
+
+          // Process classes within subdepartment
+          if (subdeptData.classes && Object.keys(subdeptData.classes).length > 0) {
+            Object.entries(subdeptData.classes).forEach(([className, classData]) => {
+              console.log(`Exporting class: ${className} in ${subdeptName}`, classData);
+              const classPrefix = `${subdeptPrefix}.${++entryCounter}`;
+
+              // Check if this class has subclasses
+              const hasSubclasses = classData.subclasses && Object.keys(classData.subclasses).length > 0;
+
+              if (hasSubclasses) {
+                // Add class row as expandable
+                const classRow = worksheet.addRow([]);
+                classRow.getCell(1).value = classPrefix;
+                classRow.getCell(2).value = className;
+                classRow.outlineLevel = 1; // Second level (2)
+                classRow.eachCell(c => styleCell(c, {
+                  font: { bold: true, italic: true },
+                  fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }
+                }));
+
+                // Add class direct entries
+                if (classData.direct && classData.direct.length > 0) {
+                  classData.direct.forEach(entry => {
+                    addRateEntryRow(entry, `${classPrefix}.${++entryCounter}`, 1);
                   });
                 }
-              });
-            }
-          });
-        }
-      });
+
+                // Process subclasses
+                Object.entries(classData.subclasses).forEach(([subclassName, subclassEntries]) => {
+                  const subclassPrefix = `${classPrefix}.${++entryCounter}`;
+                  const subclassRow = worksheet.addRow([]);
+                  subclassRow.getCell(1).value = subclassPrefix;
+                  subclassRow.getCell(2).value = className + ' - ' + subclassName;
+                  subclassRow.outlineLevel = 2; // Third level (3)
+
+                  // Add subclass entries
+                  if (Array.isArray(subclassEntries)) {
+                    subclassEntries.forEach(entry => {
+                      addRateEntryRow(entry, `${subclassPrefix}.${++entryCounter}`, 2);
+                    });
+                  }
+                });
+              } else {
+                // If no subclasses, add class entries directly under subdepartment
+                if (classData.direct && classData.direct.length > 0) {
+                  classData.direct.forEach(entry => {
+                    const row = worksheet.addRow([]);
+                    row.getCell(1).value = classPrefix;
+                    row.getCell(2).value = className;
+
+                    // Add the rest of the entry data
+                    let currentCellIndex = 3; // Start after index and entity columns
+
+                    // Helper function to add data to the current cell and increment the index
+                    const add = (data: any) => {
+                      const cell = row.getCell(currentCellIndex++);
+                      if (typeof data === 'number') {
+                        cell.value = data;
+                        cell.numFmt = '#,##0.00';
+                      } else {
+                        cell.value = data;
+                      }
+                      return cell;
+                    };
+
+                    // Add all the entry data
+                    if (columnVisibility.processingFee) {
+                      add(isNaN(parseFloat(entry.processingFee.amount)) ? entry.processingFee.amount : parseFloat(entry.processingFee.amount));
+                      add(entry.processingFee.currency);
+                      add(entry.processingFee.rate);
+                    }
+                    if (columnVisibility.issuanceFee) {
+                      add(isNaN(parseFloat(entry.issuanceFee.amount)) ? entry.issuanceFee.amount : parseFloat(entry.issuanceFee.amount));
+                      add(entry.issuanceFee.currency);
+                      add(entry.issuanceFee.rate);
+                      add(entry.issuanceFee.periodType.join(', '));
+                      add(entry.issuanceFee.periodCount.join(', '));
+                    }
+                    // Add other fields as needed
+                    if (columnVisibility.bclConsultancy) {
+                      add(entry.bclConsultancy?.tier1 || 0);
+                      add(entry.bclConsultancy?.tier2 || 0);
+                      add(entry.bclConsultancy?.tier3 || 0);
+                    }
+                    if (columnVisibility.officer) {
+                      add(entry.officer?.bossFixed || 0);
+                      add(entry.officer?.paTier1 || 0);
+                      add(entry.officer?.paEditable || 0);
+                    }
+                    if (columnVisibility.extraConsideration) {
+                      add(getExtraConsiderationField(entry, 'tccCompany').applicable ? getExtraConsiderationField(entry, 'tccCompany').value : 'N/A');
+                      add(getExtraConsiderationField(entry, 'tccIndividual').applicable ? getExtraConsiderationField(entry, 'tccIndividual').value : 'N/A');
+                      add(getExtraConsiderationField(entry, 'auditorsFee').applicable ? getExtraConsiderationField(entry, 'auditorsFee').value : 'N/A');
+                      add(getExtraConsiderationField(entry, 'degree').applicable ? getExtraConsiderationField(entry, 'degree').value : 'N/A');
+                      add(getExtraConsiderationField(entry, 'tfFile').applicable ? getExtraConsiderationField(entry, 'tfFile').value : 'N/A');
+                    }
+                    if (columnVisibility.convenienceFee) {
+                      add(entry.convenienceFee?.alienAssistance?.applicable ? entry.convenienceFee.alienAssistance.value : 'N/A');
+                      add(entry.convenienceFee?.reEntryApproval?.applicable ? entry.convenienceFee.reEntryApproval.value : 'N/A');
+                      add(entry.convenienceFee?.passportEndorsement?.applicable ? entry.convenienceFee.passportEndorsement.value : 'N/A');
+                    }
+
+                    // Style the row
+                    row.outlineLevel = 0; // Same level as direct entries
+                    styleCell(row.getCell(2), { alignment: { indent: 0 } });
+                  });
+                }
+              }
+            });
+          }
+        }});
 
       // --- ADD TOTALS ---
       const totals = calculateTotals();
