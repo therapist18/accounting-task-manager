@@ -1026,26 +1026,44 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
         // Add subdepartment row if it has direct entries or classes
         const hasDirectEntries = subdeptData.direct && subdeptData.direct.length > 0;
         const hasClasses = subdeptData.classes && Object.keys(subdeptData.classes).length > 0;
+        
+        // Get subdepartment ID from either direct entries or classes
+        let subdeptId = '';
+        if (hasDirectEntries && subdeptData.direct[0]?.entityId) {
+          subdeptId = `subdept-${subdeptData.direct[0].entityId.split('-')[0]}`;
+        } else if (hasClasses) {
+          // If no direct entries, try to get ID from the first class
+          const firstClass = Object.values(subdeptData.classes)[0];
+          if (firstClass.direct?.[0]?.entityId) {
+            subdeptId = `subdept-${firstClass.direct[0].entityId.split('-')[0]}`;
+          } else if (Object.values(firstClass.subclasses || {})[0]?.[0]?.entityId) {
+            // Try to get from subclasses if no direct class entries
+            subdeptId = `subdept-${Object.values(firstClass.subclasses)[0][0].entityId.split('-')[0]}`;
+          }
+        }
+        
+        // If we couldn't determine the ID, default to expanded
+        const isSubdeptExpanded = subdeptId ? (entityVisibility[subdeptId] !== false) : true;
 
         if (hasDirectEntries || hasClasses) {
           const subdeptRow = worksheet.addRow([]);
           subdeptRow.getCell(1).value = subdeptPrefix;
           subdeptRow.getCell(2).value = subdeptName;
-          subdeptRow.outlineLevel = 0; // Top level (1)
-          subdeptRow.eachCell(c => styleCell(c, {
-            font: { bold: true },
-            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } }
+          subdeptRow.outlineLevel = 0; // Top level (0 for Excel)
+          subdeptRow.eachCell(c => styleCell(c, { 
+            font: { bold: true }, 
+            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } } 
           }));
 
-          // Add direct entries for subdepartment if they exist
-          if (hasDirectEntries) {
+          // Add direct entries for subdepartment if they exist and subdepartment is expanded
+          if (isSubdeptExpanded && hasDirectEntries) {
             subdeptData.direct.forEach(entry => {
-              addRateEntryRow(entry, `${subdeptPrefix}.${++entryCounter}`, 0);
+              addRateEntryRow(entry, `${subdeptPrefix}.${++entryCounter}`, 1);
             });
           }
 
-          // Process classes within subdepartment
-          if (subdeptData.classes && Object.keys(subdeptData.classes).length > 0) {
+          // Process classes within subdepartment if subdepartment is expanded
+          if (isSubdeptExpanded && subdeptData.classes && Object.keys(subdeptData.classes).length > 0) {
             Object.entries(subdeptData.classes).forEach(([className, classData]) => {
               console.log(`Exporting class: ${className} in ${subdeptName}`, classData);
               const classPrefix = `${subdeptPrefix}.${++entryCounter}`;
@@ -1058,7 +1076,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                 const classRow = worksheet.addRow([]);
                 classRow.getCell(1).value = classPrefix;
                 classRow.getCell(2).value = className;
-                classRow.outlineLevel = 1; // Second level (2)
+                classRow.outlineLevel = 1; // Second level (1)
                 classRow.eachCell(c => styleCell(c, {
                   font: { bold: true, italic: true },
                   fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }
@@ -1077,7 +1095,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                   const subclassRow = worksheet.addRow([]);
                   subclassRow.getCell(1).value = subclassPrefix;
                   subclassRow.getCell(2).value = className + ' - ' + subclassName;
-                  subclassRow.outlineLevel = 2; // Third level (3)
+                  subclassRow.outlineLevel = 2; // Third level (2)
 
                   // Add subclass entries
                   if (Array.isArray(subclassEntries)) {
@@ -1147,7 +1165,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                     }
 
                     // Style the row
-                    row.outlineLevel = 0; // Same level as direct entries
+                    row.outlineLevel = 1; // Same level as class entries
                     styleCell(row.getCell(2), { alignment: { indent: 0 } });
                   });
                 }

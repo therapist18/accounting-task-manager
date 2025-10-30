@@ -12,14 +12,22 @@ import { saveAs } from 'file-saver'
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/components/ui/use-toast"
-import htmlDocx from 'html-docx-js/dist/html-docx';
+let htmlDocx: any = null;
+import('html-docx-js/dist/html-docx')
+  .then(module => {
+    htmlDocx = module.default || module;
+  })
+  .catch(err => console.error('Failed to load html-docx-js', err));
+
 import TemplateGenerationDialog from "./TemplateGenerationDialog"
 import { StageUploadDialog } from "../tasks/components/StageUploadDialog"
 import { UploadModal } from "@/components/UploadModal"
 
-const generateDocxBlobFromHtml = (html: string) => {
-  const blob = htmlDocx.asBlob(html);
-  return blob;
+const generateDocxBlobFromHtml = async (html: string) => {
+  if (!htmlDocx) {
+    throw new Error('html-docx-js is not loaded yet');
+  }
+  return htmlDocx.asBlob(html);
 };
 
 const CLASS_D_ID = '1750687058159';
