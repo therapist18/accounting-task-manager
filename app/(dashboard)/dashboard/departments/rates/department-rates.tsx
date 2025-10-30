@@ -22,6 +22,69 @@ import { fetchDepartments } from "../departments/database"
 import { supabase } from "@/lib/supabase/client"
 import ColumnVisibilityControl, { ColumnVisibilityOption } from "../main-shared-components/column-visibility"
 import EntityVisibilityControl, { EntityVisibilityOption } from "../main-shared-components/entity-visibility"
+import * as ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
+import Pagination from "@/app/generic-components/Pagination"
+
+// --- Reusable Amount Input with Selectable Options ---
+const AmountInput = ({
+  value,
+  onChange,
+  disabled = false,
+  className = "",
+}: {
+  value: string | number;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  className?: string;
+}) => {
+  const options = ["N/A", "No fee is required", "GRATIS"];
+  const [open, setOpen] = useState(false);
+
+  const handleSelect = (option: string) => {
+    onChange(option);
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <Input
+        type="text"
+        value={value.toString()}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className={cn("pr-8", className)}
+      />
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="absolute right-0 top-0 h-full px-2 text-muted-foreground hover:bg-transparent"
+            disabled={disabled}
+          >
+            <ChevronDown className="h-4 w-4" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-48 p-1">
+          <div className="flex flex-col">
+            {options.map((option) => (
+              <Button
+                key={option}
+                variant="ghost"
+                className="justify-start text-sm font-normal"
+                onClick={() => handleSelect(option)}
+              >
+                {option}
+              </Button>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+};
+
 
 interface RateData {
   usd: number
@@ -35,12 +98,12 @@ interface RateEntry {
   entityName: string
   entityPath: string
   processingFee: {
-    amount: number
+    amount: number | string // Allow text
     currency: 'USD' | 'KSH'
     rate: number
   }
   issuanceFee: {
-    amount: number
+    amount: number | string // Allow text
     currency: 'USD' | 'KSH'
     rate: number
     periodType: string[]
@@ -187,6 +250,9 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
   const [density, setDensity] = useState<'comfortable' | 'compact' | 'spacious'>('comfortable')
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [showDefaultDisplayOnly, setShowDefaultDisplayOnly] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [currentPage, setCurrentPage] = useState(0)
+  const [itemsPerPage, setItemsPerPage] = useState(50)
 
   // Column visibility state
   const [columnVisibility, setColumnVisibility] = useState({
@@ -799,172 +865,252 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [debouncedSave, isReadOnly])
 
-  // Export function
-  const exportToCSV = () => {
-    const processedDepts = getProcessedDepartments()
-    const currentDept = processedDepts.find(d => d.id === selectedDepartment)
-    if (!currentDept || currentPeriod.data.length === 0) {
-      toast({
-        title: "No data to export",
-        description: "Please select a department with rate data",
-        variant: "destructive"
-      })
-      return
+  // Helper for styling Excel cells
+  const styleCell = (cell: ExcelJS.Cell, customStyle: Partial<ExcelJS.Style> = {}) => {
+    cell.font = { name: 'Calibri', size: 11, ...customStyle.font };
+    cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true, ...customStyle.alignment };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFD4D4D4' } },
+      left: { style: 'thin', color: { argb: 'FFD4D4D4' } },
+      right: { style: 'thin', color: { argb: 'FFD4D4D4' } },
+      bottom: { style: 'thin', color: { argb: 'FFD4D4D4' } },
+    };
+    if (customStyle.fill) {
+      cell.fill = customStyle.fill;
     }
+  };
 
-    const headers = [
-      'Index',
-      'Entity Name',
-      'Processing Fee Amount',
-      'Processing Fee Currency',
-      'Processing Fee (KSH)',
-      'Issuance Fee Amount',
-      'Issuance Fee Currency',
-      'Issuance Fee (KSH)',
-      'Period Types',
-      'Period Counts',
-      'BCL Tier 1',
-      'BCL Tier 2',
-      'BCL Tier 3',
-      'Officer Boss Fixed',
-      'Officer PA Tier 1',
-      'Officer PA Editable',
-      // Extra Consideration fields
-      'TCC Company Applicable',
-      'TCC Company Value',
-      'TCC Individual Applicable',
-      'TCC Individual Value',
-      'Auditors Fee Applicable',
-      'Auditors Fee Value',
-      'Degree Applicable',
-      'Degree Value',
-      'TF File Applicable',
-      'TF File Value',
-      // Convenience Fee fields
-      'Alien Assistance Applicable',
-      'Alien Assistance Value',
-      'Re-Entry Approval Applicable',
-      'Re-Entry Approval Value',
-      'Passport Endorsement Applicable',
-      'Passport Endorsement Value'
-    ]
-
-    const totals = calculateTotals()
-
-    // Only export visible entries
-    const visibleEntries = currentPeriod.data.filter(entry => {
-      const parts = entry.entityPath.split(' → ')
-      const subdept = parts[0]
-      const cls = parts[1]
-      const subcls = parts[2]
-
-      const subdeptId = `subdept-${entry.entityId.split('-')[0]}`
-      if (entityVisibility[subdeptId] === false) return false
-
-      if (cls) {
-        const classId = `class-${entry.entityId.split('-')[0]}-${entry.entityId.split('-')[1]}`
-        if (entityVisibility[classId] === false) return false
-
-        if (subcls) {
-          const subclassId = `subclass-${entry.entityId}`
-          if (entityVisibility[subclassId] === false) return false
-        }
+  // --- UPDATED EXPORT FUNCTION ---
+  const exportToExcel = async () => {
+    setIsExporting(true);
+    console.log('Starting Excel export...');
+    try {
+      const processedDepts = getProcessedDepartments();
+      const currentDept = processedDepts.find(d => d.id === selectedDepartment);
+      if (!currentDept || currentPeriod.data.length === 0) {
+        toast({ title: "No data to export", variant: "destructive" });
+        return;
       }
 
-      return true
-    })
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet(`${currentDept.name} Rates`, {
+        properties: { outlineProperties: { summaryBelow: false } },
+      });
 
-    const csvData = visibleEntries.map((entry, index) => [
-      index + 1,
-      entry.entityName,
-      entry.processingFee?.amount || 0,
-      entry.processingFee?.currency || 'KSH',
-      entry.processingFee?.rate || 0,
-      entry.issuanceFee?.amount || 0,
-      entry.issuanceFee?.currency || 'KSH',
-      entry.issuanceFee?.rate || 0,
-      entry.issuanceFee?.periodType?.join('; ') || '',
-      entry.issuanceFee?.periodCount?.join('; ') || '',
-      entry.bclConsultancy?.tier1 || 0,
-      entry.bclConsultancy?.tier2 || 0,
-      entry.bclConsultancy?.tier3 || 0,
-      entry.officer?.bossFixed || 0,
-      entry.officer?.paTier1 || 0,
-      entry.officer?.paEditable || 0,
-      // Extra Consideration fields
-      getExtraConsiderationField(entry, 'tccCompany').applicable ? 'Yes' : 'No',
-      getExtraConsiderationField(entry, 'tccCompany').value,
-      getExtraConsiderationField(entry, 'tccIndividual').applicable ? 'Yes' : 'No',
-      getExtraConsiderationField(entry, 'tccIndividual').value,
-      getExtraConsiderationField(entry, 'auditorsFee').value,
-      getExtraConsiderationField(entry, 'degree').applicable ? 'Yes' : 'No',
-      getExtraConsiderationField(entry, 'degree').value,
-      getExtraConsiderationField(entry, 'tfFile').applicable ? 'Yes' : 'No',
-      getExtraConsiderationField(entry, 'tfFile').value,
-      // Convenience Fee fields
-      getConvenienceFeeField(entry, 'alienAssistance').applicable ? 'Yes' : 'No',
-      getConvenienceFeeField(entry, 'alienAssistance').value,
-      getConvenienceFeeField(entry, 'reEntryApproval').applicable ? 'Yes' : 'No',
-      getConvenienceFeeField(entry, 'reEntryApproval').value,
-      getConvenienceFeeField(entry, 'passportEndorsement').applicable ? 'Yes' : 'No',
-      getConvenienceFeeField(entry, 'passportEndorsement').value
-    ])
+      // --- METADATA HEADER ---
+      worksheet.mergeCells('A1:E1');
+      worksheet.getCell('A1').value = `Rates for ${currentDept.name}`;
+      worksheet.getCell('A1').font = { name: 'Calibri', size: 16, bold: true };
+      worksheet.mergeCells('A2:E2');
+      worksheet.getCell('A2').value = `USD Rate: ${rates.usd}`;
+      worksheet.getCell('A2').font = { name: 'Calibri', size: 12 };
+      worksheet.mergeCells('A3:E3');
+      const effectiveDateStr = `Effective Period: ${format(currentPeriod.effectiveFrom, "PPP")}${currentPeriod.effectiveTo ? ` - ${format(currentPeriod.effectiveTo, "PPP")}` : ''}`;
+      worksheet.getCell('A3').value = effectiveDateStr;
+      worksheet.getCell('A3').font = { name: 'Calibri', size: 12 };
 
-    // Add totals row
-    const totalsRow = [
-      'TOTALS',
-      '',
-      '',
-      '',
-      totals.processingFeeRate,
-      '',
-      '',
-      totals.issuanceFeeRate,
-      '',
-      '',
-      totals.bclTier1,
-      totals.bclTier2,
-      totals.bclTier3,
-      totals.officerBossFixed,
-      totals.officerPaTier1,
-      totals.officerPaEditable,
-      '',
-      totals.extraTccCompany,
-      '',
-      totals.extraTccIndividual,
-      '',
-      totals.extraAuditorsFee,
-      '',
-      totals.extraDegree,
-      '',
-      totals.extraTfFile,
-      '',
-      totals.convenienceAlienAssistance,
-      '',
-      totals.convenienceReEntryApproval,
-      '',
-      totals.conveniencePassportEndorsement
-    ]
+      const headerStartRow = 5;
 
-    const csvContent = [headers, ...csvData, totalsRow]
-      .map(row => row.map(cell => `"${cell}"`).join(','))
-      .join('\n')
+      // --- HEADER CONFIGURATION ---
+      const headerConfig = {
+        index: { main: '#', sub: [''], span: 1, width: 6 },
+        entity: { main: 'Entity', sub: [''], span: 1, width: 45 },
+        processingFee: { main: 'Processing Fee', sub: ['Amount', 'Currency', 'Fee (KSH)'], span: 3, widths: [18, 12, 18] },
+        issuanceFee: { main: 'Issuance Fee', sub: ['Amount', 'Currency', 'Fee (KSH)', 'Period Type', 'Period Count'], span: 5, widths: [18, 12, 18, 20, 20] },
+        bclConsultancy: { main: 'BCL Consultancy', sub: ['Tier 1', 'Tier 2', 'Tier 3'], span: 3, widths: [15, 15, 15] },
+        officer: { main: 'Officer', sub: ['Boss Fixed', 'PA Tier 1', 'PA Editable'], span: 3, widths: [15, 15, 15] },
+        extraConsideration: { main: 'Extra Consideration', sub: ['TCC Company', 'TCC Individual', 'Auditors Fee', 'Degree', 'TF File'], span: 5, widths: [22, 22, 22, 22, 22] },
+        convenienceFee: { main: 'Convenience Fee', sub: ['Alien Assistance', 'Re-Entry', 'Passport Endorsement'], span: 3, widths: [22, 22, 22] },
+      };
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    link.setAttribute('href', url)
-    link.setAttribute('download', `${currentDept.name}_rates_${format(new Date(), 'yyyy-MM-dd')}.csv`)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+      const visibleColumns = Object.keys(columnVisibility).filter(key => columnVisibility[key]);
+      const columnsToExport = visibleColumns.map(key => headerConfig[key]).filter(Boolean);
 
-    toast({
-      title: "Export Successful",
-      description: `Exported ${visibleEntries.length} visible rate entries with totals to CSV`,
-    })
-  }
+      const mainHeaderRow = worksheet.getRow(headerStartRow);
+      mainHeaderRow.height = 25;
+      const subHeaderRow = worksheet.getRow(headerStartRow + 1);
+      subHeaderRow.height = 20;
+
+      let colIndex = 1;
+      columnsToExport.forEach(config => {
+        if (config.span > 1) worksheet.mergeCells(headerStartRow, colIndex, headerStartRow, colIndex + config.span - 1);
+        const mainCell = mainHeaderRow.getCell(colIndex);
+        mainCell.value = config.main;
+        styleCell(mainCell, { font: { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } }, alignment: { vertical: 'middle', horizontal: 'center' } });
+        config.sub.forEach((sub, i) => {
+          const subCell = subHeaderRow.getCell(colIndex + i);
+          subCell.value = sub;
+          worksheet.getColumn(colIndex + i).width = (config.widths || [config.width])[i];
+          styleCell(subCell, { font: { bold: true, color: { argb: 'FFFFFFFF' } }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } }, alignment: { vertical: 'middle', horizontal: 'center' } });
+        });
+        colIndex += config.span;
+      });
+
+      const addRateEntryRow = (entry: any, index: string, level: number) => {
+        console.log(`Adding row - Level ${level}, Index ${index}:`, entry);
+        const row = worksheet.addRow([]);
+        row.outlineLevel = level;
+        let currentCellIndex = 1;
+        
+        // Skip if entry is not valid
+        if (!entry || typeof entry !== 'object') {
+          console.warn('Invalid entry:', entry);
+          return;
+        }
+
+        // Helper function to add data to the current cell and increment the index
+        const add = (data: any) => {
+          const cell = row.getCell(currentCellIndex++);
+          if (typeof data === 'number') {
+            cell.value = data;
+            cell.numFmt = '#,##0.00';
+          } else {
+            cell.value = data;
+          }
+          return cell;
+        };
+
+        if (columnVisibility.index) add(index);
+        if (columnVisibility.entity) {
+          const entityCell = row.getCell(currentCellIndex++);
+          entityCell.value = entry.entityName;
+          styleCell(entityCell, { alignment: { indent: level } });
+        }
+        if (columnVisibility.processingFee) {
+          add(isNaN(parseFloat(entry.processingFee.amount)) ? entry.processingFee.amount : parseFloat(entry.processingFee.amount));
+          add(entry.processingFee.currency);
+          add(entry.processingFee.rate);
+        }
+        if (columnVisibility.issuanceFee) {
+          add(isNaN(parseFloat(entry.issuanceFee.amount)) ? entry.issuanceFee.amount : parseFloat(entry.issuanceFee.amount));
+          add(entry.issuanceFee.currency);
+          add(entry.issuanceFee.rate);
+          add(entry.issuanceFee.periodType.join(', '));
+          add(entry.issuanceFee.periodCount.join(', '));
+        }
+        if (columnVisibility.bclConsultancy) {
+          add(entry.bclConsultancy.tier1);
+          add(entry.bclConsultancy.tier2);
+          add(entry.bclConsultancy.tier3);
+        }
+        if (columnVisibility.officer) {
+          add(entry.officer.bossFixed);
+          add(entry.officer.paTier1);
+          add(entry.officer.paEditable);
+        }
+        if (columnVisibility.extraConsideration) {
+          add(getExtraConsiderationField(entry, 'tccCompany').applicable ? getExtraConsiderationField(entry, 'tccCompany').value : 'N/A');
+          add(getExtraConsiderationField(entry, 'tccIndividual').applicable ? getExtraConsiderationField(entry, 'tccIndividual').value : 'N/A');
+          add(getExtraConsiderationField(entry, 'auditorsFee').applicable ? getExtraConsiderationField(entry, 'auditorsFee').value : 'N/A');
+          add(getExtraConsiderationField(entry, 'degree').applicable ? getExtraConsiderationField(entry, 'degree').value : 'N/A');
+          add(getExtraConsiderationField(entry, 'tfFile').applicable ? getExtraConsiderationField(entry, 'tfFile').value : 'N/A');
+        }
+        if (columnVisibility.convenienceFee) {
+          // Add convenience fee values
+          add(entry.convenienceFee.alienAssistance.applicable ? entry.convenienceFee.alienAssistance.value : 'N/A');
+          add(entry.convenienceFee.reEntryApproval.applicable ? entry.convenienceFee.reEntryApproval.value : 'N/A');
+          add(entry.convenienceFee.passportEndorsement.applicable ? entry.convenienceFee.passportEndorsement.value : 'N/A');
+        }
+      };
+      const groupedData = getGroupedEntries(currentDept);
+      console.log('Grouped data structure:', JSON.stringify(groupedData, null, 2));
+
+      Object.entries(groupedData).forEach(([subdeptName, subdeptData], subdeptIndex) => {
+        console.log(`Processing subdepartment: ${subdeptName}`, subdeptData);
+        const subdeptPrefix = `${subdeptIndex + 1}`;
+        let entryCounter = 0;
+        
+        // Add subdepartment row if it has direct entries
+        if (subdeptData.direct && subdeptData.direct.length > 0) {
+          const subdeptRow = worksheet.addRow([]);
+          subdeptRow.getCell(1).value = subdeptPrefix;
+          subdeptRow.getCell(2).value = subdeptName;
+          subdeptRow.outlineLevel = 1;
+          subdeptRow.eachCell(c => styleCell(c, { 
+            font: { bold: true }, 
+            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } } 
+          }));
+          
+          // Add direct entries for subdepartment
+          subdeptData.direct.forEach(entry => {
+            addRateEntryRow(entry, `${subdeptPrefix}.${++entryCounter}`, 1);
+          });
+        }
+
+        // Process classes within subdepartment
+        if (subdeptData.classes && Object.keys(subdeptData.classes).length > 0) {
+          Object.entries(subdeptData.classes).forEach(([className, classData]) => {
+            console.log(`Exporting class: ${className} in ${subdeptName}`, classData);
+            const classPrefix = `${subdeptPrefix}.${++entryCounter}`;
+            
+            // Add class row
+            const classRow = worksheet.addRow([]);
+            classRow.getCell(1).value = classPrefix;
+            classRow.getCell(2).value = className;
+            classRow.outlineLevel = 1;
+            classRow.eachCell(c => styleCell(c, { 
+              font: { bold: true, italic: true }, 
+              fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } } 
+            }));
+            
+            // Add class direct entries
+            if (classData.direct && classData.direct.length > 0) {
+              classData.direct.forEach(entry => {
+                addRateEntryRow(entry, `${classPrefix}.${++entryCounter}`, 2);
+              });
+            }
+            
+            // Process subclasses
+            if (classData.subclasses && Object.keys(classData.subclasses).length > 0) {
+              Object.entries(classData.subclasses).forEach(([subclassName, subclassEntries]) => {
+                const subclassPrefix = `${classPrefix}.${++entryCounter}`;
+                const subclassRow = worksheet.addRow([]);
+                subclassRow.getCell(1).value = subclassPrefix;
+                subclassRow.getCell(2).value = subclassName;
+                subclassRow.outlineLevel = 2;
+                
+                // Add subclass entries
+                if (Array.isArray(subclassEntries)) {
+                  subclassEntries.forEach(entry => {
+                    addRateEntryRow(entry, `${subclassPrefix}.${++entryCounter}`, 3);
+                  });
+                }
+              });
+            }
+          });
+        }
+      });
+
+      // --- ADD TOTALS ---
+      const totals = calculateTotals();
+      const totalsRow = worksheet.addRow([]);
+      totalsRow.font = { bold: true };
+
+      let totalCellIndex = 1;
+      if (columnVisibility.index) totalCellIndex++;
+      if (columnVisibility.entity) totalsRow.getCell(totalCellIndex++).value = 'TOTALS';
+      if (columnVisibility.processingFee) { totalsRow.getCell(totalCellIndex + 2).value = totals.processingFeeRate; totalCellIndex += 3; }
+      if (columnVisibility.issuanceFee) { totalsRow.getCell(totalCellIndex + 2).value = totals.issuanceFeeRate; totalCellIndex += 5; }
+      if (columnVisibility.bclConsultancy) { totalsRow.getCell(totalCellIndex++).value = totals.bclTier1; totalsRow.getCell(totalCellIndex++).value = totals.bclTier2; totalsRow.getCell(totalCellIndex++).value = totals.bclTier3; }
+      if (columnVisibility.officer) { totalsRow.getCell(totalCellIndex++).value = totals.officerBossFixed; totalsRow.getCell(totalCellIndex++).value = totals.officerPaTier1; totalsRow.getCell(totalCellIndex++).value = totals.officerPaEditable; }
+      if (columnVisibility.extraConsideration) { totalsRow.getCell(totalCellIndex++).value = totals.extraTccCompany; totalsRow.getCell(totalCellIndex++).value = totals.extraTccIndividual; totalsRow.getCell(totalCellIndex++).value = totals.extraAuditorsFee; totalsRow.getCell(totalCellIndex++).value = totals.extraDegree; totalsRow.getCell(totalCellIndex++).value = totals.extraTfFile; }
+      if (columnVisibility.convenienceFee) { totalsRow.getCell(totalCellIndex++).value = totals.convenienceAlienAssistance; totalsRow.getCell(totalCellIndex++).value = totals.convenienceReEntryApproval; totalsRow.getCell(totalCellIndex++).value = totals.conveniencePassportEndorsement; }
+
+      totalsRow.eachCell({ includeEmpty: true }, cell => styleCell(cell, { fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } } }));
+
+      // --- SAVE FILE ---
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `${currentDept.name}_Rates_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+      toast({ title: "Export Successful" });
+
+    } catch (error) {
+      console.error("Export to Excel failed:", error);
+      toast({ title: "Export Failed", variant: "destructive" });
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // Auto-save when data changes
   useEffect(() => {
@@ -1231,7 +1377,10 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
 
     const rate = currency === 'USD' ? rates.usd : 1
     const amount = entry[feeType].amount
-    const calculatedRate = currency === 'USD' ? amount * rate : amount
+    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+    const isValidNumber = !isNaN(numAmount) && isFinite(numAmount);
+
+    const calculatedRate = (currency === 'USD' && isValidNumber) ? numAmount * rate : (isValidNumber ? numAmount : 0)
 
     updateRateEntry(entryId, {
       [feeType]: {
@@ -1409,7 +1558,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
         e.preventDefault()
         if (!isReadOnly) {
           // Move to next input or trigger save
-          const inputs = document.querySelectorAll('input[type="number"], select')
+          const inputs = document.querySelectorAll('input[type="text"], input[type="number"], select')
           const currentIndex = Array.from(inputs).indexOf(e.target as HTMLElement)
           const nextInput = inputs[currentIndex + 1] as HTMLElement
           if (nextInput) {
@@ -1457,27 +1606,23 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
         {columnVisibility.processingFee && (
           <>
             <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
-              <Input
-                type="text"
-                value={entry.processingFee?.amount?.toString() || '0'}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value === '' || /^\d*\.?\d*$/.test(value)) {
-                    const numValue = value === '' ? 0 : parseFloat(value);
-                    updateRateEntry(entry.id, {
-                      processingFee: {
-                        ...entry.processingFee,
-                        amount: numValue,
-                        rate: entry.processingFee?.currency === 'USD'
-                          ? numValue * rates.usd
-                          : numValue
-                      }
-                    });
-                  }
+              <AmountInput
+                value={entry.processingFee?.amount ?? ''}
+                onChange={(value) => {
+                  const numValue = parseFloat(value);
+                  const isValidNumber = !isNaN(numValue) && isFinite(numValue);
+                  updateRateEntry(entry.id, {
+                    processingFee: {
+                      ...entry.processingFee,
+                      amount: value, // Store raw value
+                      rate: isValidNumber
+                        ? (entry.processingFee?.currency === 'USD' ? numValue * rates.usd : numValue)
+                        : 0
+                    }
+                  });
                 }}
-                onKeyDown={handleKeyDown}
-                className={cn(inputHeight, "text-center", fontSize, "border-0 bg-white/70 focus:bg-white transition-colors")}
                 disabled={isReadOnly}
+                className={cn(inputHeight, "text-center", fontSize, "border-0 bg-white/70 focus:bg-white transition-colors")}
               />
             </TableCell>
             <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
@@ -1507,27 +1652,23 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
         {columnVisibility.issuanceFee && (
           <>
             <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
-              <Input
-                type="text"
-                value={entry.issuanceFee?.amount?.toString() || '0'}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value === '' || /^\d*\.?\d*$/.test(value)) {
-                    const numValue = value === '' ? 0 : parseFloat(value);
-                    updateRateEntry(entry.id, {
-                      issuanceFee: {
-                        ...entry.issuanceFee,
-                        amount: numValue,
-                        rate: entry.issuanceFee?.currency === 'USD'
-                          ? numValue * rates.usd
-                          : numValue
-                      }
-                    });
-                  }
+              <AmountInput
+                value={entry.issuanceFee?.amount ?? ''}
+                onChange={(value) => {
+                  const numValue = parseFloat(value);
+                  const isValidNumber = !isNaN(numValue) && isFinite(numValue);
+                  updateRateEntry(entry.id, {
+                    issuanceFee: {
+                      ...entry.issuanceFee,
+                      amount: value,
+                      rate: isValidNumber
+                        ? (entry.issuanceFee?.currency === 'USD' ? numValue * rates.usd : numValue)
+                        : 0
+                    }
+                  });
                 }}
-                onKeyDown={handleKeyDown}
-                className={cn(inputHeight, "text-center", fontSize, "border-0 bg-white/70 focus:bg-white transition-colors")}
                 disabled={isReadOnly}
+                className={cn(inputHeight, "text-center", fontSize, "border-0 bg-white/70 focus:bg-white transition-colors")}
               />
             </TableCell>
             <TableCell className="border-r border-gray-200 bg-blue-50/30 p-2">
@@ -1821,6 +1962,62 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
 
   const processedDepartments = getProcessedDepartments()
 
+  // Get current department's entries for pagination
+  const currentDepartment = processedDepartments.find(d => d.id === selectedDepartment)
+  const groupedEntries = currentDepartment ? getGroupedEntries(currentDepartment) : {}
+
+  // Flatten the entries for pagination
+  const allEntries = Object.entries(groupedEntries).flatMap(([subdeptName, subdeptData]) => {
+    const entries = []
+
+    // Add subdepartment entry
+    if (subdeptData.direct.length > 0) {
+      entries.push({
+        ...subdeptData.direct[0],
+        level: 0,
+        parentId: null,
+        isExpanded: expandedRows.has(`group-${subdeptName}`)
+      })
+    }
+
+    // Add class entries if expanded
+    if (expandedRows.has(`group-${subdeptName}`)) {
+      Object.entries(subdeptData.classes).forEach(([className, classData]) => {
+        // Add class entry
+        if (classData.direct.length > 0) {
+          entries.push({
+            ...classData.direct[0],
+            level: 1,
+            parentId: `group-${subdeptName}`,
+            isExpanded: expandedRows.has(`class-${subdeptName}-${className}`)
+          })
+        }
+
+        // Add subclass entries if expanded
+        if (expandedRows.has(`class-${subdeptName}-${className}`)) {
+          Object.values(classData.subclasses).flat().forEach(entry => {
+            entries.push({
+              ...entry,
+              level: 2,
+              parentId: `class-${subdeptName}-${className}`
+            })
+          })
+        }
+      })
+    }
+
+    return entries
+  })
+
+  // Get current entries for the current page
+  const pageCount = Math.ceil(allEntries.length / itemsPerPage)
+  const currentItems = allEntries.slice(
+    currentPage * itemsPerPage,
+    (currentPage + 1) * itemsPerPage
+  )
+
+
+
   return (
     <div className="w-full space-y-6">
       {/* Header with improved controls */}
@@ -1899,11 +2096,15 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
           <Button
             variant="outline"
             size="sm"
-            onClick={exportToCSV}
-            disabled={!selectedDepartment || currentPeriod.data.length === 0}
+            onClick={exportToExcel}
+            disabled={!selectedDepartment || currentPeriod.data.length === 0 || isExporting}
           >
-            <DownloadCloud className="h-4 w-4 mr-2" />
-            Export to Excel
+            {isExporting ? (
+              <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+            ) : (
+              <DownloadCloud className="h-4 w-4 mr-2" />
+            )}
+            {isExporting ? 'Exporting...' : 'Export to Excel'}
           </Button>
 
           {/* Historical Periods Dialog */}
@@ -2068,7 +2269,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
               <div className="relative overflow-auto max-h-[calc(100vh-300px)] border-0">
                 <Table className="min-w-max">
                   {/* Sticky Headers */}
-                  <TableHeader className="sticky top-0 z-50">
+                  <TableHeader className="sticky top-0 z-40 bg-white shadow-sm">
                     {/* Main Headers Row */}
                     <TableRow className="bg-blue-700 text-white border-b border-slate-300">
                       {columnVisibility.index && (
@@ -2262,7 +2463,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                             )}
                             {columnVisibility.entity && (
                               <TableCell className={cn(
-                                "sticky bg-blue-100 border-r font-semibold z-30 px-3 p-2",
+                                "sticky bg-blue-100 border-r font-semibold z-30 px-3 pl-8 p-2",
                                 columnVisibility.index ? "left-16" : "left-0"
                               )}>
                                 <div className="flex justify-between items-center gap-3">
@@ -2570,6 +2771,18 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
           </TabsContent>
         ))}
       </Tabs>
+      <div className="sticky bottom-0 bg-white border-t pt-2">
+        <Pagination
+          totalItems={allEntries.length}
+          itemsPerPage={itemsPerPage}
+          currentPage={currentPage}
+          onPageChange={setCurrentPage}
+          onItemsPerPageChange={(newSize) => {
+            setItemsPerPage(newSize);
+            setCurrentPage(0); // Reset to first page when page size changes
+          }}
+        />
+      </div>
     </div>
   )
 }

@@ -41,6 +41,8 @@ interface NewCompanyInquiryDialogProps {
     onEnquiryCreated: (enquiries: any[]) => void
     departments: any[]
     selectedDepartmentId?: string
+    selectedSubdepartmentId?: string
+    selectedClassId?: string
     users: any[]
     officers: any[]
 }
@@ -51,16 +53,11 @@ export function NewCompanyInquiryDialog({
     onEnquiryCreated,
     departments: propDepartments = [],
     selectedDepartmentId = '',
+    selectedSubdepartmentId = '',
+    selectedClassId = '',
     users = [],
     officers = []
 }: NewCompanyInquiryDialogProps) {
-    console.log('🔹 [NewCompanyInquiryDialog] Rendering with props:', {
-        open,
-        selectedDepartmentId,
-        departmentsCount: propDepartments.length,
-        usersCount: users.length,
-        officersCount: officers.length
-    });
     // State for company and official selection
     const [companies, setCompanies] = useState<Company[]>([])
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
@@ -87,8 +84,8 @@ export function NewCompanyInquiryDialog({
     const [formData, setFormData] = useState({
         job_description: '',
         department_id: selectedDepartmentId || '',
-        subdepartment_id: '',
-        class_id: '',
+        subdepartment_id: selectedSubdepartmentId || '',
+        class_id: selectedClassId || '',
         subclass_id: '',
         officer_id: '',
         task_manager_id: '',
@@ -174,22 +171,79 @@ export function NewCompanyInquiryDialog({
         }
     }, []);
 
-    // Effect to handle department selection and load companies
+    // Sync departments state with propDepartments
     useEffect(() => {
-        console.log('🔹 [NewCompanyInquiryDialog] useEffect - open:', open, 'selectedDepartmentId:', selectedDepartmentId);
-        
+        if (propDepartments && propDepartments.length > 0) {
+            setDepartments(propDepartments);
+        }
+    }, [propDepartments]);
+
+    // Effect to handle department, subdepartment, and class selection
+    useEffect(() => {
+                
         if (open) {
             if (selectedDepartmentId) {
-                console.log('   [NewCompanyInquiryDialog] Setting selected department:', selectedDepartmentId);
+               
+                // Find the selected department, subdepartment, and class
+                const department = propDepartments.find(d => 
+                    String(d.id) === String(selectedDepartmentId) || d.id === Number(selectedDepartmentId)
+                );
+               
+                let subdepartment = null;
+                let selectedClass = null;
+                
+                if (department?.tm_subdepartments) {
+                    
+                    if (selectedSubdepartmentId) {
+                        subdepartment = department.tm_subdepartments.find((sd: any) => 
+                            String(sd.id) === String(selectedSubdepartmentId) || sd.id === Number(selectedSubdepartmentId)
+                        );
+                        
+                        if (subdepartment?.classes && selectedClassId) {
+                                                     
+                            // Search in both main classes and their subclasses
+                            const findClass = (classes: any[], targetId: string | number): any => {
+                                for (const cls of classes) {
+                                    if (String(cls.id) === String(targetId) || cls.id === Number(targetId)) {
+                                        return cls;
+                                    }
+                                    if (cls.subClasses?.length) {
+                                        const found = findClass(cls.subClasses, targetId);
+                                        if (found) return found;
+                                    }
+                                }
+                                return null;
+                            };
+                            
+                            selectedClass = findClass(subdepartment.classes, selectedClassId);
+                             
+                            // If the selected class has subclasses, auto-select the first one
+                            if (selectedClass?.subClasses?.length > 0) {
+                                const firstSubclass = selectedClass.subClasses[0];
+                                setFormData(prev => ({
+                                    ...prev,
+                                    class_id: selectedClass.id.toString(),
+                                    subclass_id: firstSubclass.id.toString()
+                                }));
+                            } else if (selectedClass) {
+                                setFormData(prev => ({
+                                    ...prev,
+                                    class_id: selectedClass.id.toString(),
+                                    subclass_id: ''
+                                }));
+                            }
+                        }
+                    }
+                }
+                
                 setFormData(prev => {
                     const newData = {
                         ...prev,
-                        department_id: selectedDepartmentId,
-                        subdepartment_id: '',
-                        class_id: '',
-                        subclass_id: ''
+                        department_id: String(selectedDepartmentId),
+                        subdepartment_id: subdepartment ? String(subdepartment.id) : '',
+                        class_id: selectedClass ? String(selectedClass.id) : '',
+                        subclass_id: '' // Reset subclass when class changes
                     };
-                    console.log('   [NewCompanyInquiryDialog] Updated formData:', newData);
                     return newData;
                 });
             } else {
@@ -197,11 +251,8 @@ export function NewCompanyInquiryDialog({
             }
             
             if (companies.length === 0) {
-                console.log('   [NewCompanyInquiryDialog] No companies loaded, fetching...');
-                loadCompanies();
-            } else {
-                console.log('   [NewCompanyInquiryDialog] Companies already loaded:', companies.length);
-            }
+               loadCompanies();
+            }   
         }
     }, [open, selectedDepartmentId, companies.length, loadCompanies]);
 
@@ -217,34 +268,45 @@ export function NewCompanyInquiryDialog({
     }, [selectedCompany, fetchOfficials]);
 
 
-    // --- Reused Logic from EnquiryDialog (unchanged) ---
+    // Handle form field changes
     const handleChange = useCallback((field: keyof typeof formData, value: any) => {
-        console.log(`🔄 [NewCompanyInquiryDialog] Form field changed - ${field}:`, value);
-        console.log('   [NewCompanyInquiryDialog] Current form state before change:', formData);
         setFormData(prev => {
-            const newState = {...prev};
+            const newState = { ...prev };
             
             if (field === 'department_id') {
-                console.log(`🏢 [LOG] Department selected. Previous department_id: ${prev.department_id}, New department_id: ${value}`);
-                return { ...prev, department_id: value, subdepartment_id: '', class_id: '', subclass_id: '', officer_id: '', task_manager_id: '', task_assistant_id: '' };
+                newState.department_id = value;
+                newState.subdepartment_id = '';
+                newState.class_id = '';
+                newState.subclass_id = '';
+                newState.officer_id = '';
+                newState.task_manager_id = '';
+                newState.task_assistant_id = '';
+            } 
+            else if (field === 'subdepartment_id') {
+                newState.subdepartment_id = value;
+                newState.class_id = '';
+                newState.subclass_id = '';
+                newState.officer_id = '';
+                newState.task_manager_id = '';
+                newState.task_assistant_id = '';
+            } 
+            else if (field === 'class_id') {
+                newState.class_id = value;
+                newState.subclass_id = '';
+            } 
+            else if (field === 'subclass_id') {
+                newState.subclass_id = value;
             }
-            if (field === 'subdepartment_id') {
-                console.log(`📋 [LOG] Subdepartment selected. Previous subdepartment_id: ${prev.subdepartment_id}, New subdepartment_id: ${value}`);
-                return { ...prev, subdepartment_id: value, class_id: '', subclass_id: '', officer_id: '', task_manager_id: '', task_assistant_id: '' };
+            else if (field === 'task_manager_id') {
+                newState.task_manager_id = value;
+                newState.task_assistant_id = '';
+            } 
+            else {
+                newState[field] = value;
             }
-            if (field === 'class_id') {
-                console.log(`📚 [LOG] Class selected. Previous class_id: ${prev.class_id}, New class_id: ${value}`);
-                return { ...prev, class_id: value, subclass_id: '' };
-            }
-            if (field === 'task_manager_id') {
-                console.log(`👔 [LOG] Task manager selected. Previous task_manager_id: ${prev.task_manager_id}, New task_manager_id: ${value}`);
-                return { ...prev, task_manager_id: value, task_assistant_id: '' };
-            }
-            
-            console.log(`📝 [LOG] Updating field ${field} to:`, value);
-            return { ...prev, [field]: value };
+                        return { ...newState }; // Return a new object to ensure re-render
         });
-    }, []);
+    }, [formData]);
 
     const loadStaffData = useCallback(async () => {
         setLoadingStaff(true);
@@ -391,20 +453,76 @@ export function NewCompanyInquiryDialog({
             return [];
         }
         
-        const dept = departments.find(d => d.id.toString() === formData.department_id);
+        const dept = departments.find(d => 
+            String(d.id) === String(formData.department_id) || d.id === Number(formData.department_id)
+        );
         const subdepts = dept?.tm_subdepartments || [];
         
         console.log('   [LOG] Found department:', dept ? dept.name : 'Not found');
-        console.log('   [LOG] Available subdepartments:', subdepts.map(s => ({ id: s.id, name: s.name })));
+        console.log('   [LOG] Available subdepartments:', subdepts.map((s: any) => ({ id: s.id, name: s.name })));
         
         return subdepts;
     }, [departments, formData.department_id]);
 
+    // Get main classes (without subclasses)
     const availableClasses = useMemo(() => {
         if (!formData.subdepartment_id) return [];
-        const subdept = availableSubdepartments.find(s => s.id.toString() === formData.subdepartment_id);
-        return subdept?.classes || [];
+        const subdept = availableSubdepartments.find(s => 
+            String(s.id) === String(formData.subdepartment_id) || s.id === Number(formData.subdepartment_id)
+        );
+        console.log('   [LOG] Found subdepartment for classes:', subdept ? subdept.name : 'Not found');
+        
+        const mainClasses = subdept?.classes?.filter(cls => !cls.parentId) || [];
+        
+        console.log('   [LOG] Available main classes:', mainClasses.map((c: any) => ({
+            id: c.id,
+            name: c.name,
+            hasSubclasses: c.subClasses?.length > 0
+        })));
+        
+        return mainClasses;
     }, [availableSubdepartments, formData.subdepartment_id]);
+    
+    // Get subclasses for the selected class
+    const availableSubclasses = useMemo(() => {
+        if (!formData.class_id) return [];
+        
+        const subdept = availableSubdepartments.find(s => 
+            String(s.id) === String(formData.subdepartment_id) || s.id === Number(formData.subdepartment_id)
+        );
+        
+        if (!subdept?.classes) return [];
+        
+        // Find the selected class and return its subclasses
+        const findClass = (classes: any[]): any[] => {
+            for (const cls of classes) {
+                if (String(cls.id) === String(formData.class_id) || cls.id === Number(formData.class_id)) {
+                    return cls.subClasses || [];
+                }
+                if (cls.subClasses?.length) {
+                    const found = findClass(cls.subClasses);
+                    if (found) return found;
+                }
+            }
+            return [];
+        };
+        
+        const subclasses = findClass(subdept.classes);
+        console.log('   [LOG] Available subclasses:', subclasses.map((c: any) => ({
+            id: c.id,
+            name: c.name
+        })));
+        
+        return subclasses;
+    }, [availableSubdepartments, formData.subdepartment_id, formData.class_id]);
+    
+    // Auto-select the first subclass when they become available
+    useEffect(() => {
+        if (formData.class_id && availableSubclasses.length > 0 && !formData.subclass_id) {
+            console.log('   [LOG] Auto-selecting first subclass:', availableSubclasses[0].name);
+            handleChange('subclass_id', availableSubclasses[0].id.toString());
+        }
+    }, [availableSubclasses, formData.class_id, formData.subclass_id]);
     // --- End of Reused Logic ---
 
 
@@ -665,15 +783,61 @@ export function NewCompanyInquiryDialog({
                                             </Select>
                                         </div>
                                     </div>
-                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                         <div>
-                                             <Label>Class</Label>
-                                             <Select value={formData.class_id} onValueChange={(v) => handleChange('class_id', v)} disabled={!formData.subdepartment_id}>
-                                                 <SelectTrigger><SelectValue placeholder="Select class..." /></SelectTrigger>
-                                                 <SelectContent>{availableClasses.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}</SelectContent>
-                                             </Select>
-                                         </div>
-                                     </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <Label>Class</Label>
+                                            <Select 
+                                                value={formData.class_id} 
+                                                onValueChange={(v) => {
+                                                    // When class changes, update class and auto-select first subclass if available
+                                                    handleChange('class_id', v);
+                                                    
+                                                    // Find the selected class
+                                                    const selectedClass = availableClasses.find(c => c.id.toString() === v);
+                                                    
+                                                    // If class has subclasses, auto-select the first one
+                                                    if (selectedClass?.subClasses?.length > 0) {
+                                                        handleChange('subclass_id', selectedClass.subClasses[0].id.toString());
+                                                    } else {
+                                                        handleChange('subclass_id', '');
+                                                    }
+                                                }} 
+                                                disabled={!formData.subdepartment_id}
+                                            >
+                                                <SelectTrigger><SelectValue placeholder="Select class..." /></SelectTrigger>
+                                                <SelectContent>
+                                                    {availableClasses.map(c => (
+                                                        <SelectItem key={c.id} value={c.id.toString()}>
+                                                            {c.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div>
+                                            <Label>Subclass</Label>
+                                            <Select 
+                                                value={formData.subclass_id} 
+                                                onValueChange={(v) => handleChange('subclass_id', v)} 
+                                                disabled={!formData.class_id || availableSubclasses.length === 0}
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder={
+                                                        availableSubclasses.length > 0 
+                                                            ? "Select subclass..." 
+                                                            : "No subclasses available"
+                                                    } />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {availableSubclasses.map(sc => (
+                                                        <SelectItem key={sc.id} value={sc.id.toString()}>
+                                                            {sc.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
                                 </CardContent>
                             </Card>
 

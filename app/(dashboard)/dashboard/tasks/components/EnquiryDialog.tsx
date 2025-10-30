@@ -124,54 +124,52 @@ export function EnquiryDialog({
         // Enquiry date
         enquiry_date: new Date().toISOString().split('T')[0]
     })
-    const handleChange = useCallback((field: keyof FormData, value: any) => {
-        setFormData(prev => {
-            if (field === 'department_id') {
-                console.log(`[LOG] Department changed to ID: ${value}. Resetting sub-dept, class, and staff.`);
-                return {
-                    ...prev,
-                    department_id: value,
-                    subdepartment_id: '',
-                    class_id: '',
-                    subclass_id: '',
-                    // Clear all staff assignments when department changes
-                    officer_id: '',
-                    task_manager_id: '',
-                    task_assistant_id: ''
-                };
-            }
-
-            if (field === 'subdepartment_id') {
-                console.log(`[LOG] Subdepartment changed to ID: ${value}. Resetting class and staff.`);
-                return {
-                    ...prev,
-                    subdepartment_id: value,
-                    class_id: '',
-                    subclass_id: '',
-                    // Clear all staff assignments when subdepartment changes
-                    officer_id: '',
-                    task_manager_id: '',
-                    task_assistant_id: ''
-                };
-            }
-
-            if (field === 'class_id') {
-                return { ...prev, class_id: value, subclass_id: '' };
-            }
-
-            // When manager changes, clear assistant
-            if (field === 'task_manager_id') {
-                console.log(`[LOG] Task Manager changed to ID: ${value}. Resetting assistant.`);
-                return {
-                    ...prev,
-                    task_manager_id: value,
-                    task_assistant_id: '' // Always reset assistant when manager changes
-                };
-            }
-
-            return { ...prev, [field]: value };
-        });
-    }, []);
+const handleChange = useCallback((field: keyof typeof formData, value: any) => {
+  console.log(`[FORM-CHANGE] Field: ${field}, Value:`, value);
+  
+  setFormData(prev => {
+    const newState = { ...prev };
+    
+    if (field === 'department_id') {
+      console.log(`[FORM-CHANGE] Department changed to ${value}, resetting dependent fields`);
+      return {
+        ...prev,
+        department_id: value,
+        subdepartment_id: '',
+        class_id: '',
+        subclass_id: '',
+        subdepartment_name: '',
+        class_name: '',
+        subclass_name: ''
+      };
+    }
+    
+    if (field === 'subdepartment_id') {
+      console.log(`[FORM-CHANGE] Subdepartment changed to ${value}, resetting dependent fields`);
+      return {
+        ...prev,
+        subdepartment_id: value,
+        class_id: '',
+        subclass_id: '',
+        class_name: '',
+        subclass_name: ''
+      };
+    }
+    
+    if (field === 'class_id') {
+      console.log(`[FORM-CHANGE] Class changed to ${value}, resetting subclass`);
+      return {
+        ...prev,
+        class_id: value,
+        subclass_id: '',
+        subclass_name: ''
+      };
+    }
+    
+    // For all other fields, just update the value
+    return { ...prev, [field]: value };
+  });
+}, []);
 
     const loadStaffData = useCallback(async () => {
         console.log('📥 [LOG] Loading staff data from database...');
@@ -343,56 +341,92 @@ export function EnquiryDialog({
         }
     }, [handleChange])
 
-    useEffect(() => {
-        const loadDepartments = async () => {
-            try {
-                // Use prop departments if available, otherwise fetch
-                if (propDepartments && propDepartments.length > 0) {
-                    console.log('📦 [LOG] Using prop departments:', propDepartments.length);
-                    setDepartments(propDepartments);
-                } else {
-                    console.log('🔄 [LOG] Fetching departments from API...');
-                    const depts = await fetchDepartments()
-                    setDepartments(depts)
-                }
-            } catch (error) {
-                console.error('Error loading departments:', error)
-            }
-        }
+useEffect(() => {
+  if (!open) return;
 
-        // Only load departments if we don't have them yet and dialog is open
-        if (open && departments.length === 0) {
-            loadDepartments()
-        }
-    }, [open, propDepartments, departments.length])
+  // Log the initial state
+  console.log('[AUTO-SELECT] Initial state:', {
+    departments: departments.length,
+    department_id: formData.department_id,
+    subdepartment_id: formData.subdepartment_id,
+    class_id: formData.class_id
+  });
 
-    useEffect(() => {
-        if (!open || !formData.subdepartment_id || localUsers.length === 0 || localOfficers.length === 0) {
-            return;
-        }
+  // Only run auto-selection if we have departments but no selections yet
+  if (departments.length > 0 && !formData.department_id) {
+    console.log('[AUTO-SELECT] No department selected, auto-selecting first department');
+    const firstDept = departments[0];
+    if (firstDept) {
+      console.log(`[AUTO-SELECT] Selecting first department: ${firstDept.id} - ${firstDept.name}`);
+      handleChange('department_id', firstDept.id.toString());
+      handleChange('department_name', firstDept.name);
+    }
+  }
+}, [open, departments.length, formData.department_id]);
 
-        console.log(`🔄 [LOG] Filtering staff for subdepartment ID: ${formData.subdepartment_id}`);
+useEffect(() => {
+  if (!open || !formData.department_id || formData.subdepartment_id) return;
 
-        const dept = departments.find(d => d.id.toString() === formData.department_id);
-        const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
+  const dept = departments.find(d => d.id.toString() === formData.department_id);
+  const subdepts = dept?.tm_subdepartments || [];
+  
+  console.log('[AUTO-SELECT] Checking for subdepartment auto-selection', {
+    department_id: formData.department_id,
+    subdepartmentsCount: subdepts.length,
+    currentSubdepartment: formData.subdepartment_id
+  });
 
-        if (subdept) {
-            const activeStaff = findActiveStaffForSubdept(subdept, localUsers, localOfficers);
+  if (subdepts.length > 0) {
+    const firstSubdept = subdepts[0];
+    console.log(`[AUTO-SELECT] Auto-selecting first subdepartment: ${firstSubdept.id} (${firstSubdept.name})`);
+    handleChange('subdepartment_id', firstSubdept.id.toString());
+    handleChange('subdepartment_name', firstSubdept.name);
+  }
+}, [formData.department_id, formData.subdepartment_id, departments, open]);
 
-            setAvailableOfficers(activeStaff.officers);
-            setAvailableManagers(activeStaff.managers);
-            setAvailableAssistants([]); // Assistants depend on manager selection, so clear for now
+useEffect(() => {
+  if (!open || !formData.subdepartment_id || formData.class_id) return;
 
-            // Reset selections
-            setFormData(prev => ({
-                ...prev,
-                officer_id: '',
-                task_manager_id: '',
-                task_assistant_id: ''
-            }));
-        }
-    }, [open, formData.subdepartment_id, localUsers.length, localOfficers.length, departments.length, findActiveStaffForSubdept]);
+  const dept = departments.find(d => d.id.toString() === formData.department_id);
+  const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
+  const classes = subdept?.classes || [];
+  
+  console.log('[AUTO-SELECT] Checking for class auto-selection', {
+    subdepartment_id: formData.subdepartment_id,
+    classesCount: classes.length,
+    currentClass: formData.class_id
+  });
 
+  if (classes.length > 0) {
+    const firstClass = classes[0];
+    console.log(`[AUTO-SELECT] Auto-selecting first class: ${firstClass.id} (${firstClass.name})`);
+    handleChange('class_id', firstClass.id.toString());
+    handleChange('class_name', firstClass.name);
+  }
+}, [formData.subdepartment_id, formData.class_id, departments, open]);
+
+// Update the subclass auto-selection
+useEffect(() => {
+  if (!open || !formData.class_id || formData.subclass_id) return;
+
+  const dept = departments.find(d => d.id.toString() === formData.department_id);
+  const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
+  const cls = subdept?.classes?.find(c => c.id.toString() === formData.class_id);
+  const subclasses = cls?.subClasses || [];
+  
+  console.log('[AUTO-SELECT] Checking for subclass auto-selection', {
+    class_id: formData.class_id,
+    subclassesCount: subclasses.length,
+    currentSubclass: formData.subclass_id
+  });
+
+  if (subclasses.length > 0) {
+    const firstSubclass = subclasses[0];
+    console.log(`[AUTO-SELECT] Auto-selecting first subclass: ${firstSubclass.id} (${firstSubclass.name})`);
+    handleChange('subclass_id', firstSubclass.id.toString());
+    handleChange('subclass_name', firstSubclass.name);
+  }
+}, [formData.class_id, formData.subclass_id, departments, open]);
     useEffect(() => {
         if (!open || !formData.subdepartment_id || !formData.task_manager_id) {
             // If no manager selected, clear assistants
@@ -820,23 +854,96 @@ export function EnquiryDialog({
     }, [selectedCompany]);
 
     const availableSubdepartments = useMemo(() => {
-        if (!formData.department_id) return []
-        const dept = departments.find(d => d.id.toString() === formData.department_id)
-        return dept?.tm_subdepartments || []
-    }, [departments, formData.department_id])
+        if (!formData.department_id) {
+            console.log('[AUTO-SELECT] No department selected, returning empty subdepartments');
+            return [];
+        }
+        const dept = departments.find(d => d.id.toString() === formData.department_id);
+        const subdepts = dept?.tm_subdepartments || [];
+        console.log(`[AUTO-SELECT] Found ${subdepts.length} subdepartments for department ${formData.department_id}`, 
+            { deptName: dept?.name, subdepts });
+        return subdepts;
+    }, [formData.department_id, departments])
 
     const availableClasses = useMemo(() => {
-        if (!formData.subdepartment_id) return []
-        const subdept = availableSubdepartments.find(s => s.id.toString() === formData.subdepartment_id)
-        return subdept?.classes || []
+        if (!formData.subdepartment_id) {
+            console.log('[AUTO-SELECT] No subdepartment selected, returning empty classes');
+            return [];
+        }
+        const subdept = availableSubdepartments.find(s => s.id.toString() === formData.subdepartment_id);
+        const classes = subdept?.classes || [];
+        console.log(`[AUTO-SELECT] Found ${classes.length} classes for subdepartment ${formData.subdepartment_id}`, 
+            { subdeptName: subdept?.name, classes });
+        return classes;
     }, [availableSubdepartments, formData.subdepartment_id])
 
     const availableSubclasses = useMemo(() => {
-        if (!formData.class_id) return []
-        const cls = availableClasses.find(c => c.id.toString() === formData.class_id)
-        return cls?.subClasses || []
+        if (!formData.class_id) {
+            console.log('[AUTO-SELECT] No class selected, returning empty subclasses');
+            return [];
+        }
+        const cls = availableClasses.find(c => c.id.toString() === formData.class_id);
+        const subclasses = cls?.subClasses || [];
+        console.log(`[AUTO-SELECT] Found ${subclasses.length} subclasses for class ${formData.class_id}`, 
+            { className: cls?.name, subclasses });
+        return subclasses;
     }, [availableClasses, formData.class_id])
 
+    
+    // Auto-select first subdepartment when department changes
+    useEffect(() => {
+        console.log('[AUTO-SELECT] Checking for subdepartment auto-selection', {
+            department_id: formData.department_id,
+            subdepartmentsCount: availableSubdepartments.length,
+            currentSubdepartment: formData.subdepartment_id
+        });
+
+        if (formData.department_id && availableSubdepartments.length > 0 && !formData.subdepartment_id) {
+            const firstSubdept = availableSubdepartments[0];
+            if (firstSubdept) {
+                console.log(`[AUTO-SELECT] Auto-selecting first subdepartment: ${firstSubdept.id} (${firstSubdept.name})`);
+                handleChange('subdepartment_id', firstSubdept.id.toString());
+                handleChange('subdepartment_name', firstSubdept.name);
+            }
+        }
+    }, [formData.department_id, availableSubdepartments, formData.subdepartment_id]);
+
+    // Auto-select first class when subdepartment changes
+    useEffect(() => {
+        console.log('[AUTO-SELECT] Checking for class auto-selection', {
+            subdepartment_id: formData.subdepartment_id,
+            classesCount: availableClasses.length,
+            currentClass: formData.class_id
+        });
+
+        if (formData.subdepartment_id && availableClasses.length > 0 && !formData.class_id) {
+            const firstClass = availableClasses[0];
+            if (firstClass) {
+                console.log(`[AUTO-SELECT] Auto-selecting first class: ${firstClass.id} (${firstClass.name})`);
+                handleChange('class_id', firstClass.id.toString());
+                handleChange('class_name', firstClass.name);
+            }
+        }
+    }, [formData.subdepartment_id, availableClasses, formData.class_id]);
+
+    // Auto-select first subclass when class changes
+    useEffect(() => {
+        console.log('[AUTO-SELECT] Checking for subclass auto-selection', {
+            class_id: formData.class_id,
+            subclassesCount: availableSubclasses.length,
+            currentSubclass: formData.subclass_id
+        });
+
+        if (formData.class_id && availableSubclasses.length > 0 && !formData.subclass_id) {
+            const firstSubclass = availableSubclasses[0];
+            if (firstSubclass) {
+                console.log(`[AUTO-SELECT] Auto-selecting first subclass: ${firstSubclass.id} (${firstSubclass.name})`);
+                handleChange('subclass_id', firstSubclass.id.toString());
+                handleChange('subclass_name', firstSubclass.name);
+            }
+        }
+    }, [formData.class_id, availableSubclasses, formData.subclass_id]);
+    
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
@@ -1531,7 +1638,8 @@ export function EnquiryDialog({
                                                     if (selectedDept) {
                                                         handleChange('department_id', value);
                                                         handleChange('department_name', selectedDept.name);
-                                                        handleChange('subdepartment_id', '');
+                                                        // Don't reset subdepartment_id here, let the effect handle it
+                                                        // This allows the auto-selection to work
                                                     }
                                                 }}
                                                 disabled={departments.length === 0}
@@ -1604,6 +1712,9 @@ export function EnquiryDialog({
                                                     if (selectedClass) {
                                                         handleChange('class_id', value);
                                                         handleChange('class_name', selectedClass.name);
+                                                        // Reset subclass when class changes
+                                                        handleChange('subclass_id', '');
+                                                        handleChange('subclass_name', '');
                                                     }
                                                 }}
                                                 disabled={!formData.subdepartment_id || availableClasses.length === 0}

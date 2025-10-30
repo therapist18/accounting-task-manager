@@ -68,13 +68,13 @@ export default function TasksPage() {
       setTasks(tasksData);
       setStages(stagesData);
     } catch (error) {
-        console.error("Failed to load tasks and stages:", error);
-        // Optionally, show a toast notification on error
-        toast({
-            title: "Error",
-            description: "Could not load tasks. Please try again.",
-            variant: "destructive",
-        });
+      console.error("Failed to load tasks and stages:", error);
+      // Optionally, show a toast notification on error
+      toast({
+        title: "Error",
+        description: "Could not load tasks. Please try again.",
+        variant: "destructive",
+      });
     }
   }, [departments]);
 
@@ -82,6 +82,7 @@ export default function TasksPage() {
   useEffect(() => {
     const performInitialLoad = async () => {
       const departmentsData = await fetchDepartments();
+      console.log('🔹 [Departments Loaded]:', departmentsData);
       setDepartments(departmentsData);
     };
     performInitialLoad();
@@ -122,12 +123,22 @@ export default function TasksPage() {
     const sd = d?.tm_subdepartments?.find(s => String(s.id) === selectedSubdepartment);
     const c = sd?.classes?.find(c => String(c.id) === selectedClass);
     const sc = c?.subClasses?.find(sc => String(sc.id) === selectedSubclass);
-    
-    return { 
-      dept: d || null, 
-      subdept: sd || null, 
-      cls: c || null, 
-      subcls: sc || null 
+
+    // Debug log to check department specification
+    if (d) {
+      console.log('Department:', {
+        id: d.id,
+        name: d.name,
+        specification: d.specification,
+        hasSpecification: 'specification' in d
+      });
+    }
+
+    return {
+      dept: d || null,
+      subdept: sd || null,
+      cls: c || null,
+      subcls: sc || null
     };
   }, [departments, selectedDepartment, selectedSubdepartment, selectedClass, selectedSubclass]);
 
@@ -183,13 +194,13 @@ export default function TasksPage() {
       setTaskToDelete(null);
     }
   };
-  
+
   const handleEnquiryCreated = (newEnquiry: UtilTask | UtilTask[]) => {
     const newEnquiries = Array.isArray(newEnquiry) ? newEnquiry : [newEnquiry];
     setTasks(prev => [...newEnquiries, ...prev]);
     toast({ title: "Success", description: `${newEnquiries.length} new enquiry/enquiries created.` });
   };
-  
+
   const handleStageStatusSave = async (stageId: string, taskId: string, date: string) => {
     const task = tasks.find(t => t.id.toString() === taskId);
     if (!task) return;
@@ -213,33 +224,33 @@ export default function TasksPage() {
     console.log('🔹 [handleNewEnquiryClick] Triggered');
     console.log('   [handleNewEnquiryClick] Selected Department ID:', selectedDepartment);
     console.log('   [handleNewEnquiryClick] Available Departments:', departments);
-    
+
     if (!selectedDepartment) {
       console.warn('⚠️ [handleNewEnquiryClick] No department selected');
-      toast({ 
-        title: "Department Not Selected", 
+      toast({
+        title: "Department Not Selected",
         description: "Please select a department before creating an enquiry.",
         variant: "destructive"
       });
       return;
     }
-    
+
     const currentDept = departments.find(d => String(d.id) === selectedDepartment || d.id === Number(selectedDepartment));
     console.log('   [handleNewEnquiryClick] Found Department:', currentDept);
-    
+
     if (!currentDept) {
       console.error('❌ [handleNewEnquiryClick] Department not found with ID:', selectedDepartment);
-      toast({ 
-        title: "Department Not Found", 
+      toast({
+        title: "Department Not Found",
         description: `The selected department (ID: ${selectedDepartment}) could not be found.`,
         variant: "destructive"
       });
       return;
     }
-    
+
     const specification = (currentDept.specification || 'individual').toLowerCase();
     console.log('   [handleNewEnquiryClick] Department Specification:', specification);
-    
+
     if (specification === 'company') {
       console.log('   [handleNewEnquiryClick] Opening Company Inquiry Dialog');
       setCompanyInquiryDialogOpen(true);
@@ -259,7 +270,7 @@ export default function TasksPage() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-50/50">  
+    <div className="flex h-screen bg-slate-50/50">
       <DepartmentSidebar
         departments={departments}
         activeDept={selectedDepartment}
@@ -291,7 +302,14 @@ export default function TasksPage() {
               className="flex items-center gap-2"
             >
               <Plus className="h-4 w-4" />
-              {dept?.specification === 'company' ? 'New Company Enquiry' : 'New Individual Enquiry'}
+              {(() => {
+                if (!selectedDepartment) return 'New Enquiry';
+                const currentDept = departments.find(d => String(d.id) === selectedDepartment || d.id === Number(selectedDepartment));
+                console.log('🔹 [Button] Current Department:', currentDept);
+                const specification = currentDept?.specification?.toLowerCase() || 'individual';
+                console.log('🔹 [Button] Department Specification:', specification);
+                return specification === 'company' ? 'New Company Enquiry' : 'New Individual Enquiry';
+              })()}
             </Button>
           </header>
 
@@ -348,12 +366,16 @@ export default function TasksPage() {
 
           <DeleteConfirmationDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen} onConfirm={handleDeleteConfirm} loading={isDeleting} />
           <StageUploadDialog open={stageUploadDialogOpen} onOpenChange={setStageUploadDialogOpen} selectedStageTask={selectedStageTask} />
-          
+
           <NewCompanyInquiryDialog
             open={companyInquiryDialogOpen}
             onOpenChange={(isOpen) => {
               console.log('🔹 [CompanyInquiryDialog] Open State Changed:', isOpen);
               setCompanyInquiryDialogOpen(isOpen);
+              if (!isOpen) {
+                // Reset the selected department when dialog is closed
+                setSelectedDepartment('');
+              }
             }}
             onEnquiryCreated={(enquiries) => {
               console.log('✅ [CompanyInquiryDialog] Enquiry Created:', enquiries);
@@ -361,8 +383,11 @@ export default function TasksPage() {
             }}
             departments={departments}
             selectedDepartmentId={selectedDepartment}
+            selectedSubdepartmentId={selectedSubdepartment}
+            selectedClassId={selectedClass}
             users={[]}
             officers={[]}
+            key={`company-dialog-${selectedDepartment}-${selectedSubdepartment}-${selectedClass}`} // Force re-render when any selection changes
           />
 
           <EnquiryDialog
