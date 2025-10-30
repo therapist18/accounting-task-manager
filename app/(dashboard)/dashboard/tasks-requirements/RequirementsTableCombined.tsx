@@ -9,13 +9,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import * as XLSX from 'xlsx'
 import { saveAs } from 'file-saver'
-import { UploadModal } from "@/components/UploadModal"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import supabase from "@/lib/supabase/client"
 import { toast } from "@/components/ui/use-toast"
 import htmlDocx from 'html-docx-js/dist/html-docx';
 import TemplateGenerationDialog from "./TemplateGenerationDialog"
 import { StageUploadDialog } from "../tasks/components/StageUploadDialog"
+import { UploadModal } from "@/components/UploadModal"
 
 const generateDocxBlobFromHtml = (html: string) => {
   const blob = htmlDocx.asBlob(html);

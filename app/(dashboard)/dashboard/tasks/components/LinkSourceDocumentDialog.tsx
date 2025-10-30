@@ -7,11 +7,10 @@ import { toast } from "@/hooks/use-toast";
 import { format, parseISO } from "date-fns";
 import { supabase } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import ExtractionPreview from "@/components/ExtractionPreview";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-// Import Checkbox from your UI library, e.g., shadcn/ui
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { ExtractionPreview } from "@/components/ExtractionPreview";
 
 // --- Interface Definitions ---
 interface SelectedDoc {
@@ -23,8 +22,6 @@ interface Task {
   id: string;
   applicant_name: string;
   individual_id: string;
-  // This structure now needs to support multiple documents per stage ID.
-  // The backend should ideally store this as a JSONB column like: { "stage_id_1": [SelectedDoc1, SelectedDoc2] }
   source_document_id?: Record<string, SelectedDoc[]>; 
   created_at: string;
   class_id?: string;

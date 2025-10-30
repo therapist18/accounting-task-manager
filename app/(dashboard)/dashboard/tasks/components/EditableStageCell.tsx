@@ -4,7 +4,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import ExtractionPreview from "@/components/ExtractionPreview"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Upload, Calendar, Check, X, Clock, CheckCircle, FileText, Eye, AlertTriangle, Zap, Loader2, Pencil } from "lucide-react"
@@ -12,6 +11,7 @@ import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
 import { AutomationMappingDialog } from "./AutomationMappingDialog"
+import { ExtractionPreview } from "@/components/ExtractionPreview"
 
 interface EditableStageCellProps {
   stage: any

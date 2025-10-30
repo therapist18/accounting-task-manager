@@ -23,7 +23,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import ExtractionPreview from "@/components/ExtractionPreview"
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import * as XLSX from 'xlsx'
@@ -51,6 +50,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { ReportTable } from "./components/ReportTable"
 import { MemorizedReportDialog } from "./components/MemorizedReportDialog"
+import { ExtractionPreview } from "@/components/ExtractionPreview"
 
 type ReportConfiguration = {
   taskFields: string[];
