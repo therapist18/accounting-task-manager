@@ -430,16 +430,26 @@ export default function TemplateGenerationDialog({
                 const blob = await asBlob(previewContent);
                 saveAs(blob, `${fileName}.docx`);
             } else if (outputType === 'pdf') {
+                // Dynamically import html2pdf only on client side
+                const html2pdf = (await import('html2pdf.js')).default;
                 const contentElement = document.createElement('div');
                 contentElement.innerHTML = previewContent;
                 const opt = {
                     margin: 0.5,
                     filename: `${fileName}.pdf`,
                     image: { type: 'jpeg', quality: 0.98 },
-                    html2canvas: { scale: 2 },
-                    jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+                    html2canvas: { 
+                        scale: 2,
+                        useCORS: true,
+                        logging: false
+                    },
+                    jsPDF: { 
+                        unit: 'in', 
+                        format: 'letter', 
+                        orientation: 'portrait' 
+                    }
                 };
-                html2pdf().from(contentElement).set(opt).save();
+                await html2pdf().set(opt).from(contentElement).save();
             }
 
             toast({
