@@ -12,8 +12,11 @@ import Image from 'next/image'
 import { toast } from 'sonner'
 import dynamic from 'next/dynamic'
 
-// Dynamically import PDF viewer to avoid SSR issues
-const PDFViewer = dynamic(() => import('@/components/PDFViewer'), { ssr: false })
+// Dynamically import PDF viewer with no SSR to prevent 'self is not defined' error
+const PDFViewer = dynamic(() => import('@/components/PDFViewer').then(mod => mod.PDFViewer), { 
+  ssr: false,
+  loading: () => <div className="flex items-center justify-center h-full">Loading PDF viewer...</div>
+})
 
 interface Field {
   id: string
