@@ -426,7 +426,7 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
     copyFromPeriod: null as number | null
   })
 
-  const periodOptions = ["months", "years"]
+  const periodOptions = ["One Time", "months", "years"]
   const countOptions = ["1", "2", "3", "6", "12"]
 
   const generateRateId = () => {
@@ -769,101 +769,83 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
     })
   }
 
-  // Auto-save function with debounce
-  const debouncedSave = useCallback(
-    debounce(async () => {
-      if (!selectedDepartment || currentPeriod.data.length === 0 || isReadOnly) {
-        return
-      }
-
-      setSaving(true)
-      try {
-        if (currentPeriod.id) {
-          const { error } = await supabase
-            .from('rates_history')
-            .update({
-              rates_data: currentPeriod.data,
-              exchange_rates: rates,
-              description: currentPeriod.description,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', currentPeriod.id)
-
-          if (error) throw error
-        } else {
-          const { error } = await supabase
-            .from('rates_history')
-            .insert({
-              department_id: selectedDepartment,
-              effective_from: currentPeriod.effectiveFrom.toISOString().split('T')[0],
-              effective_to: currentPeriod.effectiveTo?.toISOString().split('T')[0] || null,
-              rates_data: currentPeriod.data,
-              exchange_rates: rates,
-              description: currentPeriod.description || '',
-              is_active: true,
-              created_by: 'current_user'
-            })
-
-          if (error) throw error
-        }
-
-        setHasUnsavedChanges(false)
-
-        // Silent success - no toast for auto-save
-        await loadCurrentRates(selectedDepartment)
-      } catch (error) {
-        console.error('Error auto-saving rates:', error)
-        // Only show error toast
-        toast({
-          title: "Auto-save failed",
-          description: "Your changes are temporarily saved locally. Try refreshing the page.",
-          variant: "destructive"
-        })
-      } finally {
-        setSaving(false)
-      }
-    }, 1000),
-    [selectedDepartment, currentPeriod, rates, isReadOnly]
-  )
-
-  // Debounce utility function
-  function debounce(func: Function, wait: number) {
-    let timeout: NodeJS.Timeout
-    return function executedFunction(...args: any[]) {
-      const later = () => {
-        clearTimeout(timeout)
-        func(...args)
-      }
-      clearTimeout(timeout)
-      timeout = setTimeout(later, wait)
+  // Manual save function
+  const handleSaveChanges = async () => {
+    if (!selectedDepartment || currentPeriod.data.length === 0 || isReadOnly || !hasUnsavedChanges) {
+      return;
     }
-  }
+
+    setSaving(true);
+    try {
+      if (currentPeriod.id) {
+        const { error } = await supabase
+          .from('rates_history')
+          .update({
+            rates_data: currentPeriod.data,
+            exchange_rates: rates,
+            description: currentPeriod.description,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', currentPeriod.id);
+
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('rates_history')
+          .insert({
+            department_id: selectedDepartment,
+            effective_from: currentPeriod.effectiveFrom.toISOString().split('T')[0],
+            effective_to: currentPeriod.effectiveTo?.toISOString().split('T')[0] || null,
+            rates_data: currentPeriod.data,
+            exchange_rates: rates,
+            description: currentPeriod.description || '',
+            is_active: true,
+            created_by: 'current_user'
+          });
+
+        if (error) throw error;
+      }
+
+      setHasUnsavedChanges(false);
+      toast({
+        title: "Changes Saved",
+        description: "Your updates have been successfully saved.",
+      });
+      await loadCurrentRates(selectedDepartment);
+    } catch (error) {
+      console.error('Error saving rates:', error);
+      toast({
+        title: "Save Failed",
+        description: "Could not save your changes. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
 
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key === 's') {
-        event.preventDefault()
-        if (!isReadOnly) {
-          debouncedSave()
-          toast({
-            title: "Saving...",
-            description: "Your changes are being saved.",
-          })
+        event.preventDefault();
+        if (!isReadOnly && hasUnsavedChanges) {
+          handleSaveChanges();
         }
       }
 
       if (event.key === 'Escape') {
-        // Clear focus from any input
         if (document.activeElement instanceof HTMLElement) {
-          document.activeElement.blur()
+          document.activeElement.blur();
         }
       }
-    }
+    };
 
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [debouncedSave, isReadOnly])
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleSaveChanges, isReadOnly, hasUnsavedChanges]);
+
 
   // Helper for styling Excel cells
   const styleCell = (cell: ExcelJS.Cell, customStyle: Partial<ExcelJS.Style> = {}) => {
@@ -1204,13 +1186,6 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
       setIsExporting(false);
     }
   };
-
-  // Auto-save when data changes
-  useEffect(() => {
-    if (hasUnsavedChanges && !isReadOnly) {
-      debouncedSave()
-    }
-  }, [currentPeriod.data, rates, hasUnsavedChanges, debouncedSave, isReadOnly])
 
   useEffect(() => {
     if (!initialDepartments) {
@@ -2125,10 +2100,10 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
                 Viewing Historical Data
               </Badge>
             )}
-            {hasUnsavedChanges && !isReadOnly && (
-              <Badge variant="outline" className="text-blue-600 border-blue-200">
+            {hasUnsavedChanges && !isReadOnly && !saving && (
+              <Badge variant="outline" className="text-amber-600 border-amber-200">
                 <Clock className="h-3 w-3 mr-1" />
-                Auto-saving changes...
+                Unsaved changes
               </Badge>
             )}
             {saving && (
@@ -2142,6 +2117,15 @@ export default function DepartmentRates({ departments: initialDepartments }: Dep
 
         {/* Enhanced Control Panel */}
         <div className="flex items-center gap-2">
+           {/* Save Changes Button */}
+           <Button
+            onClick={handleSaveChanges}
+            disabled={!hasUnsavedChanges || isReadOnly || saving}
+          >
+            <Save className="h-4 w-4 mr-2" />
+            {saving ? 'Saving...' : 'Save Changes'}
+          </Button>
+
           {/* Expand/Collapse All Buttons */}
           <Button
             variant="outline"
