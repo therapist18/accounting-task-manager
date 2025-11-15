@@ -209,31 +209,44 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
                 </TableCell>
                 {paginatedHeaderStructure.map((item, colIndex) => (
                   <TableCell key={`${header.id}-${colIndex}`} className={`text-center text-sm py-1 px-2 align-middle bg-blue-500 text-white border border-gray-100 w-[200px] ${item.type === 'dependant' ? 'bg-orange-500' : ''}`}>
-                    {item.type === 'principal'
-                      ? getCellContent(item.task, header.id)
-                      : (() => {
-                        switch (header.id) {
-                          case 'applicant_name':
-                            return (
-                              <div className="flex flex-col">
-                                <span>{item.dependant.full_name || 'N/A'}</span>
-                                <span className="text-xs text-gray-500">{item.dependant.relationship || 'Dependant'}</span>
-                              </div>
-                            );
-                          case 'nationality': return item.dependant.nationality || 'N/A';
-                          case 'age': return item.dependant.age?.toString() || 'N/A';
-                          case 'case_status':
-                            return (
-                              <div className="flex flex-col">
-                                <span className="text-sm">{item.dependant.relationship || 'Dependant'}</span>
-                                <span className="text-xs text-gray-500">{item.dependant.nationality || ''}</span>
-                              </div>
-                            );
-                          default: return <span className="text-sm text-gray-400">-</span>;
-                        }
-                      })()
-                    }
-                  </TableCell>
+  {(() => {
+    const content = item.type === 'principal'
+      ? getCellContent(item.task, header.id)
+      : (() => {
+          switch (header.id) {
+            case 'applicant_name':
+              return (
+                <div className="flex flex-col">
+                  <span>{item.dependant.full_name || 'N/A'}</span>
+                  <span className="text-xs text-gray-500">{item.dependant.relationship || 'Dependant'}</span>
+                </div>
+              );
+            case 'nationality': 
+              return item.dependant.nationality || 'N/A';
+            case 'age': 
+              return item.dependant.age?.toString() || 'N/A';
+            case 'case_status':
+              return (
+                <div className="flex flex-col">
+                  <span className="text-sm">{item.dependant.relationship || 'Dependant'}</span>
+                  <span className="text-xs text-gray-500">{item.dependant.nationality || ''}</span>
+                </div>
+              );
+            default: 
+              return <span className="text-sm text-gray-400">-</span>;
+          }
+        })();
+
+    // Ensure we're not rendering objects directly
+    if (content && typeof content === 'object' && !React.isValidElement(content)) {
+      if ('status' in content) {
+        return content.status || 'N/A';
+      }
+      return JSON.stringify(content); // Fallback for other objects
+    }
+    return content;
+  })()}
+</TableCell>
                 ))}
               </TableRow>
             ))}

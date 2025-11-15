@@ -214,11 +214,17 @@ export default function DepartmentTasksManager({
 
       if (allIndividualIds.size === 0) return { dependantsMap: new Map(), applicantsMap: new Map() };
 
+      // Convert Set to array and filter out any null/undefined values
+      const individualIds = Array.from(allIndividualIds).filter(id => id != null);
+      
+      // If no valid IDs, return empty maps
+      if (individualIds.length === 0) return { dependantsMap: new Map(), applicantsMap: new Map() };
+
       // Fetch all unique individuals (both applicants and dependants) in a single query
       const { data, error } = await supabase
         .from('registry_individuals')
         .select('id, full_name, nationality, date_of_birth, relationships')
-        .in('id', Array.from(allIndividualIds));
+        .in('id', individualIds);
 
       if (error) {
         console.error('Error fetching all individuals:', error);
@@ -606,41 +612,41 @@ export default function DepartmentTasksManager({
 
   const toggleDocumentExpansion = useCallback((docId: string) => {
     setExpandedDocuments(prev => {
-      const newSet = new Set(prev)
+      const newSet = new Set(prev);
       if (newSet.has(docId)) {
-        newSet.delete(docId)
+        newSet.delete(docId);
       } else {
-        newSet.add(docId)
+        newSet.add(docId);
       }
-      return newSet
-    })
-  }, [])
+      return newSet;
+    });
+  }, []);
 
   const toggleDependantsExpansion = useCallback((taskId: string) => {
     setExpandedDependants(prev => {
-      const newSet = new Set(prev)
+      const newSet = new Set(prev);
       if (newSet.has(taskId)) {
-        newSet.delete(taskId)
+        newSet.delete(taskId);
       } else {
-        newSet.add(taskId)
+        newSet.add(taskId);
       }
-      return newSet
-    })
-  }, [])
+      return newSet;
+    });
+  }, []);
 
   const expandAll = () => {
-    setExpandedSections(new Set(['case_details', 'stages', 'stats']))
-    const allStageIds = stages.map(s => s.id)
-    setExpandedStages(new Set(allStageIds))
-    const allDocIds = stages.flatMap(s => s.documents?.map(d => d.id) || [])
-    setExpandedDocuments(new Set(allDocIds))
+    setExpandedSections(new Set(['case_details', 'stages', 'stats']));
+    const allStageIds = stages.map(s => s.id);
+    setExpandedStages(new Set(allStageIds));
+    const allDocIds = stages.flatMap(s => s.documents?.map(d => d.id) || []);
+    setExpandedDocuments(new Set(allDocIds));
 
     const allTaskIdsWithDependants = tasks.filter(t =>
       t.dependant_member && Array.isArray(t.dependant_member) && t.dependant_member.length > 0
     ).map(t => t.id.toString());
     setExpandedDependants(new Set(allTaskIdsWithDependants));
     setIsAllExpanded(true);
-  }
+  };
 
   const collapseAll = () => {
     setExpandedSections(new Set())

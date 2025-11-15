@@ -18,7 +18,6 @@ import { Badge } from "@/components/ui/badge"
 import { User, Users, Phone, Mail, MapPin, Building2, Loader2, Info, FileText, Briefcase, UserPlus, UserCheck, Shield } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { toast } from "@/hooks/use-toast"
-import { fetchDepartments } from "../../departments/departments/database"
 import { format } from "date-fns"
 
 interface Individual {
@@ -61,49 +60,54 @@ export function EnquiryDialog({
     users = [],
     officers = []
 }: EnquiryDialogProps) {
+    // Core state
     const [applicantType, setApplicantType] = useState<'principal' | 'dependant'>('principal')
     const [individuals, setIndividuals] = useState<Individual[]>([])
-    const selectedIndividualRef = useRef<Individual | null>(null);
-    const [selectedIndividual, setSelectedIndividualState] = useState<Individual | null>(null);
-    const setSelectedIndividual = useCallback((individual: Individual | null) => {
-        selectedIndividualRef.current = individual;
-        setSelectedIndividualState(individual);
-    }, []);
+    const selectedIndividualRef = useRef<Individual | null>(null)
+    const [selectedIndividual, setSelectedIndividualState] = useState<Individual | null>(null)
     const [departments, setDepartments] = useState<any[]>(propDepartments || [])
     const [localUsers, setLocalUsers] = useState<any[]>(users || [])
     const [localOfficers, setLocalOfficers] = useState<any[]>(officers || [])
+    
+    // Loading states
     const [loadingStaff, setLoadingStaff] = useState(false)
     const [loading, setLoading] = useState(false)
     const [searchLoading, setSearchLoading] = useState(false)
+    const [loadingCompanies, setLoadingCompanies] = useState(false)
+    const [loadingUnderstudies, setLoadingUnderstudies] = useState(false)
+    
+    // Task configuration
     const [taskType, setTaskType] = useState<'new' | 'renewal'>('new')
+    
+    // Dependants and references
     const [includeDependants, setIncludeDependants] = useState(false)
     const [availableDependants, setAvailableDependants] = useState<Individual[]>([])
     const [selectedDependants, setSelectedDependants] = useState<string[]>([])
     const [includeReferences, setIncludeReferences] = useState(false)
     const [availableReferences, setAvailableReferences] = useState<Individual[]>([])
     const [selectedReferences, setSelectedReferences] = useState<string[]>([])
+    
+    // Company and understudy
     const [companies, setCompanies] = useState<any[]>([])
     const [selectedCompany, setSelectedCompany] = useState<string>('')
     const [understudies, setUnderstudies] = useState<any[]>([])
     const [selectedUnderstudy, setSelectedUnderstudy] = useState<string>('')
-    const [loadingCompanies, setLoadingCompanies] = useState(false)
-    const [loadingUnderstudies, setLoadingUnderstudies] = useState(false)
-    const [principalForDependant, setPrincipalForDependant] = useState<Individual | null>(null);
+    
+    // Principal for dependant
+    const [principalForDependant, setPrincipalForDependant] = useState<Individual | null>(null)
+    
+    // Available staff (filtered)
     const [availableOfficers, setAvailableOfficers] = useState([])
     const [availableManagers, setAvailableManagers] = useState([])
     const [availableAssistants, setAvailableAssistants] = useState([])
-    const isInitialLoad = useRef(true);
-    // State to control the individual selection popover
-    const [isIndividualPopoverOpen, setIsIndividualPopoverOpen] = useState(false);
+    
+    // UI state
+    const [isIndividualPopoverOpen, setIsIndividualPopoverOpen] = useState(false)
 
-
-    // Form data - enhanced with staff fields
+    // Form data
     const [formData, setFormData] = useState({
-        // Individual details (for new individuals)
         full_name: '',
         mobile_number: '',
-
-        // Job details
         job_description: '',
         department_id: '',
         subdepartment_id: '',
@@ -112,357 +116,164 @@ export function EnquiryDialog({
         department_name: '',
         subdepartment_name: '',
         class_name: '',
-
-        // Principal member (for dependants)
         principal_member_id: '',
-
-        // Staff assignments
         officer_id: '',
         task_manager_id: '',
         task_assistant_id: '',
-
-        // Enquiry date
         enquiry_date: new Date().toISOString().split('T')[0]
     })
-const handleChange = useCallback((field: keyof typeof formData, value: any) => {
-  console.log(`[FORM-CHANGE] Field: ${field}, Value:`, value);
-  
-  setFormData(prev => {
-    const newState = { ...prev };
-    
-    if (field === 'department_id') {
-      console.log(`[FORM-CHANGE] Department changed to ${value}, resetting dependent fields`);
-      return {
-        ...prev,
-        department_id: value,
-        subdepartment_id: '',
-        class_id: '',
-        subclass_id: '',
-        subdepartment_name: '',
-        class_name: '',
-        subclass_name: ''
-      };
-    }
-    
-    if (field === 'subdepartment_id') {
-      console.log(`[FORM-CHANGE] Subdepartment changed to ${value}, resetting dependent fields`);
-      return {
-        ...prev,
-        subdepartment_id: value,
-        class_id: '',
-        subclass_id: '',
-        class_name: '',
-        subclass_name: ''
-      };
-    }
-    
-    if (field === 'class_id') {
-      console.log(`[FORM-CHANGE] Class changed to ${value}, resetting subclass`);
-      return {
-        ...prev,
-        class_id: value,
-        subclass_id: '',
-        subclass_name: ''
-      };
-    }
-    
-    // For all other fields, just update the value
-    return { ...prev, [field]: value };
-  });
-}, []);
 
+    // Unified setter for selectedIndividual
+    const setSelectedIndividual = useCallback((individual: Individual | null) => {
+        selectedIndividualRef.current = individual
+        setSelectedIndividualState(individual)
+    }, [])
+
+    // Optimized form change handler
+    const handleChange = useCallback((field: keyof typeof formData, value: any) => {
+        setFormData(prev => {
+            // Handle cascading resets for department hierarchy
+            if (field === 'department_id') {
+                return {
+                    ...prev,
+                    department_id: value,
+                    subdepartment_id: '',
+                    class_id: '',
+                    subclass_id: '',
+                    subdepartment_name: '',
+                    class_name: '',
+                    subclass_name: ''
+                }
+            }
+            
+            if (field === 'subdepartment_id') {
+                return {
+                    ...prev,
+                    subdepartment_id: value,
+                    class_id: '',
+                    subclass_id: '',
+                    class_name: '',
+                    subclass_name: ''
+                }
+            }
+            
+            if (field === 'class_id') {
+                return {
+                    ...prev,
+                    class_id: value,
+                    subclass_id: '',
+                    subclass_name: ''
+                }
+            }
+            
+            return { ...prev, [field]: value }
+        })
+    }, [])
+
+    // Memoized computed values
+    const availableSubdepartments = useMemo(() => {
+        if (!formData.department_id) return []
+        const dept = departments.find(d => d.id.toString() === formData.department_id)
+        return dept?.tm_subdepartments || []
+    }, [formData.department_id, departments])
+
+    const availableClasses = useMemo(() => {
+        if (!formData.subdepartment_id) return []
+        const subdept = availableSubdepartments.find(s => s.id.toString() === formData.subdepartment_id)
+        return subdept?.classes || []
+    }, [availableSubdepartments, formData.subdepartment_id])
+
+    const availableSubclasses = useMemo(() => {
+        if (!formData.class_id) return []
+        const cls = availableClasses.find(c => c.id.toString() === formData.class_id)
+        return cls?.subClasses || []
+    }, [availableClasses, formData.class_id])
+
+    // Current subdepartment (memoized)
+    const currentSubdepartment = useMemo(() => {
+        if (!formData.subdepartment_id) return null
+        return availableSubdepartments.find(s => s.id.toString() === formData.subdepartment_id)
+    }, [availableSubdepartments, formData.subdepartment_id])
+
+    // Optimized staff filtering
+    const findActiveStaffForSubdept = useCallback((subdept, allUsers, allOfficers) => {
+        if (!subdept || !allUsers || !allOfficers) {
+            return { officers: [], managers: [], assistants: [] }
+        }
+
+        const hasOfficerHistory = subdept.officer_history?.length > 0
+        const hasManagerHistory = subdept.manager_history?.length > 0
+        const hasAssistantHistory = subdept.assistant_history?.length > 0
+
+        // Fallback to all available staff if no history
+        if (!hasOfficerHistory && !hasManagerHistory && !hasAssistantHistory) {
+            return {
+                officers: allOfficers,
+                managers: allUsers.filter(u => u.role === 'user' || u.role === 'admin'),
+                assistants: allUsers.filter(u => u.role === 'user')
+            }
+        }
+
+        // Helper to get active user IDs
+        const getActiveUserIds = (historyArray) => {
+            if (!Array.isArray(historyArray)) return []
+            return historyArray
+                .filter(item => item && !item.end_date)
+                .map(item => item.id)
+                .filter(Boolean)
+        }
+
+        const activeOfficerIds = getActiveUserIds(subdept.officer_history)
+        const activeManagerIds = getActiveUserIds(subdept.manager_history)
+        const activeAssistantIds = getActiveUserIds(subdept.assistant_history)
+
+        const hasSpecificAssignments = 
+            activeOfficerIds.length > 0 || 
+            activeManagerIds.length > 0 || 
+            activeAssistantIds.length > 0
+
+        if (!hasSpecificAssignments) {
+            return {
+                officers: allOfficers,
+                managers: allUsers.filter(u => u.role === 'user' || u.role === 'admin'),
+                assistants: allUsers.filter(u => u.role === 'user')
+            }
+        }
+
+        return {
+            officers: allOfficers.filter(o => activeOfficerIds.includes(o.id)),
+            managers: allUsers.filter(u => activeManagerIds.includes(u.id)),
+            assistants: allUsers.filter(u => activeAssistantIds.includes(u.id))
+        }
+    }, [])
+
+    // Load staff data once
     const loadStaffData = useCallback(async () => {
-        console.log('📥 [LOG] Loading staff data from database...');
-        setLoadingStaff(true);
-
+        setLoadingStaff(true)
         try {
             const [usersResult, officersResult] = await Promise.all([
                 supabase.from('tm_users').select('*').order('name'),
                 supabase.from('tm_users').select('*').eq('role', 'officer').order('name')
-            ]);
+            ])
 
-            if (usersResult.error) throw usersResult.error;
-            if (officersResult.error) throw officersResult.error;
+            if (usersResult.error) throw usersResult.error
+            if (officersResult.error) throw officersResult.error
 
-            setLocalUsers(usersResult.data || []);
-            setLocalOfficers(officersResult.data || []);
+            setLocalUsers(usersResult.data || [])
+            setLocalOfficers(officersResult.data || [])
         } catch (error) {
             toast({
                 title: "Error",
                 description: "Failed to load staff data",
                 variant: "destructive"
-            });
+            })
         } finally {
-            setLoadingStaff(false);
+            setLoadingStaff(false)
         }
-    }, []);
+    }, [])
 
-    useEffect(() => {
-        if (!open) return;
-
-        if ((users && users.length > 0) && (officers && officers.length > 0)) {
-            setLocalUsers(users);
-            setLocalOfficers(officers);
-            return;
-        }
-
-        if (localUsers.length === 0 || localOfficers.length === 0) {
-            loadStaffData();
-        }
-    }, [open]);
-
-    useEffect(() => {
-        if (users && users.length > 0) {
-            setLocalUsers(users);
-        }
-        if (officers && officers.length > 0) {
-            setLocalOfficers(officers);
-        }
-    }, [users, officers]);
-
-    const findActiveStaffForSubdept = useCallback((subdept, allUsers, allOfficers) => {
-        console.log('🔍 [LOG] findActiveStaffForSubdept called for:', subdept?.name);
-
-        if (!subdept || !allUsers || !allOfficers) {
-            console.log('❌ [LOG] Missing required data for staff filtering');
-            return { officers: [], managers: [], assistants: [] };
-        }
-
-        // Check if history fields exist
-        const hasOfficerHistory = subdept.officer_history && Array.isArray(subdept.officer_history);
-        const hasManagerHistory = subdept.manager_history && Array.isArray(subdept.manager_history);
-        const hasAssistantHistory = subdept.assistant_history && Array.isArray(subdept.assistant_history);
-
-        if (!hasOfficerHistory && !hasManagerHistory && !hasAssistantHistory) {
-            console.log('⚠️ [LOG] No history fields found - using fallback to all available staff');
-            return {
-                officers: allOfficers,
-                managers: allUsers.filter(u => u.role === 'user' || u.role === 'admin'),
-                assistants: allUsers.filter(u => u.role === 'user')
-            };
-        }
-
-        // Helper to get active user IDs from a history array
-        const getActiveUserIds = (historyArray) => {
-            if (!historyArray || !Array.isArray(historyArray)) return [];
-            return historyArray
-                .filter(item => item && !item.end_date) // Active if no end date
-                .map(item => item.id) // Use 'id' instead of 'user_id'
-                .filter(Boolean); // Remove null/undefined IDs
-        };
-
-        const activeOfficerIds = getActiveUserIds(subdept.officer_history);
-        const activeManagerIds = getActiveUserIds(subdept.manager_history);
-        const activeAssistantIds = getActiveUserIds(subdept.assistant_history);
-        
-        console.log('[LOG] Active staff IDs found:', {
-            officers: activeOfficerIds,
-            managers: activeManagerIds,
-            assistants: activeAssistantIds
-        });
-
-
-        const hasSpecificAssignments = activeOfficerIds.length > 0 || activeManagerIds.length > 0 || activeAssistantIds.length > 0;
-
-        if (!hasSpecificAssignments) {
-            console.log(`⚠️ [LOG] No specific staff assignments for subdept "${subdept.name}". Using fallback roles.`);
-            return {
-                officers: allOfficers,
-                managers: allUsers.filter(u => u.role === 'user' || u.role === 'admin'),
-                assistants: allUsers.filter(u => u.role === 'user')
-            };
-        }
-
-        const staff = {
-            officers: allOfficers.filter(o => activeOfficerIds.includes(o.id)),
-            managers: allUsers.filter(u => activeManagerIds.includes(u.id)),
-            assistants: allUsers.filter(u => activeAssistantIds.includes(u.id)),
-        };
-
-        console.log(`✅ [LOG] Found filtered staff for subdept "${subdept.name}":`, staff);
-        return staff;
-    }, []);
-
-    const updateTaskFields = useCallback(async (taskData: any) => {
-        if (!taskData) return;
-
-        // Update IDs first
-        setFormData(prev => ({
-            ...prev,
-            department_id: taskData.department_id?.toString() || '',
-            subdepartment_id: taskData.subdepartment_id?.toString() || '',
-            class_id: taskData.class_id?.toString() || '',
-            subclass_id: taskData.subclass_id?.toString() || '',
-            job_description: taskData.job_description || '',
-            officer_id: taskData.officer_id || '',
-            task_manager_id: taskData.task_manager_id || '',
-            task_assistant_id: taskData.task_assistant_id || ''
-        }));
-
-        // Fetch department, subdepartment, and class names
-        try {
-            // Fetch department and subdepartment details
-            const { data: deptData } = await supabase
-                .from('tm_departments')
-                .select('id, name, tm_subdepartments(id, name, classes(id, name))')
-                .eq('id', taskData.department_id)
-                .single();
-
-            if (deptData) {
-                // Update form data with names
-                const subdept = deptData.tm_subdepartments.find(s => s.id === taskData.subdepartment_id);
-                const cls = subdept?.classes?.find(c => c.id.toString() === taskData.class_id);
-
-                setFormData(prev => ({
-                    ...prev,
-                    department_name: deptData.name,
-                    subdepartment_name: subdept?.name || '',
-                    class_name: cls?.name || ''
-                }));
-            }
-
-            // Update selections
-            if (taskData.department_id) {
-                handleChange('department_id', taskData.department_id);
-            }
-            if (taskData.subdepartment_id) {
-                handleChange('subdepartment_id', taskData.subdepartment_id);
-            }
-            if (taskData.class_id) {
-                handleChange('class_id', taskData.class_id);
-            }
-        } catch (error) {
-            console.error('Error fetching department details:', error);
-            toast({
-                title: "Error",
-                description: "Failed to load department details",
-                variant: "destructive"
-            });
-        }
-    }, [handleChange])
-
-useEffect(() => {
-  if (!open) return;
-
-  // Log the initial state
-  console.log('[AUTO-SELECT] Initial state:', {
-    departments: departments.length,
-    department_id: formData.department_id,
-    subdepartment_id: formData.subdepartment_id,
-    class_id: formData.class_id
-  });
-
-  // Only run auto-selection if we have departments but no selections yet
-  if (departments.length > 0 && !formData.department_id) {
-    console.log('[AUTO-SELECT] No department selected, auto-selecting first department');
-    const firstDept = departments[0];
-    if (firstDept) {
-      console.log(`[AUTO-SELECT] Selecting first department: ${firstDept.id} - ${firstDept.name}`);
-      handleChange('department_id', firstDept.id.toString());
-      handleChange('department_name', firstDept.name);
-    }
-  }
-}, [open, departments.length, formData.department_id]);
-
-useEffect(() => {
-  if (!open || !formData.department_id || formData.subdepartment_id) return;
-
-  const dept = departments.find(d => d.id.toString() === formData.department_id);
-  const subdepts = dept?.tm_subdepartments || [];
-  
-  console.log('[AUTO-SELECT] Checking for subdepartment auto-selection', {
-    department_id: formData.department_id,
-    subdepartmentsCount: subdepts.length,
-    currentSubdepartment: formData.subdepartment_id
-  });
-
-  if (subdepts.length > 0) {
-    const firstSubdept = subdepts[0];
-    console.log(`[AUTO-SELECT] Auto-selecting first subdepartment: ${firstSubdept.id} (${firstSubdept.name})`);
-    handleChange('subdepartment_id', firstSubdept.id.toString());
-    handleChange('subdepartment_name', firstSubdept.name);
-  }
-}, [formData.department_id, formData.subdepartment_id, departments, open]);
-
-useEffect(() => {
-  if (!open || !formData.subdepartment_id || formData.class_id) return;
-
-  const dept = departments.find(d => d.id.toString() === formData.department_id);
-  const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
-  const classes = subdept?.classes || [];
-  
-  console.log('[AUTO-SELECT] Checking for class auto-selection', {
-    subdepartment_id: formData.subdepartment_id,
-    classesCount: classes.length,
-    currentClass: formData.class_id
-  });
-
-  if (classes.length > 0) {
-    const firstClass = classes[0];
-    console.log(`[AUTO-SELECT] Auto-selecting first class: ${firstClass.id} (${firstClass.name})`);
-    handleChange('class_id', firstClass.id.toString());
-    handleChange('class_name', firstClass.name);
-  }
-}, [formData.subdepartment_id, formData.class_id, departments, open]);
-
-// Update the subclass auto-selection
-useEffect(() => {
-  if (!open || !formData.class_id || formData.subclass_id) return;
-
-  const dept = departments.find(d => d.id.toString() === formData.department_id);
-  const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
-  const cls = subdept?.classes?.find(c => c.id.toString() === formData.class_id);
-  const subclasses = cls?.subClasses || [];
-  
-  console.log('[AUTO-SELECT] Checking for subclass auto-selection', {
-    class_id: formData.class_id,
-    subclassesCount: subclasses.length,
-    currentSubclass: formData.subclass_id
-  });
-
-  if (subclasses.length > 0) {
-    const firstSubclass = subclasses[0];
-    console.log(`[AUTO-SELECT] Auto-selecting first subclass: ${firstSubclass.id} (${firstSubclass.name})`);
-    handleChange('subclass_id', firstSubclass.id.toString());
-    handleChange('subclass_name', firstSubclass.name);
-  }
-}, [formData.class_id, formData.subclass_id, departments, open]);
-    useEffect(() => {
-        if (!open || !formData.subdepartment_id || !formData.task_manager_id) {
-            // If no manager selected, clear assistants
-            setAvailableAssistants([]);
-            return;
-        }
-        
-        const filterAssistantsByManager = () => {
-            console.log(`[LOG] Filtering assistants for Manager ID: ${formData.task_manager_id}`);
-            const dept = departments.find(d => d.id.toString() === formData.department_id);
-            const subdept = dept?.tm_subdepartments?.find(s => s.id.toString() === formData.subdepartment_id);
-
-            if (!subdept) return;
-
-            // Get assistants assigned to this subdepartment and linked to the selected manager
-            const assistantsForManager = subdept.assistant_history
-                ?.filter(assistant =>
-                    !assistant.end_date && // Active assignments only
-                    assistant.manager_id?.toString() === formData.task_manager_id
-                )
-                ?.map(assistant => assistant.id) || [];
-
-            // Filter local users to get the actual assistant user objects
-            const availableAssistants = localUsers.filter(user =>
-                assistantsForManager.includes(user.id)
-            );
-
-            console.log(`🎯 [LOG] Found ${availableAssistants.length} assistants for manager ${formData.task_manager_id}`);
-            setAvailableAssistants(availableAssistants);
-        };
-
-        filterAssistantsByManager();
-    }, [formData.task_manager_id, formData.subdepartment_id, departments, localUsers]);
-
+    // Search individuals
     const searchIndividuals = useCallback(async (type: 'principal' | 'dependant') => {
-        console.log(`🔍 [LOG] Searching for individuals of type: ${type}`);
         setSearchLoading(true)
         try {
             const { data, error } = await supabase
@@ -483,8 +294,6 @@ useEffect(() => {
                 .order('full_name')
 
             if (error) throw error
-            
-            console.log(`✅ [LOG] Found ${data?.length || 0} individuals.`);
             setIndividuals(data || [])
         } catch (error) {
             console.error('Error searching individuals:', error)
@@ -498,47 +307,32 @@ useEffect(() => {
         }
     }, [])
 
-    const fetchDependants = async (principalId: number) => {
-        console.log(`👨‍👩‍👧 [LOG] Fetching dependants for principal ID: ${principalId}`);
+    // Fetch dependants
+    const fetchDependants = useCallback(async (principalId: number) => {
         try {
-            // First, get the principal with their relationships
             const { data: principal, error: principalError } = await supabase
                 .from('registry_individuals')
-                .select(`
-                id,
-                relationships
-            `)
+                .select('id, relationships')
                 .eq('id', principalId)
                 .single()
 
             if (principalError) throw principalError
             if (!principal?.relationships?.length) return []
 
-            // Extract all related individual IDs from relationships (excluding self)
             const relatedIds = principal.relationships
                 .map((rel: any) => rel.individual_id)
                 .filter((id: number) => id && id !== principalId)
 
             if (relatedIds.length === 0) return []
 
-            // Fetch all related individuals
             const { data: familyMembers, error } = await supabase
                 .from('registry_individuals')
-                .select(`
-                id,
-                full_name,
-                first_name,
-                last_name,
-                contact_details,
-                individual_type,
-                r_number
-            `)
+                .select('id, full_name, first_name, last_name, contact_details, individual_type, r_number')
                 .in('id', relatedIds)
                 .order('full_name')
 
             if (error) throw error
 
-            // Map relationships to include the relationship type
             return (familyMembers || []).map(member => {
                 const relationship = principal.relationships.find(
                     (rel: any) => rel.individual_id === member.id
@@ -552,42 +346,29 @@ useEffect(() => {
             console.error('Error fetching dependants:', error)
             return []
         }
-    }
+    }, [])
 
-    const fetchReferences = async (individualId: number) => {
-        console.log(`🔗 [LOG] Fetching references for individual ID: ${individualId}`);
+    // Fetch references
+    const fetchReferences = useCallback(async (individualId: number) => {
         try {
             const { data: individual, error } = await supabase
                 .from('registry_individuals')
-                .select(`
-                id,
-                references
-            `)
+                .select('id, references')
                 .eq('id', individualId)
                 .single()
 
             if (error) throw error
             if (!individual?.references?.length) return []
 
-            // Extract reference IDs from the references array
             const referenceIds = individual.references
                 .map((ref: any) => ref.id)
                 .filter((id: number) => id && id !== individualId)
 
             if (referenceIds.length === 0) return []
 
-            // Fetch all reference individuals
             const { data: referenceMembers, error: refError } = await supabase
                 .from('registry_individuals')
-                .select(`
-                id,
-                full_name,
-                first_name,
-                last_name,
-                contact_details,
-                individual_type,
-                r_number
-            `)
+                .select('id, full_name, first_name, last_name, contact_details, individual_type, r_number')
                 .in('id', referenceIds)
                 .order('full_name')
 
@@ -601,37 +382,32 @@ useEffect(() => {
             console.error('Error fetching references:', error)
             return []
         }
-    }
+    }, [])
 
-    const fetchCompanies = async (individualId: number) => {
-        if (!individualId) return;
+    // Fetch companies
+    const fetchCompanies = useCallback(async (individualId: number) => {
+        if (!individualId) return
         
-        console.log(`🏢 [LOG] Fetching companies for individual ID: ${individualId}`);
-        setLoadingCompanies(true);
-        
+        setLoadingCompanies(true)
         try {
-            // Get the individual with their employment data
             const { data: individualData, error: individualError } = await supabase
                 .from('registry_individuals')
                 .select('employment_data')
                 .eq('id', individualId)
-                .single();
-    
-            if (individualError) throw individualError;
-    
-            const employmentData = individualData?.employment_data;
+                .single()
+
+            if (individualError) throw individualError
+
+            const employmentData = individualData?.employment_data
             
-            // Check if employment_data exists and has associations
-            if (!employmentData?.associations || !Array.isArray(employmentData.associations)) {
-                console.log('📭 [LOG] No employment associations found');
-                setCompanies([]);
-                setSelectedCompany('');
-                setUnderstudies([]);
-                setSelectedUnderstudy('');
-                return;
+            if (!employmentData?.associations?.length) {
+                setCompanies([])
+                setSelectedCompany('')
+                setUnderstudies([])
+                setSelectedUnderstudy('')
+                return
             }
-    
-            // Filter associations by individual_type = 'Principal' and extract company info
+
             const principalAssociations = employmentData.associations
                 .filter((association: any) => 
                     association?.individual_type === 'Principal' && 
@@ -643,474 +419,236 @@ useEffect(() => {
                     role: association.role || '',
                     start_date: association.start_date,
                     end_date: association.end_date
-                }));
-    
-            console.log(`👔 [LOG] Found ${principalAssociations.length} Principal associations`);
-    
+                }))
+
             if (principalAssociations.length === 0) {
-                console.log('📭 [LOG] No Principal associations found');
-                setCompanies([]);
-                setSelectedCompany('');
-                setUnderstudies([]);
-                setSelectedUnderstudy('');
-                return;
+                setCompanies([])
+                setSelectedCompany('')
+                setUnderstudies([])
+                setSelectedUnderstudy('')
+                return
             }
-    
-            // Get unique company IDs
-            const companyIds = [...new Set(principalAssociations.map(assoc => assoc.company_id))];
-    
-            // Fetch company details in a single query
+
+            const companyIds = [...new Set(principalAssociations.map(assoc => assoc.company_id))]
+
             const { data: companiesData, error: companiesError } = await supabase
                 .from('acc_portal_company_duplicate')
                 .select('id, company_name, understudy')
-                .in('id', companyIds);
-    
-            if (companiesError) throw companiesError;
-    
-            // Create a map for quick lookup of association data
-            const associationMap = new Map();
+                .in('id', companyIds)
+
+            if (companiesError) throw companiesError
+
+            const associationMap = new Map()
             principalAssociations.forEach(assoc => {
-                const companyId = assoc.company_id;
+                const companyId = assoc.company_id
                 if (!associationMap.has(companyId)) {
-                    associationMap.set(companyId, []);
+                    associationMap.set(companyId, [])
                 }
-                associationMap.get(companyId).push(assoc);
-            });
-    
-            // Enrich company data with employment info
+                associationMap.get(companyId).push(assoc)
+            })
+
             const companiesWithDetails = (companiesData || []).map(company => {
-                const companyId = company.id?.toString();
-                const associations = associationMap.get(companyId) || [];
-                
-                // Determine if any association is current
-                const hasCurrent = associations.some(assoc => assoc.is_current);
-                
-                // For Principal type, we'll consider it as "bill_to" if it's current
-                // You can adjust this logic based on your business rules
-                const isBillTo = hasCurrent;
+                const companyId = company.id?.toString()
+                const associations = associationMap.get(companyId) || []
+                const hasCurrent = associations.some(assoc => assoc.is_current)
                 
                 return {
                     id: companyId,
                     company_name: company.company_name || 'Unnamed Company',
-                    is_bill_to: isBillTo,
+                    is_bill_to: hasCurrent,
                     is_current: hasCurrent,
                     understudy: company.understudy || null,
-                    associations: associations // Include all associations for this company
-                };
-            });
-    
-            console.log(`✅ [LOG] Processed ${companiesWithDetails.length} companies for Principal`);
-            setCompanies(companiesWithDetails);
-    
-            // Auto-select company logic
+                    associations: associations
+                }
+            })
+
+            setCompanies(companiesWithDetails)
+
+            // Auto-select logic
             if (companiesWithDetails.length === 1) {
-                // If only one company, auto-select it
-                const selectedCompanyId = companiesWithDetails[0].id;
-                setSelectedCompany(selectedCompanyId);
-                fetchUnderstudies(selectedCompanyId);
-                console.log(`🎯 [LOG] Auto-selected single company: ${companiesWithDetails[0].company_name}`);
+                const selectedCompanyId = companiesWithDetails[0].id
+                setSelectedCompany(selectedCompanyId)
+                fetchUnderstudies(selectedCompanyId)
             } else if (companiesWithDetails.length > 1) {
-                // If multiple companies, try to select current one or bill_to
-                const currentCompany = companiesWithDetails.find(c => c.is_current && c.is_bill_to);
+                const currentCompany = companiesWithDetails.find(c => c.is_current && c.is_bill_to)
                 const fallbackCompany = companiesWithDetails.find(c => c.is_current) || 
-                                      companiesWithDetails.find(c => c.is_bill_to);
+                                      companiesWithDetails.find(c => c.is_bill_to)
                 
-                const autoSelectCompany = currentCompany || fallbackCompany;
+                const autoSelectCompany = currentCompany || fallbackCompany
                 
                 if (autoSelectCompany) {
-                    setSelectedCompany(autoSelectCompany.id);
-                    fetchUnderstudies(autoSelectCompany.id);
-                    console.log(`🎯 [LOG] Auto-selected company: ${autoSelectCompany.company_name}`);
+                    setSelectedCompany(autoSelectCompany.id)
+                    fetchUnderstudies(autoSelectCompany.id)
                 } else {
-                    setSelectedCompany('');
-                    setUnderstudies([]);
-                    setSelectedUnderstudy('');
-                    console.log(`⚠️ [LOG] Multiple companies found, no auto-selection made`);
+                    setSelectedCompany('')
+                    setUnderstudies([])
+                    setSelectedUnderstudy('')
                 }
-            } else {
-                // No companies found
-                setSelectedCompany('');
-                setUnderstudies([]);
-                setSelectedUnderstudy('');
             }
-    
         } catch (error) {
-            console.error('❌ [LOG] Error fetching companies:', error);
+            console.error('Error fetching companies:', error)
             toast({
                 title: "Error",
                 description: "Failed to load companies",
                 variant: "destructive"
-            });
-            
-            // Reset state on error
-            setCompanies([]);
-            setSelectedCompany('');
-            setUnderstudies([]);
-            setSelectedUnderstudy('');
+            })
+            setCompanies([])
+            setSelectedCompany('')
+            setUnderstudies([])
+            setSelectedUnderstudy('')
         } finally {
-            setLoadingCompanies(false);
+            setLoadingCompanies(false)
         }
-    };
+    }, [])
 
-    const fetchUnderstudies = async (companyId: string) => {
+    // Fetch understudies
+    const fetchUnderstudies = useCallback(async (companyId: string) => {
         if (!companyId) {
-            setUnderstudies([]);
-            setSelectedUnderstudy('');
-            return;
+            setUnderstudies([])
+            setSelectedUnderstudy('')
+            return
         }
-        console.log(`👥 [LOG] Fetching understudies for company ID: ${companyId}`);
-        setLoadingUnderstudies(true);
+
+        setLoadingUnderstudies(true)
         try {
-            // First get the company to check for understudies
             const { data: companyData, error: companyError } = await supabase
                 .from('acc_portal_company_duplicate')
                 .select('understudy')
                 .eq('id', companyId)
-                .single();
-    
-            if (companyError) throw companyError;
+                .single()
+
+            if (companyError) throw companyError
             
-            const understudiesData = companyData?.understudy || [];
+            const understudiesData = companyData?.understudy || []
             
             if (!understudiesData.length) {
-                setUnderstudies([]);
-                setSelectedUnderstudy('');
-                return;
+                setUnderstudies([])
+                setSelectedUnderstudy('')
+                return
             }
             
-            // Get understudy details from registry_individuals
             const { data: understudies, error } = await supabase
                 .from('registry_individuals')
                 .select('*')
-                .in('id', understudiesData.map((u: any) => u.individual_id));
-    
-            if (error) throw error;
-    
-            // Map understudy data with their details
+                .in('id', understudiesData.map((u: any) => u.individual_id))
+
+            if (error) throw error
+
             const understudiesWithDetails = understudies.map(understudy => {
                 const understudyInfo = understudiesData.find((u: any) => 
                     u.individual_id === understudy.id
-                );
+                )
                 
                 return {
                     ...understudy,
                     employment_details: understudyInfo?.details || {}
-                };
-            });
-    
-            setUnderstudies(understudiesWithDetails);
-            setSelectedUnderstudy('');
+                }
+            })
+
+            setUnderstudies(understudiesWithDetails)
+            setSelectedUnderstudy('')
         } catch (error) {
-            console.error('Error fetching understudies:', error);
+            console.error('Error fetching understudies:', error)
             toast({
                 title: "Error",
                 description: "Failed to load understudies",
                 variant: "destructive"
-            });
+            })
         } finally {
-            setLoadingUnderstudies(false);
+            setLoadingUnderstudies(false)
         }
-    };
+    }, [])
 
-    // Load individuals when applicant type changes
-    useEffect(() => {
-        if (open) {
-            console.log(`🔄 [LOG] Applicant type changed to: ${applicantType}. Reloading and resetting.`);
-            searchIndividuals(applicantType);
-            setSelectedIndividual(null);
-            setPrincipalForDependant(null);
-            setCompanies([]);
-            setSelectedCompany('');
-            setUnderstudies([]);
-            setSelectedUnderstudy('');
-            setFormData(prev => ({
-                ...prev,
-                principal_member_id: '',
-                officer_id: '',
-                task_manager_id: '',
-                task_assistant_id: ''
-            }));
-            setIncludeReferences(false);
-            setAvailableReferences([]);
-            setSelectedReferences([]);
-            setIncludeDependants(false);
-            setAvailableDependants([]);
-            setSelectedDependants([]);
-            setAvailableOfficers([]);
-            setAvailableManagers([]);
-            setAvailableAssistants([]);
+    // Handle individual selection
+    const handleIndividualSelect = useCallback(async (individual: Individual) => {
+        setSelectedIndividual(individual)
+        setPrincipalForDependant(null)
+        setSelectedCompany('')
+        setCompanies([])
+        setUnderstudies([])
+        setSelectedUnderstudy('')
+        setAvailableDependants([])
+        setSelectedDependants([])
+        setIncludeDependants(false)
+        setAvailableReferences([])
+        setSelectedReferences([])
+        setIncludeReferences(false)
+
+        const primaryPhone = individual.contact_details?.phone?.kenyan?.primary || ''
+        const formUpdate: any = {
+            full_name: individual.full_name,
+            mobile_number: primaryPhone,
+            principal_member_id: ''
         }
-    }, [applicantType, open, searchIndividuals]);
 
-    // Handle company selection change
-    useEffect(() => {
-        if (selectedCompany) {
-            console.log(`[LOG] Company selected: ID ${selectedCompany}. Fetching understudies.`);
-            fetchUnderstudies(selectedCompany);
-        } else {
-            setUnderstudies([]);
-            setSelectedUnderstudy('');
-        }
-    }, [selectedCompany]);
+        const [references, familyMembers] = await Promise.all([
+            fetchReferences(individual.id),
+            fetchDependants(individual.id)
+        ])
 
-    const availableSubdepartments = useMemo(() => {
-        if (!formData.department_id) {
-            console.log('[AUTO-SELECT] No department selected, returning empty subdepartments');
-            return [];
-        }
-        const dept = departments.find(d => d.id.toString() === formData.department_id);
-        const subdepts = dept?.tm_subdepartments || [];
-        console.log(`[AUTO-SELECT] Found ${subdepts.length} subdepartments for department ${formData.department_id}`, 
-            { deptName: dept?.name, subdepts });
-        return subdepts;
-    }, [formData.department_id, departments])
+        setAvailableReferences(references)
 
-    const availableClasses = useMemo(() => {
-        if (!formData.subdepartment_id) {
-            console.log('[AUTO-SELECT] No subdepartment selected, returning empty classes');
-            return [];
-        }
-        const subdept = availableSubdepartments.find(s => s.id.toString() === formData.subdepartment_id);
-        const classes = subdept?.classes || [];
-        console.log(`[AUTO-SELECT] Found ${classes.length} classes for subdepartment ${formData.subdepartment_id}`, 
-            { subdeptName: subdept?.name, classes });
-        return classes;
-    }, [availableSubdepartments, formData.subdepartment_id])
+        if (individual.individual_type === 'principal') {
+            setAvailableDependants(familyMembers)
+            await fetchCompanies(individual.id)
+        } else if (individual.individual_type === 'dependant') {
+            const principalRelation = individual.relationships?.find(
+                (rel: any) => rel.isPrincipal === 'Yes' || 
+                ['principal', 'spouse', 'husband', 'wife'].includes(rel.relationship?.toLowerCase())
+            )
 
-    const availableSubclasses = useMemo(() => {
-        if (!formData.class_id) {
-            console.log('[AUTO-SELECT] No class selected, returning empty subclasses');
-            return [];
-        }
-        const cls = availableClasses.find(c => c.id.toString() === formData.class_id);
-        const subclasses = cls?.subClasses || [];
-        console.log(`[AUTO-SELECT] Found ${subclasses.length} subclasses for class ${formData.class_id}`, 
-            { className: cls?.name, subclasses });
-        return subclasses;
-    }, [availableClasses, formData.class_id])
+            if (principalRelation?.individual_id) {
+                const principalId = principalRelation.individual_id
+                formUpdate.principal_member_id = principalId.toString()
 
-    
-    // Auto-select first subdepartment when department changes
-    useEffect(() => {
-        console.log('[AUTO-SELECT] Checking for subdepartment auto-selection', {
-            department_id: formData.department_id,
-            subdepartmentsCount: availableSubdepartments.length,
-            currentSubdepartment: formData.subdepartment_id
-        });
+                const { data: principalData, error: principalError } = await supabase
+                    .from('registry_individuals')
+                    .select('id, full_name')
+                    .eq('id', principalId)
+                    .single()
 
-        if (formData.department_id && availableSubdepartments.length > 0 && !formData.subdepartment_id) {
-            const firstSubdept = availableSubdepartments[0];
-            if (firstSubdept) {
-                console.log(`[AUTO-SELECT] Auto-selecting first subdepartment: ${firstSubdept.id} (${firstSubdept.name})`);
-                handleChange('subdepartment_id', firstSubdept.id.toString());
-                handleChange('subdepartment_name', firstSubdept.name);
-            }
-        }
-    }, [formData.department_id, availableSubdepartments, formData.subdepartment_id]);
-
-    // Auto-select first class when subdepartment changes
-    useEffect(() => {
-        console.log('[AUTO-SELECT] Checking for class auto-selection', {
-            subdepartment_id: formData.subdepartment_id,
-            classesCount: availableClasses.length,
-            currentClass: formData.class_id
-        });
-
-        if (formData.subdepartment_id && availableClasses.length > 0 && !formData.class_id) {
-            const firstClass = availableClasses[0];
-            if (firstClass) {
-                console.log(`[AUTO-SELECT] Auto-selecting first class: ${firstClass.id} (${firstClass.name})`);
-                handleChange('class_id', firstClass.id.toString());
-                handleChange('class_name', firstClass.name);
-            }
-        }
-    }, [formData.subdepartment_id, availableClasses, formData.class_id]);
-
-    // Auto-select first subclass when class changes
-    useEffect(() => {
-        console.log('[AUTO-SELECT] Checking for subclass auto-selection', {
-            class_id: formData.class_id,
-            subclassesCount: availableSubclasses.length,
-            currentSubclass: formData.subclass_id
-        });
-
-        if (formData.class_id && availableSubclasses.length > 0 && !formData.subclass_id) {
-            const firstSubclass = availableSubclasses[0];
-            if (firstSubclass) {
-                console.log(`[AUTO-SELECT] Auto-selecting first subclass: ${firstSubclass.id} (${firstSubclass.name})`);
-                handleChange('subclass_id', firstSubclass.id.toString());
-                handleChange('subclass_name', firstSubclass.name);
-            }
-        }
-    }, [formData.class_id, availableSubclasses, formData.subclass_id]);
-    
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-        console.log("🚀 [LOG] Attempting to create enquiry...");
-        console.log("📋 [LOG] Current form state:", {
-            taskType,
-            applicantType,
-            selectedIndividual: selectedIndividual?.full_name,
-            formData
-        });
-    
-        try {
-            const individualToUse = selectedIndividualRef.current;
-    
-            if (!individualToUse) {
-                throw new Error('No individual selected. Please select an individual from the dropdown.');
-            }
-    
-            const individualId = individualToUse.id;
-            if (!individualId) {
-                throw new Error('Selected individual does not have a valid ID');
-            }
-    
-            console.log("👤 [LOG] Using individual:", {
-                id: individualId,
-                name: individualToUse.full_name,
-                type: individualToUse.individual_type
-            });
-    
-            const dependantsToSave = includeDependants
-                ? selectedDependants.map(id => {
-                    const dependant = availableDependants.find(d => d.id.toString() === id);
-                    return dependant ? {
-                        id: dependant.id,
-                        name: dependant.full_name,
-                        relationship: dependant.relationship_type === 'Principal Member' ? 'Principal' : (dependant.relationship_type || 'Family Member')
-                    } : null;
-                }).filter(Boolean)
-                    .filter(dependant => dependant.relationship !== 'Principal')
-                : [];
-    
-            const referencesToSave = includeReferences
-                ? selectedReferences.map(id => {
-                    const reference = availableReferences.find(r => r.id.toString() === id);
-                    return reference ? {
-                        id: reference.id,
-                        name: reference.full_name,
-                        relationship: reference.relationship_type || 'reference'
-                    } : null;
-                }).filter(Boolean)
-                : [];
-    
-            console.log("👨‍👩‍👧‍👦 [LOG] Dependants to save:", dependantsToSave);
-            console.log("🔗 [LOG] References to save:", referencesToSave);
-    
-            const enquiryStageId = '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa';
-            const now = new Date();
-            const formattedDate = format(now, 'dd/MM/yyyy');
-            const initialStages = {
-                [enquiryStageId]: {
-                    date: formattedDate,
-                    status: 'completed',
-                    completedAt: now.toISOString(),
-                },
-            };
-    
-            const taskData: any = {
-                job_description: formData.job_description || '',
-                status: 'enquiry',
-                renewal_status: taskType, // Also add renewal_status field if your schema supports it
-                department_id: formData.department_id,
-                subdepartment_id: formData.subdepartment_id,
-                individual_id: individualId,
-                applicant_type: applicantType,
-                class_id: formData.class_id || null,
-                subclass_id: formData.subclass_id || null,
-                date_initiated: new Date(formData.enquiry_date), // Use the selected date
-                applicant_name: individualToUse.full_name,
-                stages: initialStages,
-                dependant_member: dependantsToSave,
-                references: referencesToSave,
-                understudy: selectedUnderstudy || null,
-                company_id: selectedCompany || null,
-                officer_id: formData.officer_id && formData.officer_id !== 'none' ? formData.officer_id : null,
-                task_manager_id: formData.task_manager_id && formData.task_manager_id !== 'none' ? formData.task_manager_id : null,
-                task_assistant_id: formData.task_assistant_id && formData.task_assistant_id !== 'none' ? formData.task_assistant_id : null,
-            };
-    
-            if (applicantType === 'principal') {
-                taskData.principal_member = individualId;
-                console.log("👑 [LOG] Set principal_member to:", individualId);
-            } else if (applicantType === 'dependant') {
-                const principalId = formData.principal_member_id;
-                if (!principalId) {
-                    throw new Error("Principal member could not be identified for the selected dependant. Cannot create enquiry.");
+                if (principalError) {
+                    toast({ 
+                        title: "Error", 
+                        description: "Could not load principal member's details.", 
+                        variant: "destructive" 
+                    })
+                    return
                 }
-                taskData.principal_member = principalId;
-                console.log("👑 [LOG] Set principal_member for dependant to:", principalId);
-            }
-    
-            // Enhanced logging for staff assignments
-            console.log("👥 [LOG] Staff assignments:", {
-                officer_id: taskData.officer_id,
-                task_manager_id: taskData.task_manager_id,
-                task_assistant_id: taskData.task_assistant_id,
-                department_id: taskData.department_id,
-                subdepartment_id: taskData.subdepartment_id
-            });
-    
-            // --- CRITICAL LOG: SHOW DATA BEFORE SUBMISSION ---
-            console.log('📦 [LOG] Submitting the following task data to Supabase:', JSON.stringify(taskData, null, 2));
-    
-            const { data, error } = await supabase
-                .from('tm_tasks')
-                .insert([taskData])
-                .select()
-                .single();
-    
-            if (error) {
-                console.error('❌ [LOG] Supabase insertion error:', error);
-                throw error;
-            }
-            
-            console.log('✅ [LOG] Enquiry created successfully! Response:', data);
-    
-            const { data: fullTask, error: fetchError } = await supabase
-                .from('tm_tasks')
-                .select(`*,department:department_id(name),subdepartment:subdepartment_id(name),individual:individual_id(full_name)`)
-                .eq('id', data.id)
-                .single();
-                
-            if (fetchError) {
-                console.error('⚠️ [LOG] Error fetching full task details:', fetchError);
+
+                setPrincipalForDependant(principalData)
+                await fetchCompanies(principalId)
+
+                const principalIndex = familyMembers.findIndex(fm => fm.id === principalId)
+                const allFamilyForSelection = principalIndex !== -1
+                    ? familyMembers
+                        .filter(fm => fm.id !== individual.id)
+                        .map(fm => fm.id === principalId
+                            ? { ...fm, relationship_type: 'Principal Member' }
+                            : fm
+                        )
+                    : [
+                        { ...principalData, relationship_type: 'Principal Member' },
+                        ...familyMembers.filter(fm => fm.id !== individual.id)
+                    ]
+
+                setAvailableDependants(allFamilyForSelection)
+                setIncludeDependants(true)
+                setSelectedDependants([principalData.id.toString()])
             } else {
-                console.log('📋 [LOG] Full task details retrieved:', fullTask);
+                toast({ 
+                    title: "Info", 
+                    description: "No principal member found for this dependant.", 
+                    variant: "default" 
+                })
             }
-    
-            updateTaskFields(fullTask || data);
-    
-            onEnquiryCreated(fullTask || data);
-            resetForm();
-            onOpenChange(false);
-    
-            toast({
-                title: 'Success',
-                description: `${taskType === 'renewal' ? 'Renewal' : 'Enquiry'} created successfully with staff assignments`,
-            });
-        } catch (error) {
-            console.error('❌ [LOG] Error creating enquiry:', error);
-            console.error('❌ [LOG] Error details:', {
-                message: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                formData: formData,
-                taskType: taskType,
-                applicantType: applicantType
-            });
-            toast({
-                title: 'Error',
-                description: error instanceof Error ? error.message : 'Failed to create enquiry',
-                variant: 'destructive'
-            });
-        } finally {
-            setLoading(false);
         }
-    };
-    const resetForm = () => {
-        console.log("🧹 [LOG] Resetting form to initial state.");
+
+        setFormData(prev => ({ ...prev, ...formUpdate }))
+    }, [fetchReferences, fetchDependants, fetchCompanies, setSelectedIndividual])
+
+    // Reset form
+    const resetForm = useCallback(() => {
         setFormData({
             full_name: '',
             mobile_number: '',
@@ -1129,13 +667,13 @@ useEffect(() => {
             enquiry_date: new Date().toISOString().split('T')[0]
         })
         setSelectedIndividual(null)
-        setPrincipalForDependant(null);
+        setPrincipalForDependant(null)
         setApplicantType('principal')
         setTaskType('new')
-        includeDependants && setIncludeDependants(false)
+        setIncludeDependants(false)
         setSelectedDependants([])
         setAvailableDependants([])
-        includeReferences && setIncludeReferences(false)
+        setIncludeReferences(false)
         setSelectedReferences([])
         setAvailableReferences([])
         setSelectedCompany('')
@@ -1145,103 +683,284 @@ useEffect(() => {
         setAvailableOfficers([])
         setAvailableManagers([])
         setAvailableAssistants([])
-    }
+    }, [setSelectedIndividual])
 
-    const handleFormChange = (field: string, value: any) => {
-        setFormData(prev => ({
-            ...prev,
-            [field]: value
-        }))
-    }
+    // Submit handler
+    const handleSubmit = useCallback(async (e: React.FormEvent) => {
+        e.preventDefault()
+        setLoading(true)
 
-    const handleIndividualSelect = async (individual: Individual) => {
-        console.log(`👤 [LOG] Individual selected: ${individual.full_name} (ID: ${individual.id})`);
-        setSelectedIndividual(individual);
-        setPrincipalForDependant(null);
-        setSelectedCompany('');
-        setCompanies([]);
-        setUnderstudies([]);
-        setSelectedUnderstudy('');
-        setAvailableDependants([]);
-        setSelectedDependants([]);
-        setIncludeDependants(false);
-        setAvailableReferences([]);
-        setSelectedReferences([]);
-        setIncludeReferences(false);
+        try {
+            const individualToUse = selectedIndividualRef.current
 
-        const primaryPhone = individual.contact_details?.phone?.kenyan?.primary || '';
-        const formUpdate: any = {
-            full_name: individual.full_name,
-            mobile_number: primaryPhone,
-            principal_member_id: ''
-        };
+            if (!individualToUse) {
+                throw new Error('No individual selected. Please select an individual from the dropdown.')
+            }
 
-        const references = await fetchReferences(individual.id);
-        setAvailableReferences(references);
+            const individualId = individualToUse.id
+            if (!individualId) {
+                throw new Error('Selected individual does not have a valid ID')
+            }
 
-        const familyMembers = await fetchDependants(individual.id);
+            const dependantsToSave = includeDependants
+                ? selectedDependants
+                    .map(id => {
+                        const dependant = availableDependants.find(d => d.id.toString() === id)
+                        return dependant ? {
+                            id: dependant.id,
+                            name: dependant.full_name,
+                            relationship: dependant.relationship_type === 'Principal Member' 
+                                ? 'Principal' 
+                                : (dependant.relationship_type || 'Family Member')
+                        } : null
+                    })
+                    .filter(Boolean)
+                    .filter(dependant => dependant.relationship !== 'Principal')
+                : []
 
-        if (individual.individual_type === 'principal') {
-            console.log('[LOG] Selected individual is a Principal. Fetching their companies and dependants.');
-            setAvailableDependants(familyMembers);
-            await fetchCompanies(individual.id);
-        } else if (individual.individual_type === 'dependant') {
-            console.log('[LOG] Selected individual is a Dependant. Finding their principal member.');
-            const principalRelation = individual.relationships?.find(
-                (rel: any) => rel.isPrincipal === 'Yes' || ['principal', 'spouse', 'husband', 'wife'].includes(rel.relationship?.toLowerCase())
-            );
+            const referencesToSave = includeReferences
+                ? selectedReferences
+                    .map(id => {
+                        const reference = availableReferences.find(r => r.id.toString() === id)
+                        return reference ? {
+                            id: reference.id,
+                            name: reference.full_name,
+                            relationship: reference.relationship_type || 'reference'
+                        } : null
+                    })
+                    .filter(Boolean)
+                : []
 
-            if (principalRelation && principalRelation.individual_id) {
-                const principalId = principalRelation.individual_id;
-                formUpdate.principal_member_id = principalId.toString();
-                console.log(`[LOG] Found Principal ID: ${principalId}. Fetching details and companies.`);
+            const enquiryStageId = '1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'
+            const now = new Date()
+            const formattedDate = format(now, 'dd/MM/yyyy')
+            const initialStages = {
+                [enquiryStageId]: {
+                    date: formattedDate,
+                    status: 'completed',
+                    completedAt: now.toISOString(),
+                },
+            }
 
-                const principalResult = await supabase
-                    .from('registry_individuals')
-                    .select('id, full_name')
-                    .eq('id', principalId)
-                    .single();
+            const taskData: any = {
+                job_description: formData.job_description || '',
+                status: 'enquiry',
+                renewal_status: taskType,
+                department_id: formData.department_id,
+                subdepartment_id: formData.subdepartment_id,
+                individual_id: individualId,
+                applicant_type: applicantType,
+                class_id: formData.class_id || null,
+                subclass_id: formData.subclass_id || null,
+                date_initiated: new Date(formData.enquiry_date),
+                applicant_name: individualToUse.full_name,
+                stages: initialStages,
+                dependant_member: dependantsToSave,
+                references: referencesToSave,
+                understudy: selectedUnderstudy || null,
+                company_id: selectedCompany || null,
+                officer_id: formData.officer_id && formData.officer_id !== 'none' ? formData.officer_id : null,
+                task_manager_id: formData.task_manager_id && formData.task_manager_id !== 'none' ? formData.task_manager_id : null,
+                task_assistant_id: formData.task_assistant_id && formData.task_assistant_id !== 'none' ? formData.task_assistant_id : null,
+            }
 
-                if (principalResult.error) {
-                    console.error("[LOG] Error fetching principal details:", principalResult.error);
-                    toast({ title: "Error", description: "Could not load principal member's details.", variant: "destructive" });
-                    return;
+            if (applicantType === 'principal') {
+                taskData.principal_member = individualId
+            } else if (applicantType === 'dependant') {
+                const principalId = formData.principal_member_id
+                if (!principalId) {
+                    throw new Error("Principal member could not be identified for the selected dependant. Cannot create enquiry.")
                 }
+                taskData.principal_member = principalId
+            }
 
-                const principalData = principalResult.data;
-                setPrincipalForDependant(principalData);
+            const { data, error } = await supabase
+                .from('tm_tasks')
+                .insert([taskData])
+                .select()
+                .single()
 
-                await fetchCompanies(principalId);
+            if (error) throw error
 
-                const principalIndex = familyMembers.findIndex(fm => fm.id === principalId);
-                let allFamilyForSelection;
+            const { data: fullTask, error: fetchError } = await supabase
+                .from('tm_tasks')
+                .select(`*,department:department_id(name),subdepartment:subdepartment_id(name),individual:individual_id(full_name)`)
+                .eq('id', data.id)
+                .single()
 
-                if (principalIndex !== -1) {
-                    allFamilyForSelection = familyMembers
-                        .filter(fm => fm.id !== individual.id)
-                        .map(fm => fm.id === principalId
-                            ? { ...fm, relationship_type: 'Principal Member' }
-                            : fm
-                        );
-                } else {
-                    allFamilyForSelection = [
-                        { ...principalData, relationship_type: 'Principal Member' },
-                        ...familyMembers.filter(fm => fm.id !== individual.id)
-                    ];
-                }
+            onEnquiryCreated(fullTask || data)
+            resetForm()
+            onOpenChange(false)
 
-                setAvailableDependants(allFamilyForSelection);
+            toast({
+                title: 'Success',
+                description: `${taskType === 'renewal' ? 'Renewal' : 'Enquiry'} created successfully`,
+            })
+        } catch (error) {
+            console.error('Error creating enquiry:', error)
+            toast({
+                title: 'Error',
+                description: error instanceof Error ? error.message : 'Failed to create enquiry',
+                variant: 'destructive'
+            })
+        } finally {
+            setLoading(false)
+        }
+    }, [
+        applicantType, taskType, formData, includeDependants, selectedDependants, 
+        availableDependants, includeReferences, selectedReferences, availableReferences,
+        selectedCompany, selectedUnderstudy, onEnquiryCreated, resetForm, onOpenChange
+    ])
 
-                console.log('[LOG] Auto-including family members and selecting the Principal.');
-                setIncludeDependants(true);
-                setSelectedDependants([principalData.id.toString()]);
-            } else {
-                toast({ title: "Info", description: "No principal member found for this dependant.", variant: "default" });
+    // EFFECTS
+
+    // Load staff data when dialog opens
+    useEffect(() => {
+        if (!open) return
+
+        if (users?.length > 0 && officers?.length > 0) {
+            setLocalUsers(users)
+            setLocalOfficers(officers)
+            return
+        }
+
+        if (localUsers.length === 0 || localOfficers.length === 0) {
+            loadStaffData()
+        }
+    }, [open, users, officers, localUsers.length, localOfficers.length, loadStaffData])
+
+    // Update local users/officers when props change
+    useEffect(() => {
+        if (users?.length > 0) setLocalUsers(users)
+        if (officers?.length > 0) setLocalOfficers(officers)
+    }, [users, officers])
+
+    // Load individuals and reset when applicant type or dialog state changes
+    useEffect(() => {
+        if (open) {
+            searchIndividuals(applicantType)
+            setSelectedIndividual(null)
+            setPrincipalForDependant(null)
+            setCompanies([])
+            setSelectedCompany('')
+            setUnderstudies([])
+            setSelectedUnderstudy('')
+            setFormData(prev => ({
+                ...prev,
+                principal_member_id: '',
+                officer_id: '',
+                task_manager_id: '',
+                task_assistant_id: ''
+            }))
+            setIncludeReferences(false)
+            setAvailableReferences([])
+            setSelectedReferences([])
+            setIncludeDependants(false)
+            setAvailableDependants([])
+            setSelectedDependants([])
+            setAvailableOfficers([])
+            setAvailableManagers([])
+            setAvailableAssistants([])
+        }
+    }, [applicantType, open, searchIndividuals, setSelectedIndividual])
+
+    // Fetch understudies when company changes
+    useEffect(() => {
+        if (selectedCompany) {
+            fetchUnderstudies(selectedCompany)
+        } else {
+            setUnderstudies([])
+            setSelectedUnderstudy('')
+        }
+    }, [selectedCompany, fetchUnderstudies])
+
+    // CONSOLIDATED AUTO-SELECTION AND STAFF FILTERING EFFECT
+    useEffect(() => {
+        if (!open) return
+
+        // Auto-select department if not selected
+        if (departments.length > 0 && !formData.department_id) {
+            const firstDept = departments[0]
+            if (firstDept) {
+                handleChange('department_id', firstDept.id.toString())
+                handleChange('department_name', firstDept.name)
+            }
+            return // Exit early to let next render handle subdepartment
+        }
+
+        // Auto-select subdepartment if department is selected but subdepartment is not
+        if (formData.department_id && !formData.subdepartment_id && availableSubdepartments.length > 0) {
+            const firstSubdept = availableSubdepartments[0]
+            if (firstSubdept) {
+                handleChange('subdepartment_id', firstSubdept.id.toString())
+                handleChange('subdepartment_name', firstSubdept.name)
+            }
+            return // Exit early to let next render handle class
+        }
+
+        // Auto-select class if subdepartment is selected but class is not
+        if (formData.subdepartment_id && !formData.class_id && availableClasses.length > 0) {
+            const firstClass = availableClasses[0]
+            if (firstClass) {
+                handleChange('class_id', firstClass.id.toString())
+                handleChange('class_name', firstClass.name)
+            }
+            return // Exit early to let next render handle subclass
+        }
+
+        // Auto-select subclass if class is selected but subclass is not
+        if (formData.class_id && !formData.subclass_id && availableSubclasses.length > 0) {
+            const firstSubclass = availableSubclasses[0]
+            if (firstSubclass) {
+                handleChange('subclass_id', firstSubclass.id.toString())
+                handleChange('subclass_name', firstSubclass.name)
             }
         }
 
-        setFormData(prev => ({ ...prev, ...formUpdate }));
-    };
+        // Filter staff when subdepartment is selected
+        if (formData.subdepartment_id && currentSubdepartment && localUsers.length > 0 && localOfficers.length > 0) {
+            const staff = findActiveStaffForSubdept(currentSubdepartment, localUsers, localOfficers)
+            setAvailableOfficers(staff.officers)
+            setAvailableManagers(staff.managers)
+            setAvailableAssistants([]) // Reset assistants until manager is selected
+        }
+    }, [
+        open,
+        departments,
+        formData.department_id,
+        formData.subdepartment_id,
+        formData.class_id,
+        formData.subclass_id,
+        availableSubdepartments,
+        availableClasses,
+        availableSubclasses,
+        currentSubdepartment,
+        localUsers,
+        localOfficers,
+        handleChange,
+        findActiveStaffForSubdept
+    ])
+
+    // Filter assistants when manager changes
+    useEffect(() => {
+        if (!formData.subdepartment_id || !formData.task_manager_id || !currentSubdepartment) {
+            setAvailableAssistants([])
+            return
+        }
+
+        const assistantsForManager = currentSubdepartment.assistant_history
+            ?.filter(assistant =>
+                !assistant.end_date &&
+                assistant.manager_id?.toString() === formData.task_manager_id
+            )
+            ?.map(assistant => assistant.id) || []
+
+        const filteredAssistants = localUsers.filter(user =>
+            assistantsForManager.includes(user.id)
+        )
+
+        setAvailableAssistants(filteredAssistants)
+    }, [formData.task_manager_id, formData.subdepartment_id, currentSubdepartment, localUsers])
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1272,7 +991,7 @@ useEffect(() => {
                                         onValueChange={(value: 'principal' | 'dependant') => setApplicantType(value)}
                                         className="space-y-2"
                                     >
-                                        <div className="flex items-center space-x-2 border-b border-gray-200/50 pb-2 ">
+                                        <div className="flex items-center space-x-2 border-b border-gray-200/50 pb-2">
                                             <RadioGroupItem className="border-2 border-blue-500/50 hover:border-blue-500/70 transition-colors duration-200" value="principal" id="principal" />
                                             <Label htmlFor="principal" className="font-normal text-blue-700">
                                                 Principal
@@ -1330,8 +1049,8 @@ useEffect(() => {
                                                                 value={individual.full_name}
                                                                 key={individual.id}
                                                                 onSelect={() => {
-                                                                    handleIndividualSelect(individual);
-                                                                    setIsIndividualPopoverOpen(false); // Close popover on select
+                                                                    handleIndividualSelect(individual)
+                                                                    setIsIndividualPopoverOpen(false)
                                                                 }}
                                                             >
                                                                 {individual.full_name}
@@ -1357,9 +1076,7 @@ useEffect(() => {
                             <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
                                 <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
                                     <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
-                                        <Button className="bg-blue-600 hover:bg-blue-700 text-white">
-                                            <Building2 className="h-4 w-4" />
-                                        </Button>
+                                        <Building2 className="h-4 w-4" />
                                         {applicantType === 'dependant' && principalForDependant
                                             ? 'Company (Linked to Principal)'
                                             : 'Select Company'}
@@ -1380,10 +1097,10 @@ useEffect(() => {
                                             <SelectValue placeholder={loadingCompanies ? "Loading..." : "Select company..."} />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {companies && companies.length > 0 ? (
-                                                <>
-                                                    {companies.map((company) => (
-                                                        <SelectItem key={company.id} value={company.id.toString()} className="flex items-center justify-between">
+                                            {companies?.length > 0 ? (
+                                                companies.map((company) => (
+                                                    <SelectItem key={company.id} value={company.id.toString()}>
+                                                        <div className="flex items-center justify-between w-full">
                                                             <span>{company.company_name}</span>
                                                             <div className="flex items-center gap-2 ml-2">
                                                                 {company.is_current && (
@@ -1397,9 +1114,9 @@ useEffect(() => {
                                                                     </Badge>
                                                                 )}
                                                             </div>
-                                                        </SelectItem>
-                                                    ))}
-                                                </>
+                                                        </div>
+                                                    </SelectItem>
+                                                ))
                                             ) : (
                                                 <div className="px-3 py-2 text-blue-500 text-sm">No companies found</div>
                                             )}
@@ -1408,6 +1125,7 @@ useEffect(() => {
                                 </CardContent>
                             </Card>
 
+                            {/* Understudy Selection */}
                             <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
                                 <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
                                     <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
@@ -1424,14 +1142,12 @@ useEffect(() => {
                                             <SelectValue placeholder="Select understudy..." />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {understudies && understudies.length > 0 ? (
-                                                <>
-                                                    {understudies.map((understudy) => (
-                                                        <SelectItem key={understudy.id} value={understudy.id.toString()}>
-                                                            {understudy.full_name}
-                                                        </SelectItem>
-                                                    ))}
-                                                </>
+                                            {understudies?.length > 0 ? (
+                                                understudies.map((understudy) => (
+                                                    <SelectItem key={understudy.id} value={understudy.id.toString()}>
+                                                        {understudy.full_name}
+                                                    </SelectItem>
+                                                ))
                                             ) : (
                                                 <div className="px-3 py-2 text-blue-500 text-sm">No understudies found</div>
                                             )}
@@ -1450,15 +1166,15 @@ useEffect(() => {
                                         </CardTitle>
                                     </CardHeader>
                                     <CardContent>
-                                        <div className="space-y-2 border-b border-gray-200/50 pb-2">
+                                        <div className="space-y-2">
                                             <div className="flex items-center space-x-2 border-b border-gray-200/50 pb-2">
                                                 <input
                                                     type="checkbox"
                                                     id="include-dependants"
                                                     checked={includeDependants}
                                                     onChange={(e) => {
-                                                        setIncludeDependants(e.target.checked);
-                                                        if (!e.target.checked) setSelectedDependants([]);
+                                                        setIncludeDependants(e.target.checked)
+                                                        if (!e.target.checked) setSelectedDependants([])
                                                     }}
                                                     className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                 />
@@ -1478,16 +1194,14 @@ useEffect(() => {
                                                                     setSelectedDependants(prev => e.target.checked
                                                                         ? [...prev, dependant.id.toString()]
                                                                         : prev.filter(id => id !== dependant.id.toString())
-                                                                    );
+                                                                    )
                                                                 }}
                                                                 className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                             />
                                                             <label htmlFor={`dependant-${dependant.id}`} className="text-blue-700 text-sm flex-1 flex justify-between items-center">
                                                                 <span>{dependant.full_name}</span>
                                                                 {dependant.relationship_type === 'Principal Member' ? (
-                                                                    <Button type="button" variant="outline" className="border-blue-500 hover:bg-blue-50 text-blue-700 hover:text-blue-900">
-                                                                        Principal
-                                                                    </Button>
+                                                                    <Badge variant="outline" className="text-xs">Principal</Badge>
                                                                 ) : (
                                                                     <span className="text-xs text-gray-500 capitalize">
                                                                         {dependant.relationship_type || 'Family Member'}
@@ -1513,15 +1227,15 @@ useEffect(() => {
                                         </CardTitle>
                                     </CardHeader>
                                     <CardContent>
-                                        <div className="space-y-2 border-b border-gray-200/50 pb-2">
+                                        <div className="space-y-2">
                                             <div className="flex items-center space-x-2 border-b border-gray-200/50 pb-2">
                                                 <input
                                                     type="checkbox"
                                                     id="include-references"
                                                     checked={includeReferences}
                                                     onChange={(e) => {
-                                                        setIncludeReferences(e.target.checked);
-                                                        if (!e.target.checked) setSelectedReferences([]);
+                                                        setIncludeReferences(e.target.checked)
+                                                        if (!e.target.checked) setSelectedReferences([])
                                                     }}
                                                     className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                 />
@@ -1541,7 +1255,7 @@ useEffect(() => {
                                                                     setSelectedReferences(prev => e.target.checked
                                                                         ? [...prev, reference.id.toString()]
                                                                         : prev.filter(id => id !== reference.id.toString())
-                                                                    );
+                                                                    )
                                                                 }}
                                                                 className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                             />
@@ -1560,6 +1274,7 @@ useEffect(() => {
 
                         {/* Right Column - Enquiry Details */}
                         <div className="lg:col-span-2 space-y-6">
+                            {/* Enquiry Details */}
                             <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
                                 <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
                                     <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
@@ -1573,7 +1288,7 @@ useEffect(() => {
                                             <Label htmlFor="task-type" className="text-sm font-medium">
                                                 Task Type <span className="text-red-500">*</span>
                                             </Label>
-                                            <Select className="w-full"
+                                            <Select
                                                 value={taskType}
                                                 onValueChange={(value: 'new' | 'renewal') => setTaskType(value)}
                                             >
@@ -1594,7 +1309,7 @@ useEffect(() => {
                                                 id="enquiry-date"
                                                 type="date"
                                                 value={formData.enquiry_date}
-                                                onChange={(e) => handleFormChange('enquiry_date', e.target.value)}
+                                                onChange={(e) => setFormData(prev => ({ ...prev, enquiry_date: e.target.value }))}
                                                 className="mt-1"
                                                 required
                                             />
@@ -1608,7 +1323,7 @@ useEffect(() => {
                                         <Textarea
                                             id="job-description"
                                             value={formData.job_description}
-                                            onChange={(e) => handleFormChange('job_description', e.target.value)}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, job_description: e.target.value }))}
                                             placeholder="Describe the enquiry details..."
                                             className="mt-1 min-h-[100px]"
                                             required
@@ -1631,15 +1346,13 @@ useEffect(() => {
                                             <Label htmlFor="department" className="text-sm font-medium">
                                                 Department <span className="text-red-500">*</span>
                                             </Label>
-                                            <Select className="w-full"
+                                            <Select
                                                 value={formData.department_id}
                                                 onValueChange={(value) => {
-                                                    const selectedDept = departments.find(d => d.id.toString() === value);
+                                                    const selectedDept = departments.find(d => d.id.toString() === value)
                                                     if (selectedDept) {
-                                                        handleChange('department_id', value);
-                                                        handleChange('department_name', selectedDept.name);
-                                                        // Don't reset subdepartment_id here, let the effect handle it
-                                                        // This allows the auto-selection to work
+                                                        handleChange('department_id', value)
+                                                        handleChange('department_name', selectedDept.name)
                                                     }
                                                 }}
                                                 disabled={departments.length === 0}
@@ -1667,13 +1380,13 @@ useEffect(() => {
                                             <Label htmlFor="subdepartment" className="text-sm font-medium">
                                                 Subdepartment
                                             </Label>
-                                            <Select className="w-full"
+                                            <Select
                                                 value={formData.subdepartment_id}
                                                 onValueChange={(value) => {
-                                                    const selectedSubdept = availableSubdepartments.find(sd => sd.id.toString() === value);
+                                                    const selectedSubdept = availableSubdepartments.find(sd => sd.id.toString() === value)
                                                     if (selectedSubdept) {
-                                                        handleChange('subdepartment_id', value);
-                                                        handleChange('subdepartment_name', selectedSubdept.name);
+                                                        handleChange('subdepartment_id', value)
+                                                        handleChange('subdepartment_name', selectedSubdept.name)
                                                     }
                                                 }}
                                                 disabled={!formData.department_id || availableSubdepartments.length === 0}
@@ -1705,16 +1418,13 @@ useEffect(() => {
                                             <Label htmlFor="class" className="text-sm font-medium">
                                                 Class
                                             </Label>
-                                            <Select className="w-full"
+                                            <Select
                                                 value={formData.class_id}
                                                 onValueChange={(value) => {
-                                                    const selectedClass = availableClasses.find(c => c.id.toString() === value);
+                                                    const selectedClass = availableClasses.find(c => c.id.toString() === value)
                                                     if (selectedClass) {
-                                                        handleChange('class_id', value);
-                                                        handleChange('class_name', selectedClass.name);
-                                                        // Reset subclass when class changes
-                                                        handleChange('subclass_id', '');
-                                                        handleChange('subclass_name', '');
+                                                        handleChange('class_id', value)
+                                                        handleChange('class_name', selectedClass.name)
                                                     }
                                                 }}
                                                 disabled={!formData.subdepartment_id || availableClasses.length === 0}
@@ -1744,13 +1454,13 @@ useEffect(() => {
                                             <Label htmlFor="subclass" className="text-sm font-medium">
                                                 Subclass
                                             </Label>
-                                            <Select className="w-full"
+                                            <Select
                                                 value={formData.subclass_id}
                                                 onValueChange={(value) => {
-                                                    const selectedSubclass = availableSubclasses.find(sc => sc.id.toString() === value);
+                                                    const selectedSubclass = availableSubclasses.find(sc => sc.id.toString() === value)
                                                     if (selectedSubclass) {
-                                                        handleChange('subclass_id', value);
-                                                        handleChange('subclass_name', selectedSubclass.name);
+                                                        handleChange('subclass_id', value)
+                                                        handleChange('subclass_name', selectedSubclass.name)
                                                     }
                                                 }}
                                                 disabled={!formData.class_id || availableSubclasses.length === 0}
@@ -1779,7 +1489,7 @@ useEffect(() => {
                                 </CardContent>
                             </Card>
 
-                            {/* Staff Assignment Section - NEW */}
+                            {/* Staff Assignment */}
                             <Card className="border border-gray-200/50 rounded-lg bg-white/50 shadow-sm hover:shadow-md transition-shadow duration-200">
                                 <CardHeader className="pb-3 bg-blue-50/50 border-b border-gray-200/50">
                                     <CardTitle className="text-base font-semibold flex items-center gap-2 text-blue-800">
@@ -1872,7 +1582,7 @@ useEffect(() => {
                                         )}
                                     </div>
 
-                                    {/* Task Assistant Selection - Only shown when manager is selected */}
+                                    {/* Task Assistant Selection */}
                                     <div className="space-y-2">
                                         <Label className="text-xs font-medium flex items-center">
                                             <UserCheck className="w-3 h-3 mr-1" />
@@ -1911,7 +1621,6 @@ useEffect(() => {
                                             </SelectContent>
                                         </Select>
 
-                                        {/* Helper text */}
                                         {!formData.task_manager_id ? (
                                             <p className="text-xs text-blue-500">Select a manager to see available assistants</p>
                                         ) : formData.task_manager_id && availableAssistants.length === 0 && !loadingStaff ? (
@@ -1926,31 +1635,28 @@ useEffect(() => {
                     </div>
 
                     {/* Form Actions */}
-                    <DialogFooter className="border-t border-gray-200/50 pt-4 bg-white/50 flex flex-col sm:flex-row sm:justify-between gap-3 flex-end">
-                        <div className="flex flex-col sm:flex-row sm:justify-between gap-3">
-                            <Button
-                                type="button"
-                                variant="outline"
-                                className="border-blue-500 hover:bg-blue-50 text-blue-700 hover:text-blue-900"
-                                onClick={() => {
-                                    resetForm();
-                                    onOpenChange(false);
-                                }}
-                                disabled={loading}
-                            >
-                                Cancel
-                            </Button>
-                            <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white">
-                                {loading ? (
-                                    <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        Creating...
-                                    </>
-                                ) : (
-                                    'Create Enquiry'
-                                )}
-                            </Button>
-                        </div>
+                    <DialogFooter className="border-t border-gray-200/50 pt-4 bg-white/50">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                                resetForm()
+                                onOpenChange(false)
+                            }}
+                            disabled={loading}
+                        >
+                            Cancel
+                        </Button>
+                        <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white">
+                            {loading ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Creating...
+                                </>
+                            ) : (
+                                'Create Enquiry'
+                            )}
+                        </Button>
                     </DialogFooter>
                 </form>
             </DialogContent>

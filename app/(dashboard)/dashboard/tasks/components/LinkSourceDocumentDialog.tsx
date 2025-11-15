@@ -22,7 +22,7 @@ interface Task {
   id: string;
   applicant_name: string;
   individual_id: string;
-  source_document_id?: Record<string, SelectedDoc[]>; 
+  source_document_id?: Record<string, SelectedDoc[]>;
   created_at: string;
   class_id?: string;
   subclass_id?: string;
@@ -128,12 +128,12 @@ export function LinkSourceDocumentDialog({
       .filter(stage => isStageApplicableToTask(stage, task, departments) && stage.documents?.length > 0)
       .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
   }, [stages, task, departments]);
-  
+
   // MODIFICATION: handleSave now sends a payload compatible with the new multi-select structure.
   const handleSave = useCallback(async () => {
     setIsLoading(true);
     try {
-       // The finalPayload is already in the correct format { stageId: [doc1, doc2], ... }
+      // The finalPayload is already in the correct format { stageId: [doc1, doc2], ... }
       const { error } = await supabase
         .from('tm_tasks')
         .update({ source_document_id: selectedDocs, updated_at: new Date().toISOString() })
@@ -159,15 +159,15 @@ export function LinkSourceDocumentDialog({
       if (isSelected) {
         // Add the document if it's not already selected
         if (!currentSelections.some(d => d.id === doc.id)) {
-            newSelections = [...currentSelections, { id: doc.id, document_id: doc.document_id }];
+          newSelections = [...currentSelections, { id: doc.id, document_id: doc.document_id }];
         } else {
-            newSelections = currentSelections;
+          newSelections = currentSelections;
         }
       } else {
         // Remove the document
         newSelections = currentSelections.filter(d => d.id !== doc.id);
       }
-      
+
       return { ...prev, [stageId]: newSelections };
     });
   }, []);
@@ -204,19 +204,19 @@ export function LinkSourceDocumentDialog({
       const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
       const fileName = document.file_path?.split('/').pop() || documentName;
       const fileType = fileName.split('.').pop()?.toLowerCase() || 'pdf';
-      
+
       const transformKycFields = (fields: any[]): any[] => {
         if (!Array.isArray(fields)) return [];
         return fields.map((field: any) => ({
-            id: field.id || field.fieldName || '',
-            fieldName: field.name || field.fieldName || '',
-            description: field.description || '',
-            isRequired: field.isRequired !== false,
-            fieldType: field.type === 'array' || field.isArray ? 'array' : (field.type || field.fieldType || 'text'),
-            parentField: field.parentField,
-            isArray: field.type === 'array' || field.isArray,
-            fields: field.fields ? transformKycFields(field.fields) : undefined,
-            ...(field.type === 'array' && field.arrayConfig && { arrayConfig: { maxItems: field.arrayConfig.maxItems, fields: transformKycFields(field.arrayConfig.fields) } })
+          id: field.id || field.fieldName || '',
+          fieldName: field.name || field.fieldName || '',
+          description: field.description || '',
+          isRequired: field.isRequired !== false,
+          fieldType: field.type === 'array' || field.isArray ? 'array' : (field.type || field.fieldType || 'text'),
+          parentField: field.parentField,
+          isArray: field.type === 'array' || field.isArray,
+          fields: field.fields ? transformKycFields(field.fields) : undefined,
+          ...(field.type === 'array' && field.arrayConfig && { arrayConfig: { maxItems: field.arrayConfig.maxItems, fields: transformKycFields(field.arrayConfig.fields) } })
         }));
       };
       const fields = transformKycFields(kycData.fields || []);
@@ -241,7 +241,7 @@ export function LinkSourceDocumentDialog({
     setPreviewDocument(null);
     setIsPreviewDialogOpen(false);
   };
-  
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -270,13 +270,14 @@ export function LinkSourceDocumentDialog({
                         // MODIFICATION: Replaced RadioGroup with a div to contain Checkboxes.
                         <div className="space-y-2">
                           {availableDocs.map(doc => {
-                            const isSelected = selectedDocs[stage.id]?.some(d => d.id === doc.id) ?? false;
+                            const isSelected = Array.isArray(selectedDocs[stage.id])
+                              ? selectedDocs[stage.id].some(d => d.id === doc.id)
+                              : false;
                             return (
-                              <div 
+                              <div
                                 key={doc.id}
-                                className={`flex items-center gap-4 p-3 border rounded-md transition-colors ${
-                                  isSelected ? 'bg-blue-50 border-blue-300' : 'hover:bg-slate-50'
-                                }`}
+                                className={`flex items-center gap-4 p-3 border rounded-md transition-colors ${isSelected ? 'bg-blue-50 border-blue-300' : 'hover:bg-slate-50'
+                                  }`}
                               >
                                 <div className="flex items-center gap-3 flex-1">
                                   {/* MODIFICATION: Replaced RadioGroupItem with a Checkbox. */}
@@ -288,7 +289,7 @@ export function LinkSourceDocumentDialog({
                                     }}
                                   />
                                   <div className="min-w-0">
-                                    <Label 
+                                    <Label
                                       htmlFor={`${stage.id}-${doc.id}`}
                                       className="font-medium text-slate-900 block truncate cursor-pointer"
                                     >
@@ -319,10 +320,10 @@ export function LinkSourceDocumentDialog({
                           })}
                         </div>
                       ) : (
-                         <div className="text-center py-8 text-slate-500">
+                        <div className="text-center py-8 text-slate-500">
                           <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
                           <p className="font-medium">No documents found</p>
-                         </div>
+                        </div>
                       )}
                     </div>
                   )
@@ -339,7 +340,7 @@ export function LinkSourceDocumentDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {/* The preview dialog remains unchanged */}
       <Dialog open={isPreviewDialogOpen} onOpenChange={setIsPreviewDialogOpen}>
         <DialogContent className="max-w-7xl w-[95vw] h-[95vh] p-0 flex flex-col">
