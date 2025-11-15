@@ -470,97 +470,77 @@ export default function DepartmentTasksManager({
     return Promise.resolve(allKycFields[doc.kycId] || []);
   }, [allKycFields])
 
-  const determineCurrentStage = (task: any, stages: any[]) => {
-    console.log('🎯 determineCurrentStage called for task:', task.id);
-    
-    if (!task || !stages.length) {
-      console.log('❌ No task or stages array');
-      return null;
-    }
-  
-    // Sort stages by order_num for proper sequence
-    const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-    console.log('📋 Sorted stages for determine:', sortedStages.map(s => ({ name: s.name, order: s.order_num })));
-    
-    // Helper function to check if a stage is truly completed based on ACTUAL data
-    const isStageCompleted = (stage: any) => {
-      console.log(`🔄 [DETERMINE] Checking completion for: ${stage.name}`);
-      
-      const requiresDocuments = stage.documents && stage.documents.length > 0;
-      console.log(`📄 [DETERMINE] Stage requires documents: ${requiresDocuments}`);
-      
+  interface Stage {
+    id: string;
+    name: string;
+    order_num?: number;
+    documents?: Array<{ id: string }>;
+  }
+
+  interface TaskStageData {
+    status?: string;
+    date?: string;
+    completedAt?: string;
+  }
+
+  interface Task {
+    id: string;
+    stages?: Record<string, TaskStageData>;
+    source_document_id?: Record<string, string | { id: string }>;
+    created_at?: string;
+  }
+
+  interface Document {
+    id: string;
+    indicator?: boolean;
+    created_at?: string;
+  }
+
+  const determineCurrentStage = (task: Task | null, stages: Stage[]): Stage | null => {
+    if (!task || !stages.length) return null;
+
+    // Sort stages by order_num once
+    const sortedStages = [...stages].sort((a, b) => (a.order_num ?? 0) - (b.order_num ?? 0));
+
+    const isStageCompleted = (stage: Stage): boolean => {
+      const stageData = task.stages?.[stage.id];
+      const requiresDocuments = Boolean(stage.documents?.length);
+
       if (requiresDocuments) {
-        // For stages with document requirements, check for linked documents
-        const linkedDocumentData = task.source_document_id?.[stage.id];
-        const hasLinkedDocument = !!linkedDocumentData;
-        console.log(`🔗 [DETERMINE] ${stage.name} has linked document: ${hasLinkedDocument}`);
-        
-        if (!hasLinkedDocument) {
-          return false;
+        const documentRef = task.source_document_id?.[stage.id];
+        if (!documentRef) return false;
+
+        const documentId = typeof documentRef === 'string' ? documentRef : documentRef.id;
+        const linkedDoc = allDocuments.find(doc => doc.id === documentId) as Document | undefined;
+
+        if (!linkedDoc?.indicator) {
+          // If task has no creation date or document has no creation date, consider it valid
+          if (!task.created_at || !linkedDoc?.created_at) return true;
+
+          // Only invalidate if document is older than the task
+          return new Date(linkedDoc.created_at) >= new Date(task.created_at);
         }
-        
-        // Verify document is valid (not indicator, not old)
-        if (allDocuments.length > 0) {
-          const documentId = typeof linkedDocumentData === 'string' 
-            ? linkedDocumentData 
-            : linkedDocumentData.id;
-          const linkedDoc = allDocuments.find(doc => doc.id === documentId);
-          
-          if (!linkedDoc || linkedDoc.indicator === true) {
-            return false;
-          }
-          
-          if (task.created_at && linkedDoc.created_at) {
-            const docDate = new Date(linkedDoc.created_at);
-            const taskDate = new Date(task.created_at);
-            if (docDate < taskDate) return false;
-          }
-        }
-        
-        return true;
-      } else {
-        // For stages without document requirements, check stored stage data
-        const stageData = task.stages?.[stage.id];
-        const completed = stageData && (
-          stageData.status === 'completed' || 
-          stageData.date || 
-          stageData.completedAt
-        );
-        console.log(`✅ [DETERMINE] ${stage.name} completed (no docs required): ${completed}`);
-        return completed;
+        return false;
       }
+
+      // For non-document stages, check completion status
+      return Boolean(
+        stageData?.status === 'completed' ||
+        stageData?.date ||
+        stageData?.completedAt
+      );
     };
-    
-    // Find the last stage with completion data
-    let lastCompletedIndex = -1;
-    
-    for (let i = 0; i < sortedStages.length; i++) {
-      const stage = sortedStages[i];
-      
-      if (isStageCompleted(stage)) {
-        console.log(`✅ [DETERMINE] Stage ${stage.name} is completed at index ${i}`);
-        lastCompletedIndex = i;
-      }
-    }
-    
-    console.log(`🎯 [DETERMINE] Last completed index: ${lastCompletedIndex}`);
-    
-    // Return the next stage after the last completed one, or the first stage if none completed
-    const nextStageIndex = lastCompletedIndex + 1;
-    
-    if (nextStageIndex < sortedStages.length) {
-      console.log(`📍 [DETERMINE] Returning next stage: ${sortedStages[nextStageIndex].name}`);
-      return sortedStages[nextStageIndex];
-    } else if (lastCompletedIndex >= 0) {
-      // All stages completed, return the last stage
-      console.log(`📍 [DETERMINE] All completed, returning last stage: ${sortedStages[lastCompletedIndex].name}`);
-      return sortedStages[lastCompletedIndex];
-    } else {
-      // No stages completed, return the first stage
-      console.log(`📍 [DETERMINE] No stages completed, returning first stage: ${sortedStages[0].name}`);
-      return sortedStages[0];
-    }
+
+    // Find the last completed stage
+    const lastCompletedIndex = sortedStages.reduce<number>((lastIndex, stage, index) => {
+      return isStageCompleted(stage) ? index : lastIndex;
+    }, -1);
+
+    // Determine the appropriate stage to return
+    if (lastCompletedIndex === -1) return sortedStages[0] || null;
+    return sortedStages[lastCompletedIndex + 1] ?? sortedStages[lastCompletedIndex];
   };
+
   // Create wrapper functions for utility functions
   const getEnhancedImmigrationStatusWrapper = useCallback((task: any) => {
     return getEnhancedImmigrationStatus(task, stages, allDocuments, kycDocuments);
@@ -1386,273 +1366,247 @@ export default function DepartmentTasksManager({
   }, [onTaskAction, refreshAllData])
 
   const renderCellContent = useCallback((row: any, task: any) => {
-    console.log('🔄 renderCellContent called:', {
-      rowType: row.type,
-      rowKey: row.key,
-      stageName: row.stage?.name,
-      taskId: task.id,
-      stageId: row.stage?.id
-    });
-    const value = row.getValue ? row.getValue(task) : '';
-
+    const value = row.getValue?.(task) ?? '';
+  
+    // Early return for N/A values
     if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
       return <span className="text-sm text-gray-400 italic">N/A</span>;
     }
-
-    if (row.type === 'stage' && row.stage && task.stages?.[row.stage.id]) {
-      const stageData = task.stages[row.stage.id];
-      console.log('📊 Stage data found:', {
-        stageName: row.stage.name,
-        stageData,
-        hasDate: !!stageData.date
-      });
-
-      return (
-        <div className="flex flex-col items-center gap-0.5">
-          {stageData.date && (
+  
+    // Handle stage data display
+    if (row.type === 'stage' && row.stage) {
+      if (task.stages?.[row.stage.id]) {
+        const stageData = task.stages[row.stage.id];
+        return stageData.date ? (
+          <div className="flex flex-col items-center gap-0.5">
             <span className="text-sm font-medium text-slate-800">
               {formatDateValue(stageData.date)}
             </span>
+          </div>
+        ) : null;
+      }
+  
+      return renderEditableStageCell(row, task);
+    }
+  
+    // Handle field type
+    if (row.type === 'field') {
+      return renderFieldContent(row, value);
+    }
+  
+    // Handle different row types
+    switch (row.type) {
+      case 'badge':
+      case 'stat':
+        return <span className="text-sm font-semibold">{value}</span>;
+      
+      case 'date':
+        return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
+      
+      case 'actions':
+        return renderActionButtons(row, task);
+      
+      default:
+        return <span className="text-sm text-slate-800">{value}</span>;
+    }
+  }, [
+    handleStageDocumentUpload, 
+    handleViewDocument, 
+    onTaskAction, 
+    handleTaskEdit, 
+    enhancedHandleStageStatusSave, 
+    allDocuments, 
+    handlePushCase, 
+    handleDownloadZip, 
+    isPushingCase, 
+    isDownloading, 
+    getKycFields
+  ]);
+  
+  // Extracted helper functions
+  const renderEditableStageCell = (row: any, task: any) => {
+    const requiresUpload = row.stage?.requires_upload !== false;
+    return (
+      <EditableStageCell
+        key={row.stage.id}
+        stage={row.stage}
+        task={task}
+        value={task.stages?.[row.stage.id]?.status}
+        onSave={enhancedHandleStageStatusSave}
+        onDocumentUpload={handleStageDocumentUpload}
+        onShowDocuments={handleViewDocument}
+        requiresUpload={requiresUpload}
+        departments={departments}
+        onAutomationClick={(e) => handleAutomationClick(e, row.stage, task.id)}
+        getKycFields={getKycFields}
+        allDocuments={allDocuments}
+      />
+    );
+  };
+  
+  const renderFieldContent = (row: any, value: any) => {
+    const fieldValue = typeof value === 'object' ? value.value : value;
+    const isOldDoc = typeof value === 'object' && value.isOldDocument;
+  
+    if (row.field?.fieldType?.toLowerCase() === 'date') {
+      const formattedDate = formatDateValue(fieldValue);
+      return (
+        <div className="flex items-center gap-1">
+          <span className="text-sm text-slate-700" title={formattedDate}>
+            {formattedDate}
+          </span>
+          {isOldDoc && (
+            <AlertTriangle 
+              className="h-3 w-3 text-orange-500" 
+              title="Document is older than task creation" 
+            />
           )}
         </div>
       );
     }
-    if (row.type === 'stage') {
-      console.log('🎛️ Rendering EditableStageCell:', {
-        stageName: row.stage?.name,
-        stageId: row.stage?.id,
-        taskId: task.id,
-        requiresUpload: row.stage?.requires_upload !== false
-      });
-
-      const requiresUpload = row.stage?.requires_upload !== false;
-
-      return (
-        <EditableStageCell
-          key={row.stage.id}
-          stage={row.stage}
-          task={task}
-          value={task.stages?.[row.stage.id]?.status}
-          onSave={enhancedHandleStageStatusSave}
-          onDocumentUpload={handleStageDocumentUpload}
-          onShowDocuments={handleViewDocument}
-          requiresUpload={requiresUpload}
-          departments={departments}
-          onAutomationClick={(e) => {
-            e.stopPropagation();
-            console.log('⚡ Automation clicked for stage:', row.stage.name);
-            if (row.stage.automation) {
-              setSelectedAutomation({
-                ...row.stage.automation,
-                stageId: row.stage.id,
-                taskId: task.id
-              });
-              setAutomationDialogOpen(true);
-            }
-          }}
-          getKycFields={getKycFields}
-          allDocuments={allDocuments}
-        />
-      );
-    }
-
-    if (row.type === 'field') {
-      const fieldValue = typeof value === 'object' ? value.value : value;
-      const isOldDoc = typeof value === 'object' ? value.isOldDocument : false;
-
-      if (row.field?.fieldType?.toLowerCase() === 'date') {
-        const formattedDate = formatDateValue(fieldValue);
-        return (
-          <div className="flex items-center gap-1">
-            <span className="text-sm text-slate-700" title={formattedDate}>{formattedDate}</span>
-            {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
-          </div>
-        );
-      }
-      return (
-        <div className="flex items-center gap-1">
-          <span className="text-sm text-gray-700">{fieldValue}</span>
-          {isOldDoc && <AlertTriangle className="h-3 w-3 text-orange-500" title="Document is older than task creation" />}
-        </div>
-      );
-    }
-
-    switch (row.type) {
-      case 'badge': return <span className="text-sm font-semibold">{value}</span>
-      case 'date': return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
-      case 'stat': return <span className="text-sm font-semibold">{value}</span>
-
-      case 'stage':
-        // Check if stage is applicable to task
-        const isStageApplicable = !row.stage.targetEntities || row.stage.targetEntities.length === 0 ||
-          row.stage.targetEntities.some((target: any) => {
-            const matchesClass = target.class_id?.toString() === task.class_id?.toString();
-            const matchesSubclass = !target.subclass_id ||
-              target.subclass_id.toString() === task.subclass_id?.toString();
-            return matchesClass && matchesSubclass;
-          });
-
-        if (!isStageApplicable) {
-          return <span className="text-sm text-gray-400 italic">N/A</span>;
-        }
-
-        // Determine if this stage requires upload based on stage configuration
-        const requiresUpload = row.stage.requires_upload !== false; // Default to true if not specified
-
-        return (
-          <EditableStageCell
-            key={row.stage.id}
-            stage={row.stage}
-            task={task}
-            value={task.stages?.[row.stage.id]?.status}
-            onSave={enhancedHandleStageStatusSave}
-            onDocumentUpload={handleStageDocumentUpload}
-            onShowDocuments={handleViewDocument}
-            requiresUpload={requiresUpload}
-            onAutomationClick={(e) => {
-              e.stopPropagation();
-              if (row.stage.automation) {
-                setSelectedAutomation({
-                  ...row.stage.automation,
-                  stageId: row.stage.id,
-                  taskId: task.id
-                });
-                setAutomationDialogOpen(true);
-              }
-            }}
-            getKycFields={getKycFields}
-            allDocuments={allDocuments}
+  
+    return (
+      <div className="flex items-center gap-1">
+        <span className="text-sm text-gray-700">{fieldValue}</span>
+        {isOldDoc && (
+          <AlertTriangle 
+            className="h-3 w-3 text-orange-500" 
+            title="Document is older than task creation" 
           />
-        )
-      case 'document':
-        // Check if document is applicable to task
-        const isDocApplicable = !row.document?.targetEntities || row.document.targetEntities.length === 0 ||
-          row.document.targetEntities.some((target: any) => {
-            const matchesClass = target.class_id?.toString() === task.class_id?.toString();
-            const matchesSubclass = !target.subclass_id ||
-              target.subclass_id.toString() === task.subclass_id?.toString();
-            return matchesClass && matchesSubclass;
-          });
-
-        if (!isDocApplicable) {
-          return <span className="text-sm text-gray-400 italic">N/A</span>;
-        }
-
-        return (
-          <EditableStageCell
-            key={`${row.stage.id}_${row.document?.id}`}
-            stage={row.stage}
-            task={task}
-            value={value}
-            isDocumentRow={true}
-            documentData={row.document}
-            onSave={enhancedHandleStageStatusSave}
-            onDocumentUpload={handleStageDocumentUpload}
-            onShowDocuments={(task, stage) => handleViewDocument(task, { ...stage, documents: [row.document] })}
-            onAutomationClick={(e, docData) => {
-              e.stopPropagation();
-              if (docData?.automation) {
-                setSelectedAutomation({
-                  ...docData.automation,
-                  documentId: docData.id,
-                  stageId: row.stage.id,
-                  taskId: task.id
-                });
-                setAutomationDialogOpen(true);
-              }
-            }}
-            getKycFields={getKycFields}
-            allDocuments={allDocuments}
-          />
-        )
-      case 'actions': return (
-        <div className="flex items-center justify-center gap-1">
-          <Button variant="ghost" size="icon" onClick={() => handleTaskEdit(task)} className="h-8 w-8 text-blue-600 hover:bg-blue-100" title="Edit Task"><Edit className="h-4 w-4" /></Button>
-          <>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={(e) => {
-                e.stopPropagation();
-                setDeleteDialogOpen(true);
-                setTaskToDelete(task);
-              }}
-              className="h-8 w-8 text-red-600 hover:bg-red-100"
-              title="Delete Task"
-              disabled={isDeleting}
+        )}
+      </div>
+    );
+  };
+  
+  const renderActionButtons = (row: any, task: any) => {
+    return (
+      <div className="flex items-center justify-center gap-1">
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          onClick={() => handleTaskEdit(task)} 
+          className="h-8 w-8 text-blue-600 hover:bg-blue-100" 
+          title="Edit Task"
+        >
+          <Edit className="h-4 w-4" />
+        </Button>
+        
+        <DeleteButton task={task} />
+        
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 text-slate-600 hover:bg-slate-100" 
+              title="More Actions"
             >
-              <Trash2 className="h-4 w-4" />
+              <ChevronDown className="h-4 w-4" />
             </Button>
-            <DeleteConfirmationDialog
-              open={deleteDialogOpen}
-              onOpenChange={setDeleteDialogOpen}
-              onConfirm={async () => {
-                if (!taskToDelete) return;
-
-                try {
-                  setIsDeleting(true);
-                  const { error } = await supabase
-                    .from('tm_tasks')
-                    .delete()
-                    .eq('id', taskToDelete.id);
-
-                  if (error) throw error;
-
-                  // Update tasks list by removing the deleted task
-                  setTasks(prevTasks => prevTasks.filter(t => t.id !== taskToDelete.id));
-
-                  toast({
-                    title: 'Success',
-                    description: 'Task deleted successfully',
-                    variant: 'default'
-                  });
-
-                } catch (error) {
-                  console.error('Error deleting task:', error);
-                  toast({
-                    title: 'Error',
-                    description: 'Failed to delete task. Please try again.',
-                    variant: 'destructive'
-                  });
-                } finally {
-                  setIsDeleting(false);
-                  setDeleteDialogOpen(false);
-                  setTaskToDelete(null);
-                }
-              }}
-              loading={isDeleting}
-            />
-          </>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:bg-slate-100" title="More Actions">
-                <ChevronDown className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onClick={() => handlePushCase(task, 6, 'Alien')}
-                disabled={isPushingCase}
-              >
-                <Send className="mr-2 h-4 w-4" /> Push to Alien
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => handlePushCase(task, 7, 'Re-Entry Pass')}
-                disabled={isPushingCase}
-              >
-                <Send className="mr-2 h-4 w-4" /> Push to Re-Entry
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleDownloadZip(task)} disabled={isDownloading}>
-                <DownloadCloud className="mr-2 h-4 w-4" /> Download Docs
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      )
-      default: return <span className="text-sm text-slate-800">{value}</span>
+          </DropdownMenuTrigger>
+          <ActionMenuItems task={task} />
+        </DropdownMenu>
+      </div>
+    );
+  };
+  
+  // Extracted DeleteButton component
+  const DeleteButton = ({ task }: { task: any }) => {
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  
+    const handleDelete = async () => {
+      try {
+        setIsDeleting(true);
+        const { error } = await supabase
+          .from('tm_tasks')
+          .delete()
+          .eq('id', task.id);
+  
+        if (error) throw error;
+  
+        setTasks(prevTasks => prevTasks.filter(t => t.id !== task.id));
+        toast({
+          title: 'Success',
+          description: 'Task deleted successfully',
+          variant: 'default'
+        });
+      } catch (error) {
+        console.error('Error deleting task:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to delete task. Please try again.',
+          variant: 'destructive'
+        });
+      } finally {
+        setIsDeleting(false);
+        setDeleteDialogOpen(false);
+      }
+    };
+  
+    return (
+      <>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={(e) => {
+            e.stopPropagation();
+            setDeleteDialogOpen(true);
+          }}
+          className="h-8 w-8 text-red-600 hover:bg-red-100"
+          title="Delete Task"
+          disabled={isDeleting}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+        <DeleteConfirmationDialog
+          open={deleteDialogOpen}
+          onOpenChange={setDeleteDialogOpen}
+          onConfirm={handleDelete}
+          loading={isDeleting}
+        />
+      </>
+    );
+  };
+  
+  // Extracted ActionMenuItems component
+  const ActionMenuItems = ({ task }: { task: any }) => {
+    return (
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          onClick={() => handlePushCase(task, 6, 'Alien')}
+          disabled={isPushingCase}
+        >
+          <Send className="mr-2 h-4 w-4" /> Push to Alien
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => handlePushCase(task, 7, 'Re-Entry Pass')}
+          disabled={isPushingCase}
+        >
+          <Send className="mr-2 h-4 w-4" /> Push to Re-Entry
+        </DropdownMenuItem>
+        <DropdownMenuItem 
+          onClick={() => handleDownloadZip(task)} 
+          disabled={isDownloading}
+        >
+          <DownloadCloud className="mr-2 h-4 w-4" /> Download Docs
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    );
+  };
+  
+  // Helper function for automation click
+  const handleAutomationClick = (e: React.MouseEvent, stage: any, taskId: string) => {
+    e.stopPropagation();
+    if (stage.automation) {
+      setSelectedAutomation({
+        ...stage.automation,
+        stageId: stage.id,
+        taskId
+      });
+      setAutomationDialogOpen(true);
     }
-  }, [handleStageDocumentUpload, handleViewDocument, onTaskAction, handleTaskEdit, enhancedHandleStageStatusSave, allDocuments, handlePushCase, handleDownloadZip, isPushingCase, isDownloading, getKycFields])
-
+  };
   const loadRows = useCallback(async (tasks: any[]) => {
     if (!tasks || tasks.length === 0) return;
     try {
@@ -2042,17 +1996,11 @@ export default function DepartmentTasksManager({
 
   if (!departments.length) {
     return (
-      <div className="flex-1 p-8 bg-slate-50/30">
-        <Card className="border-2 border-dashed border-slate-300 bg-white">
-          <CardHeader className="text-center items-center">
-            <Building className="h-12 w-12 text-slate-400 mb-2" />
-            <CardTitle className="text-xl">No Departments Found</CardTitle>
-            <CardDescription className="text-slate-700">Please add departments via the Admin panel to start managing tasks.</CardDescription>
-          </CardHeader>
-          <CardContent className="text-center">
-            <Button onClick={() => window.location.href = '/dashboard/departments'}>Go to Departments</Button>
-          </CardContent>
-        </Card>
+      <div className="flex-1 p-8 bg-slate-50/30 flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-400 mx-auto"></div>
+          <p className="text-slate-700">Loading departments...</p>
+        </div>
       </div>
     )
   }
