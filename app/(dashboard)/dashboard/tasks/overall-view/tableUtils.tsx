@@ -135,25 +135,37 @@ export const calculateAge = (dateOfBirth: string | null): number | null => {
   if (!dateOfBirth) return null;
 
   try {
-    const birthDate = new Date(dateOfBirth);
-    if (isNaN(birthDate.getTime())) {
-      console.warn('Invalid date of birth:', dateOfBirth);
-      return null;
+    // First try parsing with our custom parseDate function
+    const birthDate = parseDate(dateOfBirth);
+    
+    // If that fails, try direct Date parsing as fallback
+    if (!birthDate || isNaN(birthDate.getTime())) {
+      const fallbackDate = new Date(dateOfBirth);
+      if (isNaN(fallbackDate.getTime())) {
+        console.warn('Invalid date of birth:', dateOfBirth);
+        return null;
+      }
+      return calculateAgeFromDate(fallbackDate);
     }
 
-    const today = new Date();
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
-
-    return age;
+    return calculateAgeFromDate(birthDate);
   } catch (error) {
     console.error('Error calculating age:', error);
     return null;
   }
+};
+
+// Helper function to calculate age from a Date object
+const calculateAgeFromDate = (birthDate: Date): number => {
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+
+  return age;
 };
 
 // Memoized immigration status getter
@@ -257,7 +269,9 @@ export const getCurrentStageStatus = (
 
   const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
 
-  const isStageCompleted = useCallback((stage: any) => {
+  const isStageCompleted = (stage: any, task: any, allDocuments: any[] = []) => {
+    if (!task || !stage) return false;
+    
     const requiresDocuments = stage.documents?.length > 0;
     
     if (requiresDocuments) {
@@ -287,12 +301,12 @@ export const getCurrentStageStatus = (
       stageData.date || 
       stageData.completedAt
     );
-  }, [task, allDocuments]);
+  };
 
   // Find last completed stage
   let lastCompletedIndex = -1;
   for (let i = 0; i < sortedStages.length; i++) {
-    if (isStageCompleted(sortedStages[i])) {
+    if (isStageCompleted(sortedStages[i], task, allDocuments)) {
       lastCompletedIndex = i;
     }
   }
