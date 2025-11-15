@@ -78,9 +78,6 @@ export default function Page() {
 
   return (
     <>
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">Task Manager</h2>
-      </div>
       <DepartmentTasksManager
         handleStageStatusSave={handleStageStatusSave}
       />

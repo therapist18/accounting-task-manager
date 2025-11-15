@@ -1367,12 +1367,12 @@ export default function DepartmentTasksManager({
 
   const renderCellContent = useCallback((row: any, task: any) => {
     const value = row.getValue?.(task) ?? '';
-  
+
     // Early return for N/A values
     if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
       return <span className="text-sm text-gray-400 italic">N/A</span>;
     }
-  
+
     // Handle stage data display
     if (row.type === 'stage' && row.stage) {
       if (task.stages?.[row.stage.id]) {
@@ -1385,44 +1385,44 @@ export default function DepartmentTasksManager({
           </div>
         ) : null;
       }
-  
+
       return renderEditableStageCell(row, task);
     }
-  
+
     // Handle field type
     if (row.type === 'field') {
       return renderFieldContent(row, value);
     }
-  
+
     // Handle different row types
     switch (row.type) {
       case 'badge':
       case 'stat':
         return <span className="text-sm font-semibold">{value}</span>;
-      
+
       case 'date':
         return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
-      
+
       case 'actions':
         return renderActionButtons(row, task);
-      
+
       default:
         return <span className="text-sm text-slate-800">{value}</span>;
     }
   }, [
-    handleStageDocumentUpload, 
-    handleViewDocument, 
-    onTaskAction, 
-    handleTaskEdit, 
-    enhancedHandleStageStatusSave, 
-    allDocuments, 
-    handlePushCase, 
-    handleDownloadZip, 
-    isPushingCase, 
-    isDownloading, 
+    handleStageDocumentUpload,
+    handleViewDocument,
+    onTaskAction,
+    handleTaskEdit,
+    enhancedHandleStageStatusSave,
+    allDocuments,
+    handlePushCase,
+    handleDownloadZip,
+    isPushingCase,
+    isDownloading,
     getKycFields
   ]);
-  
+
   // Extracted helper functions
   const renderEditableStageCell = (row: any, task: any) => {
     const requiresUpload = row.stage?.requires_upload !== false;
@@ -1443,11 +1443,11 @@ export default function DepartmentTasksManager({
       />
     );
   };
-  
+
   const renderFieldContent = (row: any, value: any) => {
     const fieldValue = typeof value === 'object' ? value.value : value;
     const isOldDoc = typeof value === 'object' && value.isOldDocument;
-  
+
     if (row.field?.fieldType?.toLowerCase() === 'date') {
       const formattedDate = formatDateValue(fieldValue);
       return (
@@ -1456,49 +1456,49 @@ export default function DepartmentTasksManager({
             {formattedDate}
           </span>
           {isOldDoc && (
-            <AlertTriangle 
-              className="h-3 w-3 text-orange-500" 
-              title="Document is older than task creation" 
+            <AlertTriangle
+              className="h-3 w-3 text-orange-500"
+              title="Document is older than task creation"
             />
           )}
         </div>
       );
     }
-  
+
     return (
       <div className="flex items-center gap-1">
         <span className="text-sm text-gray-700">{fieldValue}</span>
         {isOldDoc && (
-          <AlertTriangle 
-            className="h-3 w-3 text-orange-500" 
-            title="Document is older than task creation" 
+          <AlertTriangle
+            className="h-3 w-3 text-orange-500"
+            title="Document is older than task creation"
           />
         )}
       </div>
     );
   };
-  
+
   const renderActionButtons = (row: any, task: any) => {
     return (
       <div className="flex items-center justify-center gap-1">
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          onClick={() => handleTaskEdit(task)} 
-          className="h-8 w-8 text-blue-600 hover:bg-blue-100" 
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => handleTaskEdit(task)}
+          className="h-8 w-8 text-blue-600 hover:bg-blue-100"
           title="Edit Task"
         >
           <Edit className="h-4 w-4" />
         </Button>
-        
+
         <DeleteButton task={task} />
-        
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 text-slate-600 hover:bg-slate-100" 
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-slate-600 hover:bg-slate-100"
               title="More Actions"
             >
               <ChevronDown className="h-4 w-4" />
@@ -1509,12 +1509,12 @@ export default function DepartmentTasksManager({
       </div>
     );
   };
-  
+
   // Extracted DeleteButton component
   const DeleteButton = ({ task }: { task: any }) => {
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  
+
     const handleDelete = async () => {
       try {
         setIsDeleting(true);
@@ -1522,9 +1522,9 @@ export default function DepartmentTasksManager({
           .from('tm_tasks')
           .delete()
           .eq('id', task.id);
-  
+
         if (error) throw error;
-  
+
         setTasks(prevTasks => prevTasks.filter(t => t.id !== task.id));
         toast({
           title: 'Success',
@@ -1543,7 +1543,7 @@ export default function DepartmentTasksManager({
         setDeleteDialogOpen(false);
       }
     };
-  
+
     return (
       <>
         <Button
@@ -1568,7 +1568,7 @@ export default function DepartmentTasksManager({
       </>
     );
   };
-  
+
   // Extracted ActionMenuItems component
   const ActionMenuItems = ({ task }: { task: any }) => {
     return (
@@ -1585,8 +1585,8 @@ export default function DepartmentTasksManager({
         >
           <Send className="mr-2 h-4 w-4" /> Push to Re-Entry
         </DropdownMenuItem>
-        <DropdownMenuItem 
-          onClick={() => handleDownloadZip(task)} 
+        <DropdownMenuItem
+          onClick={() => handleDownloadZip(task)}
           disabled={isDownloading}
         >
           <DownloadCloud className="mr-2 h-4 w-4" /> Download Docs
@@ -1594,7 +1594,7 @@ export default function DepartmentTasksManager({
       </DropdownMenuContent>
     );
   };
-  
+
   // Helper function for automation click
   const handleAutomationClick = (e: React.MouseEvent, stage: any, taskId: string) => {
     e.stopPropagation();
@@ -2031,8 +2031,9 @@ export default function DepartmentTasksManager({
   ].filter(Boolean);
 
   return (
-    <div className="flex-1 space-y-2 p-2 bg-slate-50/30 min-h-screen">
+    <div className="flex-1 space-y-2 px-2 bg-slate-50/30 min-h-screen">
       <div className="flex justify-between items-center px-1">
+        <h2 className="text-2xl font-bold text-slate-900">Task Manager</h2>
         {!areTabsVisible && (
           <div className="text-sm text-slate-600 font-medium flex items-center gap-2 flex-wrap">
             <span className="font-bold text-slate-800">Viewing:</span>
@@ -2292,7 +2293,7 @@ export default function DepartmentTasksManager({
                           </div>
                         </div>
 
-                        {isWipTab && areTabsVisible && (
+                        {/* {isWipTab && areTabsVisible && (
                           <div className="space-y-4 pt-4">
                             <Tabs value={activeFollowUpFilter} onValueChange={setActiveFollowUpFilter}>
                               <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
@@ -2303,14 +2304,13 @@ export default function DepartmentTasksManager({
                               </TabsList>
                             </Tabs>
 
-                            {/* Enhanced Staff Tabs */}
                             {(activeFollowUpFilter === 'bcl' || activeFollowUpFilter === 'officer') && activeSubdepartmentTab && (
                               <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
                                 {renderStaffTabs()}
                               </div>
                             )}
                           </div>
-                        )}
+                        )} */}
                       </CardHeader>
                       <CardContent className="p-2 sm:p-4">
                         {activeReport ? (
