@@ -135,7 +135,7 @@ export function LinkSourceDocumentDialog({
     try {
       // The finalPayload is already in the correct format { stageId: [doc1, doc2], ... }
       const { error } = await supabase
-        .from('tm_tasks')
+        .from('tm_tasks_duplicate')
         .update({ source_document_id: selectedDocs, updated_at: new Date().toISOString() })
         .eq('id', task.id);
 
@@ -153,12 +153,13 @@ export function LinkSourceDocumentDialog({
   // NEW: Callback to handle checkbox state changes for multi-selection.
   const handleDocSelectionChange = useCallback((stageId: string, doc: Document, isSelected: boolean) => {
     setSelectedDocs(prev => {
-      const currentSelections = prev[stageId] || [];
+      // Ensure currentSelections is always an array
+      const currentSelections = Array.isArray(prev[stageId]) ? prev[stageId] : [];
       let newSelections;
 
       if (isSelected) {
         // Add the document if it's not already selected
-        if (!currentSelections.some(d => d.id === doc.id)) {
+        if (!currentSelections.some(d => d && d.id === doc.id)) {
           newSelections = [...currentSelections, { id: doc.id, document_id: doc.document_id }];
         } else {
           newSelections = currentSelections;

@@ -44,19 +44,61 @@ const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolea
     return false
   }
 }
-
-// Helper function to get LINKED document for a stage
 const getLinkedDocumentForStage = (task: any, stage: any, allDocuments: any[]): any | null => {
-  const linkedDocumentData = task.source_document_id?.[stage.id];
+  const sourceDocId = task.source_document_id;
+  let documentId: string | undefined;
 
-  if (linkedDocumentData) {
-    const documentId = typeof linkedDocumentData === 'string'
-      ? linkedDocumentData
-      : linkedDocumentData.id;
+  console.log('🔍 [getLinkedDocumentForStage] Input:', {
+    stageId: stage.id,
+    sourceDocId,
+    allDocumentIds: allDocuments?.map(d => d.id) || []
+  });
+
+  if (sourceDocId && typeof sourceDocId === 'object') {
+    // Handle the case where source_document_id is an object with stage IDs as keys
+    // and each value is an array of document objects
+    const stageDocuments = sourceDocId[stage.id];
+
+    if (Array.isArray(stageDocuments) && stageDocuments.length > 0) {
+      // Get the first document in the array (you might need to adjust this logic)
+      const documentRef = stageDocuments[0];
+      documentId = documentRef.id || documentRef.document_id;
+
+      console.log('📄 [getLinkedDocumentForStage] Found document reference:', {
+        documentRef,
+        documentId,
+        stageId: stage.id
+      });
+    }
+  }
+
+  console.log('🔍 [getLinkedDocumentForStage] Looking for document:', {
+    stageId: stage.id,
+    documentId,
+    allDocumentCount: allDocuments?.length
+  });
+
+  if (documentId) {
     // Find the document instance from allDocuments by its unique ID
-    const linkedDoc = allDocuments.find(doc => doc.id === documentId);
+    const linkedDoc = allDocuments?.find(doc =>
+      doc.id === documentId || doc.document_id === documentId
+    );
+
+    console.log('✅ [getLinkedDocumentForStage] Document lookup result:', {
+      documentId,
+      found: !!linkedDoc,
+      docId: linkedDoc?.id,
+      docType: linkedDoc?.document_type
+    });
+
     return linkedDoc || null;
   }
+
+  console.log('❌ [getLinkedDocumentForStage] No document ID found for stage:', {
+    stageId: stage.id,
+    sourceDocIdKeys: sourceDocId ? Object.keys(sourceDocId) : 'none'
+  });
+
   return null;
 };
 
@@ -233,9 +275,11 @@ export default function EditableStageCell({
   }, []);
 
   const buildPreviewDocumentData = useCallback(async () => {
-    console.log('🔍 Building preview data for:', {
+    console.log('🔍 [EditableStageCell] Building preview data for:', {
       stageName: stage.name,
       stageId: stage.id,
+      taskId: task.id,
+      applicantName: task.applicant_name,
       isDocumentRow,
       documentData: documentData ? {
         id: documentData.id,
@@ -243,291 +287,90 @@ export default function EditableStageCell({
         display_name: documentData.display_name,
         kycId: documentData.kycId
       } : null,
-      taskId: task.id,
-      applicantName: task.applicant_name
+      allDocumentsCount: allDocuments?.length || 0,
+      hasSourceDocId: !!task.source_document_id
     });
 
-    let documentsToProcess = [];
-    let targetDocumentKycIds = [];
-
-    if (isDocumentRow && documentData) {
-      // For document rows, process only the specific document
-      console.log('📄 Document row mode - processing specific document:', {
-        documentDataKycId: documentData.kycId,
-        documentName: documentData.name || documentData.display_name
+    try {
+      // Get the linked document for this stage
+      console.log('🔄 [EditableStageCell] Getting linked document for stage:', {
+        stageId: stage.id,
+        stageName: stage.name,
+        taskId: task.id,
+        sourceDocumentId: task.source_document_id,
+        allDocuments: allDocuments?.map(d => ({ id: d.id, name: d.name, document_id: d.document_id }))
       });
 
-      const singleDocStage = {
-        ...stage,
-        documents: [documentData]
-      };
+      const linkedDocument = getLinkedDocumentForStage(task, stage, allDocuments);
 
-      const linkedDoc = getLinkedDocumentForStage(task, singleDocStage, allDocuments);
-
-      if (linkedDoc && linkedDoc.document_id === documentData.kycId) {
-        documentsToProcess = [{ linkedDoc, documentConfig: documentData }];
-        targetDocumentKycIds = [documentData.kycId];
-      } else {
-        // Try to find the correct document for this specific document type
-        const correctDoc = allDocuments.find(doc =>
-          doc.director_id === task.individual_id &&
-          doc.document_id === documentData.kycId
-        );
-
-        if (correctDoc) {
-          documentsToProcess = [{ linkedDoc: correctDoc, documentConfig: documentData }];
-          targetDocumentKycIds = [documentData.kycId];
-        }
-      }
-    } else {
-      // For stage rows, process ALL applicable documents for the stage
-      console.log('🏗️ Stage row mode - processing all stage documents');
-
-      if (!stage?.documents?.length) {
-        console.log('❌ No documents configured for stage');
+      if (!linkedDocument) {
+        console.warn('⚠️ [EditableStageCell] No linked document found for stage:', {
+          stageId: stage.id,
+          stageName: stage.name,
+          taskId: task.id,
+          sourceDocumentId: task.source_document_id,
+          allDocumentIds: allDocuments?.map(d => d.id) || []
+        });
         toast({
-          title: 'No Documents',
-          description: 'No documents configured for this stage.',
+          title: 'No Document',
+          description: 'No document has been linked to this stage yet.',
           variant: 'default',
         });
         return null;
       }
 
-      // Get all applicable documents for this stage and task
-      const applicableDocuments = stage.documents.filter((doc: any) => {
-        const isApplicable = !doc.targetEntities?.length ||
-          doc.targetEntities.some((entity: any) => {
-            const classMatch = entity.class_id ? entity.class_id.toString() === task.class_id?.toString() : true;
-            const subdeptMatch = entity.subdept_id ? entity.subdept_id.toString() === task.subdepartment?.id?.toString() : true;
-            return classMatch && subdeptMatch;
-          });
-
-        console.log('📋 Document applicability check:', {
-          docName: doc.name || doc.display_name,
-          docKycId: doc.kycId,
-          isApplicable,
-          taskClassId: task.class_id,
-          taskSubdeptId: task.subdepartment?.id
-        });
-
-        return isApplicable;
-      });
-
-      console.log(`📚 Found ${applicableDocuments.length} applicable documents for stage`);
-
-      // Find ALL linked documents for each applicable document type
-      for (const docConfig of applicableDocuments) {
-        console.log('🔍 Processing document config:', {
-          docConfigName: docConfig.name || docConfig.display_name,
-          docConfigKycId: docConfig.kycId
-        });
-
-        // Method 1: Try to find using the stage-based linking system
-        const singleDocStage = {
-          ...stage,
-          documents: [docConfig]
-        };
-
-        const linkedDoc = getLinkedDocumentForStage(task, singleDocStage, allDocuments);
-
-        console.log('🔗 Checking linked document for:', {
-          docConfigName: docConfig.name || docConfig.display_name,
-          docConfigKycId: docConfig.kycId,
-          linkedDocId: linkedDoc?.id,
-          linkedDocKycId: linkedDoc?.document_id,
-          matches: linkedDoc?.document_id === docConfig.kycId
-        });
-
-        if (linkedDoc && linkedDoc.document_id === docConfig.kycId) {
-          // Found matching linked document via stage linking
-          documentsToProcess.push({ linkedDoc, documentConfig: docConfig });
-          targetDocumentKycIds.push(docConfig.kycId);
-          console.log('✅ Added linked document via stage linking:', {
-            docName: docConfig.name || docConfig.display_name,
-            linkedDocId: linkedDoc.id
-          });
-        } else {
-          // Method 2: Try to find document directly by individual_id and document_id
-          const directLinkedDoc = allDocuments.find(doc =>
-            doc.director_id === task.individual_id &&
-            doc.document_id === docConfig.kycId
-          );
-
-          if (directLinkedDoc) {
-            documentsToProcess.push({ linkedDoc: directLinkedDoc, documentConfig: docConfig });
-            targetDocumentKycIds.push(docConfig.kycId);
-            console.log('✅ Added document via direct search:', {
-              docName: docConfig.name || docConfig.display_name,
-              linkedDocId: directLinkedDoc.id
-            });
-          } else {
-            console.log('❌ No linked document found for:', {
-              docName: docConfig.name || docConfig.display_name,
-              docKycId: docConfig.kycId,
-              searchedForDirectorId: task.individual_id
-            });
-          }
-        }
-      }
-
-      if (documentsToProcess.length === 0) {
-        console.log('❌ No linked documents found for any applicable document types');
-        toast({
-          title: 'No Linked Documents',
-          description: 'No documents have been linked for any of the applicable document types in this stage.',
-          variant: 'default',
-        });
-        return null;
-      }
-
-      console.log(`✅ Found ${documentsToProcess.length} linked documents to process`);
-    }
-
-    // Check for indicators and old documents
-    const validDocuments = documentsToProcess.filter(({ linkedDoc, documentConfig }) => {
-      if (linkedDoc.indicator === true) {
-        console.log('⚠️ Document has indicator - skipping:', {
-          docName: documentConfig.name || documentConfig.display_name,
-          linkedDocId: linkedDoc.id
-        });
-        return false;
-      }
-
+      // Check if document is older than task creation
       const isOldDoc = task.created_at &&
-        isDocumentOlderThanTask(linkedDoc.created_at, task.created_at);
+        isDocumentOlderThanTask(linkedDocument.created_at, task.created_at);
 
       if (isOldDoc) {
-        console.log('⚠️ Document is older than task creation - skipping:', {
-          docName: documentConfig.name || documentConfig.display_name,
-          linkedDocId: linkedDoc.id
+        console.log('📅 [EditableStageCell] Document is older than task creation:', {
+          docCreatedAt: linkedDocument.created_at,
+          taskCreatedAt: task.created_at,
+          documentId: linkedDocument.id,
+          documentName: linkedDocument.name || linkedDocument.file_name
         });
-        return false;
+        setIsOldDocument(true);
       }
 
-      return true;
-    });
-
-    if (validDocuments.length === 0) {
-      console.log('❌ No valid documents found after filtering');
-      toast({
-        title: 'Preview not available',
-        description: 'Document preview is not available for the linked documents (either too old or marked as indicator).',
-        variant: 'default',
-      });
-      return null;
-    }
-
-    console.log(`📋 Processing ${validDocuments.length} valid documents`);
-
-    // Process each valid document
-    const processedDocuments = [];
-
-    for (const { linkedDoc, documentConfig } of validDocuments) {
-      const kycId = linkedDoc.document_id;
-
-      console.log('📋 Fetching KYC document data for:', {
-        kycId,
-        expectedDocType: documentConfig?.name || documentConfig?.display_name || 'Unknown',
-        linkedDocId: linkedDoc.id
-      });
-
-      // Fetch KYC document data with fields
-      const kycData = await fetchKycDocumentData(kycId);
-      if (!kycData) {
-        console.error('❌ Failed to fetch KYC document data for:', kycId);
-        continue;
+      const kycDoc = kycDocumentData || await fetchKycDocumentData(linkedDocument.document_id);
+      if (!kycDoc) {
+        console.error('KYC document not found for ID:', linkedDocument.document_id);
+        toast({
+          title: 'Error',
+          description: 'Could not load document details.',
+          variant: 'destructive',
+        });
+        return null;
       }
 
-      console.log('✅ Successfully fetched KYC document data:', {
-        kycId: kycData.id,
-        name: kycData.name,
-        displayName: kycData.display_name,
-        documentType: kycData.document_type,
-        fieldsCount: kycData.fields?.length || 0
-      });
-
-      // Transform KYC fields to the format expected by ExtractionPreview
-      const fields = transformKycFieldsToPreviewFormat(kycData.fields || []);
-
-      // Get document name from KYC data
-      const documentName = kycData.display_name || kycData.name || 'Document';
-
-      // Build file URL
-      const bucketName = 'kyc-documents';
-      const filePath = linkedDoc.file_path?.startsWith(bucketName)
-        ? linkedDoc.file_path
-        : `${bucketName}/${linkedDoc.file_path}`;
-
-      const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
-      const fileName = linkedDoc.file_path?.split('/').pop() || documentName;
-
-      // Prepare extracted data from the linked document
-      const rawExtractedData = linkedDoc.extracted_details || {};
-
-      // Ensure all fields have values in extractedData
-      const extractedData = { ...rawExtractedData };
-      fields.forEach((field: any) => {
-        if (extractedData[field.id] === undefined && extractedData[field.name] === undefined) {
-          extractedData[field.id] = field.isArray ? [] : '';
-          extractedData[field.name] = field.isArray ? [] : '';
-        }
-      });
-
-      const documentPreviewData = {
-        documentId: linkedDoc.id,
-        documentName,
-        fileUrl,
-        fileName,
-        extractedData,
-        fields,
-        type: kycData.document_type || 'document',
+          const previewData = {
+        documentId: linkedDocument.id,
+        documentName: kycDoc.display_name || kycDoc.name || 'Document',
+        fileUrl: linkedDocument.file_path || linkedDocument.download_url,
+        fileName: linkedDocument.file_path?.split('/').pop() || 'document.pdf',
+        extractedData: linkedDocument.extracted_data || {},
+        fields: transformKycFieldsToPreviewFormat(kycDoc.fields || []),
+        kycDoc: kycDoc,
+        document: linkedDocument,
+        type: kycDoc.document_type || 'document',
         file: {
-          name: fileName,
-          type: fileName.split('.').pop()?.toLowerCase() || 'pdf',
-          url: fileUrl
+          url: linkedDocument.file_path || linkedDocument.download_url,
+          name: linkedDocument.file_name || linkedDocument.file_path?.split('/').pop() || 'document.pdf',
+          type: linkedDocument.file_type || 'application/pdf'
         }
       };
 
-      processedDocuments.push(documentPreviewData);
-
-      console.log('📄 Processed document:', {
-        documentId: documentPreviewData.documentId,
-        documentName: documentPreviewData.documentName,
-        fileName: documentPreviewData.fileName,
-        fieldsCount: documentPreviewData.fields.length
+      return previewData;
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to prepare document preview.',
+        variant: 'destructive',
       });
-    }
-
-    if (processedDocuments.length === 0) {
-      console.log('❌ No documents successfully processed');
       return null;
     }
 
-    // Always return multiple documents format for stage rows to support multiple documents
-    // For document rows, return single document format for backward compatibility
-    const finalPreviewData = (isDocumentRow && processedDocuments.length === 1)
-      ? processedDocuments[0]
-      : {
-        documents: processedDocuments,
-        isMultiDocument: processedDocuments.length > 1,
-        stageName: stage.name,
-        applicantName: task.applicant_name,
-        // For single document case, also include top-level properties for backward compatibility
-        ...(processedDocuments.length === 1 ? processedDocuments[0] : {})
-      };
-
-    console.log('🎯 Final preview data prepared:', {
-      isMultiDocument: processedDocuments.length > 1,
-      documentCount: processedDocuments.length,
-      stageName: stage.name,
-      isDocumentRow,
-      documentsProcessed: processedDocuments.map(d => ({
-        name: d.documentName,
-        id: d.documentId
-      }))
-    });
-
-    return finalPreviewData;
   }, [task, stage, allDocuments, fetchKycDocumentData, transformKycFieldsToPreviewFormat, isDocumentRow, documentData]);
 
   const processExtractedData = (data: any, fields: any[]): any => {
@@ -558,11 +401,26 @@ export default function EditableStageCell({
     if (!isPreviewOpen) return;
 
     const preparePreview = async () => {
-      const previewData = await buildPreviewDocumentData();
-      if (previewData) {
-        setPreviewDocument(previewData);
-      } else {
+      try {
+        const previewData = await buildPreviewDocumentData();
+        if (previewData) {
+          setPreviewDocument(previewData);
+        } else {
+          setIsPreviewOpen(false);
+          toast({
+            title: 'Preview not available',
+            description: 'Could not load document preview.',
+            variant: 'default',
+          });
+        }
+      } catch (error) {
+        console.error('Error preparing preview:', error);
         setIsPreviewOpen(false);
+        toast({
+          title: 'Error',
+          description: 'Failed to prepare document preview.',
+          variant: 'destructive',
+        });
       }
     };
 
@@ -899,9 +757,13 @@ export default function EditableStageCell({
         display_name: documentData.display_name,
         kycId: documentData.kycId
       } : null,
-      stageDocumentsCount: stage.documents?.length || 0
+      stageDocumentsCount: stage.documents?.length || 0,
+      taskId: task.id,
+      applicantName: task.applicant_name
     });
 
+    // Reset preview document state before opening
+    setPreviewDocument(null);
     setIsPreviewOpen(true);
   }, [stage, isDocumentRow, documentData]);
 

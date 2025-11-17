@@ -43,7 +43,6 @@ import {
   filterTasksBySearch,
   ENHANCED_TABLE_HEADERS
 } from './overall-view/tableUtils';
-import EditableStageCell from "./components/EditableStageCell"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { OtherDialog } from "./components/OtherDialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -51,6 +50,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { ReportTable } from "./components/ReportTable"
 import { MemorizedReportDialog } from "./components/MemorizedReportDialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
+import EditableStageCell from "./components/EditableStageCell"
 
 type ReportConfiguration = {
   taskFields: string[];
@@ -126,6 +126,7 @@ export default function DepartmentTasksManager({
   const [allKycFields, setAllKycFields] = useState<Record<string, any[]>>({})
   const [previewDocument, setPreviewDocument] = useState<any>(null);
   const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set())
+  const [isDocumentPreviewOpen, setIsDocumentPreviewOpen] = useState(false);
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
@@ -174,6 +175,21 @@ export default function DepartmentTasksManager({
   const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
 
+  // Add this useEffect near the top of your component, with other state declarations
+  useEffect(() => {
+    const loadKycData = async () => {
+      try {
+        console.log('Loading KYC documents...');
+        const { kycDocsMap } = await fetchAllKycFields();
+        console.log(`Loaded ${kycDocsMap.size} KYC documents`, Array.from(kycDocsMap.keys()));
+        setKycDocuments(kycDocsMap);
+      } catch (error) {
+        console.error('Error loading KYC documents:', error);
+      }
+    };
+
+    loadKycData();
+  }, []);
 
   const handleApplyReport = (report: MemorizedReport) => {
     setActiveReport(report);
@@ -216,7 +232,7 @@ export default function DepartmentTasksManager({
 
       // Convert Set to array and filter out any null/undefined values
       const individualIds = Array.from(allIndividualIds).filter(id => id != null);
-      
+
       // If no valid IDs, return empty maps
       if (individualIds.length === 0) return { dependantsMap: new Map(), applicantsMap: new Map() };
 
@@ -1091,16 +1107,21 @@ export default function DepartmentTasksManager({
           for (const doc of stage.documents) {
             const kycData = kycDocuments.get(doc.kycId);
             const docDisplayName = kycData?.display_name || kycData?.name || doc.display_name || doc.name || 'Document';
-
+        
+            // Add the document row
             rows.push({
               key: `doc_${stage.id}_${doc.id}`,
               label: docDisplayName,
-              type: 'document',
+              type: 'document',  // Ensure type is 'document'
               stage,
-              document: doc,
+              document: {
+                ...doc,
+                stageId: stage.id,
+                document_id: doc.kycId,
+                name: docDisplayName
+              },
               isSubRow: true,
               getValue: (task: UtilTask) => {
-                // Check if stage is applicable to task
                 const isApplicable = (() => {
                   if (!task || !departments.length) return false;
                   const dept = departments.find(d => d.id === task.department?.id);
@@ -1524,6 +1545,7 @@ export default function DepartmentTasksManager({
     const handleDelete = async () => {
       try {
         setIsDeleting(true);
+
         const { error } = await supabase
           .from('tm_tasks')
           .delete()
@@ -2366,6 +2388,7 @@ export default function DepartmentTasksManager({
                             tableRows={tableRows}
                             loading={false}
                             error={error}
+                            kycDocuments={kycDocuments}
                             getCellContent={getCellContentWrapper}
                             renderCellContent={renderCellContent}
                             toggleSectionExpansion={toggleSectionExpansion}
@@ -2373,6 +2396,34 @@ export default function DepartmentTasksManager({
                             toggleDocumentExpansion={toggleDocumentExpansion}
                             getTaskHierarchy={getTaskHierarchy}
                             getStaffName={getStaffName}
+                            onDocumentPreview={async (doc) => {
+                              console.log('Document preview clicked:', doc);
+                              setPreviewDocument(doc);
+                              
+                              // If there's a document ID, try to fetch the extracted data
+                              if (doc.document_id) {
+                                try {
+                                  const { data: extractionData, error } = await supabase
+                                    .from('document_extractions')
+                                    .select('extracted_data')
+                                    .eq('document_id', doc.document_id)
+                                    .single();
+                                  
+                                  if (extractionData?.extracted_data) {
+                                    setExtractedData(extractionData.extracted_data);
+                                  } else {
+                                    setExtractedData({});
+                                  }
+                                } catch (error) {
+                                  console.error('Error fetching extraction data:', error);
+                                  setExtractedData({});
+                                }
+                              } else {
+                                setExtractedData({});
+                              }
+                              
+                              setIsDocumentPreviewOpen(true);
+                            }}                     
                             onDeleteTask={async (task) => {
                               try {
                                 setIsDeleting(true);
