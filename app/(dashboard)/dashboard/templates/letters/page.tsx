@@ -63,7 +63,7 @@ export default function LettersPage() {
       `${selectedSubdepartment}_${selectedClass}`;
   }, [selectedSubdepartment, selectedClass, selectedSubclass]);
 
-  // --- Fetch Letter Types based on Sidebar Selection ---
+  // --- Fetch Template Types based on Sidebar Selection ---
   useEffect(() => {
     const fetchLetterTypesForClass = async () => {
       const activeClassId = selectedSubclass || selectedClass;
@@ -103,14 +103,14 @@ export default function LettersPage() {
           return;
         }
 
-        const { data: lettersData, error: lettersError } = await supabase
+        const { data: documentsData, error: documentsError } = await supabase
           .from('acc_portal_kyc')
           .select('*')
           .in('id', documentIds)
-          .eq('main_category', 'Letters');
+          .or('main_category.eq.Letters,main_category.eq.Forms');
 
-        if (lettersError) throw lettersError;
-        setLetterTypes(lettersData || []);
+        if (documentsError) throw documentsError;
+        setLetterTypes(documentsData || []);
       } catch (error) {
         console.error("Error fetching letter types for class:", error);
         setLetterTypes([]);
@@ -177,7 +177,7 @@ export default function LettersPage() {
 
       <main className="flex-1 overflow-hidden p-6 space-y-6">
         <header>
-          <h1 className="text-3xl font-bold tracking-tight">Letter Template Management</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Template Management</h1>
           <p className="text-muted-foreground">{breadcrumb || 'Select a department to begin'}</p>
         </header>
 
@@ -191,7 +191,7 @@ export default function LettersPage() {
         ) : (
           <div className="grid grid-cols-12 gap-6 h-[calc(100%-80px)]">
             <Card className="col-span-4 h-full flex flex-col">
-              <CardHeader><CardTitle>Letter Types</CardTitle><CardDescription>Letters required for this class.</CardDescription></CardHeader>
+              <CardHeader><CardTitle>Template Types</CardTitle><CardDescription>Templates required for this class.</CardDescription></CardHeader>
               <CardContent className="flex-1 overflow-hidden p-2">
                 <ScrollArea className="h-full">
                   {isLoading ? (
@@ -204,7 +204,7 @@ export default function LettersPage() {
                       </Button>
                     ))
                   ) : (
-                    <div className="text-center py-10 text-sm text-muted-foreground">No letter types found for the selected class.</div>
+                    <div className="text-center py-10 text-sm text-muted-foreground">No template types found for the selected class.</div>
                   )}
                 </ScrollArea>
               </CardContent>
@@ -221,8 +221,8 @@ export default function LettersPage() {
               ) : (
                 <Card className="h-full flex items-center justify-center">
                   <div className="text-center">
-                    <h3 className="text-lg font-medium">Select a Letter Type</h3>
-                    <p className="text-sm text-muted-foreground mt-1">Choose a letter from the left panel to see its templates.</p>
+                    <h3 className="text-lg font-medium">Select a Template Type</h3>
+                    <p className="text-sm text-muted-foreground mt-1">Choose a template type from the left panel to see its templates.</p>
                   </div>
                 </Card>
               )}
@@ -388,7 +388,7 @@ function TemplateDisplayArea({ selectedLetter, onCreateNew, onEdit, templateVers
       <CardHeader className="flex-row items-center justify-between">
         <div>
           <CardTitle>{selectedLetter.display_name}</CardTitle>
-          <CardDescription>Available templates for this letter.</CardDescription>
+          <CardDescription>Available templates for this template type.</CardDescription>
         </div>
         <Button onClick={onCreateNew}>
           <PlusCircle className="mr-2 h-4 w-4" /> Create New
