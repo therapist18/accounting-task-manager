@@ -830,7 +830,7 @@ export default function DepartmentTasksManager({
 
   const enquiryTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('enquiry')), [getFilteredTasks, filterTasksBySearchWrapper])
   const wipTasks = useMemo(() => filterTasksBySearchWrapper(getWIPTasksByFollowUp(activeFollowUpFilter)), [getWIPTasksByFollowUp, activeFollowUpFilter, filterTasksBySearchWrapper])
-  const completedTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('completed')), [getFilteredTasks, filterTasksBySearchWrapper])
+  const completedTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('write_up_completed')), [getFilteredTasks, filterTasksBySearchWrapper])
 
   // Enhanced Excel export function
   const handleExport = useCallback(async (tasks: any[], tableType: string) => {
@@ -915,9 +915,9 @@ export default function DepartmentTasksManager({
       const currentDate = new Date().toISOString();
       const stages = {};
       if (isAlien || isReEntry) {
-        stages['1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'] = { date: currentDate, status: 'completed' };
-        stages['a19b270e-6d1e-4e6d-b2bc-f21db72cde08'] = { date: currentDate, status: 'completed' };
-        stages['9ccdbfa6-8d76-49db-b8d4-09742c734905'] = { date: currentDate, status: 'completed' };
+        stages['1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'] = { date: currentDate, status: 'write_up_completed' };
+        stages['a19b270e-6d1e-4e6d-b2bc-f21db72cde08'] = { date: currentDate, status: 'write_up_completed' };
+        stages['9ccdbfa6-8d76-49db-b8d4-09742c734905'] = { date: currentDate, status: 'write_up_completed' };
       }
       const { dependantsMap } = await fetchAllDependantsAndApplicants([task]);
       const dependants = [];
@@ -1005,7 +1005,7 @@ export default function DepartmentTasksManager({
       if (handleStageStatusSave) await handleStageStatusSave(stageId, taskId, value, updatedExtractedDetails)
       const task = tasks.find(t => t.id.toString() === taskId.toString())
       if (!task) return
-      const updatedStages = { ...task.stages, [stageId]: { status: 'completed', date: value, completedAt: new Date().toISOString() } }
+      const updatedStages = { ...task.stages, [stageId]: { status: 'write_up_completed', date: value, completedAt: new Date().toISOString() } }
       const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages)
       const updateData: any = { stages: updatedStages, updated_at: new Date().toISOString() }
       if (currentStage) { updateData.current_stage_id = currentStage.id; updateData.current_stage_started_at = new Date().toISOString(); }
@@ -1042,7 +1042,7 @@ export default function DepartmentTasksManager({
               if (!dept) return false;
               return true; // Simplified - actual logic is now in EditableStageCell
             });
-            const completedStages = applicableStages.filter(stage => task.stages?.[stage.id]?.status === 'completed');
+            const completedStages = applicableStages.filter(stage => task.stages?.[stage.id]?.status === 'write_up_completed');
             return `${completedStages.length}/${applicableStages.length}`;
           }
         })
@@ -2038,7 +2038,8 @@ export default function DepartmentTasksManager({
   const activeStatus = {
     'enquiries': 'Enquiries',
     'wip-stages': 'WIP Stages',
-    'completed': 'Completed'
+    'write_up_completed': 'Write Up Completed',
+    'endorsed': 'Endorsement Completed'
   }[activeSubTab] || '';
 
   let wipFilter = '';
@@ -2122,19 +2123,23 @@ export default function DepartmentTasksManager({
                   <TabsTrigger value="wip-stages" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
                     WIP Stages <Badge variant="secondary">{wipTasks.length}</Badge>
                   </TabsTrigger>
-                  <TabsTrigger value="completed" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
-                    Completed <Badge variant="secondary">{completedTasks.length}</Badge>
+                  <TabsTrigger value="write_up_completed" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                    Write Up Completed <Badge variant="secondary">{completedTasks.length}</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="endorsed" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md rounded-md">
+                    Endorsement Completed <Badge variant="secondary">{getFilteredTasks('endorsed').length}</Badge>
                   </TabsTrigger>
                 </TabsList>
               )}
 
               {/* All Tabs Content */}
-              {['enquiries', 'wip-stages', 'completed'].map(tabValue => {
+              {['enquiries', 'wip-stages', 'write_up_completed', 'endorsed'].map(tabValue => {
                 const isWipTab = tabValue === 'wip-stages';
                 let tasksToRender, title;
                 if (tabValue === 'enquiries') { tasksToRender = enquiryTasks; title = 'Enquiries'; }
                 else if (tabValue === 'wip-stages') { tasksToRender = wipTasks; title = 'WIP Stages'; }
-                else { tasksToRender = completedTasks; title = 'Completed Tasks'; }
+                else if (tabValue === 'endorsed') { tasksToRender = getFilteredTasks('endorsed'); title = 'Endorsement Completed'; }
+                else { tasksToRender = completedTasks; title = 'Write Up Completed'; }
 
                 return (
                   <TabsContent key={tabValue} value={tabValue} className="mt-4">
