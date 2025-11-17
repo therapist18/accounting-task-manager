@@ -198,7 +198,7 @@ const initialSelectedDocs = useMemo(() => {
     setIsLoading(true);
     try {
       const { error } = await supabase
-        .from("tm_tasks_duplicate")
+        .from("tm_tasks")
         .update({
           source_document_id: selectedDocs,
           updated_at: new Date().toISOString(),
