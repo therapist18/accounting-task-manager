@@ -177,7 +177,9 @@ export const ExtractionPreview = ({
   // Initialize localData with a function to compute the initial state
   const [localData, setLocalData] = useState<Record<string, any>>(() => {
     const initialData: Record<string, any> = {};
-    fields.forEach(field => {
+    fields?.forEach(field => {
+      if (!field?.name) return;
+      
       const snakeCase = field.name
         .toLowerCase()
         .replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => '_' + chr.toLowerCase())
@@ -203,7 +205,9 @@ export const ExtractionPreview = ({
   // Use useMemo to compute derived state
   const formattedData = useMemo(() => {
     const result: Record<string, any> = {};
-    fields.forEach(field => {
+    fields?.forEach(field => {
+      if (!field || !field.name) return;
+      
       const snakeCase = field.name
         .toLowerCase()
         .replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => '_' + chr.toLowerCase())
@@ -355,13 +359,15 @@ export const ExtractionPreview = ({
   };
 
   const renderField = (field: Field) => {
+    if (!field?.name) return null;
+    
     const value = localData[field.name];
 
     // Handle array fields (like directors_and_shareholders)
     if (Array.isArray(value)) {
       return (
         <div key={field.id} className="space-y-3">
-          <Label className="text-sm font-medium capitalize">{field.name.replace(/_/g, ' ')}</Label>
+          <Label className="text-sm font-medium capitalize">{(field.name || '').replace(/_/g, ' ')}</Label>
           <div className="space-y-4">
             {value.map((item, index) => (
               <div key={index} className="p-3 border rounded-md bg-gray-50">
@@ -382,7 +388,7 @@ export const ExtractionPreview = ({
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       return (
         <div key={field.id} className="space-y-1">
-          <Label className="text-sm font-medium capitalize">{field.name.replace(/_/g, ' ')}</Label>
+          <Label className="text-sm font-medium capitalize">{(field.name || '').replace(/_/g, ' ')}</Label>
           <div className="p-3 border rounded-md bg-gray-50">
             {Object.entries(value).map(([key, val]) => (
               <div key={key} className="grid grid-cols-3 gap-2 text-sm mb-1">
@@ -398,7 +404,7 @@ export const ExtractionPreview = ({
     // Handle simple fields
     return (
       <div key={field.id} className="space-y-1">
-        <Label className="text-sm font-medium capitalize">{field.name.replace(/_/g, ' ')}</Label>
+        <Label className="text-sm font-medium capitalize">{(field.name || '').replace(/_/g, ' ')}</Label>
         <Input
           value={value || ''}
           onChange={(e) => handleFieldChange(field.name, e.target.value)}
@@ -467,8 +473,10 @@ export const ExtractionPreview = ({
               .sort((a, b) => {
                 // Sort fields to show important ones first
                 const order = ['name', 'company_name', 'date', 'reference_number', 'file_number'];
-                const aIndex = order.indexOf(a.name.toLowerCase());
-                const bIndex = order.indexOf(b.name.toLowerCase());
+                const aName = a?.name?.toLowerCase?.() || '';
+                const bName = b?.name?.toLowerCase?.() || '';
+                const aIndex = order.indexOf(aName);
+                const bIndex = order.indexOf(bName);
                 return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
               })
               .map(renderField)}

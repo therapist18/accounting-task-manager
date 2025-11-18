@@ -426,22 +426,19 @@ export default function EditableStageCell({
       const hasAnyAutomation = stage.documents.some((doc: any) => isDocumentApplicable(doc, task) && (doc.automationId || doc.automation?.id));
 
       return (
-        <div className="flex flex-col items-center gap-1 p-1">
-          <div className="flex gap-1">
+        <div className="grid grid-cols-3 gap-2">
+          <div className="col-span-2">{stageDate && <div className="text-xs text-gray-600 text-center mt-1">{formatDateDisplay(stageDate)}</div>}</div>
+          <div className="col-span-1 flex gap-1">
             {!hasLinkedDocument && hasAnyAutomation && (
               <Button variant="ghost" size="icon" className="h-8 w-8 text-amber-500" onClick={handleTriggerAutomation} title="Run automation"><Zap className="h-4 w-4" /></Button>
             )}
-            <Button variant="ghost" size="icon" className={`h-8 w-8 ${hasLinkedDocument ? 'text-blue-400' : 'text-blue-600'}`} onClick={handleDocumentUpload} title={hasLinkedDocument ? 'Upload new' : 'Upload document'}><Upload className="h-4 w-4" /></Button>
             {hasLinkedDocument && (
               <Button variant="ghost" size="icon" className="h-8 w-8 text-green-600" onClick={handleViewDocument} title="View details"><Eye className="h-4 w-4" /></Button>
             )}
+            <Button variant="ghost" size="icon" className={`h-8 w-8 ${hasLinkedDocument ? 'text-blue-400' : 'text-blue-600'}`} onClick={handleDocumentUpload} title={hasLinkedDocument ? 'Upload new' : 'Upload document'}><Upload className="h-4 w-4" /></Button>
             {isOldDocument && (
               <div className="h-8 w-8 flex items-center justify-center" title="Document is older than task creation"><AlertTriangle className="h-4 w-4 text-orange-500" /></div>
             )}
-          </div>
-          {stageDate && <div className="text-xs text-gray-600 text-center mt-1">{formatDateDisplay(stageDate)}</div>}
-          <div className={`text-xs text-center mt-1 ${isOldDocument ? 'text-orange-600' : hasLinkedDocument ? 'text-green-600' : 'text-slate-500'}`}>
-            {isOldDocument ? 'Old Document' : hasLinkedDocument ? 'Document Ready' : 'No Document'}
           </div>
         </div>
       );
