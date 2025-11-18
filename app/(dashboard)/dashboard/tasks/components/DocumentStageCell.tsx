@@ -2,7 +2,6 @@
 "use client"
 import { Button } from "@/components/ui/button";
 import { Upload, Eye, AlertTriangle } from "lucide-react";
-import { isDocumentOlderThanTask } from "@/lib/utils";
 import { Document } from "@/types/documents";
 
 interface Stage {
@@ -69,9 +68,6 @@ export function DocumentStageCell({
   const documentDisplayName = kycData?.display_name || kycData?.name || stage.documents[0].display_name || stage.documents[0].name || 'Document'
 
   const hasDocument = !!document
-  const isOldDocument = document && task.created_at &&
-    isDocumentOlderThanTask(document.created_at, task.created_at)
-
   const hasIndicator = document?.indicator === true
 
   return (
@@ -95,12 +91,8 @@ export function DocumentStageCell({
           <Eye className="h-4 w-4" />
         </Button>
       )}
-      {/* Show alert icon for old documents */}
-      {isOldDocument && (
-        <AlertTriangle className="h-3 w-3 text-orange-500" />
-      )}
-      {/* If document exists but has an indicator or is old, show a message instead of the preview button */}
-      {hasDocument && (hasIndicator || isOldDocument) && (
+      {/* If document exists but has an indicator, show a message instead of the preview button */}
+      {hasDocument && hasIndicator && (
         <span className="text-xs text-gray-500 ml-1">No Preview</span>
       )}
       {!hasDocument && (

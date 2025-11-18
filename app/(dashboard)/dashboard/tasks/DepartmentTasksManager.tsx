@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AutomationDialog } from "@/app/(dashboard)/dashboard/settings/automation/components/AutomationDialog";
-import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, Zap, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight } from "lucide-react"
+import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, Zap, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { Building, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -26,7 +26,7 @@ import { Label } from "@/components/ui/label"
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import * as XLSX from 'xlsx'
-import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchKycDocument, isDocumentOlderThanTask, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document } from "./utils/taskManagerData"
+import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKycFields, fetchKycDocument, formatDateValue, type Task as UtilTask, type Department, type KycDocument, type Document } from "./utils/taskManagerData"
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
@@ -121,6 +121,11 @@ export default function DepartmentTasksManager({
   const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(new Set(ENHANCED_TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
   const [visibleStats, setVisibleStats] = useState<Set<string>>(new Set(STATS_HEADERS.filter(h => h.default).map(h => h.id)))
   const [visibleStageIds, setVisibleStageIds] = useState<Set<string>>(new Set())
+  const [showNAStages, setShowNAStages] = useState<boolean>(false);
+  // Debug log when showNAStages changes
+  useEffect(() => {
+    console.log('showNAStages changed:', showNAStages);
+  }, [showNAStages]);
   const [expandedDependants, setExpandedDependants] = useState<Set<string>>(new Set())
   const [kycDocuments, setKycDocuments] = useState<Map<string, KycDocument>>(new Map())
   const [allKycFields, setAllKycFields] = useState<Record<string, any[]>>({})
@@ -175,13 +180,43 @@ export default function DepartmentTasksManager({
   const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
 
+  const isStageApplicableToTask = useCallback((stage: any, task: any, departments: any[]): boolean => {
+    if (!task || !stage || !Array.isArray(departments) || departments.length === 0) {
+      return true; // Default to applicable if data is missing
+    }
+
+    try {
+      const dept = departments.find(d => d?.id === (task.department?.id || task.department_id));
+      if (!dept) return true;
+
+      const subdept = dept.tm_subdepartments?.find((s: any) => s?.id === (task.subdepartment?.id || task.subdepartment_id));
+      if (!subdept) return true;
+
+      if (task.class_id) {
+        const cls = subdept.classes?.find((c: any) => c?.id?.toString() === task.class_id?.toString());
+        const classStage = cls?.stages?.find((s: any) => s.stage_id === stage.id);
+        if (classStage && typeof classStage.applicable === 'boolean') {
+          return classStage.applicable;
+        }
+      }
+
+      const subdeptStage = subdept.stages?.find((s: any) => s.stage_id === stage.id);
+      if (subdeptStage && typeof subdeptStage.applicable === 'boolean') {
+        return subdeptStage.applicable;
+      }
+
+      return true; // Default to applicable if no override is found
+    } catch (error) {
+      console.error('Error in isStageApplicableToTask:', error);
+      return true; // Failsafe
+    }
+  }, []);
+
   // Add this useEffect near the top of your component, with other state declarations
   useEffect(() => {
     const loadKycData = async () => {
       try {
-        console.log('Loading KYC documents...');
         const { kycDocsMap } = await fetchAllKycFields();
-        console.log(`Loaded ${kycDocsMap.size} KYC documents`, Array.from(kycDocsMap.keys()));
         setKycDocuments(kycDocsMap);
       } catch (error) {
         console.error('Error loading KYC documents:', error);
@@ -347,19 +382,32 @@ export default function DepartmentTasksManager({
     return assistantHistory.filter(assistant => !assistant.end_date);
   }, []);
 
-  const getDocumentForTaskStage = useCallback((
-    task: UtilTask,
-    stage: { id: string; documents?: { kycId: string }[] },
-  ): Document | undefined => {
-    const linkedDocumentData = task.source_document_id?.[stage.id];
-    if (linkedDocumentData) {
-      const documentId = typeof linkedDocumentData === 'string'
-        ? linkedDocumentData
-        : linkedDocumentData.id;
-      return allDocuments.find(doc => doc.id === documentId);
-    }
-    return undefined;
-  }, [allDocuments]);
+const getDocumentForTaskStage = useCallback((
+  task: UtilTask,
+  stage: { id: string; documents?: { kycId: string }[] },
+): Document[] => {
+  const linkedDocumentData = task.source_document_id?.[stage.id];
+
+  if (!linkedDocumentData) {
+    return [];
+  }
+
+  // Handle both single document and array of documents
+  const documentRefs = Array.isArray(linkedDocumentData) 
+    ? linkedDocumentData 
+    : [linkedDocumentData];
+
+  const linkedDocs = documentRefs
+    .map(ref => {
+      const documentId = typeof ref === 'string' ? ref : ref.id;
+      const doc = allDocuments.find(doc => doc.id.toString() === documentId.toString());
+            
+      return doc;
+    })
+    .filter((doc): doc is Document => !!doc);
+
+  return linkedDocs;
+}, [allDocuments]);
 
   const getActiveStaffFromSubdepartment = useCallback((subdepartmentId: string) => {
     if (!subdepartmentId || !departments.length) {
@@ -1019,11 +1067,20 @@ export default function DepartmentTasksManager({
   }, [handleStageStatusSave, tasks, stages, determineCurrentStage, loadTasksData, activeDepartmentTab, activeSubdepartmentTab])
 
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
-    if (!tasks.length) return []
+    if (!tasks.length) return [];
 
+    console.log('Generating table rows with stages:', {
+      allStages: stages?.map(s => ({id: s.id, name: s.name, status: s.status})),
+      visibleStageIds: Array.from(visibleStageIds),
+      showNAStages
+    });
+
+    // Filter stages based on visibility
     const allStages = stages
       .filter(stage => stage && visibleStageIds.has(stage.id.toString()))
-      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0))
+      .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+      
+    console.log('Final filtered stages:', allStages.map(s => ({id: s.id, name: s.name})));
     const rows = []
 
     // Stats Section
@@ -1089,102 +1146,77 @@ export default function DepartmentTasksManager({
 
     if (expandedSections.has('stages')) {
       for (const stage of allStages) {
-        rows.push({
-          key: `stage_${stage.id}`,
-          label: `${stage.name}`,
-          type: 'stage',
-          stage,
-          stageId: stage.id,
-          stageOrder: stage.order_num || 0,
-          getValue: (task: UtilTask) => {
-            // The actual applicability check is now handled in EditableStageCell
-            // We'll just return the stage data and let EditableStageCell handle the display
-            return task.stages?.[stage.id] || null;
-          }
-        })
+        const isApplicableToAnyTask = tasks.some(task => isStageApplicableToTask(stage, task, departments));
 
-        if (expandedStages.has(stage.id) && stage.documents && stage.documents.length > 0) {
-          for (const doc of stage.documents) {
-            const kycData = kycDocuments.get(doc.kycId);
-            const docDisplayName = kycData?.display_name || kycData?.name || doc.display_name || doc.name || 'Document';
-        
-            // Add the document row
-            rows.push({
-              key: `doc_${stage.id}_${doc.id}`,
-              label: docDisplayName,
-              type: 'document',  // Ensure type is 'document'
-              stage,
-              document: {
-                ...doc,
-                stageId: stage.id,
-                document_id: doc.kycId,
-                name: docDisplayName
-              },
-              isSubRow: true,
-              getValue: (task: UtilTask) => {
-                const isApplicable = (() => {
-                  if (!task || !departments.length) return false;
-                  const dept = departments.find(d => d.id === task.department?.id);
-                  if (!dept) return false;
-                  const subdept = dept.tm_subdepartments?.find(s => s.id === task.subdepartment?.id);
-                  if (!subdept) return false;
+        if (showNAStages || isApplicableToAnyTask) {
+          rows.push({
+            key: `stage_${stage.id}`,
+            label: `${stage.name}`,
+            type: 'stage',
+            stage,
+            stageId: stage.id,
+            stageOrder: stage.order_num || 0,
+            getValue: (task: UtilTask) => isStageApplicableToTask(stage, task, departments) ? task.stages?.[stage.id] : 'N/A'
+          });
 
-                  const subdeptStage = subdept.stages?.find(s => s.stage_id === stage.id);
-                  if (subdeptStage && !subdeptStage.applicable) return false;
+          if (expandedStages.has(stage.id) && stage.documents && stage.documents.length > 0) {
+            for (const doc of stage.documents) {
+              const kycData = kycDocuments.get(doc.kycId);
+              const docDisplayName = kycData?.display_name || kycData?.name || doc.display_name || doc.name || 'Document';
 
-                  if (task.class_id) {
-                    const cls = subdept.classes?.find(c => c.id.toString() === task.class_id.toString());
-                    if (cls) {
-                      const classStage = cls.stages?.find(s => s.stage_id === stage.id);
-                      if (classStage && !classStage.applicable) return false;
-                    }
-                  }
+              // Add the document row
+              rows.push({
+                key: `doc_${stage.id}_${doc.id}`,
+                label: docDisplayName,
+                type: 'document',  // Ensure type is 'document'
+                stage,
+                document: {
+                  ...doc,
+                  stageId: stage.id,
+                  document_id: doc.kycId,
+                  name: docDisplayName
+                },
+                isSubRow: true,
+                getValue: (task: UtilTask) => {
+                  if (!isStageApplicableToTask(stage, task, departments)) return 'N/A';
 
-                  return true;
-                })();
+                  const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
+                  const hasIndicator = linkedDocument?.indicator === true;
 
-                if (!isApplicable) return 'N/A';
-
-                const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
-                const isOldDoc = linkedDocument && task.created_at &&
-                  isDocumentOlderThanTask(linkedDocument.created_at, task.created_at);
-                const hasIndicator = linkedDocument?.indicator === true;
-
-                return {
-                  hasDocument: !!linkedDocument,
-                  isOldDocument: isOldDoc,
-                  hasIndicator,
-                  status: hasIndicator ? 'Preview Not Available' :
-                    isOldDoc ? 'Old Document - No Preview' :
+                  return {
+                    hasDocument: !!linkedDocument,
+                    hasIndicator,
+                    status: hasIndicator ? 'Preview Not Available' :
                       (linkedDocument ? 'Linked' : 'Not Linked')
-                };
-              }
-            })
+                  };
+                }
+              })
 
-            if (expandedDocuments.has(doc.id) && doc.kycId) {
-              const kycFields = await getKycFields(doc);
-              if (kycFields && kycFields.length > 0) {
-                kycFields.forEach(field => {
-                  rows.push({
-                    key: `field_${stage.id}_${doc.id}_${field.id || field.fieldName}`,
-                    label: `${field.fieldName}`,
-                    type: 'field',
-                    stage,
-                    document: doc,
-                    field,
-                    isSubRow: true,
-                    isSubSubRow: true,
-                    getValue: (task: UtilTask) => {
-                      // if (!isStageApplicableToTask(stage, task)) return 'N/A'
+              if (expandedDocuments.has(doc.id) && doc.kycId) {
+                const kycFields = await getKycFields(doc);
+                if (kycFields && kycFields.length > 0) {
+                  kycFields.forEach(field => {
+                    rows.push({
+                      key: `field_${stage.id}_${doc.id}_${field.id || field.fieldName}`,
+                      label: `${field.fieldName}`,
+                      type: 'field',
+                      stage,
+                      document: doc,
+                      field,
+                      isSubRow: true,
+                      isSubSubRow: true,
+                      getValue: (task: UtilTask) => {
+                        if (!isStageApplicableToTask(stage, task, departments)) return 'N/A'
 
-                      const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
+                        const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] })
 
-                      if (!linkedDocument || !linkedDocument.extracted_details || linkedDocument.indicator === true) return 'N/A'
-                      const value = linkedDocument.extracted_details[field.fieldName] || linkedDocument.extracted_details[field.id] || 'N/A'
-                      return { value }
-                    }
+                        if (!linkedDocument || !linkedDocument.extracted_details || linkedDocument.indicator === true) return 'N/A'
+                        const value = linkedDocument.extracted_details[field.fieldName] || linkedDocument.extracted_details[field.id] || 'N/A'
+                        return { value }
+                      }
+                    })
                   })
-                })
+                }
               }
             }
           }
@@ -1238,39 +1270,30 @@ export default function DepartmentTasksManager({
 
   const handleViewDocument = useCallback(async (task: any, stage: any) => {
     try {
-      const document = getDocumentForTaskStage(task, stage);
+    const linkedDocs = getDocumentForTaskStage(task, stage);
+   
+    if (linkedDocs.length === 0) {
+      toast({
+        title: 'No Linked Document',
+        description: `No document has been linked for this stage yet. Please use the 'Link' button to link a document first.`,
+        variant: 'default',
+      });
+      return;
+    }
 
-      if (!document) {
-        toast({
-          title: 'No Linked Document',
-          description: `No document has been linked for this stage yet. Please use the 'Link' button to link a document first.`,
-          variant: 'default',
-        });
-        return;
-      }
+    // Use the first linked document for preview
+    const document = linkedDocs[0];
+    
+    if (document.indicator === true) {
+      toast({
+        title: 'Preview not available',
+        description: 'Document preview is not available for this document.',
+        variant: 'default',
+      });
+      return;
+    }
 
-      if (document.indicator === true) {
-        toast({
-          title: 'Preview not available',
-          description: 'Document preview is not available for this document.',
-          variant: 'default',
-        });
-        return;
-      }
-
-      const isOldDocument = task.created_at &&
-        isDocumentOlderThanTask(document.created_at, task.created_at);
-
-      if (isOldDocument) {
-        toast({
-          title: 'Preview not available',
-          description: 'Document is older than task creation - preview disabled.',
-          variant: 'default',
-        });
-        return;
-      }
-
-      const kycId = document.document_id;
+    const kycId = document.document_id;
       if (!kycId) {
         toast({
           title: 'Error',
@@ -1450,26 +1473,29 @@ export default function DepartmentTasksManager({
     getKycFields
   ]);
 
-  // Extracted helper functions
-  const renderEditableStageCell = (row: any, task: any) => {
-    const requiresUpload = row.stage?.requires_upload !== false;
-    return (
-      <EditableStageCell
-        key={row.stage.id}
-        stage={row.stage}
-        task={task}
-        value={task.stages?.[row.stage.id]?.status}
-        onSave={enhancedHandleStageStatusSave}
-        onDocumentUpload={handleStageDocumentUpload}
-        onShowDocuments={handleViewDocument}
-        requiresUpload={requiresUpload}
-        departments={departments}
-        onAutomationClick={(e) => handleAutomationClick(e, row.stage, task.id)}
-        getKycFields={getKycFields}
-        allDocuments={allDocuments}
-      />
-    );
-  };
+ const renderEditableStageCell = (row: any, task: any) => {
+  const requiresUpload = row.stage?.requires_upload !== false;
+  
+  // Get linked documents for this stage
+  const linkedDocs = getDocumentForTaskStage(task, row.stage);
+  
+  return (
+    <EditableStageCell
+      key={row.stage.id}
+      stage={row.stage}
+      task={task}
+      value={task.stages?.[row.stage.id]?.status}
+      onSave={enhancedHandleStageStatusSave}
+      onDocumentUpload={handleStageDocumentUpload}
+      onShowDocuments={handleViewDocument}
+      requiresUpload={requiresUpload}
+      departments={departments}
+      onAutomationClick={(e) => handleAutomationClick(e, row.stage, task.id)}
+      getKycFields={getKycFields}
+      linkedDocuments={linkedDocs}  // PASS THE LINKED DOCUMENTS
+    />
+  );
+};
 
   const renderFieldContent = (row: any, value: any) => {
     const fieldValue = typeof value === 'object' ? value.value : value;
@@ -1876,11 +1902,21 @@ export default function DepartmentTasksManager({
 
   useEffect(() => {
     if (stages && stages.length > 0) {
-      setVisibleStageIds(new Set(stages.map(s => s.id.toString())))
+      // Show all stages if showNAStages is true, otherwise filter out N/A stages
+      const applicableStages = showNAStages 
+        ? [...stages] 
+        : stages.filter(stage => !stage.status || stage.status !== 'N/A');
+        
+      console.log('Setting initial visible stages:', {
+        allStages: stages.map(s => ({id: s.id, name: s.name, status: s.status})),
+        applicableStages: applicableStages.map(s => ({id: s.id, name: s.name, status: s.status})),
+        showNAStages
+      });
+      setVisibleStageIds(new Set(applicableStages.map(s => s.id.toString())));
     } else {
-      setVisibleStageIds(new Set())
+      setVisibleStageIds(new Set());
     }
-  }, [stages])
+  }, [stages, showNAStages])
 
   useEffect(() => {
     if (isTransposedView) return;
@@ -2312,7 +2348,29 @@ export default function DepartmentTasksManager({
                               </PopoverContent>
                             </Popover>
 
-                            <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => setIsReportDialogOpen(true)}>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="flex items-center gap-2" 
+                              onClick={() => setShowNAStages(!showNAStages)}
+                            >
+                              {showNAStages ? (
+                                <>
+                                  <EyeOff className="h-4 w-4" /> Hide N/A Stages
+                                </>
+                              ) : (
+                                <>
+                                  <Eye className="h-4 w-4" /> Show N/A Stages
+                                </>
+                              )}
+                            </Button>
+
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="flex items-center gap-2" 
+                              onClick={() => setIsReportDialogOpen(true)}
+                            >
                               <FileText className="h-4 w-4" /> Reports
                             </Button>
 

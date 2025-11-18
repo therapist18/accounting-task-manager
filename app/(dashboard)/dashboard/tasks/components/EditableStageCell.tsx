@@ -27,45 +27,12 @@ interface EditableStageCellProps {
   onShowDocuments?: (task: any, stage: any) => void
   getKycFields?: (documentConfig: any) => Promise<any[]>
   allDocuments?: any[]
+  linkedDocuments?: any[]  // ADD THIS
   isDocumentRow?: boolean
   documentData?: any
   onAutomationClick?: (e: React.MouseEvent, documentData?: any) => void
   departments?: any[]
 }
-
-// Helper function to check if document is older than task creation
-const isDocumentOlderThanTask = (documentDate: string, taskDate: string): boolean => {
-  if (!documentDate || !taskDate) return false;
-  try {
-    const docDate = new Date(documentDate);
-    const tskDate = new Date(taskDate);
-    return docDate < tskDate;
-  } catch (error) {
-    console.error('Error comparing dates:', error);
-    return false;
-  }
-};
-
-const getLinkedDocumentForStage = (task: any, stage: any, allDocuments: any[]): any | null => {
-  const sourceDocId = task?.source_document_id;
-  if (!sourceDocId || !stage?.id || !Array.isArray(allDocuments)) return null;
-
-  let documentId: string | undefined;
-
-  // Handle case where source_document_id is an object mapping stage IDs to document arrays
-  if (typeof sourceDocId === 'object') {
-    const stageDocuments = sourceDocId[stage.id];
-    if (Array.isArray(stageDocuments) && stageDocuments.length > 0) {
-      const documentRef = stageDocuments[0]; // Assuming the first document is the relevant one
-      documentId = documentRef.id || documentRef.document_id;
-    }
-  }
-
-  if (!documentId) return null;
-
-  // Find the full document object from the allDocuments list
-  return allDocuments.find(doc => doc.id === documentId || doc.document_id === documentId) || null;
-};
 
 // Helper function to check if a document is applicable to the current task
 const isDocumentApplicable = (doc: any, task: any): boolean => {
@@ -165,6 +132,7 @@ export default function EditableStageCell({
   onShowDocuments,
   allDocuments = [],
   isDocumentRow = false,
+  linkedDocuments = [],
   documentData = null,
   departments
 }: EditableStageCellProps) {
@@ -180,16 +148,14 @@ export default function EditableStageCell({
   const requiresUpload = useMemo(() => stage.documents && stage.documents.length > 0, [stage.documents]);
 
   const linkedDocument = useMemo(() => {
-    if (!requiresUpload) return null;
-    return getLinkedDocumentForStage(task, stage, allDocuments);
-  }, [task, stage, allDocuments, requiresUpload]);
+    if (!requiresUpload || linkedDocuments.length === 0) {
+      return null;
+    }
+    const firstDoc = linkedDocuments[0];
+    return firstDoc;
+  }, [linkedDocuments, requiresUpload, stage.id, stage.name]);
 
-  const isOldDocument = useMemo(() => {
-    if (!linkedDocument || !task.created_at) return false;
-    return isDocumentOlderThanTask(linkedDocument.created_at, task.created_at);
-  }, [linkedDocument, task.created_at]);
-
-  const hasLinkedDocument = useMemo(() => !!linkedDocument && !linkedDocument.indicator && !isOldDocument, [linkedDocument, isOldDocument]);
+  const hasLinkedDocument = useMemo(() => !!linkedDocument && !linkedDocument.indicator, [linkedDocument]);
 
   const stageDate = useMemo(() => {
     if (!hasLinkedDocument || !linkedDocument.extracted_details) return '';
@@ -320,40 +286,43 @@ export default function EditableStageCell({
   }, []);
 
   const buildPreviewDocumentData = useCallback(async () => {
-    if (!linkedDocument) {
-      toast({ title: 'No Document', description: 'No document is linked to this stage.', variant: 'default' });
+ 
+  if (!linkedDocument) {
+    toast({ title: 'No Document', description: 'No document is linked to this stage.', variant: 'default' });
+    return null;
+  }
+
+  try {
+    const kycDoc = await fetchKycDocumentData(linkedDocument.document_id);
+    
+    if (!kycDoc) {
+      toast({ title: 'Error', description: 'Could not load document configuration.', variant: 'destructive' });
       return null;
     }
 
-    try {
-      const kycDoc = await fetchKycDocumentData(linkedDocument.document_id);
-      if (!kycDoc) {
-        toast({ title: 'Error', description: 'Could not load document configuration.', variant: 'destructive' });
-        return null;
+    const previewData = {
+      documentId: linkedDocument.id,
+      documentName: kycDoc.display_name || kycDoc.name || 'Document',
+      fileUrl: linkedDocument.file_path || linkedDocument.download_url,
+      fileName: linkedDocument.file_path?.split('/').pop() || 'document.pdf',
+      extractedData: linkedDocument.extracted_data || {},
+      fields: transformKycFieldsToPreviewFormat(kycDoc.fields || []),
+      kycDoc,
+      document: linkedDocument,
+      type: kycDoc.document_type || 'document',
+      file: {
+        url: linkedDocument.file_path || linkedDocument.download_url,
+        name: linkedDocument.file_name || linkedDocument.file_path?.split('/').pop() || 'document.pdf',
+        type: linkedDocument.file_type || 'application/pdf'
       }
+    };
 
-      return {
-        documentId: linkedDocument.id,
-        documentName: kycDoc.display_name || kycDoc.name || 'Document',
-        fileUrl: linkedDocument.file_path || linkedDocument.download_url,
-        fileName: linkedDocument.file_path?.split('/').pop() || 'document.pdf',
-        extractedData: linkedDocument.extracted_data || {},
-        fields: transformKycFieldsToPreviewFormat(kycDoc.fields || []),
-        kycDoc,
-        document: linkedDocument,
-        type: kycDoc.document_type || 'document',
-        file: {
-          url: linkedDocument.file_path || linkedDocument.download_url,
-          name: linkedDocument.file_name || linkedDocument.file_path?.split('/').pop() || 'document.pdf',
-          type: linkedDocument.file_type || 'application/pdf'
-        }
-      };
-    } catch (error) {
-      toast({ title: 'Error', description: 'Failed to prepare document preview.', variant: 'destructive' });
-      return null;
-    }
-  }, [linkedDocument, fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
-
+    return previewData;
+  } catch (error) {
+    toast({ title: 'Error', description: 'Failed to prepare document preview.', variant: 'destructive' });
+    return null;
+  }
+}, [linkedDocument, linkedDocuments, fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
   const handleViewDocument = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsLoading(true);
@@ -372,7 +341,6 @@ export default function EditableStageCell({
       toast({ title: 'Success', description: 'Document data saved successfully.' });
       setIsPreviewOpen(false);
     } catch (error) {
-      console.error('Error saving document data:', error);
       toast({ title: 'Error', description: 'Failed to save document data.', variant: 'destructive' });
     }
   }, [onSave, previewDocument, stage.id, task.id]);
@@ -436,9 +404,6 @@ export default function EditableStageCell({
               <Button variant="ghost" size="icon" className="h-8 w-8 text-green-600" onClick={handleViewDocument} title="View details"><Eye className="h-4 w-4" /></Button>
             )}
             <Button variant="ghost" size="icon" className={`h-8 w-8 ${hasLinkedDocument ? 'text-blue-400' : 'text-blue-600'}`} onClick={handleDocumentUpload} title={hasLinkedDocument ? 'Upload new' : 'Upload document'}><Upload className="h-4 w-4" /></Button>
-            {isOldDocument && (
-              <div className="h-8 w-8 flex items-center justify-center" title="Document is older than task creation"><AlertTriangle className="h-4 w-4 text-orange-500" /></div>
-            )}
           </div>
         </div>
       );
