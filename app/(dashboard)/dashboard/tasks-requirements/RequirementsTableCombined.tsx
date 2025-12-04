@@ -21,7 +21,7 @@ import('html-docx-js/dist/html-docx')
 
 import TemplateGenerationDialog from "./TemplateGenerationDialog"
 import { StageUploadDialog } from "../tasks/components/StageUploadDialog"
-import { UploadModal } from "@/components/UploadModal"
+import { UploadModal } from "@/app/generic-components/UploadModal"
 
 const generateDocxBlobFromHtml = async (html: string) => {
   if (!htmlDocx) {
