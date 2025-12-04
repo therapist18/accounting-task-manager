@@ -508,7 +508,7 @@ export function StageUploadDialog({
 
     const checkLockedDocuments = async () => {
       const { data: taskData } = await supabase
-        .from('tm_tasks_duplicate')
+        .from('tm_tasks')
         .select('source_document_id')
         .eq('id', task.id)
         .single();
@@ -538,8 +538,11 @@ export function StageUploadDialog({
     checkLockedDocuments();
   }, [stage?.id, task?.id, JSON.stringify(applicableDocuments)]);
 
+
+  // --- Event Handlers ---
+
   const handleDocumentCompletion = useCallback(async (docId: string, docInstanceId: string, kycId: string) => {
-    if (!stage?.id || !task?.id) return;
+    if (!stage?.id) return;
 
     try {
       const currentDate = new Date().toISOString();
@@ -550,83 +553,55 @@ export function StageUploadDialog({
         updated_at: currentDate
       };
 
-      // Update local state
       setLockedDocuments(prev => ({ ...prev, [docId]: true }));
       setLinkedDocuments(prev => ({ ...prev, [docId]: docToAdd }));
 
-      // Update source document in the database
       const updatedSource = {
         ...selectedSourceDocs,
         [stage.id]: [...(selectedSourceDocs[stage.id] || []).filter(d => d.document_id !== kycId), docToAdd]
       };
 
-      // Update the task with the new source document
       await supabase
-        .from('tm_tasks_duplicate')
-        .update({
-          source_document_id: updatedSource,
-          updated_at: currentDate
-        })
+        .from('tm_tasks')
+        .update({ source_document_id: updatedSource, updated_at: currentDate })
         .eq('id', task.id);
 
-      // Get all required documents for this stage
-      const requiredDocuments = stage.documents || [];
-      const currentLinkedDocs = { ...linkedDocuments, [docId]: docToAdd };
+      toast({ title: 'Success', description: 'Document linked successfully.' });
 
-      // Check if all required documents are linked
-      const allRequiredDocsLinked = requiredDocuments.every(doc =>
-        currentLinkedDocs[doc.id] || // Already linked
-        doc.id === docId // Just linked now
+      const allDocumentsCompleted = applicableDocuments.every((doc: any) =>
+        lockedDocuments[doc.id] || doc.id === docId
       );
 
-      const timestamp = new Date().toISOString();
-      const updatedStages = {
-        ...task.stages,
-        [stage.id]: {
-          ...task.stages?.[stage.id],
-          status: allRequiredDocsLinked ? 'completed' : 'in_progress',
-          date: new Date().toLocaleDateString('en-GB'),
-          completedAt: allRequiredDocsLinked ? timestamp : null,
-          documentsUploaded: Object.keys(currentLinkedDocs).length
-        }
-      };
+      if (allDocumentsCompleted) {
+        const timestamp = new Date().toISOString();
+        const updatedStages = {
+          ...task.stages,
+          [stage.id]: {
+            status: 'completed',
+            date: new Date().toLocaleDateString('en-GB'),
+            completedAt: timestamp,
+            documentsUploaded: applicableDocuments.length
+          }
+        };
 
-      // Update the task with the new stage status
-      await supabase
-        .from('tm_tasks_duplicate')
-        .update({
+        await supabase.from('tm_tasks').update({
           stages: updatedStages,
-          current_stage_id: allRequiredDocsLinked ? stage.id : task.current_stage_id,
+          current_stage_id: stage.id,
           updated_at: timestamp
-        })
-        .eq('id', task.id);
+        }).eq('id', task.id);
 
-      toast({
-        title: 'Success',
-        description: allRequiredDocsLinked
-          ? 'All documents uploaded. Stage completed!'
-          : 'Document linked successfully. Please upload remaining documents.'
-      });
-
-      if (allRequiredDocsLinked) {
         onStageCompleted?.(stage.id, task.id, {
           date: updatedStages[stage.id].date,
           status: 'completed'
         });
         onTaskAction?.({ type: 'refresh', taskId: task.id });
-        onOpenChange(false); // This closes the dialog
-      } else {
-        onTaskAction?.({ type: 'refresh', taskId: task.id });
+        onOpenChange(false);
       }
     } catch (e) {
       console.error('Document completion error', e);
-      toast({
-        title: 'Error',
-        description: 'Failed to process document',
-        variant: 'destructive'
-      });
+      toast({ title: 'Error', description: 'Failed to complete document', variant: 'destructive' });
     }
-  }, [stage, task, selectedSourceDocs, onStageCompleted, onTaskAction, onOpenChange, linkedDocuments]);
+  }, [stage, task, selectedSourceDocs, applicableDocuments, lockedDocuments, onStageCompleted, onTaskAction, onOpenChange]);
 
   const handleUploadSuccess = useCallback(async (newDocument: any, originatingDoc: any) => {
     if (originatingDoc?.kycId && newDocument?.id && stage?.id) {
@@ -663,7 +638,7 @@ export function StageUploadDialog({
 
       setSelectedSourceDocs(updatedSource);
       const { error } = await supabase
-        .from('tm_tasks_duplicate')
+        .from('tm_tasks')
         .update({ source_document_id: updatedSource, updated_at: currentDate })
         .eq('id', task.id);
 
