@@ -479,13 +479,11 @@ const handlePreviewSave = useCallback(async (data: any) => {
             if (!requiresUpload) setIsEditing(true);
           }}
         >
-          <Badge
-            variant="default"
-            className="bg-green-100 text-green-800 hover:bg-green-200"
+          <div
+            className="text-gray-800 hover:bg-blue-200 flex"
           >
-            <Check className="h-3 w-3 mr-1" />
             {formatDateDisplay(stageDate)}
-          </Badge>
+          </div>
         </div>
       );
     }

@@ -231,7 +231,7 @@ const MemoizedTableRow = React.memo(({
         <React.Fragment key={`${row.key}-${colIndex}`}>
           {/* DATE COLUMN */}
           <TableCell 
-            className={`text-center text-sm py-1 px-2 align-middle border border-gray-100 w-[150px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
+            className={`text-center text-sm py-1 px-2 align-middle border-l-4 border-t border-b border-gray-100 w-[150px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
           >
             {item.type === 'principal' ? (
               // ✅ FIXED: Wrapped result in safeRender
@@ -243,7 +243,7 @@ const MemoizedTableRow = React.memo(({
           
           {/* ACTIONS COLUMN */}
           <TableCell 
-            className={`text-center text-sm py-1 px-2 align-middle border border-gray-100 w-[120px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
+            className={`text-center text-sm py-1 px-2 align-middle border-r-4 border-t border-b border-gray-100 w-[120px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
           >
             {item.type === 'principal' ? (
               // ✅ FIXED: Wrapped result in safeRender
