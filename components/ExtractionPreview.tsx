@@ -13,6 +13,7 @@ import Image from 'next/image'
 import { toast } from 'sonner'
 import dynamic from 'next/dynamic'
 import { Textarea } from '@/components/ui/textarea';
+import DocumentActions from '@/app/generic-components/DocumentActions';
 
 // Dynamically import PDF viewer to avoid SSR issues
 const PDFViewer = dynamic(() => import('@/components/PDFViewer'), { ssr: false })
@@ -60,7 +61,7 @@ interface ExtractionPreviewProps {
   onDownloadError?: (error: Error) => void;
 }
 
-// --- HELPER COMPONENTS FOR TABLE LAYOUT ---
+// --- HELPER COMPONENTS MOVED OUTSIDE ---
 const RowWrapper = ({ children, className = "", isEven = false }) => (
   <div className={`flex flex-col sm:flex-row border-b last:border-b-0 border-gray-100 ${isEven ? 'bg-white' : 'bg-gray-50/60'} hover:bg-blue-50/50 transition-colors duration-150 ${className}`}>
     {children}
@@ -69,7 +70,7 @@ const RowWrapper = ({ children, className = "", isEven = false }) => (
 
 const LabelCell = ({ children }) => (
   <div className="w-full sm:w-[160px] flex-shrink-0 p-3 sm:border-r border-gray-100 flex items-center bg-gray-50/50 sm:bg-transparent">
-     <span className="text-xs font-semibold text-gray-500 capitalize tracking-tight break-words">
+     <span className="text-xs font-semibold text-gray-500 uppercase tracking-tight break-words">
         {children}
      </span>
   </div>
@@ -106,7 +107,7 @@ const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
   const displayUrl = fileUrl?.startsWith('blob:')
     ? fileUrl
     : fileUrl
-      ? `https://zyszsqgdlrpnunkegipk.supabase.co/storage/v1/object/public/kyc-documents/${fileUrl}`
+      ? `${fileUrl}`
       : null;
 
   return (
@@ -172,6 +173,7 @@ const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
   );
 };
 
+
 export const ExtractionPreview = ({
   documentName,
   extractedData,
@@ -195,7 +197,6 @@ export const ExtractionPreview = ({
   documentTypes,
   onDownloadSuccess,
   onDownloadError,
-  onDownload,
   onSave,
 }: ExtractionPreviewProps) => {
 
@@ -209,8 +210,7 @@ export const ExtractionPreview = ({
   // Initialize localData
   const [localData, setLocalData] = useState<Record<string, any>>(() => {
     const initialData: Record<string, any> = {};
-    fields?.forEach(field => {
-      if (!field?.name) return;
+    fields.forEach(field => {
       const snakeCase = field.name
         .toLowerCase()
         .replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => '_' + chr.toLowerCase())
@@ -235,9 +235,7 @@ export const ExtractionPreview = ({
 
   const formattedData = useMemo(() => {
     const result: Record<string, any> = {};
-    fields?.forEach(field => {
-      if (!field || !field.name) return;
-
+    fields.forEach(field => {
       const snakeCase = field.name
         .toLowerCase()
         .replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => '_' + chr.toLowerCase())
@@ -277,13 +275,12 @@ export const ExtractionPreview = ({
   }, [extractedData, fields]);
 
   useEffect(() => {
-    setLocalData(prevData => {
-      const additions = Object.fromEntries(
+    setLocalData(prevData => ({
+      ...prevData,
+      ...Object.fromEntries(
         Object.entries(formattedData).filter(([key]) => prevData[key] === undefined || prevData[key] === '')
-      );
-      if (Object.keys(additions).length === 0) return prevData;
-      return { ...prevData, ...additions };
-    });
+      )
+    }));
   }, [formattedData]);
 
   const handleFieldChange = (field: string, value: any) => {
@@ -310,10 +307,10 @@ export const ExtractionPreview = ({
       
       await onDelete(documentData);
       toast.success('Document deleted successfully');
-      setShowDeleteDialog(false);
     } catch (error) {
       console.error('Error deleting document:', error);
       toast.error(error.message || 'Failed to delete document');
+      throw error;
     } finally {
       setIsDeleting(false);
     }
@@ -363,26 +360,7 @@ export const ExtractionPreview = ({
     }
   };
 
-  const handleDownload = async (format: 'document' | 'excel' | 'pdf' = 'document') => {
-    if (!onDownload) {
-      console.warn('onDownload handler is not defined');
-      return;
-    }
-    try {
-      setIsDownloading(true);
-      await onDownload(format);
-      onDownloadSuccess?.();
-    } catch (error) {
-      console.error('Error downloading document:', error);
-      toast.error(error.message || 'Failed to download document');
-      onDownloadError?.(error);
-    } finally {
-      setIsDownloading(false);
-    }
-  };
-
   const renderField = (field: Field, index: number) => {
-    if (!field?.name) return null;
     const value = localData[field.name];
     const isEven = index % 2 === 0;
 
@@ -458,57 +436,35 @@ export const ExtractionPreview = ({
       <div className="lg:col-span-1 h-[75vh] shadow-sm rounded-lg flex flex-col">
         <div className={`h-full flex flex-col rounded-lg border ${getStylesByType?.(type || 'principal')?.getBgColor() || 'bg-white'} ${getStylesByType?.(type || 'principal')?.getBorderColor() || 'border-gray-200'} overflow-hidden`}>
           
-          {/* 1. Header Section (Fixed at top) with CUSTOM BUTTONS */}
+          {/* 1. Header Section (Fixed at top) */}
           <div className="p-4 border-b border-gray-200 bg-white flex-shrink-0">
-            <div className="flex justify-between items-center flex-wrap gap-2">
+            <div className="flex justify-between items-center">
               <h3 className="text-lg font-bold text-gray-800">Extracted Details</h3>
-              <div className="flex items-center gap-2">
-                
-                {/* Download Button */}
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => handleDownload('document')} 
-                  disabled={isDownloading}
-                  className="gap-2 h-9"
-                >
-                  <Download className="h-4 w-4" /> Download
-                </Button>
-
-                {/* Retry Button */}
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleRetryExtraction} 
-                  disabled={isRetrying}
-                  className="gap-2 h-9"
-                >
-                  <RefreshCw className={`h-4 w-4 ${isRetrying ? 'animate-spin' : ''}`} /> Retry
-                </Button>
-
-                {/* Save Button */}
-                {showSaveButton && (
-                  <Button 
-                    size="sm" 
-                    onClick={handleSave} 
-                    disabled={isSaving} 
-                    className="gap-2 bg-green-600 hover:bg-green-700 text-white h-9"
-                  >
-                    <Save className="h-4 w-4" /> Save
-                  </Button>
-                )}
-
-                {/* Delete Button */}
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setShowDeleteDialog(true)} 
-                  disabled={isDeleting}
-                  className="gap-2 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 h-9"
-                >
-                  <Trash2 className="h-4 w-4" /> Delete
-                </Button>
-
+              <div className="flex items-center space-x-2">
+                <DocumentActions
+                  document={{
+                    ...localData,
+                    fileUrl,
+                    fileName,
+                    documentName,
+                    type,
+                    file,
+                    document_display_name: documentName,
+                    document_id: type,
+                    extracted_details: localData,
+                    id: file?.id,
+                    file_path: fileUrl
+                  }}
+                  documentTypes={documentTypes || []}
+                  supabase={supabase}
+                  onSave={onSave}
+                  onDelete={onDelete ? handleDelete : undefined}
+                  onRetry={onRetryExtraction}
+                  onDownloadSuccess={() => toast.success('Download started')}
+                  onDownloadError={(error) => toast.error(error.message || 'Download failed')}
+                  className="ml-auto"
+                  showDeleteConfirmation={true}
+                />
               </div>
             </div>
 
@@ -532,10 +488,8 @@ export const ExtractionPreview = ({
               {fields
                 .sort((a, b) => {
                   const order = ['name', 'company_name', 'date', 'reference_number', 'file_number'];
-                  const aName = a?.name?.toLowerCase?.() || '';
-                  const bName = b?.name?.toLowerCase?.() || '';
-                  const aIndex = order.indexOf(aName);
-                  const bIndex = order.indexOf(bName);
+                  const aIndex = order.indexOf(a.name.toLowerCase());
+                  const bIndex = order.indexOf(b.name.toLowerCase());
                   return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
                 })
                 .map((field, index) => renderField(field, index))}
@@ -596,7 +550,7 @@ export const ExtractionPreview = ({
             <Button variant="outline" onClick={() => setShowDeleteDialog(false)} disabled={isDeleting}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => handleDelete()} disabled={isDeleting}>
+            <Button variant="destructive" onClick={handleDelete} disabled={isDeleting}>
               {isDeleting ? 'Deleting...' : 'Delete Document'}
             </Button>
           </div>

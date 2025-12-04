@@ -665,58 +665,16 @@ export const filterTasksBySearch = (
 };
 
 export const isDocumentApplicable = (doc: any, task: any): boolean => {
-  if (!doc || !task) {
-    console.log('Document or task is missing', { docId: doc?.id, taskId: task?.id });
-    return false;
-  }
-
-  // Log task's job level and document details
-  console.log('Document applicability check:', {
-    documentId: doc.id,
-    documentName: doc.name || doc.document_name,
-    documentType: doc.entityType,
-    isSpecial: doc.isSpecial,
-    targetEntities: doc.targetEntities,
-    taskId: task.id,
-    taskClass: task.class_id,
-    taskSubdept: task.subdepartment_id || task.subdepartment?.id,
-    taskSubclass: task.subclass_id,
-    taskJobLevel: task.job_level
-  });
-
-  // If document has no special restrictions, it's always applicable
-  if (doc.isSpecial !== true) {
-    console.log('Document has no special restrictions, considering it applicable');
-    return true;
-  }
-
-  // For special documents, check if they have any target entities
-  if (!Array.isArray(doc.targetEntities) || doc.targetEntities.length === 0) {
-    console.log('Special document has no target entities, considering it not applicable by default');
-    return false;
-  }
+  if (!doc || !task) return false;
+  if (doc.isSpecial !== true) return true;
+  if (!Array.isArray(doc.targetEntities) || doc.targetEntities.length === 0) return false;
 
   const taskClassId = task.class_id?.toString();
   const taskSubdeptId = task.subdepartment?.id?.toString() || task.subdepartment_id?.toString();
 
-  // Check against targetEntities
-  const isApplicable = doc.targetEntities.some((entity: any) => {
-    // If no class_id is specified in the entity, it applies to all classes
+  return doc.targetEntities.some((entity: any) => {
     const classMatch = !entity.class_id || entity.class_id.toString() === taskClassId;
-    // If no subdept_id is specified, it applies to all subdepartments
     const subdeptMatch = !entity.subdept_id || entity.subdept_id.toString() === taskSubdeptId;
-    const result = classMatch && subdeptMatch;
-    
-    console.log('Checking target entity:', {
-      entity,
-      classMatch,
-      subdeptMatch,
-      result
-    });
-    
-    return result;
+    return classMatch && subdeptMatch;
   });
-
-  console.log('Final target match result:', isApplicable);
-  return isApplicable;
 };

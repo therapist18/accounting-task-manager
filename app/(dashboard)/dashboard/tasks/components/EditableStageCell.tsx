@@ -105,8 +105,20 @@ export default function EditableStageCell({
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<any>(null);
+  const [uploadedDocuments, setUploadedDocuments] = useState<any[]>([]);
 
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const handlePreviewDataChange = useCallback((docId: string, fieldName: string, value: any) => {
+    setUploadedDocuments(prev => 
+      prev.map(doc => 
+        doc.id === docId 
+          ? { ...doc, extracted_details: { ...doc.extracted_details, [fieldName]: value } } 
+          : doc
+      )
+    );
+  }, []);
+
   const requiresUpload = useMemo(() => stage.documents && stage.documents.length > 0, [stage.documents]);
 
   const linkedDocument = useMemo(() => {
@@ -117,46 +129,28 @@ export default function EditableStageCell({
     return firstDoc;
   }, [linkedDocuments, requiresUpload, stage.id, stage.name]);
 
-const hasLinkedDocument = useMemo(() => {
-  if (!linkedDocument) {
-    return false;
-  }
+  const hasLinkedDocument = useMemo(() => {
+    if (!linkedDocument) {
+      return false;
+    }
 
-  // First, check if there's actually a document uploaded
-  const hasDocument = linkedDocument.file_path || 
-                     linkedDocument.url || 
-                     linkedDocument.document_url ||
-                     linkedDocument.extracted_details ||
-                     linkedDocument.extracted_data;
-  
-  if (!hasDocument) {
-    console.log('No document file or data found', {
-      documentId: linkedDocument.id,
-      documentName: linkedDocument.name || linkedDocument.document_name,
-      taskId: task.id
-    });
-    return false;
-  }
+    const hasDocument = linkedDocument.file_path ||
+      linkedDocument.url ||
+      linkedDocument.document_url ||
+      linkedDocument.extracted_details ||
+      linkedDocument.extracted_data;
 
-  // Then check if the document is applicable to this task
-  const isApplicable = isDocumentApplicable(linkedDocument, task);
-  if (!isApplicable) {
-    console.log('Document is not applicable to task', {
-      documentId: linkedDocument.id,
-      documentName: linkedDocument.name || linkedDocument.document_name,
-      taskId: task.id
-    });
-    return false;
-  }
+    if (!hasDocument) {
+      return false;
+    }
 
-  console.log('Document is linked and applicable', {
-    documentId: linkedDocument.id,
-    documentName: linkedDocument.name || linkedDocument.document_name,
-    taskId: task.id
-  });
+    const isApplicable = isDocumentApplicable(linkedDocument, task);
+    if (!isApplicable) {
+      return false;
+    }
 
-  return true;
-}, [linkedDocument, task]);
+    return true;
+  }, [linkedDocument, task]);
 
   const stageDate = useMemo(() => {
     const dateFields = [
@@ -306,65 +300,142 @@ const hasLinkedDocument = useMemo(() => {
     }));
   }, []);
 
-  const buildPreviewDocumentData = useCallback(async () => {
-    if (!linkedDocument) {
-      toast({ title: 'No Document', description: 'No document is linked to this stage.', variant: 'default' });
+const buildPreviewDocumentData = useCallback(async () => {
+  if (!linkedDocument) {
+    console.log('No linked document found');
+    return null;
+  }
+
+  try {
+    const kycDoc = await fetchKycDocumentData(linkedDocument.document_id);
+    console.log('Fetched KYC doc:', kycDoc);
+
+    if (!kycDoc) {
+      console.log('No KYC document configuration found');
       return null;
     }
 
-    try {
-      const kycDoc = await fetchKycDocumentData(linkedDocument.document_id);
+    // Construct the full file URL
+    const filePath = linkedDocument.file_path || linkedDocument.download_url || linkedDocument.url || linkedDocument.document_url;
+    const fileUrl = filePath ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}` : null;
+    const fileName = linkedDocument.file_name || filePath?.split('/').pop() || 'document.pdf';
+    const documentType = linkedDocument.type || kycDoc.document_type || 'document';
+    const documentName = kycDoc.display_name || kycDoc.name || linkedDocument.name || linkedDocument.document_name || 'Document';
 
-      if (!kycDoc) {
-        toast({ title: 'Error', description: 'Could not load document configuration.', variant: 'destructive' });
-        return null;
+    const previewData = {
+      documentId: linkedDocument.id,
+      documentName,
+      fileUrl, // This is now the full URL
+      fileName,
+      extractedData: linkedDocument.extracted_data || linkedDocument.extracted_details || {},
+      fields: transformKycFieldsToPreviewFormat(kycDoc.fields || []),
+      kycDoc,
+      document: linkedDocument,
+      type: documentType,
+      documentType,
+      file: {
+        url: fileUrl,
+        name: fileName,
+        type: linkedDocument.file_type || 'application/pdf'
       }
+    };
 
-      const previewData = {
-        documentId: linkedDocument.id,
-        documentName: kycDoc.display_name || kycDoc.name || 'Document',
-        fileUrl: linkedDocument.file_path || linkedDocument.download_url,
-        fileName: linkedDocument.file_path?.split('/').pop() || 'document.pdf',
-        extractedData: linkedDocument.extracted_data || {},
-        fields: transformKycFieldsToPreviewFormat(kycDoc.fields || []),
-        kycDoc,
-        document: linkedDocument,
-        type: kycDoc.document_type || 'document',
-        file: {
-          url: linkedDocument.file_path || linkedDocument.download_url,
-          name: linkedDocument.file_name || linkedDocument.file_path?.split('/').pop() || 'document.pdf',
-          type: linkedDocument.file_type || 'application/pdf'
-        }
-      };
-
-      return previewData;
-    } catch (error) {
-      toast({ title: 'Error', description: 'Failed to prepare document preview.', variant: 'destructive' });
-      return null;
-    }
-  }, [linkedDocument, fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
+    console.log('Built preview data:', previewData);
+    return previewData;
+  } catch (error) {
+    console.error('Error building preview data:', error);
+    toast({ 
+      title: 'Error', 
+      description: 'Failed to prepare document preview.', 
+      variant: 'destructive' 
+    });
+    return null;
+  }
+}, [linkedDocument, fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
 
   const handleViewDocument = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsLoading(true);
-    const previewData = await buildPreviewDocumentData();
-    if (previewData) {
-      setPreviewDocument(previewData);
-      setIsPreviewOpen(true);
+    if (!linkedDocument) {
+      console.log('No linked document found');
+      return;
     }
-    setIsLoading(false);
-  }, [buildPreviewDocumentData]);
 
-  const handlePreviewSave = useCallback(async (data: any) => {
-    if (!onSave || !previewDocument?.documentId) return;
+    console.log('Opening document preview for:', {
+      documentId: linkedDocument.id,
+      documentName: linkedDocument.name || linkedDocument.document_name,
+      hasFile: !!(linkedDocument.file_path || linkedDocument.url || linkedDocument.document_url),
+      hasExtractedData: !!(linkedDocument.extracted_data || linkedDocument.extracted_details)
+    });
+
+    setIsLoading(true);
     try {
-      await onSave(stage.id, task.id, 'completed', { extractedData: data });
-      toast({ title: 'Success', description: 'Document data saved successfully.' });
-      setIsPreviewOpen(false);
+      const previewData = await buildPreviewDocumentData();
+      console.log('Preview data prepared:', {
+        documentId: previewData?.documentId,
+        documentName: previewData?.documentName,
+        hasExtractedData: !!previewData?.extractedData,
+        fieldsCount: previewData?.fields?.length || 0,
+        fileUrl: previewData?.fileUrl
+      });
+
+      setPreviewDocument(previewData || {
+        documentId: linkedDocument.id,
+        documentName: linkedDocument.name || linkedDocument.document_name || 'Document',
+        extractedData: {},
+        documentType: linkedDocument.type || 'document',
+        documentUrl: linkedDocument.url || linkedDocument.file_path || linkedDocument.document_url
+      });
+
+      setIsPreviewOpen(true);
     } catch (error) {
-      toast({ title: 'Error', description: 'Failed to save document data.', variant: 'destructive' });
+      console.error('Error in handleViewDocument:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to open document preview',
+        variant: 'destructive'
+      });
+    } finally {
+      setIsLoading(false);
     }
-  }, [onSave, previewDocument, stage.id, task.id]);
+  }, [buildPreviewDocumentData, linkedDocument]);
+
+const handlePreviewSave = useCallback(async (data: any) => {
+  if (!onSave || !previewDocument?.documentId) {
+    console.error('Missing required data for save:', { onSave, previewDocument });
+    return;
+  }
+  
+  try {
+    console.log('Saving document data:', {
+      stageId: stage.id,
+      taskId: task.id,
+      extractedData: previewDocument.extractedData || data
+    });
+    
+    await onSave(
+      stage.id, 
+      task.id, 
+      'completed', 
+      { 
+        extractedData: previewDocument.extractedData || data,
+        documentId: previewDocument.documentId
+      }
+    );
+    
+    toast({ 
+      title: 'Success', 
+      description: 'Document data saved successfully.' 
+    });
+    setIsPreviewOpen(false);
+  } catch (error) {
+    console.error('Error saving document data:', error);
+    toast({ 
+      title: 'Error', 
+      description: error instanceof Error ? error.message : 'Failed to save document data.', 
+      variant: 'destructive' 
+    });
+  }
+}, [onSave, previewDocument, stage.id, task.id]);
 
   // ========================================
   // RENDER MODE: DATE COLUMN
@@ -441,85 +512,129 @@ const hasLinkedDocument = useMemo(() => {
   // ========================================
   // RENDER MODE: ACTIONS COLUMN
   // ========================================
-  if (renderMode === 'actions') {
-    if (!isStageApplicable) {
-      return <span className="text-sm text-gray-400 italic">-</span>;
-    }
 
-    const hasAutomation = !!(stage?.automation?.automationId || stage?.automation?.id || stage?.web_automation?.automationId);
-    const hasAnyAutomation = requiresUpload && stage.documents?.some((doc: any) =>
-      isDocumentApplicable(doc, task) && (doc.automationId || doc.automation?.id)
-    );
-
-    if (isDocumentRow && documentData) {
-      const isApplicable = isDocumentApplicable(documentData, task);
-      
-      console.log('Document row rendering check:', {
-        documentId: documentData.id,
-        documentName: documentData.name || documentData.document_name,
-        isApplicable,
-        taskId: task.id,
-        taskClass: task.class_id,
-        taskSubdept: task.subdepartment_id || task.subdepartment?.id,
-        documentTargets: documentData.targetEntities,
-        isSpecial: documentData.isSpecial
-      });
-      
-      if (!isApplicable) {
-        return (
-          <div className="h-full flex items-center justify-center text-gray-400">
-            N/A
-          </div>
-        );
+  const renderContent = () => {
+    if (renderMode === 'actions') {
+      if (!isStageApplicable) {
+        return <span className="text-sm text-gray-400 italic">-</span>;
       }
+
+      const hasAutomation = !!(stage?.automation?.automationId || stage?.automation?.id || stage?.web_automation?.automationId);
+      const hasAnyAutomation = requiresUpload && stage.documents?.some((doc: any) =>
+        isDocumentApplicable(doc, task) && (doc.automationId || doc.automation?.id)
+      );
+
+      if (isDocumentRow && documentData) {
+        const isApplicable = isDocumentApplicable(documentData, task);
+
+        console.log('Document row rendering check:', {
+          documentId: documentData.id,
+          documentName: documentData.name || documentData.document_name,
+          isApplicable,
+          taskId: task.id,
+          taskClass: task.class_id,
+          taskSubdept: task.subdepartment_id || task.subdepartment?.id,
+          documentTargets: documentData.targetEntities,
+          isSpecial: documentData.isSpecial
+        });
+
+        if (!isApplicable) {
+          return (
+            <div className="h-full flex items-center justify-center text-gray-400">
+              N/A
+            </div>
+          );
+        }
+      }
+
+      return (
+        <div className="flex items-center justify-center gap-1">
+          {/* Automation button */}
+          {(hasAutomation || hasAnyAutomation) && !hasLinkedDocument && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-amber-500 hover:bg-amber-50"
+              onClick={handleTriggerAutomation}
+              disabled={isAutomationRunning}
+              title="Run automation"
+            >
+              {isAutomationRunning ? <Clock className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+            </Button>
+          )}
+
+          {/* View document button - always show if there's a linked document */}
+          {linkedDocument && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-green-600 hover:bg-green-50"
+              onClick={handleViewDocument}
+              title="View document details"
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </Button>
+          )}
+
+          {/* Upload document button */}
+          {requiresUpload && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`h-7 w-7 ${hasLinkedDocument ? 'text-blue-400 hover:bg-blue-50' : 'text-blue-600 hover:bg-blue-50'}`}
+              onClick={handleDocumentUpload}
+              title={hasLinkedDocument ? 'Upload new document' : 'Upload document'}
+            >
+              <Upload className="h-3.5 w-3.5" />
+            </Button>
+          )}
+
+        </div>
+      );
     }
-
-    return (
-      <div className="flex items-center justify-center gap-1">
-        {/* Automation button */}
-        {(hasAutomation || hasAnyAutomation) && !hasLinkedDocument && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-amber-500 hover:bg-amber-50"
-            onClick={handleTriggerAutomation}
-            disabled={isAutomationRunning}
-            title="Run automation"
-          >
-            {isAutomationRunning ? <Clock className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-          </Button>
-        )}
-
-        {/* View document button */}
-        {hasLinkedDocument && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-green-600 hover:bg-green-50"
-            onClick={handleViewDocument}
-            title="View document details"
-          >
-            <Eye className="h-3.5 w-3.5" />
-          </Button>
-        )}
-
-        {/* Upload document button */}
-        {requiresUpload && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`h-7 w-7 ${hasLinkedDocument ? 'text-blue-400 hover:bg-blue-50' : 'text-blue-600 hover:bg-blue-50'}`}
-            onClick={handleDocumentUpload}
-            title={hasLinkedDocument ? 'Upload new document' : 'Upload document'}
-          >
-            <Upload className="h-3.5 w-3.5" />
-          </Button>
-        )}
-
-      </div>
-    );
-  }
+  };
 
   // Fallback (shouldn't reach here)
-  return null;
+  return (
+    <>
+      {renderContent()}
+      {/* Extraction Preview Dialog */}
+    <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+        <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col">
+          <DialogHeader>
+             <DialogTitle>Document Preview: {previewDocument?.documentName || 'Document'}</DialogTitle>
+          </DialogHeader>
+          <div className="flex-grow overflow-y-auto p-1 space-y-4">
+            <div className="border rounded-lg">
+              <div className="p-3 bg-gray-50 border-b ">
+                <h3 className="font-medium text-sm">Document (Uploaded: {previewDocument?.created_at ? formatDateDisplay(previewDocument.created_at) : 'N/A'})</h3>
+              </div>
+              <div className="p-2">
+                <div className="flex-1 overflow-auto border rounded-lg">
+                  {previewDocument ? (
+                    <ExtractionPreview
+                      key={previewDocument.documentId}
+                      documentName={previewDocument.documentName}
+                      extractedData={previewDocument.extractedData}
+                      fields={previewDocument.fields}
+                      fileUrl={previewDocument.fileUrl}
+                      fileName={previewDocument.fileName}
+                      onSave={handlePreviewSave}
+                      expanded={true}
+                      showSaveButton={!!onSave}
+                      readOnly={false} 
+                      type={previewDocument.type}
+                      file={previewDocument.file}
+                      onDataChange={(fieldName, value) => handlePreviewDataChange(doc.id, fieldName, value)} />
+                  ) : (
+                    <div className="h-full flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /><p className="ml-4">Loading preview...</p></div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
