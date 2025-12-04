@@ -596,7 +596,7 @@ export function NewCompanyInquiryDialog({
             };
 
             console.log(`📦 [LOG] Submitting task to Supabase.`);
-            const { data, error } = await supabase.from('tm_tasks_duplicate').insert([taskToCreate]).select();
+            const { data, error } = await supabase.from('tm_tasks').insert([taskToCreate]).select();
 
             if (error) throw error;
 

@@ -508,7 +508,7 @@ export function StageUploadDialog({
 
     const checkLockedDocuments = async () => {
       const { data: taskData } = await supabase
-        .from('tm_tasks_duplicate')
+        .from('tm_tasks')
         .select('source_document_id')
         .eq('id', task.id)
         .single();
@@ -562,7 +562,7 @@ export function StageUploadDialog({
       };
 
       await supabase
-        .from('tm_tasks_duplicate')
+        .from('tm_tasks')
         .update({ source_document_id: updatedSource, updated_at: currentDate })
         .eq('id', task.id);
 
@@ -584,7 +584,7 @@ export function StageUploadDialog({
           }
         };
 
-        await supabase.from('tm_tasks_duplicate').update({
+        await supabase.from('tm_tasks').update({
           stages: updatedStages,
           current_stage_id: stage.id,
           updated_at: timestamp
@@ -638,7 +638,7 @@ export function StageUploadDialog({
 
       setSelectedSourceDocs(updatedSource);
       const { error } = await supabase
-        .from('tm_tasks_duplicate')
+        .from('tm_tasks')
         .update({ source_document_id: updatedSource, updated_at: currentDate })
         .eq('id', task.id);
 
