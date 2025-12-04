@@ -169,7 +169,7 @@ export default function EditableStageCell({
         const extractedDate = findDateInObject(linkedDocument.extracted_details, dateFields);
         if (extractedDate) return extractedDate;
       }
-      
+
       if (linkedDocument.extracted_data) {
         const extractedDate = findDateInObject(linkedDocument.extracted_data, dateFields);
         if (extractedDate) return extractedDate;
@@ -177,12 +177,12 @@ export default function EditableStageCell({
 
       return '';
     }
-    
+
     // PRIORITY 2: Non-document stages - use completion date from value prop
     if (!requiresUpload && !hasDocumentsUploaded && value) {
       return typeof value === 'string' ? value : '';
     }
-    
+
     return '';
   }, [hasLinkedDocument, linkedDocument, requiresUpload, value, task, stage.id, stage.name]);
 
@@ -309,7 +309,7 @@ export default function EditableStageCell({
 
     try {
       const kycDoc = await fetchKycDocumentData(linkedDocument.document_id);
-      
+
       if (!kycDoc) {
         toast({ title: 'Error', description: 'Could not load document configuration.', variant: 'destructive' });
         return null;
@@ -396,17 +396,20 @@ export default function EditableStageCell({
     // Display date or "Add Date" button
     if (stageDate && stageDate !== 'NaN/NaN/NaN') {
       return (
-        <div 
+        <div
           className="flex items-center gap-2 group cursor-pointer"
-          onClick={() => !requiresUpload && setIsEditing(true)}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!requiresUpload) setIsEditing(true);
+          }}
         >
-          <Badge variant="default" className="bg-green-100 text-green-800 hover:bg-green-200">
+          <Badge
+            variant="default"
+            className="bg-green-100 text-green-800 hover:bg-green-200"
+          >
             <Check className="h-3 w-3 mr-1" />
             {formatDateDisplay(stageDate)}
           </Badge>
-          {!requiresUpload && (
-            <Pencil className="h-3 w-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-          )}
         </div>
       );
     }
@@ -414,9 +417,9 @@ export default function EditableStageCell({
     // No date available
     if (!requiresUpload) {
       return (
-        <Button 
-          variant="ghost" 
-          size="sm" 
+        <Button
+          variant="ghost"
+          size="sm"
           className="h-7 px-3 text-gray-600 border border-dashed border-gray-300 hover:border-gray-400"
           onClick={() => setIsEditing(true)}
         >
@@ -439,7 +442,7 @@ export default function EditableStageCell({
     }
 
     const hasAutomation = !!(stage?.automation?.automationId || stage?.automation?.id || stage?.web_automation?.automationId);
-    const hasAnyAutomation = requiresUpload && stage.documents?.some((doc: any) => 
+    const hasAnyAutomation = requiresUpload && stage.documents?.some((doc: any) =>
       isDocumentApplicable(doc, task) && (doc.automationId || doc.automation?.id)
     );
 
@@ -447,11 +450,11 @@ export default function EditableStageCell({
       <div className="flex items-center justify-center gap-1">
         {/* Automation button */}
         {(hasAutomation || hasAnyAutomation) && !hasLinkedDocument && (
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="h-7 w-7 text-amber-500 hover:bg-amber-50" 
-            onClick={handleTriggerAutomation} 
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-amber-500 hover:bg-amber-50"
+            onClick={handleTriggerAutomation}
             disabled={isAutomationRunning}
             title="Run automation"
           >
@@ -461,11 +464,11 @@ export default function EditableStageCell({
 
         {/* View document button */}
         {hasLinkedDocument && (
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="h-7 w-7 text-green-600 hover:bg-green-50" 
-            onClick={handleViewDocument} 
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-green-600 hover:bg-green-50"
+            onClick={handleViewDocument}
             title="View document details"
           >
             <Eye className="h-3.5 w-3.5" />
@@ -474,29 +477,17 @@ export default function EditableStageCell({
 
         {/* Upload document button */}
         {requiresUpload && (
-          <Button 
-            variant="ghost" 
-            size="icon" 
+          <Button
+            variant="ghost"
+            size="icon"
             className={`h-7 w-7 ${hasLinkedDocument ? 'text-blue-400 hover:bg-blue-50' : 'text-blue-600 hover:bg-blue-50'}`}
-            onClick={handleDocumentUpload} 
+            onClick={handleDocumentUpload}
             title={hasLinkedDocument ? 'Upload new document' : 'Upload document'}
           >
             <Upload className="h-3.5 w-3.5" />
           </Button>
         )}
 
-        {/* Edit button for non-document stages with dates */}
-        {!requiresUpload && stageDate && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-gray-600 hover:bg-gray-100"
-            onClick={() => setIsEditing(true)}
-            title="Edit date"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-        )}
       </div>
     );
   }

@@ -543,7 +543,7 @@ export function StageUploadDialog({
         }
       };
 
-      await supabase.from('tm_tasks').update({
+      await supabase.from('tm_tasks_duplicate').update({
         stages: updatedStages,
         current_stage_id: stage.id,
         updated_at: timestamp
@@ -575,7 +575,7 @@ const handleUploadSuccess = useCallback(async (newDocument: any, originatingDoc:
     setSelectedSourceDocs(updatedSource);
     
     await supabase
-      .from('tm_tasks')
+      .from('tm_tasks_duplicate')
       .update({ 
         source_document_id: updatedSource,
         updated_at: currentDate
@@ -605,7 +605,7 @@ const handleUseExisting = useCallback(async (docConfigId: string, existingDocId:
     setSelectedSourceDocs(updatedSource);
     
     const { error } = await supabase
-      .from('tm_tasks')
+      .from('tm_tasks_duplicate')
       .update({ 
         source_document_id: updatedSource,
         updated_at: currentDate
@@ -660,7 +660,7 @@ const toggleSourceDocument = useCallback(async (docId: string, kycId: string, is
     setSelectedSourceDocs(updatedSource);
     
     const { error } = await supabase
-      .from('tm_tasks')
+      .from('tm_tasks_duplicate')
       .update({ 
         source_document_id: updatedSource,
         updated_at: currentDate

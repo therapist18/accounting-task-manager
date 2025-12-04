@@ -82,6 +82,46 @@ const processDocumentsForTasks = (tasks: any[], allDocuments: any[] = []) => {
 
 // --- Child Components (Memoized for Performance) ---
 
+// ✅ FIXED: Robust safeRender to handle objects, JSX, and arrays correctly
+const safeRender = (content: any) => {
+  // 1. Valid React Element (JSX) - Pass through
+  if (React.isValidElement(content)) return content;
+  
+  // 2. Primitives - Pass through
+  if (typeof content === 'string' || typeof content === 'number') return content;
+  if (content === null || content === undefined) return null;
+
+  // 3. Arrays - Process recursively
+  if (Array.isArray(content)) {
+    return content.map((c, i) => <React.Fragment key={i}>{safeRender(c)}</React.Fragment>);
+  }
+
+  // 4. Plain Objects - Handle specific structure or stringify
+  if (typeof content === 'object') {
+    // If the object has a 'status' property
+    if ('status' in content) {
+       const status = content.status;
+       
+       // If status is primitive, return it
+       if (typeof status === 'string' || typeof status === 'number') return status;
+       
+       // If status is a React Element, return it directly
+       if (React.isValidElement(status)) return status;
+       
+       // If status is null/undefined
+       if (!status) return null;
+       
+       // If status is an object/array, stringify it
+       return JSON.stringify(status);
+    }
+    
+    // Fallback for objects without status: Stringify to prevent crash
+    return <span className="text-xs text-gray-500 truncate max-w-[100px] inline-block" title={JSON.stringify(content)}>{JSON.stringify(content)}</span>;
+  }
+
+  return String(content);
+};
+
 const TableHeaderCell = React.memo(({ item, header, getCellContent }) => {
   const renderContent = () => {
     if (item.type === 'principal') {
@@ -162,14 +202,16 @@ const MemoizedTableRow = React.memo(({
     <TableRow className={`${rowBg} ${hoverBg} group border-b border-slate-200`}>
       {/* Row Number */}
       <TableCell className={`sticky left-0 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 text-center w-20`}>
-        {row.stageOrder || (row.type !== 'stage' && row.type !== 'document' && row.type !== 'field' && row.type !== 'actions' ? (rowIndex + 1) : '')}
+        {/* ✅ FIXED: Wrapped stageOrder in safeRender just in case */}
+        {safeRender(row.stageOrder) || (row.type !== 'stage' && row.type !== 'document' && row.type !== 'field' && row.type !== 'actions' ? (rowIndex + 1) : '')}
       </TableCell>
       
       {/* Row Label */}
       <TableCell className={`sticky left-20 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 min-w-[300px]`}>
         <div className="flex items-center gap-2 justify-between">
           <div style={{ paddingLeft: row.isSubSubRow ? '32px' : row.isSubRow ? '16px' : '0px' }} className="flex items-center gap-2">
-            <span className={row.type === 'stage' ? 'font-semibold' : ''}>{row.label}</span>
+            {/* ✅ FIXED: Wrapped row.label in safeRender */}
+            <span className={row.type === 'stage' ? 'font-semibold' : ''}>{safeRender(row.label)}</span>
             {row.type === 'principal' && onDeleteTask && row.task?.id && (
               <Button variant="ghost" size="icon" className="h-5 w-5 p-0 text-slate-400 hover:text-destructive hover:bg-destructive/10" onClick={(e) => { e.stopPropagation(); setTaskToDelete(row.task); }}>
                 <Trash2 className="h-3.5 w-3.5" />
@@ -192,7 +234,8 @@ const MemoizedTableRow = React.memo(({
             className={`text-center text-sm py-1 px-2 align-middle border border-gray-100 w-[150px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
           >
             {item.type === 'principal' ? (
-              renderCellContent(row, item.task, 'date')
+              // ✅ FIXED: Wrapped result in safeRender
+              safeRender(renderCellContent(row, item.task, 'date'))
             ) : (
               <span className="text-sm text-gray-400">-</span>
             )}
@@ -203,7 +246,8 @@ const MemoizedTableRow = React.memo(({
             className={`text-center text-sm py-1 px-2 align-middle border border-gray-100 w-[120px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
           >
             {item.type === 'principal' ? (
-              renderCellContent(row, item.task, 'actions')
+              // ✅ FIXED: Wrapped result in safeRender
+              safeRender(renderCellContent(row, item.task, 'actions'))
             ) : (
               <span className="text-sm text-gray-400">-</span>
             )}
@@ -412,7 +456,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
                     <TableCell colSpan={2} className={`text-center text-sm py-1 px-2 align-middle bg-blue-500 text-white border border-gray-100 w-[150px] ${item.type === 'dependant' ? 'bg-orange-500' : ''}`}>
                       <div className="flex flex-col items-center">
                         <TableHeaderCell item={item} header={header} getCellContent={getCellContent} />
-                                             </div>
+                      </div>
                     </TableCell>
                   </React.Fragment>
                 ))}
