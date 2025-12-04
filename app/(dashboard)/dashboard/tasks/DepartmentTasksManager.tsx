@@ -1020,7 +1020,7 @@ export default function DepartmentTasksManager({
           }
         }
       }
-      const { data: newTasks, error } = await supabase.from('tm_tasks').insert(tasksToCreate).select();
+      const { data: newTasks, error } = await supabase.from('tm_tasks_duplicate').insert(tasksToCreate).select();
       if (error) throw error;
       const mainTask = newTasks[0]; const dependantTasks = newTasks.slice(1);
       let successMessage = `Main case pushed to ${targetSubDeptName} successfully. New Task ID: ${mainTask.id}`;
@@ -1089,7 +1089,7 @@ export default function DepartmentTasksManager({
       const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages)
       const updateData: any = { stages: updatedStages, updated_at: new Date().toISOString() }
       if (currentStage) { updateData.current_stage_id = currentStage.id; updateData.current_stage_started_at = new Date().toISOString(); }
-      const { error } = await supabase.from('tm_tasks').update(updateData).eq('id', taskId)
+      const { error } = await supabase.from('tm_tasks_duplicate').update(updateData).eq('id', taskId)
       if (error) throw error
       await loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
     } catch (error) {
@@ -1209,27 +1209,40 @@ export default function DepartmentTasksManager({
                   name: docDisplayName
                 },
                 isSubRow: true,
-                getValue: (task: UtilTask) => {
-                  if (!isStageApplicableToTask(stage, task, departments)) {
-                    return 'N/A';
-                  }
+              getValue: (task: UtilTask) => {
+  // Check if stage is applicable to this task
+  if (!isStageApplicableToTask(stage, task, departments)) {
+    return 'N/A';
+  }
 
-                  const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
-                  const hasIndicator = linkedDocument?.indicator === true;
-                  const isApplicable = isDocumentApplicable(doc, task);
+  // Get all linked documents for this task and stage
+  const linkedDocuments = task.source_document_id?.[stage.id] || [];
+  
+  // Find if this specific document is linked
+  const linkedDocument = linkedDocuments.find(
+    (d: any) => d.document_id === doc.kycId
+  );
+  
+  // Check if document is applicable to this task
+  const isApplicable = isDocumentApplicable(doc, task);
+  
+  // If document is not applicable, return N/A
+  if (!isApplicable) {
+    return 'N/A';
+  }
 
-                  if (!isApplicable) {
-                    return 'N/A';
-                  }
-                  return {
-                    hasDocument: !!linkedDocument,
-                    hasIndicator,
-                    isApplicable: true,
-                    status: hasIndicator
-                      ? 'Preview Not Available'
-                      : (linkedDocument ? 'Linked' : 'Not Linked')
-                  };
-                }
+  // Document is applicable, check if it has an indicator
+  const hasIndicator = linkedDocument?.indicator === true;
+
+  return {
+    hasDocument: !!linkedDocument,
+    hasIndicator,
+    isApplicable: true,
+    status: hasIndicator 
+      ? 'Preview Not Available' 
+      : (linkedDocument ? 'Linked' : 'Not Linked')
+  };
+}
               })
 
               if (expandedDocuments.has(doc.id) && doc.kycId) {
@@ -1465,25 +1478,53 @@ export default function DepartmentTasksManager({
 
     // Handle document object with hasDocument, hasIndicator, and status
     if (typeof value === 'object' && value !== null && 'hasDocument' in value) {
-      const { hasDocument, hasIndicator, status, isApplicable } = value;
+      const { hasDocument, hasIndicator, status, isApplicable, documentInfo } = value;
 
       // If document is not applicable, show N/A
       if (isApplicable === false) {
         return <span className="text-sm text-gray-400 italic">N/A</span>;
       }
 
-      return (
+      const statusContent = (
         <div className="flex items-center gap-1">
           {hasDocument ? (
             <CheckCircle2 className="h-4 w-4 text-green-500" />
           ) : (
             <XCircle className="h-4 w-4 text-red-500" />
           )}
-          <span className="text-sm text-slate-700">
+          <span className={`text-sm ${hasDocument ? 'text-blue-600 hover:underline cursor-pointer' : 'text-slate-700'}`}>
             {status}
           </span>
         </div>
       );
+
+      // Only show popover for linked documents with additional info
+      if (hasDocument && documentInfo) {
+        return (
+          <Popover>
+            <PopoverTrigger asChild>
+              {statusContent}
+            </PopoverTrigger>
+            <PopoverContent className="w-80" align="start">
+              <div className="space-y-2">
+                <h4 className="font-medium leading-none">Document Details</h4>
+                <div className="text-sm text-muted-foreground">
+                  {documentInfo.name && <p><span className="font-medium">Name:</span> {documentInfo.name}</p>}
+                  {documentInfo.type && <p><span className="font-medium">Type:</span> {documentInfo.type}</p>}
+                  {documentInfo.uploadedAt && (
+                    <p><span className="font-medium">Uploaded:</span> {new Date(documentInfo.uploadedAt).toLocaleDateString()}</p>
+                  )}
+                  {documentInfo.size && (
+                    <p><span className="font-medium">Size:</span> {formatFileSize(documentInfo.size)}</p>
+                  )}
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+        );
+      }
+
+      return statusContent;
     }
 
     // Handle stage data display with columnType
@@ -1625,7 +1666,7 @@ export default function DepartmentTasksManager({
         setIsDeleting(true);
 
         const { error } = await supabase
-          .from('tm_tasks')
+          .from('tm_tasks_duplicate')
           .delete()
           .eq('id', task.id);
 
@@ -2544,7 +2585,7 @@ export default function DepartmentTasksManager({
                                 setIsDeleting(true);
 
                                 const { error } = await supabase
-                                  .from('tm_tasks')
+                                  .from('tm_tasks_duplicate')
                                   .delete()
                                   .eq('id', task.id);
 

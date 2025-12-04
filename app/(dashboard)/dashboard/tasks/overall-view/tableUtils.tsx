@@ -276,7 +276,15 @@ export const getCurrentStageStatus = (
     
     if (requiresDocuments) {
       const linkedDocumentData = task.source_document_id?.[stage.id];
-      if (!linkedDocumentData) return false;
+      
+      // If no document is linked, return 'not_linked' status
+      if (!linkedDocumentData) {
+        // Set the stage status to 'Not Linked' in the task object
+        if (!task.stages) task.stages = {};
+        if (!task.stages[stage.id]) task.stages[stage.id] = {};
+        task.stages[stage.id].status = 'Not Linked';
+        return false;
+      }
 
       if (allDocuments.length > 0) {
         const documentId = typeof linkedDocumentData === 'string' 
@@ -284,12 +292,24 @@ export const getCurrentStageStatus = (
           : linkedDocumentData.id;
         
         const linkedDoc = allDocuments.find(doc => doc.id === documentId);
-        if (!linkedDoc || linkedDoc.indicator === true) return false;
+        if (!linkedDoc || linkedDoc.indicator === true) {
+          // Set the stage status to 'Not Linked' if document is invalid
+          if (!task.stages) task.stages = {};
+          if (!task.stages[stage.id]) task.stages[stage.id] = {};
+          task.stages[stage.id].status = 'Not Linked';
+          return false;
+        }
 
         if (task.created_at && linkedDoc.created_at) {
           const docDate = new Date(linkedDoc.created_at);
           const taskDate = new Date(task.created_at);
-          if (docDate < taskDate) return false;
+          if (docDate < taskDate) {
+            // Document is older than task creation
+            if (!task.stages) task.stages = {};
+            if (!task.stages[stage.id]) task.stages[stage.id] = {};
+            task.stages[stage.id].status = 'Document Outdated';
+            return false;
+          }
         }
       }
       return true;
@@ -486,7 +506,23 @@ export const renderImmigrationStatusCell = (
 
 export const renderCurrentStageStatusCell = (task: any, getStageStatus: (task: any) => StageStatusInfo) => {
   const { stageStatus } = getStageStatus(task);
-  const getStatusColor = (status: string) => 'text-white'; // Add your color logic here
+  
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'not linked':
+        return 'text-red-500 font-medium';
+      case 'document outdated':
+        return 'text-orange-500 font-medium';
+      case 'completed':
+        return 'text-green-500';
+      case 'in progress':
+        return 'text-blue-500';
+      case 'pending':
+        return 'text-yellow-500';
+      default:
+        return 'text-gray-500';
+    }
+  };
 
   return (
     <span className={`whitespace-normal text-sm ${getStatusColor(stageStatus)}`}>
