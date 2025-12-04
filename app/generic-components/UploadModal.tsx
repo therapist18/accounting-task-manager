@@ -487,6 +487,12 @@ export function UploadModal({
   showTitle = true,
 }: UploadModalProps) {
   // Store uploaded documents by document type ID
+  // State to track form data for each document
+  const [formData, setFormData] = useState<Record<string, Record<string, any>>>(() => {
+    console.log('[UploadModal] Initializing formData state');
+    return {};
+  });
+
   const [uploadedDocs, setUploadedDocs] = useState<Record<string, Array<{
     id: string;
     file: File;
@@ -497,6 +503,7 @@ export function UploadModal({
     validationStatus?: 'pending' | 'valid' | 'warning' | 'error';
     validationMessage?: string;
     selectedDocTypeId?: string;
+    isEditing?: boolean;
   }>>>(() => {
     // Initialize with empty arrays for each document type if available
     if (documentTypes?.length) {
@@ -605,6 +612,63 @@ export function UploadModal({
     return uploadedDocs[docTypeId];
   }, [uploadedDocs, getCurrentDocTypeId]);
 
+  // Update form data when document fields change
+  useEffect(() => {
+    console.log('[UploadModal] documentFields changed:', {
+      hasDocumentFields: !!documentFields?.length,
+      documentFields: documentFields
+    });
+
+    if (documentFields?.length) {
+      setFormData(prev => {
+        const newFormData = { ...prev };
+        const docTypeId = getCurrentDocTypeId();
+        const currentDocs = uploadedDocs[docTypeId] || [];
+
+        currentDocs.forEach(doc => {
+          if (!newFormData[doc.id]) {
+            newFormData[doc.id] = { ...doc.extractedData };
+          }
+        });
+
+        return newFormData;
+      });
+    }
+  }, [documentFields, uploadedDocs, getCurrentDocTypeId]);
+
+  // Handle field changes in the form
+  const handleFieldChange = useCallback((docId: string, fieldId: string, value: any) => {
+    console.log('[UploadModal] Field changed:', { docId, fieldId, value, currentFormData: formData[docId] });
+    setFormData(prev => {
+      const newData = {
+        ...prev,
+        [docId]: {
+          ...(prev[docId] || {}),
+          [fieldId]: value
+        }
+      };
+      console.log('[UploadModal] New formData:', newData);
+      return newData;
+    });
+  }, []);
+
+  // Toggle edit mode for a document
+  const toggleEditMode = useCallback((docId: string, isEditing: boolean) => {
+    console.log(`[UploadModal] Toggling edit mode for doc ${docId} to ${isEditing}`);
+    setUploadedDocs(prev => {
+      const docTypeId = getCurrentDocTypeId();
+      const updatedDocs = { ...prev };
+
+      if (updatedDocs[docTypeId]) {
+        updatedDocs[docTypeId] = updatedDocs[docTypeId].map(doc =>
+          doc.id === docId ? { ...doc, isEditing } : doc
+        );
+      }
+
+      return updatedDocs;
+    });
+  }, [getCurrentDocTypeId]);
+
   const handleFileUpload = async (files: File[]) => {
     const requiredDropdowns = dropdowns?.filter(d => d.required) || [];
     const missingRequiredDropdowns = requiredDropdowns.filter(d => !d.value);
@@ -622,11 +686,12 @@ export function UploadModal({
     const currentDocs = uploadedDocs[docTypeId] || [];
 
     const newDocs = fileArray.map(file => {
+      const docId = generateDocumentId();
       const fileUrl = URL.createObjectURL(file);
       addBlobUrl(fileUrl);
 
       return {
-        id: generateDocumentId(),
+        id: docId,
         file,
         fileUrl,
         extractedData: {},
@@ -634,9 +699,19 @@ export function UploadModal({
         fileName: file.name,
         validationStatus: 'pending' as const,
         validationMessage: 'Processing...',
-        selectedDocTypeId: docTypeId
+        selectedDocTypeId: docTypeId,
+        isEditing: false
       };
     });
+
+    // Initialize form data for new documents
+    setFormData(prev => ({
+      ...prev,
+      ...newDocs.reduce((acc, doc) => ({
+        ...acc,
+        [doc.id]: {}
+      }), {})
+    }));
 
     setUploadedDocs(prev => ({
       ...prev,
@@ -686,16 +761,31 @@ export function UploadModal({
             }
 
             const finalExtractedData = {};
-            (finalSelectedDoc?.fields || documentFields || []).forEach(field => {
+            const fieldsToProcess = finalSelectedDoc?.fields || documentFields || [];
+
+            fieldsToProcess.forEach(field => {
               const fieldName = field.name;
+              const fieldId = field.id || fieldName;
               const extractedValue = parsedData[fieldName];
 
+              // Use existing form data if available, otherwise use extracted value
+              const existingValue = formData[doc.id]?.[fieldId];
+
               if (field.isArray) {
-                finalExtractedData[fieldName] = Array.isArray(extractedValue) ? extractedValue : [];
+                finalExtractedData[fieldId] = Array.isArray(extractedValue) ? extractedValue : [];
               } else {
-                finalExtractedData[fieldName] = extractedValue ?? '';
+                finalExtractedData[fieldId] = existingValue ?? extractedValue ?? '';
               }
             });
+
+            // Update form data with extracted values
+            setFormData(prev => ({
+              ...prev,
+              [doc.id]: {
+                ...(prev[doc.id] || {}),
+                ...finalExtractedData
+              }
+            }));
 
             const docWithData = {
               ...doc,
@@ -725,9 +815,15 @@ export function UploadModal({
         });
 
         const fullyProcessedDocs = await Promise.all(processedDocsPromises);
-        setUploadedDocs(prev => prev.map(oldDoc =>
-          fullyProcessedDocs.find(pd => pd.id === oldDoc.id) || oldDoc
-        ));
+        setUploadedDocs(prev => {
+          const updatedDocs = { ...prev };
+          Object.entries(updatedDocs).forEach(([docType, docs]) => {
+            updatedDocs[docType] = docs.map(oldDoc =>
+              fullyProcessedDocs.find(pd => pd.id === oldDoc.id) || oldDoc
+            );
+          });
+          return updatedDocs;
+        });
 
       } catch (error) {
         console.error('Error in file upload:', error);
@@ -1196,23 +1292,41 @@ export function UploadModal({
     }
   };
 
+  const handleRemoveFile = useCallback((docId: string) => {
+    setUploadedDocs(prev => {
+      if (Array.isArray(prev)) {
+        return prev.filter(doc => doc.id !== docId);
+      }
+      return [];
+    });
+  }, []);
+
   const handleDataChange = useCallback((docId: string, fieldName: string, value: any) => {
     setUploadedDocs(prev => {
-      return prev.map(doc => {
-        if (doc.id === docId) {
-          const processedValue = value === null || value === undefined ? '' : String(value);
+      // 1. Create a shallow copy of the state object
+      const newState = { ...prev };
 
-          return {
-            ...doc,
-            extractedData: {
-              ...doc.extractedData,
-              [fieldName]: processedValue
-            },
-            lastModified: new Date().toISOString()
-          };
-        }
-        return doc;
+      // 2. Iterate through the keys (document types) to find and update the specific document
+      Object.keys(newState).forEach(key => {
+        // Map through the array for this specific key
+        newState[key] = newState[key].map(doc => {
+          if (doc.id === docId) {
+            // 3. Update the specific document's data
+            return {
+              ...doc,
+              extractedData: {
+                ...doc.extractedData,
+                [fieldName]: value
+              },
+              // Update timestamp (optional)
+              lastModified: new Date().toISOString()
+            };
+          }
+          return doc;
+        });
       });
+
+      return newState;
     });
   }, []);
 
@@ -1271,17 +1385,121 @@ export function UploadModal({
     );
   };
 
+  const renderDocumentForm = (doc: any) => {
+    const fields = finalSelectedDoc?.fields || documentFields || [];
+    const currentFormData = formData[doc.id] || {};
+
+    console.log(`[UploadModal] Rendering form for doc ${doc.id}`, {
+      docId: doc.id,
+      docStatus: doc.status,
+      isEditing: doc.isEditing,
+      currentFormData,
+      docExtractedData: doc.extractedData
+    });
+
+    return (
+      <div className="space-y-4 mt-4">
+        {fields.map((field) => {
+          const fieldId = field.id || field.name;
+          const fieldValue = currentFormData[fieldId] !== undefined
+            ? currentFormData[fieldId]
+            : doc.extractedData[field.name] || '';
+
+          return (
+            <div key={fieldId} className="space-y-2">
+              <Label htmlFor={`${doc.id}-${fieldId}`}>
+                {field.name}
+                {field.isRequired && <span className="text-red-500 ml-1">*</span>}
+              </Label>
+              {field.type === 'select' ? (
+                <Select
+                  value={fieldValue}
+                  onValueChange={(value) => handleFieldChange(doc.id, fieldId, value)}
+                  disabled={doc.status === 'completed' && !doc.isEditing}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={`Select ${field.name}`} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {field.options?.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label || option.value}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : field.type === 'date' ? (
+                <Input
+                  type="date"
+                  id={`${doc.id}-${fieldId}`}
+                  value={fieldValue}
+                  onChange={(e) => handleFieldChange(doc.id, fieldId, e.target.value)}
+                  required={field.isRequired}
+                  disabled={doc.status === 'completed' && !doc.isEditing}
+                />
+              ) : field.type === 'textarea' ? (
+                <Textarea
+                  id={`${doc.id}-${fieldId}`}
+                  value={fieldValue}
+                  onChange={(e) => handleFieldChange(doc.id, fieldId, e.target.value)}
+                  required={field.isRequired}
+                  placeholder={`Enter ${field.name}`}
+                  disabled={doc.status === 'completed' && !doc.isEditing}
+                />
+              ) : (
+                <Input
+                  id={`${doc.id}-${fieldId}`}
+                  type={field.type || 'text'}
+                  value={fieldValue}
+                  onChange={(e) => handleFieldChange(doc.id, fieldId, e.target.value)}
+                  required={field.isRequired}
+                  placeholder={`Enter ${field.name}`}
+                  disabled={doc.status === 'completed' && !doc.isEditing}
+                />
+              )}
+              {field.description && (
+                <p className="text-xs text-muted-foreground">{field.description}</p>
+              )}
+            </div>
+          );
+        })}
+
+        {doc.status === 'completed' && (
+          <div className="flex justify-end gap-2 mt-4">
+            {doc.isEditing ? (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => toggleEditMode(doc.id, false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => toggleEditMode(doc.id, false)}
+                >
+                  Save Changes
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => toggleEditMode(doc.id, true)}
+              >
+                Edit
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className={cn("bg-background", className)}>
-      {showTitle && (
-        <div className="mb-6">
-          <h2 className="text-xl font-semibold">
-            Upload <span className='uppercase'>{currentDocumentName}</span> for {individualName}
-          </h2>
-        </div>
-      )}
-
-      {dropdowns && dropdowns.length > 0 && (
+            {dropdowns && dropdowns.length > 0 && (
         <div className="space-y-4 mb-6">
           {dropdowns.map((dropdown) => (
             <div key={dropdown.id} className={dropdown.className || ''}>
@@ -1409,7 +1627,7 @@ export function UploadModal({
                         documentName={currentDocumentName}
                         extractedData={doc.extractedData || {}}
                         fields={docTypeForPreview.fields || documentFields || []}
-                        onDataChange={documentCallbacks[doc.id]}
+                        onDataChange={(fieldName, value) => handleDataChange(doc.id, fieldName, value)}
                         fileUrl={doc.fileUrl}
                         fileName={doc.fileName}
                         expanded={true}

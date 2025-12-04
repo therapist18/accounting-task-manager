@@ -4,9 +4,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Send, FileText, Trash2, MessageSquare, Star, Eye, Check } from "lucide-react"
+import { Loader2, Send, FileText, MessageSquare, Star, Eye, Check } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { toast } from "@/hooks/use-toast"
@@ -16,7 +16,7 @@ import { format, parseISO } from "date-fns"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { UploadModal } from "@/app/generic-components/UploadModal"
 
-// --- Helper Functions (Extracted for Performance) ---
+// --- Helper Functions ---
 
 const transformKycFields = (fields: any[]): any[] => {
   if (!Array.isArray(fields)) return []
@@ -60,11 +60,10 @@ const processExtractedData = (data: any, fields: any[]): any => {
   return result;
 };
 
-// Pure logic for filtering documents
+// Filter documents applicable to the current task context
 const isDocumentApplicableToTask = (doc: any, task: any, childContext: any = null) => {
   if (!doc.isSpecial) return true;
 
-  // Check targetEntities array
   if (doc.targetEntities?.length > 0) {
     const matchesTarget = doc.targetEntities.some((entity: any) => {
       const classMatch = entity.class_id ? entity.class_id.toString() === task.class_id?.toString() : true;
@@ -72,7 +71,7 @@ const isDocumentApplicableToTask = (doc: any, task: any, childContext: any = nul
       return classMatch && subdeptMatch;
     });
     if (!matchesTarget) return false;
-    return true; // If it matches target entities, we accept it
+    return true;
   }
 
   const taskClassId = task.class_id?.toString();
@@ -90,7 +89,6 @@ const isDocumentApplicableToTask = (doc: any, task: any, childContext: any = nul
     return docSubdeptId === taskSubdeptId;
   }
 
-  // Child context check (subclass/child levels)
   if (childContext?.childLevelId && childContext?.childLevelType) {
     const { childLevelId, childLevelType } = childContext;
     if (doc[`${childLevelType}_id`] && doc[`${childLevelType}_id`].toString() !== childLevelId) {
@@ -100,7 +98,6 @@ const isDocumentApplicableToTask = (doc: any, task: any, childContext: any = nul
     if (childLevelType === 'class' && doc.subdept_id && doc.subdept_id.toString() !== taskSubdeptId) return false;
   }
 
-  // Specific Entity Type checks
   if (doc.entityType === 'class' && doc.class_id) {
     const classMatch = taskClassId === doc.class_id.toString();
     if (doc.subdept_id) return classMatch && (taskSubdeptId === doc.subdept_id.toString());
@@ -115,7 +112,6 @@ const isDocumentApplicableToTask = (doc: any, task: any, childContext: any = nul
 }
 
 // --- Sub-Component: Document Tab Panel ---
-// Handles the UI for a single document to reduce re-renders in the parent
 const DocumentTabPanel = ({
   doc,
   task,
@@ -124,7 +120,6 @@ const DocumentTabPanel = ({
   isLocked,
   linkedDocInstanceId,
   kycData,
-  isLoadingFields,
   activeDocFields,
   isSourceDocSelected,
   onToggleSourceDoc,
@@ -159,10 +154,7 @@ const DocumentTabPanel = ({
       });
 
       if (!response.ok) throw new Error('Conversion failed');
-      
       const blob = await response.blob();
-      // In a real scenario, you'd likely upload this blob immediately or trigger the upload modal with it
-      // For this refactor, we simulate the success/toast
       toast({ title: 'Success', description: 'Message converted to PDF. Please upload using the file upload option.' });
     } catch (error) {
       console.error(error);
@@ -173,7 +165,7 @@ const DocumentTabPanel = ({
   };
 
   return (
-    <div className="space-y-4 p-4 rounded-lg border">
+    <div className="space-y-4 p-4 rounded-lg border h-full overflow-y-auto">
       {/* Existing Documents Section */}
       {(existingDocs.length > 0 || isLocked) && (
         <div className={`mb-4 p-4 rounded-lg border ${isLocked ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}>
@@ -181,7 +173,7 @@ const DocumentTabPanel = ({
             <h4 className={`text-sm font-medium mb-2 ${isLocked ? 'text-green-900' : 'text-blue-900'}`}>
               {isLocked ? "Linked Source Document" : `Existing Documents (${existingDocs.length})`}
             </h4>
-            
+
             <div className="flex items-center gap-2 mb-2">
               <input
                 type="checkbox"
@@ -205,10 +197,10 @@ const DocumentTabPanel = ({
                     return (
                       <div key={ed.id} className={`flex items-center gap-3 p-2 border rounded transition-colors ${isSelected ? 'bg-blue-50 border-blue-200' : 'hover:bg-slate-50'}`}>
                         <div className="flex items-center gap-2">
-                          <RadioGroupItem 
-                            value={ed.id} 
-                            id={ed.id} 
-                            disabled={isLocked} 
+                          <RadioGroupItem
+                            value={ed.id}
+                            id={ed.id}
+                            disabled={isLocked}
                             className={`${isLocked ? 'opacity-50' : ''}`}
                           />
                           <button
@@ -239,10 +231,10 @@ const DocumentTabPanel = ({
                           </div>
                           <p className="text-xs text-slate-500">{format(parseISO(ed.created_at), 'dd MMM yyyy')}</p>
                         </div>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-gray-500 hover:text-gray-700" 
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-gray-500 hover:text-gray-700"
                           onClick={(e) => {
                             e.stopPropagation();
                             onPreviewExisting(ed, kycData);
@@ -255,16 +247,16 @@ const DocumentTabPanel = ({
                     )
                   })}
                 </RadioGroup>
-                
+
                 {!isLocked && selectedExistingId && (
-                  <Button 
-                    onClick={() => onUseExistingLink(doc.id, selectedExistingId, doc.kycId)} 
-                    disabled={isProcessing} 
-                    className="ml-6 mt-2" 
+                  <Button
+                    onClick={() => onUseExistingLink(doc.id, selectedExistingId, doc.kycId)}
+                    disabled={isProcessing}
+                    className="ml-6 mt-2"
                     size="sm"
                   >
-                     {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-                     Use Selected
+                    {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                    Use Selected
                   </Button>
                 )}
               </div>
@@ -272,17 +264,6 @@ const DocumentTabPanel = ({
           </div>
         </div>
       )}
-
-      {/* Special Doc Banner */}
-      {doc.isSpecial && (
-        <div className="bg-amber-50 border-l-4 border-amber-400 p-4 mb-4 flex gap-3">
-          <Star className="h-5 w-5 text-amber-600 flex-shrink-0" />
-          <p className="text-sm text-amber-700">
-            {doc.entityName ? `Specific to ${doc.entityName}` : 'Special requirements apply'}
-          </p>
-        </div>
-      )}
-
       {/* Upload / Message Section */}
       {isLocked ? (
         <div className="text-center p-6 bg-slate-50 border-dashed border-2 border-slate-200 rounded-lg">
@@ -291,9 +272,7 @@ const DocumentTabPanel = ({
         </div>
       ) : !useExisting && (
         <>
-          {isLoadingFields ? (
-            <div className="flex justify-center p-10"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
-          ) : activeDocFields ? (
+          {activeDocFields ? (
             <UploadModal
               documentName={documentName}
               documentFields={activeDocFields}
@@ -306,18 +285,15 @@ const DocumentTabPanel = ({
               idFieldName="director_id"
               documentIdFieldName="document_id"
               isCompanyUpload={false}
-              additionalFields={{
-                expiry_date: null
-              }}
+              additionalFields={{ expiry_date: null }}
               onBeforeUpload={async (recordData) => {
-                // Custom handling before upload if needed
-                if (doc.onBeforeUpload) {
-                  return doc.onBeforeUpload(recordData);
-                }
+                if (doc.onBeforeUpload) return doc.onBeforeUpload(recordData);
                 return null;
               }}
             />
-          ) : null}
+          ) : (
+            <div className="flex justify-center p-10 text-muted-foreground">Initializing fields...</div>
+          )}
 
           {(inputType === 'message' || inputType === 'both') && (
             <div className="mt-4 pt-4 border-t">
@@ -357,24 +333,21 @@ export function StageUploadDialog({
   const [activeDocumentTab, setActiveDocumentTab] = useState('');
   const [existingDocuments, setExistingDocuments] = useState<Record<string, any[]>>({});
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map());
-  const [activeDocFields, setActiveDocFields] = useState<any[] | null>(null);
-  const [isLoadingFields, setIsLoadingFields] = useState(false);
-  const [selectedSourceDocs, setSelectedSourceDocs] = useState<Record<string, Array<{id: string, document_id: string}>>>({});
-  
-  // Preview State consolidated
+  const [docFieldsMap, setDocFieldsMap] = useState<Record<string, any[]>>({});
+  const [isLoading, setIsLoading] = useState(false);
+  const [selectedSourceDocs, setSelectedSourceDocs] = useState<Record<string, Array<{ id: string, document_id: string }>>>({});
+  const [lockedDocuments, setLockedDocuments] = useState<Record<string, boolean>>({});
+  const [linkedDocuments, setLinkedDocuments] = useState<Record<string, any>>({});
+
   const [previewState, setPreviewState] = useState({
     isOpen: false,
     data: null as any,
     loading: false
   });
 
-  // Refs for caching to avoid re-fetching fields constantly
-  const documentFieldsCache = useRef(new Map());
-
-  // Derived Values
   const { task, stage } = selectedStageTask || {};
-  
-  // Initialize selectedSourceDocs from task.source_document_id when dialog opens
+
+  // Initialize Source Docs
   useEffect(() => {
     if (open && task?.source_document_id) {
       setSelectedSourceDocs(prev => ({
@@ -383,21 +356,16 @@ export function StageUploadDialog({
       }));
     }
   }, [open, task?.source_document_id]);
-  
-  const linkedDocumentForStage = useMemo(() => {
-    const sourceIdMap = task?.source_document_id;
-    return (sourceIdMap && typeof sourceIdMap === 'object' && stage?.id) ? sourceIdMap[stage.id] : null;
-  }, [task?.source_document_id, stage?.id]);
-  
-  // Check if a document is selected as a source for the current stage
+
   const isDocSelectedAsSource = useCallback((docId: string) => {
-    if (!stage?.id) return false;
-    const stageSelections = selectedSourceDocs[stage.id] || [];
-    return stageSelections.some(doc => doc.id === docId);
+    return Boolean(selectedSourceDocs[stage?.id || '']?.some(doc => doc.id === docId));
   }, [selectedSourceDocs, stage?.id]);
 
-  const isStageLocked = !!linkedDocumentForStage;
+  const isDocumentLocked = useCallback((docId: string) => {
+    return Boolean(lockedDocuments[docId]);
+  }, [lockedDocuments]);
 
+  // Determine which documents apply to this specific task
   const applicableDocuments = useMemo(() => {
     if (!stage?.documents || !task) return [];
     const childContext = {
@@ -407,9 +375,9 @@ export function StageUploadDialog({
     return stage.documents.filter((doc: any) => isDocumentApplicableToTask(doc, task, childContext));
   }, [stage, task, selectedStageTask?.childLevelId]);
 
-  const individualName = useMemo(() => 
-    task?.applicant_name || task?.principal_member_name || 'Individual', 
-  [task]);
+  const individualName = useMemo(() =>
+    task?.applicant_name || task?.principal_member_name || 'Individual',
+    [task]);
 
   // Set initial tab
   useEffect(() => {
@@ -418,7 +386,7 @@ export function StageUploadDialog({
     }
   }, [open, applicableDocuments, activeDocumentTab]);
 
-  // Clean up on close
+  // Clean up
   useEffect(() => {
     if (!open) {
       setActiveDocumentTab('');
@@ -426,281 +394,274 @@ export function StageUploadDialog({
     }
   }, [open]);
 
-  // --- Data Fetching ---
-
-  const fetchKycDocument = useCallback(async (kycId: string) => {
-    if (kycDocuments.has(kycId)) return kycDocuments.get(kycId);
-    
-    try {
-      const { data, error } = await supabase
-        .from('acc_portal_kyc')
-        .select('id, fields, name, display_name, document_type')
-        .eq('id', kycId)
-        .single();
-        
-      if (error || !data) throw error;
-
-      const transformedDoc = { ...data, fields: transformKycFields(data.fields || []) };
-      setKycDocuments(prev => new Map(prev.set(kycId, transformedDoc)));
-      return transformedDoc;
-    } catch (e) {
-      console.error('Error fetching KYC:', e);
-      return null;
-    }
-  }, [kycDocuments]);
-
-  // Fetch Existing Docs
+  // --- Optimized Data Fetching ---
+  // Fetches ALL necessary data for the stage in parallel when dialog opens
   useEffect(() => {
-    if (!open || !task?.individual_id || !stage?.documents) return;
+    if (!open || !stage?.documents || !task?.individual_id) return;
 
-    const loadDocs = async () => {
-      const { data: documents } = await supabase
-        .from('acc_portal_directors_documents')
-        .select('*')
-        .eq('director_id', task.individual_id)
-        .order('created_at', { ascending: false });
+    const fetchData = async () => {
+      setIsLoading(true);
+      try {
+        // 1. Identify all KYC IDs required by applicable documents
+        const uniqueKycIds = [...new Set(applicableDocuments
+          .map((d: any) => d.kycId)
+          .filter(Boolean))];
 
-      if (!documents) return;
+        // 2. Prepare parallel fetches
+        const promises: Promise<any>[] = [];
 
-      const groupedDocs: Record<string, any[]> = {};
-      
-      // We need to know which stage doc corresponds to which KYC ID
-      for (const stageDoc of stage.documents) {
-        if (stageDoc.kycId) {
-          // Prefetch KYC definition
-          await fetchKycDocument(stageDoc.kycId);
-          
-          const matching = documents.filter(d => d.document_id === stageDoc.kycId);
-          if (matching.length > 0) groupedDocs[stageDoc.id] = matching;
+        // Fetch KYC Definitions
+        if (uniqueKycIds.length > 0) {
+          promises.push(
+            supabase
+              .from('acc_portal_kyc')
+              .select('id, fields, name, display_name, document_type')
+              .in('id', uniqueKycIds)
+          );
+        } else {
+          promises.push(Promise.resolve({ data: [] }));
         }
-      }
-      setExistingDocuments(groupedDocs);
-    };
 
-    loadDocs();
-  }, [open, task?.individual_id, stage?.documents, fetchKycDocument]);
+        // Fetch Existing User Documents
+        promises.push(
+          supabase
+            .from('acc_portal_directors_documents')
+            .select('*')
+            .eq('director_id', task.individual_id)
+            .order('created_at', { ascending: false })
+        );
 
-  // Fetch Fields for Active Tab
-  useEffect(() => {
-    if (!activeDocumentTab) return;
+        // Execute fetches
+        const [kycRes, userDocsRes] = await Promise.all(promises);
 
-    const loadFields = async () => {
-      if (documentFieldsCache.current.has(activeDocumentTab)) {
-        setActiveDocFields(documentFieldsCache.current.get(activeDocumentTab));
-        return;
-      }
+        // 3. Process KYC Definitions & Fields
+        const newKycMap = new Map();
+        const newDocFieldsMap: Record<string, any[]> = {};
 
-      setIsLoadingFields(true);
-      const docConfig = stage?.documents?.find((d: any) => d.id === activeDocumentTab);
-      let fields = [];
-
-      if (docConfig?.kycId) {
-        const kycDoc = await fetchKycDocument(docConfig.kycId);
-        if (kycDoc?.fields) {
-          fields = kycDoc.fields.map((field: any) => ({
-            id: field.id || field.fieldName,
-            name: field.fieldName,
-            type: field.fieldType,
-            required: field.isRequired,
-            description: field.description,
-            isArray: field.isArray,
-            arrayConfig: field.arrayConfig
-          }));
+        // Process fetched KYC data
+        if (kycRes.data) {
+          kycRes.data.forEach((kycData: any) => {
+            const transformed = { ...kycData, fields: transformKycFields(kycData.fields || []) };
+            newKycMap.set(kycData.id, transformed);
+          });
         }
-      }
-      
-      // Fallback to extractionSpecs if no KYC fields
-      if (!fields.length && docConfig?.extractionSpecs) {
-         fields = docConfig.extractionSpecs.map((spec: any) => ({
-          id: spec.id || spec.fieldName || `field-${Date.now()}`,
-          name: spec.fieldName || spec.name || 'Field',
-          type: spec.fieldType || 'text',
-          required: spec.required || false,
-          isArray: spec.isArray || false
-         }));
-      }
 
-      documentFieldsCache.current.set(activeDocumentTab, fields);
-      setActiveDocFields(fields);
-      setIsLoadingFields(false);
-    };
-
-    loadFields();
-  }, [activeDocumentTab, stage?.documents, fetchKycDocument]);
-
-  // --- Handlers ---
-
-  const handleStageCompletion = useCallback(async (count: number = 1) => {
-    try {
-      const timestamp = new Date().toISOString();
-      const updatedStages = {
-        ...task.stages,
-        [stage.id]: {
-          status: 'completed',
-          date: new Date().toLocaleDateString('en-GB'),
-          completedAt: timestamp,
-          documentsUploaded: count
-        }
-      };
-
-      await supabase.from('tm_tasks_duplicate').update({
-        stages: updatedStages,
-        current_stage_id: stage.id,
-        updated_at: timestamp
-      }).eq('id', task.id);
-
-      onStageCompleted?.(stage.id, task.id, { date: updatedStages[stage.id].date, status: 'completed' });
-      onTaskAction?.({ type: 'refresh', taskId: task.id });
-      onOpenChange(false);
-    } catch (e) {
-      console.error('Stage completion error', e);
-      toast({ title: "Error", description: "Failed to update stage status", variant: "destructive" });
-    }
-  }, [task, stage, onStageCompleted, onTaskAction, onOpenChange]);
-
-const handleUploadSuccess = useCallback(async (newDocument: any, originatingDoc: any) => {
-  if (originatingDoc?.kycId && newDocument?.id && stage?.id) {
-    const currentDate = new Date().toISOString();
-    const docToAdd = { 
-      id: newDocument.id.toString(), 
-      document_id: originatingDoc.kycId,
-      linked_at: currentDate,
-      updated_at: currentDate
-    };
-    const updatedSource = {
-      ...selectedSourceDocs,
-      [stage.id]: [...(selectedSourceDocs[stage.id] || []), docToAdd]
-    };
-    
-    setSelectedSourceDocs(updatedSource);
-    
-    await supabase
-      .from('tm_tasks_duplicate')
-      .update({ 
-        source_document_id: updatedSource,
-        updated_at: currentDate
-      })
-      .eq('id', task.id);
-  }
-  
-  await handleStageCompletion(Array.isArray(newDocument) ? newDocument.length : 1);
-}, [task, stage, selectedSourceDocs, handleStageCompletion]);
-
-const handleUseExisting = useCallback(async (docConfigId: string, existingDocId: string, kycId: string) => {
-  if (!stage?.id) return;
-  
-  try {
-    const currentDate = new Date().toISOString();
-    const docToAdd = { 
-      id: existingDocId.toString(), 
-      document_id: kycId,
-      linked_at: currentDate,
-      updated_at: currentDate
-    };
-    const updatedSource = {
-      ...selectedSourceDocs,
-      [stage.id]: [...(selectedSourceDocs[stage.id] || []).filter(d => d.id !== existingDocId), docToAdd]
-    };
-    
-    setSelectedSourceDocs(updatedSource);
-    
-    const { error } = await supabase
-      .from('tm_tasks_duplicate')
-      .update({ 
-        source_document_id: updatedSource,
-        updated_at: currentDate
-      })
-      .eq('id', task.id);
-    
-    if (error) throw error;
-    
-    toast({ title: 'Success', description: 'Document linked successfully.' });
-    await handleStageCompletion(1);
-  } catch (e) {
-    console.error('Error linking document:', e);
-    toast({ 
-      title: 'Error', 
-      variant: 'destructive', 
-      description: 'Failed to link document. Please try again.' 
-    });
-  }
-}, [task, stage, selectedSourceDocs, handleStageCompletion]);
-
-const toggleSourceDocument = useCallback(async (docId: string, kycId: string, isSelected: boolean) => {
-  if (!stage?.id) return;
-  
-  try {
-    const currentDate = new Date().toISOString();
-    let updatedSource = { ...selectedSourceDocs };
-    
-    if (isSelected) {
-      updatedSource = {
-        ...updatedSource,
-        [stage.id]: [
-          ...(updatedSource[stage.id] || []), 
-          { 
-            id: docId, 
-            document_id: kycId,
-            linked_at: currentDate,
-            updated_at: currentDate
+        // Map fields to stage document IDs
+        applicableDocuments.forEach((doc: any) => {
+          let fields = [];
+          if (doc.kycId && newKycMap.has(doc.kycId)) {
+            const kycDoc = newKycMap.get(doc.kycId);
+            if (kycDoc.fields) {
+              fields = kycDoc.fields.map((field: any) => ({
+                id: field.id || field.fieldName,
+                name: field.fieldName,
+                type: field.fieldType,
+                required: field.isRequired,
+                description: field.description,
+                isArray: field.isArray,
+                arrayConfig: field.arrayConfig
+              }));
+            }
+          } else if (doc.extractionSpecs) {
+            // Fallback to extractionSpecs if no KYC ID
+            fields = doc.extractionSpecs.map((spec: any) => ({
+              id: spec.id || spec.fieldName || `field-${Date.now()}`,
+              name: spec.fieldName || spec.name || 'Field',
+              type: spec.fieldType || 'text',
+              required: spec.required || false,
+              isArray: spec.isArray || false
+            }));
           }
-        ]
+          newDocFieldsMap[doc.id] = fields;
+        });
+
+        // 4. Process Existing Documents
+        const groupedDocs: Record<string, any[]> = {};
+        if (userDocsRes.data) {
+          applicableDocuments.forEach((stageDoc: any) => {
+            if (stageDoc.kycId) {
+              const matching = userDocsRes.data.filter((d: any) => d.document_id === stageDoc.kycId);
+              if (matching.length > 0) groupedDocs[stageDoc.id] = matching;
+            }
+          });
+        }
+
+        setKycDocuments(newKycMap);
+        setDocFieldsMap(newDocFieldsMap);
+        setExistingDocuments(groupedDocs);
+
+      } catch (error) {
+        console.error("Error initializing stage upload dialog:", error);
+        toast({ title: "Error loading data", description: "Please close and try again.", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [open, stage?.documents, task?.individual_id, applicableDocuments]);
+
+
+  // Check for locked documents
+  useEffect(() => {
+    if (!stage?.id || !applicableDocuments.length || !task?.id) return;
+
+    const checkLockedDocuments = async () => {
+      const { data: taskData } = await supabase
+        .from('tm_tasks_duplicate')
+        .select('source_document_id')
+        .eq('id', task.id)
+        .single();
+
+      if (taskData?.source_document_id) {
+        const newLockedDocs = { ...lockedDocuments };
+        const newLinkedDocs = { ...linkedDocuments };
+
+        applicableDocuments.forEach((doc: any) => {
+          const docInstance = taskData.source_document_id[stage.id]?.find(
+            (d: any) => d.document_id === doc.kycId
+          );
+
+          if (docInstance) {
+            newLockedDocs[doc.id] = true;
+            newLinkedDocs[doc.id] = docInstance;
+          } else {
+            newLockedDocs[doc.id] = false;
+          }
+        });
+
+        setLockedDocuments(newLockedDocs);
+        setLinkedDocuments(newLinkedDocs);
+      }
+    };
+
+    checkLockedDocuments();
+  }, [stage?.id, task?.id, JSON.stringify(applicableDocuments)]);
+
+
+  // --- Event Handlers ---
+
+  const handleDocumentCompletion = useCallback(async (docId: string, docInstanceId: string, kycId: string) => {
+    if (!stage?.id) return;
+
+    try {
+      const currentDate = new Date().toISOString();
+      const docToAdd = {
+        id: docInstanceId,
+        document_id: kycId,
+        linked_at: currentDate,
+        updated_at: currentDate
       };
-    } else {
-      updatedSource = {
-        ...updatedSource,
-        [stage.id]: (updatedSource[stage.id] || [])
-          .map(doc => doc.id === docId 
+
+      setLockedDocuments(prev => ({ ...prev, [docId]: true }));
+      setLinkedDocuments(prev => ({ ...prev, [docId]: docToAdd }));
+
+      const updatedSource = {
+        ...selectedSourceDocs,
+        [stage.id]: [...(selectedSourceDocs[stage.id] || []).filter(d => d.document_id !== kycId), docToAdd]
+      };
+
+      await supabase
+        .from('tm_tasks_duplicate')
+        .update({ source_document_id: updatedSource, updated_at: currentDate })
+        .eq('id', task.id);
+
+      toast({ title: 'Success', description: 'Document linked successfully.' });
+
+      const allDocumentsCompleted = applicableDocuments.every((doc: any) =>
+        lockedDocuments[doc.id] || doc.id === docId
+      );
+
+      if (allDocumentsCompleted) {
+        const timestamp = new Date().toISOString();
+        const updatedStages = {
+          ...task.stages,
+          [stage.id]: {
+            status: 'completed',
+            date: new Date().toLocaleDateString('en-GB'),
+            completedAt: timestamp,
+            documentsUploaded: applicableDocuments.length
+          }
+        };
+
+        await supabase.from('tm_tasks_duplicate').update({
+          stages: updatedStages,
+          current_stage_id: stage.id,
+          updated_at: timestamp
+        }).eq('id', task.id);
+
+        onStageCompleted?.(stage.id, task.id, {
+          date: updatedStages[stage.id].date,
+          status: 'completed'
+        });
+        onTaskAction?.({ type: 'refresh', taskId: task.id });
+        onOpenChange(false);
+      }
+    } catch (e) {
+      console.error('Document completion error', e);
+      toast({ title: 'Error', description: 'Failed to complete document', variant: 'destructive' });
+    }
+  }, [stage, task, selectedSourceDocs, applicableDocuments, lockedDocuments, onStageCompleted, onTaskAction, onOpenChange]);
+
+  const handleUploadSuccess = useCallback(async (newDocument: any, originatingDoc: any) => {
+    if (originatingDoc?.kycId && newDocument?.id && stage?.id) {
+      await handleDocumentCompletion(
+        originatingDoc.id,
+        newDocument.id.toString(),
+        originatingDoc.kycId
+      );
+    }
+  }, [stage?.id, handleDocumentCompletion]);
+
+  const handleUseExisting = useCallback(async (docConfigId: string, existingDocId: string, kycId: string) => {
+    await handleDocumentCompletion(docConfigId, existingDocId, kycId);
+  }, [handleDocumentCompletion]);
+
+  const toggleSourceDocument = useCallback(async (docId: string, kycId: string, isSelected: boolean) => {
+    if (!stage?.id) return;
+    try {
+      const currentDate = new Date().toISOString();
+      let updatedSource = { ...selectedSourceDocs };
+
+      if (isSelected) {
+        updatedSource[stage.id] = [
+          ...(updatedSource[stage.id] || []),
+          { id: docId, document_id: kycId, linked_at: currentDate, updated_at: currentDate }
+        ];
+      } else {
+        updatedSource[stage.id] = (updatedSource[stage.id] || [])
+          .map(doc => doc.id === docId
             ? { ...doc, updated_at: currentDate, unlinked_at: currentDate }
             : doc
-          )
-      };
+          );
+      }
+
+      setSelectedSourceDocs(updatedSource);
+      const { error } = await supabase
+        .from('tm_tasks_duplicate')
+        .update({ source_document_id: updatedSource, updated_at: currentDate })
+        .eq('id', task.id);
+
+      if (error) throw error;
+      toast({ title: 'Success', description: isSelected ? 'Document linked as source.' : 'Document unlinked from source.' });
+      onTaskAction?.({ type: 'refresh', taskId: task.id });
+    } catch (e) {
+      console.error('Error updating source document:', e);
+      toast({ title: 'Error', variant: 'destructive', description: 'Failed to update source document.' });
     }
-    
-    setSelectedSourceDocs(updatedSource);
-    
-    const { error } = await supabase
-      .from('tm_tasks_duplicate')
-      .update({ 
-        source_document_id: updatedSource,
-        updated_at: currentDate
-      })
-      .eq('id', task.id);
-    
-    if (error) throw error;
-    
-    toast({ 
-      title: 'Success', 
-      description: isSelected ? 'Document linked as source.' : 'Document unlinked from source.' 
-    });
-    
-    onTaskAction?.({ type: 'refresh', taskId: task.id });
-    
-  } catch (e) {
-    console.error('Error updating source document:', e);
-    toast({ 
-      title: 'Error', 
-      variant: 'destructive', 
-      description: 'Failed to update source document. Please try again.' 
-    });
-  }
-}, [task?.id, stage?.id, selectedSourceDocs, onTaskAction]);
- 
+  }, [task?.id, stage?.id, selectedSourceDocs, onTaskAction]);
 
   const handlePreview = useCallback(async (document: any, kycData: any) => {
     if (!kycData) return;
-    
     setPreviewState(prev => ({ ...prev, isOpen: true, loading: true }));
     try {
       const bucketName = 'kyc-documents';
       const filePath = document.file_path?.startsWith(bucketName) ? document.file_path : `${bucketName}/${document.file_path}`;
       const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${filePath}`;
       const fileName = document.file_path?.split('/').pop() || kycData.name;
-      
-      // Process fields for preview
       const fields = transformKycFields(kycData.fields || []);
       const processedData = processExtractedData(document.extracted_details || {}, fields);
-      
+
       setPreviewState({
         isOpen: true,
         loading: false,
@@ -727,63 +688,96 @@ const toggleSourceDocument = useCallback(async (docId: string, kycId: string, is
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-[1800px] max-h-[95vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Upload Documents for {stage?.name}</DialogTitle>
-            <DialogDescription>
-              Upload required documents or select existing ones to complete this stage.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <Tabs value={activeDocumentTab} onValueChange={setActiveDocumentTab} className="w-full">
-            <TabsList className="w-full justify-start overflow-x-auto">
-              {applicableDocuments.map((doc: any) => (
-                <TabsTrigger key={doc.id} value={doc.id}>
-                  {doc.name || 'Document'}
-                  {isStageLocked && linkedDocumentForStage?.document_id === doc.kycId && (
-                    <Check className="h-4 w-4 ml-2 text-green-600" />
+        <DialogContent className="max-w-[1800px] max-h-[95vh] flex flex-col p-0 gap-0">
+          <div className="p-6 border-b">
+            <DialogHeader>
+              <DialogTitle className="flex justify-between">
+                <h2>Upload {stage?.name} for {individualName}</h2>
+                <div>
+                  {applicableDocuments.some((doc: any) => doc.isSpecial) && (
+                    <div className="p-2 flex gap-3">
+                      <Star className="h-5 w-5 text-amber-600 flex-shrink-0" />
+                      <p className="text-sm text-amber-700">
+                        Special requirements apply to some documents
+                      </p>
+                    </div>
                   )}
-                </TabsTrigger>
-              ))}
-            </TabsList>
+                </div>
+              </DialogTitle>
+              <DialogDescription>
+                Upload required documents or select existing ones to complete this stage.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
 
-            {applicableDocuments.map((doc: any) => (
-              <TabsContent key={doc.id} value={doc.id} className="mt-6">
-                <DocumentTabPanel
-                  doc={doc}
-                  task={task}
-                  individualName={individualName}
-                  existingDocs={existingDocuments[doc.id]}
-                  isLocked={isStageLocked}
-                  linkedDocInstanceId={isStageLocked ? linkedDocumentForStage?.id : null}
-                  kycData={doc.kycId ? kycDocuments.get(doc.kycId) : null}
-                  isLoadingFields={isLoadingFields}
-                  activeDocFields={activeDocFields}
-                  isSourceDocSelected={isDocSelectedAsSource}
-                  onToggleSourceDoc={toggleSourceDocument}
-                  onUploadSuccess={handleUploadSuccess}
-                  onPreviewExisting={handlePreview}
-                  onUseExistingLink={handleUseExisting}
-                />
-              </TabsContent>
-            ))}
-          </Tabs>
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <Tabs value={activeDocumentTab} onValueChange={setActiveDocumentTab} className="flex-1 flex flex-col overflow-hidden">
+              <div className="px-6 pt-2 border-b bg-muted/10">
+                <TabsList className="w-full justify-start overflow-x-auto h-auto p-1 bg-transparent gap-2">
+                  {applicableDocuments.map((doc: any) => (
+                    <TabsTrigger
+                      key={doc.id}
+                      value={doc.id}
+                      className="relative px-4 py-2 data-[state=active]:bg-white data-[state=active]:shadow-sm border border-transparent data-[state=active]:border-border"
+                    >
+                      {doc.name || 'Document'}
+                      {isDocumentLocked(doc.id) && (
+                        <Check className="h-4 w-4 ml-2 text-green-600" />
+                      )}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </div>
+
+              <div className="flex-1 overflow-auto relative bg-slate-50/50">
+                {isLoading ? (
+                  <div className="flex items-center justify-center h-full">
+                    <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" />
+                  </div>
+                ) : (
+                  applicableDocuments.map((doc: any) => (
+                    // CRITICAL FIX: Use display:none (hidden class) instead of unmounting content.
+                    // This preserves the state of UploadModal when switching tabs.
+                    <div
+                      key={doc.id}
+                      className={`h-full overflow-y-auto p-6 ${activeDocumentTab === doc.id ? 'block' : 'hidden'}`}
+                    >
+                      <DocumentTabPanel
+                        doc={doc}
+                        task={task}
+                        individualName={individualName}
+                        existingDocs={existingDocuments[doc.id]}
+                        isLocked={isDocumentLocked(doc.id)}
+                        linkedDocInstanceId={isDocumentLocked(doc.id) ? linkedDocuments[doc.id]?.id : null}
+                        kycData={doc.kycId ? kycDocuments.get(doc.kycId) : null}
+                        activeDocFields={docFieldsMap[doc.id]}
+                        isSourceDocSelected={isDocSelectedAsSource}
+                        onToggleSourceDoc={toggleSourceDocument}
+                        onUploadSuccess={handleUploadSuccess}
+                        onPreviewExisting={handlePreview}
+                        onUseExistingLink={handleUseExisting}
+                      />
+                    </div>
+                  ))
+                )}
+              </div>
+            </Tabs>
+          </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={previewState.isOpen} onOpenChange={(v) => setPreviewState(p => ({ ...p, isOpen: v }))}>
         <DialogContent className="max-w-[1800px] max-h-[95vh] overflow-y-auto">
-           {previewState.loading ? (
-             <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin h-10 w-10" /></div>
-           ) : previewState.data ? (
-             <ExtractionPreview
-               {...previewState.data}
-               expanded={true}
-               showSaveButton={false}
-               // Pass a resolved promise for compatibility with the component's interface
-               fieldsPromise={Promise.resolve(previewState.data.fields)}
-             />
-           ) : null}
+          {previewState.loading ? (
+            <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin h-10 w-10" /></div>
+          ) : previewState.data ? (
+            <ExtractionPreview
+              {...previewState.data}
+              expanded={true}
+              showSaveButton={false}
+              fieldsPromise={Promise.resolve(previewState.data.fields)}
+            />
+          ) : null}
         </DialogContent>
       </Dialog>
     </>

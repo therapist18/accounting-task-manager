@@ -2,7 +2,7 @@
 "use client"
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase/client';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -211,20 +211,24 @@ export const ExtractionPreview = ({
   const [localData, setLocalData] = useState<Record<string, any>>(() => {
     const initialData: Record<string, any> = {};
     fields.forEach(field => {
-      const snakeCase = field.name
+      // Add null check and provide a fallback empty string if name is undefined
+      const fieldName = field?.name || field?.id || 'field';
+      const snakeCase = fieldName
+        .toString() // Ensure it's a string
         .toLowerCase()
         .replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => '_' + chr.toLowerCase())
         .replace(/^_/, '');
 
       let value = extractedData[snakeCase] ||
-        extractedData[field.id] ||
-        extractedData[field.name] ||
-        extractedData[field.name.toLowerCase()] || '';
+        extractedData[field?.id] ||
+        (field?.name ? extractedData[field.name] : '') ||
+        (field?.name ? extractedData[field.name.toLowerCase()] : '') ||
+        '';
 
-      if (field.name.toLowerCase() === 'sex' || field.name.toLowerCase() === 'gender') {
+      if (field?.name?.toLowerCase() === 'sex' || field?.name?.toLowerCase() === 'gender') {
         value = value.toString().toUpperCase() === 'FEMALE' ? 'F' :
           value.toString().toUpperCase() === 'MALE' ? 'M' : value;
-      } else if (field.name.toLowerCase() === 'surname' && value) {
+      } else if (field?.name?.toLowerCase() === 'surname' && value) {
         value = value.toString().toUpperCase();
       }
 
@@ -236,7 +240,11 @@ export const ExtractionPreview = ({
   const formattedData = useMemo(() => {
     const result: Record<string, any> = {};
     fields.forEach(field => {
-      const snakeCase = field.name
+      if (!field?.name) return;
+      
+      const fieldName = field?.name || field?.id || 'field';
+      const snakeCase = fieldName
+        .toString()
         .toLowerCase()
         .replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => '_' + chr.toLowerCase())
         .replace(/^_/, '');
@@ -246,19 +254,19 @@ export const ExtractionPreview = ({
       };
 
       let value = extractedData[snakeCase] ||
-        extractedData[field.id] ||
-        extractedData[field.name] ||
-        extractedData[field.name.toLowerCase()] ||
-        getNestedValue(extractedData, field.name) ||
+        extractedData[field?.id] ||
+        (field?.name ? extractedData[field.name] : '') ||
+        (field?.name ? extractedData[field.name.toLowerCase()] : '') ||
+        (field?.name ? getNestedValue(extractedData, field.name) : '') ||
         getNestedValue(extractedData, snakeCase) ||
         '';
 
-      if (field.name.toLowerCase() === 'sex' || field.name.toLowerCase() === 'gender') {
+      if (field?.name && (field.name.toLowerCase() === 'sex' || field.name.toLowerCase() === 'gender')) {
         value = value.toString().toUpperCase() === 'FEMALE' ? 'F' :
           value.toString().toUpperCase() === 'MALE' ? 'M' : value;
-      } else if (field.name.toLowerCase() === 'surname' && value) {
+      } else if (field?.name?.toLowerCase() === 'surname' && value) {
         value = value.toString().toUpperCase();
-      } else if (field.name.toLowerCase() === 'directors_and_shareholders' && Array.isArray(value)) {
+      } else if (field?.name?.toLowerCase() === 'directors_and_shareholders' && Array.isArray(value)) {
         value = value.map(item => ({
           name: item.name || item.Name || '-',
           shares: item.shares || item.Shares || '-',
@@ -367,7 +375,7 @@ export const ExtractionPreview = ({
     if (Array.isArray(value)) {
       return (
         <RowWrapper key={field.id} className="items-start" isEven={isEven}>
-          <LabelCell>{field.name.replace(/_/g, ' ')}</LabelCell>
+         <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
           <div className="w-full sm:flex-1 p-2">
             <div className="space-y-3">
               {value.length === 0 && <span className="text-sm text-gray-400 italic">No entries found</span>}
@@ -390,7 +398,7 @@ export const ExtractionPreview = ({
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       return (
         <RowWrapper key={field.id} className="items-start" isEven={isEven}>
-          <LabelCell>{field.name.replace(/_/g, ' ')}</LabelCell>
+         <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
           <div className="w-full sm:flex-1 p-2">
             <div className="p-3 border rounded-md bg-white shadow-sm">
               {Object.entries(value).map(([key, val]) => (
@@ -407,7 +415,7 @@ export const ExtractionPreview = ({
 
     return (
       <RowWrapper key={field.id} isEven={isEven}>
-        <LabelCell>{field.name.replace(/_/g, ' ')}</LabelCell>
+       <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
         <ValueCell>
           <Input
             value={value || ''}
