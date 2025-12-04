@@ -109,7 +109,7 @@
   export const fetchTasks = async (departmentId?: string, subdepartmentId?: string): Promise<Task[]> => {
     try {
       let query = supabase
-        .from('tm_tasks')
+        .from('tm_tasks_duplicate')
         .select(`*, 
           department:department_id (id, name), 
           subdepartment:subdepartment_id (id, name)

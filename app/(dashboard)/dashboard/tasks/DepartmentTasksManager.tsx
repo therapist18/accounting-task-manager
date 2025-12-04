@@ -1415,76 +1415,64 @@ const getDocumentForTaskStage = useCallback((
     }
   }, [onTaskAction, refreshAllData])
 
-  const renderCellContent = useCallback((row: any, task: any) => {
-    const value = row.getValue?.(task) ?? '';
+const renderCellContent = useCallback((row: any, task: any, columnType?: 'date' | 'actions') => {
+  const value = row.getValue?.(task) ?? '';
 
-    // Early return for N/A values
-    if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
-      return <span className="text-sm text-gray-400 italic">N/A</span>;
-    }
+  // Early return for N/A values
+  if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
+    return <span className="text-sm text-gray-400 italic">N/A</span>;
+  }
 
-    // Handle stage data display
-    if (row.type === 'stage' && row.stage) {
-      if (task.stages?.[row.stage.id]) {
-        const stageData = task.stages[row.stage.id];
-        return stageData.date ? (
-          <div className="flex flex-col items-center gap-0.5">
-            <span className="text-sm font-medium text-slate-800">
-              {formatDateValue(stageData.date)}
-            </span>
-          </div>
-        ) : null;
-      }
+  // ✅ Handle stage data display with columnType
+  if (row.type === 'stage' && row.stage) {
+    return renderEditableStageCell(row, task, columnType || 'date');
+  }
+  // Handle field type
+  if (row.type === 'field') {
+    return renderFieldContent(row, value);
+  }
 
-      return renderEditableStageCell(row, task);
-    }
+  // Handle different row types
+  switch (row.type) {
+    case 'badge':
+    case 'stat':
+      return <span className="text-sm font-semibold">{value}</span>;
 
-    // Handle field type
-    if (row.type === 'field') {
-      return renderFieldContent(row, value);
-    }
+    case 'date':
+      return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
 
-    // Handle different row types
-    switch (row.type) {
-      case 'badge':
-      case 'stat':
-        return <span className="text-sm font-semibold">{value}</span>;
+    case 'actions':
+      return renderActionButtons(row, task);
 
-      case 'date':
-        return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
+    default:
+      return <span className="text-sm text-slate-800">{value}</span>;
+  }
+}, [
+  handleStageDocumentUpload,
+  handleViewDocument,
+  onTaskAction,
+  handleTaskEdit,
+  enhancedHandleStageStatusSave,
+  allDocuments,
+  handlePushCase,
+  handleDownloadZip,
+  isPushingCase,
+  isDownloading,
+  getKycFields
+]);
 
-      case 'actions':
-        return renderActionButtons(row, task);
-
-      default:
-        return <span className="text-sm text-slate-800">{value}</span>;
-    }
-  }, [
-    handleStageDocumentUpload,
-    handleViewDocument,
-    onTaskAction,
-    handleTaskEdit,
-    enhancedHandleStageStatusSave,
-    allDocuments,
-    handlePushCase,
-    handleDownloadZip,
-    isPushingCase,
-    isDownloading,
-    getKycFields
-  ]);
-
- const renderEditableStageCell = (row: any, task: any) => {
+const renderEditableStageCell = (row: any, task: any, renderMode: 'date' | 'actions' = 'date') => {
   const requiresUpload = row.stage?.requires_upload !== false;
-  
-  // Get linked documents for this stage
   const linkedDocs = getDocumentForTaskStage(task, row.stage);
+  const stageData = task.stages?.[row.stage.id];
+  const cellValue = stageData?.date || stageData?.status || null;
   
   return (
     <EditableStageCell
-      key={row.stage.id}
+      key={`${row.stage.id}-${renderMode}`}
       stage={row.stage}
       task={task}
-      value={task.stages?.[row.stage.id]?.status}
+      value={cellValue}
       onSave={enhancedHandleStageStatusSave}
       onDocumentUpload={handleStageDocumentUpload}
       onShowDocuments={handleViewDocument}
@@ -1492,7 +1480,8 @@ const getDocumentForTaskStage = useCallback((
       departments={departments}
       onAutomationClick={(e) => handleAutomationClick(e, row.stage, task.id)}
       getKycFields={getKycFields}
-      linkedDocuments={linkedDocs}  // PASS THE LINKED DOCUMENTS
+      linkedDocuments={linkedDocs}
+      renderMode={renderMode}  // ✅ Pass the render mode
     />
   );
 };

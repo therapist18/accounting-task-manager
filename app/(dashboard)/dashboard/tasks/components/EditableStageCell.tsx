@@ -27,14 +27,15 @@ interface EditableStageCellProps {
   onShowDocuments?: (task: any, stage: any) => void
   getKycFields?: (documentConfig: any) => Promise<any[]>
   allDocuments?: any[]
-  linkedDocuments?: any[]  // ADD THIS
+  linkedDocuments?: any[]
   isDocumentRow?: boolean
   documentData?: any
   onAutomationClick?: (e: React.MouseEvent, documentData?: any) => void
   departments?: any[]
+  renderMode?: 'date' | 'actions'  // NEW: Specify what to render
 }
 
-// Helper function to check if a document is applicable to the current task
+// Helper functions remain the same
 const isDocumentApplicable = (doc: any, task: any): boolean => {
   if (!doc || !task) return false;
   if (!doc.isSpecial) return true;
@@ -42,7 +43,6 @@ const isDocumentApplicable = (doc: any, task: any): boolean => {
   const taskClassId = task.class_id?.toString();
   const taskSubdeptId = task.subdepartment?.id?.toString() || task.subdepartment_id?.toString();
 
-  // New targetEntities logic
   if (Array.isArray(doc.targetEntities) && doc.targetEntities.length > 0) {
     return doc.targetEntities.some((entity: any) => {
       const classMatch = !entity.class_id || entity.class_id.toString() === taskClassId;
@@ -51,7 +51,6 @@ const isDocumentApplicable = (doc: any, task: any): boolean => {
     });
   }
 
-  // Legacy entityType logic
   const docClassId = doc.class_id?.toString();
   const docSubdeptId = doc.subdept_id?.toString();
   const docSubclassId = doc.subclass_id?.toString();
@@ -71,10 +70,9 @@ const isDocumentApplicable = (doc: any, task: any): boolean => {
   }
 };
 
-// Optimized and robust stage applicability check
 const isStageApplicableToTask = (stage: any, task: any, departments: any[] = []): boolean => {
   if (!task || !stage || !Array.isArray(departments) || departments.length === 0) {
-    return true; // Default to applicable if data is missing
+    return true;
   }
 
   try {
@@ -84,7 +82,6 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[] = [])
     const subdept = dept.tm_subdepartments?.find((s: any) => s?.id === (task.subdepartment?.id || task.subdepartment_id));
     if (!subdept) return true;
 
-    // Check class-level override (most specific)
     if (task.class_id) {
       const cls = subdept.classes?.find((c: any) => c?.id?.toString() === task.class_id?.toString());
       const classStage = cls?.stages?.find((s: any) => s.stage_id === stage.id);
@@ -93,20 +90,18 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[] = [])
       }
     }
 
-    // Fallback to subdepartment-level override
     const subdeptStage = subdept.stages?.find((s: any) => s.stage_id === stage.id);
     if (subdeptStage && typeof subdeptStage.applicable === 'boolean') {
       return subdeptStage.applicable;
     }
 
-    return true; // Default to applicable if no override is found
+    return true;
   } catch (error) {
     console.error('Error in isStageApplicableToTask:', error);
-    return true; // Failsafe
+    return true;
   }
 };
 
-// Helper function to find a date in a potentially nested object
 const findDateInObject = (obj: any, dateFields: string[]): string | null => {
   if (!obj || typeof obj !== 'object') return null;
 
@@ -134,7 +129,8 @@ export default function EditableStageCell({
   isDocumentRow = false,
   linkedDocuments = [],
   documentData = null,
-  departments
+  departments,
+  renderMode = 'date'  // Default to date mode
 }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
@@ -158,14 +154,37 @@ export default function EditableStageCell({
   const hasLinkedDocument = useMemo(() => !!linkedDocument && !linkedDocument.indicator, [linkedDocument]);
 
   const stageDate = useMemo(() => {
-    if (!hasLinkedDocument || !linkedDocument.extracted_details) return '';
     const dateFields = [
       'application_date', 'date', 'upload_date', 'created_date',
       'date_and_time_generated', 'invoice_date_and_time', 'With_Effect_From',
       'Expiry_Date', 'Date_of_Issue'
     ];
-    return findDateInObject(linkedDocument.extracted_details, dateFields) || '';
-  }, [hasLinkedDocument, linkedDocument]);
+
+    const stageData = task?.stages?.[stage.id];
+    const hasDocumentsUploaded = stageData?.documentsUploaded !== undefined && stageData?.documentsUploaded !== null;
+
+    // PRIORITY 1: Document stages - use extracted dates
+    if ((requiresUpload || hasDocumentsUploaded) && hasLinkedDocument) {
+      if (linkedDocument.extracted_details) {
+        const extractedDate = findDateInObject(linkedDocument.extracted_details, dateFields);
+        if (extractedDate) return extractedDate;
+      }
+      
+      if (linkedDocument.extracted_data) {
+        const extractedDate = findDateInObject(linkedDocument.extracted_data, dateFields);
+        if (extractedDate) return extractedDate;
+      }
+
+      return '';
+    }
+    
+    // PRIORITY 2: Non-document stages - use completion date from value prop
+    if (!requiresUpload && !hasDocumentsUploaded && value) {
+      return typeof value === 'string' ? value : '';
+    }
+    
+    return '';
+  }, [hasLinkedDocument, linkedDocument, requiresUpload, value, task, stage.id, stage.name]);
 
   const isStageApplicable = useMemo(() => isStageApplicableToTask(stage, task, departments), [stage, task, departments]);
 
@@ -177,7 +196,6 @@ export default function EditableStageCell({
   }, [isEditing]);
 
   useEffect(() => {
-    // Set initial edit value when editing starts or stageDate changes
     if (stageDate && stageDate !== 'NaN/NaN/NaN') {
       const parsedDate = parse(stageDate, 'dd/MM/yyyy', new Date());
       if (isValid(parsedDate)) {
@@ -215,7 +233,6 @@ export default function EditableStageCell({
     setIsLoading(true);
     try {
       const formattedDate = format(dateObj, 'dd/MM/yyyy');
-      // Logic to update extracted_details can be added here if needed
       await onSave(stage.id, task.id, formattedDate, linkedDocument?.extracted_details || {});
       setIsEditing(false);
       toast({ title: "Success", description: "Date saved successfully" });
@@ -229,7 +246,6 @@ export default function EditableStageCell({
 
   const handleCancel = useCallback(() => {
     setIsEditing(false);
-    // Reset value back to original
     if (stageDate) {
       const parsedDate = parse(stageDate, 'dd/MM/yyyy', new Date());
       if (isValid(parsedDate)) {
@@ -286,43 +302,43 @@ export default function EditableStageCell({
   }, []);
 
   const buildPreviewDocumentData = useCallback(async () => {
- 
-  if (!linkedDocument) {
-    toast({ title: 'No Document', description: 'No document is linked to this stage.', variant: 'default' });
-    return null;
-  }
-
-  try {
-    const kycDoc = await fetchKycDocumentData(linkedDocument.document_id);
-    
-    if (!kycDoc) {
-      toast({ title: 'Error', description: 'Could not load document configuration.', variant: 'destructive' });
+    if (!linkedDocument) {
+      toast({ title: 'No Document', description: 'No document is linked to this stage.', variant: 'default' });
       return null;
     }
 
-    const previewData = {
-      documentId: linkedDocument.id,
-      documentName: kycDoc.display_name || kycDoc.name || 'Document',
-      fileUrl: linkedDocument.file_path || linkedDocument.download_url,
-      fileName: linkedDocument.file_path?.split('/').pop() || 'document.pdf',
-      extractedData: linkedDocument.extracted_data || {},
-      fields: transformKycFieldsToPreviewFormat(kycDoc.fields || []),
-      kycDoc,
-      document: linkedDocument,
-      type: kycDoc.document_type || 'document',
-      file: {
-        url: linkedDocument.file_path || linkedDocument.download_url,
-        name: linkedDocument.file_name || linkedDocument.file_path?.split('/').pop() || 'document.pdf',
-        type: linkedDocument.file_type || 'application/pdf'
+    try {
+      const kycDoc = await fetchKycDocumentData(linkedDocument.document_id);
+      
+      if (!kycDoc) {
+        toast({ title: 'Error', description: 'Could not load document configuration.', variant: 'destructive' });
+        return null;
       }
-    };
 
-    return previewData;
-  } catch (error) {
-    toast({ title: 'Error', description: 'Failed to prepare document preview.', variant: 'destructive' });
-    return null;
-  }
-}, [linkedDocument, linkedDocuments, fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
+      const previewData = {
+        documentId: linkedDocument.id,
+        documentName: kycDoc.display_name || kycDoc.name || 'Document',
+        fileUrl: linkedDocument.file_path || linkedDocument.download_url,
+        fileName: linkedDocument.file_path?.split('/').pop() || 'document.pdf',
+        extractedData: linkedDocument.extracted_data || {},
+        fields: transformKycFieldsToPreviewFormat(kycDoc.fields || []),
+        kycDoc,
+        document: linkedDocument,
+        type: kycDoc.document_type || 'document',
+        file: {
+          url: linkedDocument.file_path || linkedDocument.download_url,
+          name: linkedDocument.file_name || linkedDocument.file_path?.split('/').pop() || 'document.pdf',
+          type: linkedDocument.file_type || 'application/pdf'
+        }
+      };
+
+      return previewData;
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to prepare document preview.', variant: 'destructive' });
+      return null;
+    }
+  }, [linkedDocument, fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
+
   const handleViewDocument = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsLoading(true);
@@ -345,146 +361,146 @@ export default function EditableStageCell({
     }
   }, [onSave, previewDocument, stage.id, task.id]);
 
-
-  // RENDER LOGIC
-  if (isEditing && !requiresUpload) {
-    return (
-      <div className="flex items-center gap-2 min-w-[200px]">
-        <Input
-          ref={inputRef}
-          type="date"
-          value={editValue}
-          onChange={(e) => setEditValue(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onBlur={handleSave}
-          className="text-sm"
-          disabled={isLoading}
-        />
-        <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-green-600" onClick={handleSave} disabled={isLoading}><Check className="h-3 w-3" /></Button>
-        <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-600" onClick={handleCancel} disabled={isLoading}><X className="h-3 w-3" /></Button>
-      </div>
-    );
-  }
-
-  const renderContent = () => {
-    if (!isDocumentRow && !isStageApplicable) {
-      return <span className="text-gray-400">N/A</span>;
+  // ========================================
+  // RENDER MODE: DATE COLUMN
+  // ========================================
+  if (renderMode === 'date') {
+    if (!isStageApplicable) {
+      return <span className="text-sm text-gray-400 italic">N/A</span>;
     }
 
-    if (isDocumentRow) {
-      if (!isDocumentApplicable(documentData, task)) {
-        return <span className="text-gray-400">N/A</span>;
-      }
-      const docValue = typeof value === 'object' ? value : { status: value };
-      const hasAutomation = !!(documentData?.automation?.automationId || documentData?.automation?.id);
-
+    // Date editing mode for non-document stages
+    if (isEditing && !requiresUpload) {
       return (
-        <div className="flex items-center gap-2 justify-center">
-          <span>{docValue.status}</span>
-          {docValue.hasDocument && !docValue.hasIndicator && !docValue.isOldDocument ? (
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-green-600" onClick={handleViewDocument} title="View details"><Eye className="h-3 w-3" /></Button>
-          ) : (docValue.status === 'Not Linked' && hasAutomation) && (
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-amber-500" title="Run Automation" onClick={handleTriggerAutomation}><Zap className="h-3 w-3" /></Button>
+        <div className="flex items-center gap-2 min-w-[150px]">
+          <Input
+            ref={inputRef}
+            type="date"
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={handleSave}
+            className="text-sm h-7"
+            disabled={isLoading}
+          />
+          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-green-600" onClick={handleSave} disabled={isLoading}>
+            <Check className="h-3 w-3" />
+          </Button>
+          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-600" onClick={handleCancel} disabled={isLoading}>
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      );
+    }
+
+    // Display date or "Add Date" button
+    if (stageDate && stageDate !== 'NaN/NaN/NaN') {
+      return (
+        <div 
+          className="flex items-center gap-2 group cursor-pointer"
+          onClick={() => !requiresUpload && setIsEditing(true)}
+        >
+          <Badge variant="default" className="bg-green-100 text-green-800 hover:bg-green-200">
+            <Check className="h-3 w-3 mr-1" />
+            {formatDateDisplay(stageDate)}
+          </Badge>
+          {!requiresUpload && (
+            <Pencil className="h-3 w-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
           )}
         </div>
       );
     }
 
-    if (requiresUpload) {
-      const hasAnyAutomation = stage.documents.some((doc: any) => isDocumentApplicable(doc, task) && (doc.automationId || doc.automation?.id));
-
+    // No date available
+    if (!requiresUpload) {
       return (
-        <div className="grid grid-cols-3 gap-2">
-          <div className="col-span-2">{stageDate && <div className="text-xs text-gray-600 text-center mt-1">{formatDateDisplay(stageDate)}</div>}</div>
-          <div className="col-span-1 flex gap-1">
-            {!hasLinkedDocument && hasAnyAutomation && (
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-amber-500" onClick={handleTriggerAutomation} title="Run automation"><Zap className="h-4 w-4" /></Button>
-            )}
-            {hasLinkedDocument && (
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-green-600" onClick={handleViewDocument} title="View details"><Eye className="h-4 w-4" /></Button>
-            )}
-            <Button variant="ghost" size="icon" className={`h-8 w-8 ${hasLinkedDocument ? 'text-blue-400' : 'text-blue-600'}`} onClick={handleDocumentUpload} title={hasLinkedDocument ? 'Upload new' : 'Upload document'}><Upload className="h-4 w-4" /></Button>
-          </div>
-        </div>
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          className="h-7 px-3 text-gray-600 border border-dashed border-gray-300 hover:border-gray-400"
+          onClick={() => setIsEditing(true)}
+        >
+          <Calendar className="h-3 w-3 mr-1" />
+          Add Date
+        </Button>
       );
     }
 
-    // Non-upload stages
+    // Document stage without linked document
+    return <span className="text-sm text-gray-500 italic">-</span>;
+  }
+
+  // ========================================
+  // RENDER MODE: ACTIONS COLUMN
+  // ========================================
+  if (renderMode === 'actions') {
+    if (!isStageApplicable) {
+      return <span className="text-sm text-gray-400 italic">-</span>;
+    }
+
     const hasAutomation = !!(stage?.automation?.automationId || stage?.automation?.id || stage?.web_automation?.automationId);
+    const hasAnyAutomation = requiresUpload && stage.documents?.some((doc: any) => 
+      isDocumentApplicable(doc, task) && (doc.automationId || doc.automation?.id)
+    );
+
     return (
-      <div className="flex items-center gap-2" onClick={() => !stageDate && setIsEditing(true)}>
-        {hasAutomation && (
-          <Button variant="ghost" size="icon" className="h-6 w-6 text-amber-500" onClick={handleTriggerAutomation} disabled={isAutomationRunning} title="Run automation">
-            {isAutomationRunning ? <Clock className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+      <div className="flex items-center justify-center gap-1">
+        {/* Automation button */}
+        {(hasAutomation || hasAnyAutomation) && !hasLinkedDocument && (
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-7 w-7 text-amber-500 hover:bg-amber-50" 
+            onClick={handleTriggerAutomation} 
+            disabled={isAutomationRunning}
+            title="Run automation"
+          >
+            {isAutomationRunning ? <Clock className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
           </Button>
         )}
-        {stageDate && stageDate !== 'NaN/NaN/NaN' ? (
-          <div className="flex items-center gap-2 group cursor-pointer">
-            <Badge variant="default" className="bg-green-100 text-green-800"><Check className="h-3 w-3 mr-1" />{formatDateDisplay(stageDate)}</Badge>
-            <Pencil className="h-3 w-3 text-gray-400 opacity-0 group-hover:opacity-100" />
-          </div>
-        ) : (
-          <Button variant="ghost" size="sm" className="h-8 px-3 text-gray-600 border border-dashed border-gray-300">
-            <Calendar className="h-3 w-3 mr-1" />Add Date
+
+        {/* View document button */}
+        {hasLinkedDocument && (
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-7 w-7 text-green-600 hover:bg-green-50" 
+            onClick={handleViewDocument} 
+            title="View document details"
+          >
+            <Eye className="h-3.5 w-3.5" />
+          </Button>
+        )}
+
+        {/* Upload document button */}
+        {requiresUpload && (
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className={`h-7 w-7 ${hasLinkedDocument ? 'text-blue-400 hover:bg-blue-50' : 'text-blue-600 hover:bg-blue-50'}`}
+            onClick={handleDocumentUpload} 
+            title={hasLinkedDocument ? 'Upload new document' : 'Upload document'}
+          >
+            <Upload className="h-3.5 w-3.5" />
+          </Button>
+        )}
+
+        {/* Edit button for non-document stages with dates */}
+        {!requiresUpload && stageDate && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-gray-600 hover:bg-gray-100"
+            onClick={() => setIsEditing(true)}
+            title="Edit date"
+          >
+            <Pencil className="h-3.5 w-3.5" />
           </Button>
         )}
       </div>
     );
-  };
+  }
 
-  const automationId = isDocumentRow
-    ? documentData?.automation?.automationId || documentData?.automation?.id
-    : stage?.web_automation?.automationId || stage?.web_automation?.id;
-
-  return (
-    <>
-      <AutomationMappingDialog
-        isOpen={automationDialogOpen}
-        onClose={() => setAutomationDialogOpen(false)}
-        taskId={task.id}
-        automationId={automationId}
-        task={task}
-        stage={stage}
-        allDocuments={allDocuments}
-      />
-
-      <div className="flex items-center justify-center min-h-[32px] rounded p-1">
-        {renderContent()}
-      </div>
-
-      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-        <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col">
-          <DialogHeader><DialogTitle>Preview: {previewDocument?.document_display_name} - {previewDocument?.company_name}</DialogTitle></DialogHeader>
-          <div className="flex-grow overflow-y-auto p-1 space-y-4">
-            <div className="border rounded-lg">
-              <div className="p-3 bg-gray-50 border-b ">
-                <h3 className="font-medium text-sm">Document (Uploaded: {previewDocument?.created_at ? formatDateDisplay(previewDocument.created_at) : 'N/A'})</h3>
-              </div>
-              <div className="p-2">
-                <div className="flex-1 overflow-auto border rounded-lg">
-                  {previewDocument ? (
-                    <ExtractionPreview
-                      key={previewDocument.documentId}
-                      documentName={previewDocument.documentName}
-                      extractedData={previewDocument.extractedData}
-                      fields={previewDocument.fields}
-                      fileUrl={previewDocument.fileUrl}
-                      fileName={previewDocument.fileName}
-                      onSave={handlePreviewSave}
-                      expanded={true}
-                      showSaveButton={!!onSave}
-                      type={previewDocument.type}
-                      file={previewDocument.file}
-                    />
-                  ) : (
-                    <div className="h-full flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /><p className="ml-4">Loading preview...</p></div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
+  // Fallback (shouldn't reach here)
+  return null;
 }
