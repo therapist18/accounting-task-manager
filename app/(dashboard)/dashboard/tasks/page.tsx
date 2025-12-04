@@ -4,10 +4,11 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import DepartmentTasksManager from "./DepartmentTasksManager"
 import TasksPage from "./TasksPage"
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Department } from "../departments/departments/database";
 import { Task } from "@/lib/types";
 import supabase from "@/lib/supabase/client";
+import { toast } from "@/hooks/use-toast";
 
 export default function Page() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -15,66 +16,76 @@ export default function Page() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+const handleStageStatusSave = useCallback(async (stageId: string, taskId: string, date: string) => {
+  try {
+    // 1. Get current task stages (Lightweight fetch)
+    const { data: currentTask, error: fetchError } = await supabase
+      .from('tm_tasks')
+      .select('stages, status')
+      .eq('id', taskId)
+      .single()
 
-  const handleStageStatusSave = async (stageId: string, taskId: string, date: string) => {
-    console.log('handleStageStatusSave called with:', { stageId, taskId, date });
-    try {
-      // Get current task data
-      const { data: currentTask, error: fetchError } = await supabase
-        .from('tm_tasks')
-        .select('stages')
-        .eq('id', taskId)
-        .single()
+    if (fetchError) throw fetchError
 
-      if (fetchError) throw fetchError
+    // 2. Determine the new status based on stage ID
+    let newStatus = 'completed';
+    let taskStatusUpdate = {};
 
-      // Parse existing stages or create new object
-      const existingStages = currentTask.stages || {}
-
-      // The date is already in DD/MM/YYYY format, so use it directly
-      const formattedDate = date; // No need to re-parse!
-
-      // Update stages object
-      const updatedStages = {
-        ...existingStages,
-        [stageId]: {
-          date: formattedDate,
-          status: 'completed',
-          completedAt: new Date().toISOString()
-        }
-      }
-
-      // Check if this is confirmation stage
-      const confirmationStageId = "a19b270e-6d1e-4e6d-b2bc-f21db72cde08"
-      const shouldMoveToProgress = stageId === confirmationStageId
-
-      // Update task with new stages data and potentially new status
-      const { error: updateError } = await supabase
-        .from('tm_tasks')
-        .update({
-          stages: updatedStages,
-          status: shouldMoveToProgress ? 'in_progress' : undefined,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', taskId)
-
-      if (updateError) throw updateError
-
-      // Refresh tasks after successful update
-      const { data: tasksData, error: tasksError } = await supabase
-        .from('tm_tasks')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (tasksError) throw tasksError;
-
-      setTasks(tasksData || []);
-      return Promise.resolve()
-    } catch (error) {
-      console.error('Error saving stage status:', error)
-      throw error
+    if (stageId === 'caefd742-5de5-4341-a3bb-81d7b9dd2b73') {
+      newStatus = 'endorsed';
+      taskStatusUpdate = { status: 'endorsed' };
+    } else if (stageId === '072b9710-45df-4a05-ba65-01b4ef29d61d') {
+      newStatus = 'write_up_completed';
+      taskStatusUpdate = { status: 'write_up_completed' };
+    } else if (stageId === 'a19b270e-6d1e-4e6d-b2bc-f21db72cde08') {
+      taskStatusUpdate = { status: 'in_progress' };
     }
+
+    // 3. Prepare Update Payload
+    const existingStages = currentTask?.stages || {}
+    const timestamp = new Date().toISOString()
+
+    const updatedStages = {
+      ...existingStages,
+      [stageId]: {
+        ...existingStages[stageId],
+        date: date, // Using the passed date string directly
+        status: newStatus,
+        completedAt: timestamp,
+        updatedAt: timestamp
+      }
+    }
+
+    // 4. Execute Update
+    const { error: updateError } = await supabase
+      .from('tm_tasks')
+      .update({
+        ...taskStatusUpdate,
+        stages: updatedStages,
+        updated_at: timestamp
+      })
+      .eq('id', taskId)
+
+    if (updateError) throw updateError
+
+    toast({
+      title: "Success",
+      description: `Stage marked as ${newStatus.replace('_', ' ')}`,
+    })
+
+    return Promise.resolve()
+  } catch (error: any) {
+    console.error('Error saving stage status:', error)
+    
+    toast({
+      title: "Error",
+      description: "Failed to update stage status",
+      variant: "destructive"
+    })
+    
+    throw error
   }
+}, []) // Removed the dependencies since we don't need them here
 
   return (
     <>

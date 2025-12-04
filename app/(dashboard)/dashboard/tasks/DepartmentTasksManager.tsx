@@ -978,30 +978,50 @@ export default function DepartmentTasksManager({
   }, [getClassesForSubdepartment, enhancedTasksData]);
 
   const executePushCase = useCallback(async (
-    task: UtilTask,
-    targetDeptId: number,
-    targetSubDeptId: number,
-    targetSubDeptName: string,
-    applicantClassId: string | null,
-    dependantClassId: string | null
-  ) => {
-    setIsPushingCase(true);
-    toast({ title: "Pushing Case...", description: `Creating new task(s) in ${targetSubDeptName}.` });
-    const isReEntry = targetSubDeptId === 7;
-    const isPrincipalMember = task.applicant_type === 'principal' || task.principal_member === true;
-    const isAlien = targetSubDeptId === 6;
-    try {
-      const tasksToCreate = [];
-      const currentDate = new Date().toISOString();
-      const stages = {};
-      if (isAlien || isReEntry) {
-        stages['1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'] = { date: currentDate, status: 'write_up_completed' };
-        stages['a19b270e-6d1e-4e6d-b2bc-f21db72cde08'] = { date: currentDate, status: 'write_up_completed' };
-        stages['9ccdbfa6-8d76-49db-b8d4-09742c734905'] = { date: currentDate, status: 'write_up_completed' };
-      }
-      const { dependantsMap } = await fetchAllDependantsAndApplicants([task]);
-      const dependants = [];
-      let skippedMinors = 0;
+  task: UtilTask,
+  targetDeptId: number,
+  targetSubDeptId: number,
+  targetSubDeptName: string,
+  applicantClassId: string | null,
+  dependantClassId: string | null
+) => {
+  setIsPushingCase(true);
+  toast({ title: "Pushing Case...", description: `Creating new task(s) in ${targetSubDeptName}.` });
+  const isReEntry = targetSubDeptId === 7;
+  const isPrincipalMember = task.applicant_type === 'principal' || task.principal_member === true;
+  const isAlien = targetSubDeptId === 6;
+  
+  try {
+    const tasksToCreate = [];
+    const currentDate = new Date().toISOString();
+    const stages = {};
+    
+    // Update stage statuses based on the target department
+    if (isAlien || isReEntry) {
+      stages['1e6ebd85-db1e-4eb9-abb6-5fc145ac8caa'] = { 
+        date: currentDate, 
+        status: 'write_up_completed',
+        completedAt: currentDate,
+        updatedAt: currentDate
+      };
+      stages['a19b270e-6d1e-4e6d-b2bc-f21db72cde08'] = { 
+        date: currentDate, 
+        status: 'in_progress',
+        completedAt: currentDate,
+        updatedAt: currentDate
+      };
+      stages['9ccdbfa6-8d76-49db-b8d4-09742c734905'] = { 
+        date: currentDate, 
+        status: 'write_up_completed',
+        completedAt: currentDate,
+        updatedAt: currentDate
+      };
+    }
+
+    // Rest of the function remains the same...
+    const { dependantsMap } = await fetchAllDependantsAndApplicants([task]);
+    const dependants = [];
+    let skippedMinors = 0;
 
       if (isReEntry) {
         if (!isPrincipalMember) tasksToCreate.push({ status: 'in_progress', department_id: targetDeptId, subdepartment_id: targetSubDeptId, class_id: applicantClassId ? Number(applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, current_stage_id: null, current_stage_started_at: null, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: false, understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(task.applicant_name || ''), individual_id: String(task.individual_id || '') });
@@ -1020,19 +1040,43 @@ export default function DepartmentTasksManager({
           }
         }
       }
-      const { data: newTasks, error } = await supabase.from('tm_tasks').insert(tasksToCreate).select();
-      if (error) throw error;
-      const mainTask = newTasks[0]; const dependantTasks = newTasks.slice(1);
-      let successMessage = `Main case pushed to ${targetSubDeptName} successfully. New Task ID: ${mainTask.id}`;
-      if (dependantTasks.length > 0) successMessage += `\n${dependantTasks.length} dependant task(s) also created.`;
-      if (targetSubDeptId === 6 && skippedMinors > 0) successMessage += `\nNote: ${skippedMinors} minor dependant(s) were skipped for Alien cases.`;
-      toast({ title: "Success", description: successMessage, variant: "default" });
-      await refreshAllData();
-    } catch (error) {
-      console.error(`Error pushing case to ${targetSubDeptName}:`, error);
-      toast({ title: "Error", description: `Failed to push case: ${error.message}`, variant: "destructive" });
-    } finally { setIsPushingCase(false); }
-  }, [refreshAllData, fetchAllDependantsAndApplicants]);
+      const { data: newTasks, error } = await supabase
+      .from('tm_tasks')
+      .insert(tasksToCreate)
+      .select();
+
+    if (error) throw error;
+
+    const mainTask = newTasks[0];
+    const dependantTasks = newTasks.slice(1);
+    let successMessage = `Main case pushed to ${targetSubDeptName} successfully. New Task ID: ${mainTask.id}`;
+    
+    if (dependantTasks.length > 0) {
+      successMessage += `\n${dependantTasks.length} dependant task(s) also created.`;
+    }
+    
+    if (targetSubDeptId === 6 && skippedMinors > 0) {
+      successMessage += `\nNote: ${skippedMinors} minor dependant(s) were skipped for Alien cases.`;
+    }
+    
+    toast({ 
+      title: "Success", 
+      description: successMessage, 
+      variant: "default" 
+    });
+    
+    await refreshAllData();
+  } catch (error) {
+    console.error(`Error pushing case to ${targetSubDeptName}:`, error);
+    toast({ 
+      title: "Error", 
+      description: `Failed to push case: ${error.message}`, 
+      variant: "destructive" 
+    });
+  } finally { 
+    setIsPushingCase(false); 
+  }
+}, [refreshAllData, fetchAllDependantsAndApplicants]);
 
   const handleDownloadZip = useCallback(async (task: UtilTask) => {
     setIsDownloading(true);
@@ -1075,28 +1119,70 @@ export default function DepartmentTasksManager({
     } finally { setIsDownloading(false); }
   }, [allDocuments, getTaskHierarchy, stages]);
 
-  const enhancedHandleStageStatusSave = useCallback(async (
-    stageId: string,
-    taskId: string,
-    value: string,
-    updatedExtractedDetails?: Record<string, any>
-  ) => {
-    try {
-      if (handleStageStatusSave) await handleStageStatusSave(stageId, taskId, value, updatedExtractedDetails)
-      const task = tasks.find(t => t.id.toString() === taskId.toString())
-      if (!task) return
-      const updatedStages = { ...task.stages, [stageId]: { status: 'write_up_completed', date: value, completedAt: new Date().toISOString() } }
-      const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages)
-      const updateData: any = { stages: updatedStages, updated_at: new Date().toISOString() }
-      if (currentStage) { updateData.current_stage_id = currentStage.id; updateData.current_stage_started_at = new Date().toISOString(); }
-      const { error } = await supabase.from('tm_tasks').update(updateData).eq('id', taskId)
-      if (error) throw error
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
-    } catch (error) {
-      console.error('Error updating stage status:', error)
-      toast({ title: "Error", description: "Failed to update stage status.", variant: "destructive" })
+const enhancedHandleStageStatusSave = useCallback(async (
+  stageId: string,
+  taskId: string,
+  value: string,
+  updatedExtractedDetails?: Record<string, any>
+) => {
+  try {
+    if (handleStageStatusSave) await handleStageStatusSave(stageId, taskId, value, updatedExtractedDetails)
+    const task = tasks.find(t => t.id.toString() === taskId.toString())
+    if (!task) return
+
+    // Determine status based on stage ID
+    let status = 'completed';
+    let taskStatusUpdate = {};
+    
+    if (stageId === 'caefd742-5de5-4341-a3bb-81d7b9dd2b73') {
+      status = 'endorsed';
+      taskStatusUpdate = { status: 'endorsed' };
+    } else if (stageId === '072b9710-45df-4a05-ba65-01b4ef29d61d') {
+      status = 'write_up_completed';
+      taskStatusUpdate = { status: 'write_up_completed' };
+    } else if (stageId === 'a19b270e-6d1e-4e6d-b2bc-f21db72cde08') {
+      status = 'in_progress';
+      taskStatusUpdate = { status: 'in_progress' };
     }
-  }, [handleStageStatusSave, tasks, stages, determineCurrentStage, loadTasksData, activeDepartmentTab, activeSubdepartmentTab])
+
+    const updatedStages = { 
+      ...task.stages, 
+      [stageId]: { 
+        ...task.stages?.[stageId],
+        status,
+        date: value, 
+        completedAt: new Date().toISOString() 
+      } 
+    }
+    
+    const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages)
+    const updateData: any = { 
+      ...taskStatusUpdate,
+      stages: updatedStages, 
+      updated_at: new Date().toISOString() 
+    }
+    
+    if (currentStage) { 
+      updateData.current_stage_id = currentStage.id; 
+      updateData.current_stage_started_at = new Date().toISOString(); 
+    }
+    
+    const { error } = await supabase
+      .from('tm_tasks')
+      .update(updateData)
+      .eq('id', taskId)
+
+    if (error) throw error
+    await loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
+  } catch (error) {
+    console.error('Error updating stage status:', error)
+    toast({ 
+      title: "Error", 
+      description: "Failed to update stage status.", 
+      variant: "destructive" 
+    })
+  }
+}, [handleStageStatusSave, tasks, stages, determineCurrentStage, loadTasksData, activeDepartmentTab, activeSubdepartmentTab])
 
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
     if (!tasks.length) return [];
@@ -1209,27 +1295,40 @@ export default function DepartmentTasksManager({
                   name: docDisplayName
                 },
                 isSubRow: true,
-                getValue: (task: UtilTask) => {
-                  if (!isStageApplicableToTask(stage, task, departments)) {
-                    return 'N/A';
-                  }
+              getValue: (task: UtilTask) => {
+  // Check if stage is applicable to this task
+  if (!isStageApplicableToTask(stage, task, departments)) {
+    return 'N/A';
+  }
 
-                  const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
-                  const hasIndicator = linkedDocument?.indicator === true;
-                  const isApplicable = isDocumentApplicable(doc, task);
+  // Get all linked documents for this task and stage
+  const linkedDocuments = task.source_document_id?.[stage.id] || [];
+  
+  // Find if this specific document is linked
+  const linkedDocument = linkedDocuments.find(
+    (d: any) => d.document_id === doc.kycId
+  );
+  
+  // Check if document is applicable to this task
+  const isApplicable = isDocumentApplicable(doc, task);
+  
+  // If document is not applicable, return N/A
+  if (!isApplicable) {
+    return 'N/A';
+  }
 
-                  if (!isApplicable) {
-                    return 'N/A';
-                  }
-                  return {
-                    hasDocument: !!linkedDocument,
-                    hasIndicator,
-                    isApplicable: true,
-                    status: hasIndicator
-                      ? 'Preview Not Available'
-                      : (linkedDocument ? 'Linked' : 'Not Linked')
-                  };
-                }
+  // Document is applicable, check if it has an indicator
+  const hasIndicator = linkedDocument?.indicator === true;
+
+  return {
+    hasDocument: !!linkedDocument,
+    hasIndicator,
+    isApplicable: true,
+    status: hasIndicator 
+      ? 'Preview Not Available' 
+      : (linkedDocument ? 'Linked' : 'Not Linked')
+  };
+}
               })
 
               if (expandedDocuments.has(doc.id) && doc.kycId) {
@@ -1465,25 +1564,53 @@ export default function DepartmentTasksManager({
 
     // Handle document object with hasDocument, hasIndicator, and status
     if (typeof value === 'object' && value !== null && 'hasDocument' in value) {
-      const { hasDocument, hasIndicator, status, isApplicable } = value;
+      const { hasDocument, hasIndicator, status, isApplicable, documentInfo } = value;
 
       // If document is not applicable, show N/A
       if (isApplicable === false) {
         return <span className="text-sm text-gray-400 italic">N/A</span>;
       }
 
-      return (
+      const statusContent = (
         <div className="flex items-center gap-1">
           {hasDocument ? (
             <CheckCircle2 className="h-4 w-4 text-green-500" />
           ) : (
             <XCircle className="h-4 w-4 text-red-500" />
           )}
-          <span className="text-sm text-slate-700">
+          <span className={`text-sm ${hasDocument ? 'text-blue-600 hover:underline cursor-pointer' : 'text-slate-700'}`}>
             {status}
           </span>
         </div>
       );
+
+      // Only show popover for linked documents with additional info
+      if (hasDocument && documentInfo) {
+        return (
+          <Popover>
+            <PopoverTrigger asChild>
+              {statusContent}
+            </PopoverTrigger>
+            <PopoverContent className="w-80" align="start">
+              <div className="space-y-2">
+                <h4 className="font-medium leading-none">Document Details</h4>
+                <div className="text-sm text-muted-foreground">
+                  {documentInfo.name && <p><span className="font-medium">Name:</span> {documentInfo.name}</p>}
+                  {documentInfo.type && <p><span className="font-medium">Type:</span> {documentInfo.type}</p>}
+                  {documentInfo.uploadedAt && (
+                    <p><span className="font-medium">Uploaded:</span> {new Date(documentInfo.uploadedAt).toLocaleDateString()}</p>
+                  )}
+                  {documentInfo.size && (
+                    <p><span className="font-medium">Size:</span> {formatFileSize(documentInfo.size)}</p>
+                  )}
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+        );
+      }
+
+      return statusContent;
     }
 
     // Handle stage data display with columnType
