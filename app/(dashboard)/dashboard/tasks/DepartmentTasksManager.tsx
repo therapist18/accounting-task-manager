@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AutomationDialog } from "@/app/(dashboard)/dashboard/settings/automation/components/AutomationDialog";
-import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, Zap, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff } from "lucide-react"
+import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, Zap, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { Building, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -41,7 +41,8 @@ import {
   getCellContent as utilGetCellContent,
   sortTasks,
   filterTasksBySearch,
-  ENHANCED_TABLE_HEADERS
+  ENHANCED_TABLE_HEADERS,
+  isDocumentApplicable
 } from './overall-view/tableUtils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { OtherDialog } from "./components/OtherDialog"
@@ -381,33 +382,64 @@ export default function DepartmentTasksManager({
     if (!assistantHistory || !Array.isArray(assistantHistory)) return [];
     return assistantHistory.filter(assistant => !assistant.end_date);
   }, []);
+  const getDocumentForTaskStage = useCallback((
+    task: UtilTask,
+    stage: {
+      id: string;
+      documents?: Array<{
+        kycId: string;
+        isSpecial?: boolean;
+        targetEntities?: Array<{
+          class_id?: string | number;
+          subdept_id?: string | number;
+          entityType?: 'class' | 'subdept' | 'subclass';
+        }>;
+      }>
+    },
+  ): Document[] => {
+    const linkedDocumentData = task.source_document_id?.[stage.id];
 
-const getDocumentForTaskStage = useCallback((
-  task: UtilTask,
-  stage: { id: string; documents?: { kycId: string }[] },
-): Document[] => {
-  const linkedDocumentData = task.source_document_id?.[stage.id];
+    if (!linkedDocumentData) {
+      return [];
+    }
 
-  if (!linkedDocumentData) {
-    return [];
-  }
+    // Get task's class and subdepartment IDs for comparison
+    const taskClassId = task.class_id?.toString();
+    const taskSubdeptId = task.subdepartment?.id?.toString() || task.subdepartment_id?.toString();
 
-  // Handle both single document and array of documents
-  const documentRefs = Array.isArray(linkedDocumentData) 
-    ? linkedDocumentData 
-    : [linkedDocumentData];
+    // Handle both single document and array of documents
+    const documentRefs = Array.isArray(linkedDocumentData)
+      ? linkedDocumentData
+      : [linkedDocumentData];
 
-  const linkedDocs = documentRefs
-    .map(ref => {
-      const documentId = typeof ref === 'string' ? ref : ref.id;
-      const doc = allDocuments.find(doc => doc.id.toString() === documentId.toString());
-            
-      return doc;
-    })
-    .filter((doc): doc is Document => !!doc);
+    const linkedDocs = documentRefs
+      .map(ref => {
+        const documentId = typeof ref === 'string' ? ref : ref.id;
+        const doc = allDocuments.find(doc => doc.id.toString() === documentId.toString());
 
-  return linkedDocs;
-}, [allDocuments]);
+        if (!doc) return null;
+
+        // For non-special documents, always include them
+        if (!doc.isSpecial) return doc;
+
+        // For special documents, check target entities
+        if (Array.isArray(doc.targetEntities) && doc.targetEntities.length > 0) {
+          const isApplicable = doc.targetEntities.some(entity => {
+            const classMatch = !entity.class_id || entity.class_id.toString() === taskClassId;
+            const subdeptMatch = !entity.subdept_id || entity.subdept_id.toString() === taskSubdeptId;
+            return classMatch && subdeptMatch;
+          });
+
+          return isApplicable ? doc : null;
+        }
+
+        // For backward compatibility, include the document if no target entities are defined
+        return doc;
+      })
+      .filter((doc): doc is Document => !!doc);
+
+    return linkedDocs;
+  }, [allDocuments]);
 
   const getActiveStaffFromSubdepartment = useCallback((subdepartmentId: string) => {
     if (!subdepartmentId || !departments.length) {
@@ -1070,7 +1102,7 @@ const getDocumentForTaskStage = useCallback((
     if (!tasks.length) return [];
 
     console.log('Generating table rows with stages:', {
-      allStages: stages?.map(s => ({id: s.id, name: s.name, status: s.status})),
+      allStages: stages?.map(s => ({ id: s.id, name: s.name, status: s.status })),
       visibleStageIds: Array.from(visibleStageIds),
       showNAStages
     });
@@ -1079,8 +1111,8 @@ const getDocumentForTaskStage = useCallback((
     const allStages = stages
       .filter(stage => stage && visibleStageIds.has(stage.id.toString()))
       .sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-      
-    console.log('Final filtered stages:', allStages.map(s => ({id: s.id, name: s.name})));
+
+    console.log('Final filtered stages:', allStages.map(s => ({ id: s.id, name: s.name })));
     const rows = []
 
     // Stats Section
@@ -1178,16 +1210,24 @@ const getDocumentForTaskStage = useCallback((
                 },
                 isSubRow: true,
                 getValue: (task: UtilTask) => {
-                  if (!isStageApplicableToTask(stage, task, departments)) return 'N/A';
+                  if (!isStageApplicableToTask(stage, task, departments)) {
+                    return 'N/A';
+                  }
 
                   const linkedDocument = getDocumentForTaskStage(task, { ...stage, documents: [doc] });
                   const hasIndicator = linkedDocument?.indicator === true;
+                  const isApplicable = isDocumentApplicable(doc, task);
 
+                  if (!isApplicable) {
+                    return 'N/A';
+                  }
                   return {
                     hasDocument: !!linkedDocument,
                     hasIndicator,
-                    status: hasIndicator ? 'Preview Not Available' :
-                      (linkedDocument ? 'Linked' : 'Not Linked')
+                    isApplicable: true,
+                    status: hasIndicator
+                      ? 'Preview Not Available'
+                      : (linkedDocument ? 'Linked' : 'Not Linked')
                   };
                 }
               })
@@ -1270,30 +1310,30 @@ const getDocumentForTaskStage = useCallback((
 
   const handleViewDocument = useCallback(async (task: any, stage: any) => {
     try {
-    const linkedDocs = getDocumentForTaskStage(task, stage);
-   
-    if (linkedDocs.length === 0) {
-      toast({
-        title: 'No Linked Document',
-        description: `No document has been linked for this stage yet. Please use the 'Link' button to link a document first.`,
-        variant: 'default',
-      });
-      return;
-    }
+      const linkedDocs = getDocumentForTaskStage(task, stage);
 
-    // Use the first linked document for preview
-    const document = linkedDocs[0];
-    
-    if (document.indicator === true) {
-      toast({
-        title: 'Preview not available',
-        description: 'Document preview is not available for this document.',
-        variant: 'default',
-      });
-      return;
-    }
+      if (linkedDocs.length === 0) {
+        toast({
+          title: 'No Linked Document',
+          description: `No document has been linked for this stage yet. Please use the 'Link' button to link a document first.`,
+          variant: 'default',
+        });
+        return;
+      }
 
-    const kycId = document.document_id;
+      // Use the first linked document for preview
+      const document = linkedDocs[0];
+
+      if (document.indicator === true) {
+        toast({
+          title: 'Preview not available',
+          description: 'Document preview is not available for this document.',
+          variant: 'default',
+        });
+        return;
+      }
+
+      const kycId = document.document_id;
       if (!kycId) {
         toast({
           title: 'Error',
@@ -1415,76 +1455,99 @@ const getDocumentForTaskStage = useCallback((
     }
   }, [onTaskAction, refreshAllData])
 
-const renderCellContent = useCallback((row: any, task: any, columnType?: 'date' | 'actions') => {
-  const value = row.getValue?.(task) ?? '';
+  const renderCellContent = useCallback((row: any, task: any, columnType?: 'date' | 'actions') => {
+    const value = row.getValue?.(task) ?? '';
 
-  // Early return for N/A values
-  if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
-    return <span className="text-sm text-gray-400 italic">N/A</span>;
-  }
+    // Early return for N/A values
+    if (value === 'N/A' || (typeof value === 'object' && value?.status === 'N/A')) {
+      return <span className="text-sm text-gray-400 italic">N/A</span>;
+    }
 
-  // ✅ Handle stage data display with columnType
-  if (row.type === 'stage' && row.stage) {
-    return renderEditableStageCell(row, task, columnType || 'date');
-  }
-  // Handle field type
-  if (row.type === 'field') {
-    return renderFieldContent(row, value);
-  }
+    // Handle document object with hasDocument, hasIndicator, and status
+    if (typeof value === 'object' && value !== null && 'hasDocument' in value) {
+      const { hasDocument, hasIndicator, status, isApplicable } = value;
 
-  // Handle different row types
-  switch (row.type) {
-    case 'badge':
-    case 'stat':
-      return <span className="text-sm font-semibold">{value}</span>;
+      // If document is not applicable, show N/A
+      if (isApplicable === false) {
+        return <span className="text-sm text-gray-400 italic">N/A</span>;
+      }
 
-    case 'date':
-      return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
+      return (
+        <div className="flex items-center gap-1">
+          {hasDocument ? (
+            <CheckCircle2 className="h-4 w-4 text-green-500" />
+          ) : (
+            <XCircle className="h-4 w-4 text-red-500" />
+          )}
+          <span className="text-sm text-slate-700">
+            {status}
+          </span>
+        </div>
+      );
+    }
 
-    case 'actions':
-      return renderActionButtons(row, task);
+    // Handle stage data display with columnType
+    if (row.type === 'stage' && row.stage) {
+      return renderEditableStageCell(row, task, columnType || 'date');
+    }
+    // Handle field type
+    if (row.type === 'field') {
+      return renderFieldContent(row, value);
+    }
 
-    default:
-      return <span className="text-sm text-slate-800">{value}</span>;
-  }
-}, [
-  handleStageDocumentUpload,
-  handleViewDocument,
-  onTaskAction,
-  handleTaskEdit,
-  enhancedHandleStageStatusSave,
-  allDocuments,
-  handlePushCase,
-  handleDownloadZip,
-  isPushingCase,
-  isDownloading,
-  getKycFields
-]);
+    // Handle different row types
+    switch (row.type) {
+      case 'badge':
+      case 'stat':
+        return <span className="text-sm font-semibold">{value}</span>;
 
-const renderEditableStageCell = (row: any, task: any, renderMode: 'date' | 'actions' = 'date') => {
-  const requiresUpload = row.stage?.requires_upload !== false;
-  const linkedDocs = getDocumentForTaskStage(task, row.stage);
-  const stageData = task.stages?.[row.stage.id];
-  const cellValue = stageData?.date || stageData?.status || null;
-  
-  return (
-    <EditableStageCell
-      key={`${row.stage.id}-${renderMode}`}
-      stage={row.stage}
-      task={task}
-      value={cellValue}
-      onSave={enhancedHandleStageStatusSave}
-      onDocumentUpload={handleStageDocumentUpload}
-      onShowDocuments={handleViewDocument}
-      requiresUpload={requiresUpload}
-      departments={departments}
-      onAutomationClick={(e) => handleAutomationClick(e, row.stage, task.id)}
-      getKycFields={getKycFields}
-      linkedDocuments={linkedDocs}
-      renderMode={renderMode}  // ✅ Pass the render mode
-    />
-  );
-};
+      case 'date':
+        return <span className="text-sm text-slate-600">{formatDateValue(value)}</span>;
+
+      case 'actions':
+        return renderActionButtons(row, task);
+
+      default:
+        return <span className="text-sm text-slate-800">{value}</span>;
+    }
+  }, [
+    handleStageDocumentUpload,
+    handleViewDocument,
+    onTaskAction,
+    handleTaskEdit,
+    enhancedHandleStageStatusSave,
+    allDocuments,
+    handlePushCase,
+    handleDownloadZip,
+    isPushingCase,
+    isDownloading,
+    getKycFields
+  ]);
+
+  const renderEditableStageCell = (row: any, task: any, renderMode: 'date' | 'actions' = 'date') => {
+    const requiresUpload = row.stage?.requires_upload !== false;
+    const linkedDocs = getDocumentForTaskStage(task, row.stage);
+    const stageData = task.stages?.[row.stage.id];
+    const cellValue = stageData?.date || stageData?.status || null;
+
+    return (
+      <EditableStageCell
+        key={`${row.stage.id}-${renderMode}`}
+        stage={row.stage}
+        task={task}
+        value={cellValue}
+        onSave={enhancedHandleStageStatusSave}
+        onDocumentUpload={handleStageDocumentUpload}
+        onShowDocuments={handleViewDocument}
+        requiresUpload={requiresUpload}
+        departments={departments}
+        onAutomationClick={(e) => handleAutomationClick(e, row.stage, task.id)}
+        getKycFields={getKycFields}
+        linkedDocuments={linkedDocs}
+        renderMode={renderMode}  // ✅ Pass the render mode
+      />
+    );
+  };
 
   const renderFieldContent = (row: any, value: any) => {
     const fieldValue = typeof value === 'object' ? value.value : value;
@@ -1892,13 +1955,13 @@ const renderEditableStageCell = (row: any, task: any, renderMode: 'date' | 'acti
   useEffect(() => {
     if (stages && stages.length > 0) {
       // Show all stages if showNAStages is true, otherwise filter out N/A stages
-      const applicableStages = showNAStages 
-        ? [...stages] 
+      const applicableStages = showNAStages
+        ? [...stages]
         : stages.filter(stage => !stage.status || stage.status !== 'N/A');
-        
+
       console.log('Setting initial visible stages:', {
-        allStages: stages.map(s => ({id: s.id, name: s.name, status: s.status})),
-        applicableStages: applicableStages.map(s => ({id: s.id, name: s.name, status: s.status})),
+        allStages: stages.map(s => ({ id: s.id, name: s.name, status: s.status })),
+        applicableStages: applicableStages.map(s => ({ id: s.id, name: s.name, status: s.status })),
         showNAStages
       });
       setVisibleStageIds(new Set(applicableStages.map(s => s.id.toString())));
@@ -2337,10 +2400,10 @@ const renderEditableStageCell = (row: any, task: any, renderMode: 'date' | 'acti
                               </PopoverContent>
                             </Popover>
 
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              className="flex items-center gap-2" 
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-2"
                               onClick={() => setShowNAStages(!showNAStages)}
                             >
                               {showNAStages ? (
@@ -2354,10 +2417,10 @@ const renderEditableStageCell = (row: any, task: any, renderMode: 'date' | 'acti
                               )}
                             </Button>
 
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              className="flex items-center gap-2" 
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-2"
                               onClick={() => setIsReportDialogOpen(true)}
                             >
                               <FileText className="h-4 w-4" /> Reports
@@ -2451,7 +2514,7 @@ const renderEditableStageCell = (row: any, task: any, renderMode: 'date' | 'acti
                             onDocumentPreview={async (doc) => {
                               console.log('Document preview clicked:', doc);
                               setPreviewDocument(doc);
-                              
+
                               // If there's a document ID, try to fetch the extracted data
                               if (doc.document_id) {
                                 try {
@@ -2460,7 +2523,7 @@ const renderEditableStageCell = (row: any, task: any, renderMode: 'date' | 'acti
                                     .select('extracted_data')
                                     .eq('document_id', doc.document_id)
                                     .single();
-                                  
+
                                   if (extractionData?.extracted_data) {
                                     setExtractedData(extractionData.extracted_data);
                                   } else {
@@ -2473,9 +2536,9 @@ const renderEditableStageCell = (row: any, task: any, renderMode: 'date' | 'acti
                               } else {
                                 setExtractedData({});
                               }
-                              
+
                               setIsDocumentPreviewOpen(true);
-                            }}                     
+                            }}
                             onDeleteTask={async (task) => {
                               try {
                                 setIsDeleting(true);

@@ -486,7 +486,7 @@ export function UploadModal({
   className,
   showTitle = true,
 }: UploadModalProps) {
-  // Track documents by document type ID to maintain state when switching tabs
+  // Store uploaded documents by document type ID
   const [uploadedDocs, setUploadedDocs] = useState<Record<string, Array<{
     id: string;
     file: File;
@@ -497,15 +497,30 @@ export function UploadModal({
     validationStatus?: 'pending' | 'valid' | 'warning' | 'error';
     validationMessage?: string;
     selectedDocTypeId?: string;
-  }>>>({});
-
-  // Track which document types have been saved
+  }>>>(() => {
+    // Initialize with empty arrays for each document type if available
+    if (documentTypes?.length) {
+      const initial: Record<string, any[]> = {};
+      documentTypes.forEach(docType => {
+        initial[docType.id] = [];
+      });
+      return initial;
+    }
+    return { 'default': [] };
+  });
   const [savedDocTypes, setSavedDocTypes] = useState<Set<string>>(new Set());
-
   const [isUploading, setIsUploading] = useState(false);
   const [currentDocumentName, setCurrentDocumentName] = useState(documentName);
   const [selectedValues, setSelectedValues] = useState<Record<string, string>>({});
   const [finalSelectedDoc, setFinalSelectedDoc] = useState(selectedDoc);
+  const [validationDialog, setValidationDialog] = useState({
+    isOpen: false,
+    title: '',
+    description: '',
+    type: 'warning' as const,
+    onConfirm: null as (() => void) | null,
+    onClose: null as (() => void) | null
+  });
 
   // Blob URL cleanup using useRef to maintain stability across renders
   const blobUrlsRef = useRef<Set<string>>(new Set());
@@ -514,13 +529,16 @@ export function UploadModal({
   useEffect(() => {
     return () => {
       // Clean up all blob URLs
-      Object.values(uploadedDocs).flat().forEach(doc => {
-        if (doc.fileUrl) {
-          URL.revokeObjectURL(doc.fileUrl);
-        }
+      Object.values(uploadedDocs).forEach(docs => {
+        docs.forEach(doc => {
+          if (doc.fileUrl) {
+            URL.revokeObjectURL(doc.fileUrl);
+          }
+        });
       });
 
       if (blobUrlsRef.current) {
+        blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
         blobUrlsRef.current.clear();
       }
     };
@@ -576,7 +594,15 @@ export function UploadModal({
   // Get documents for the current document type
   const getCurrentTabDocuments = useCallback(() => {
     const docTypeId = getCurrentDocTypeId();
-    return uploadedDocs[docTypeId] || [];
+    // Ensure the document type exists in the state
+    if (!uploadedDocs[docTypeId]) {
+      setUploadedDocs(prev => ({
+        ...prev,
+        [docTypeId]: []
+      }));
+      return [];
+    }
+    return uploadedDocs[docTypeId];
   }, [uploadedDocs, getCurrentDocTypeId]);
 
   const handleFileUpload = async (files: File[]) => {
@@ -710,7 +736,21 @@ export function UploadModal({
     }
   };
 
-  const handleDocTypeChange = async (docId: string, newDocTypeId: string) => {
+  // Handle document type change
+  const handleDocTypeChange = useCallback((docTypeId: string) => {
+    const selectedDoc = availableDocTypes.find(doc => doc.id === docTypeId);
+    if (selectedDoc) {
+      setFinalSelectedDoc(selectedDoc);
+      setCurrentDocumentName(selectedDoc.name);
+      // Ensure the document type exists in the state
+      setUploadedDocs(prev => ({
+        ...prev,
+        [docTypeId]: prev[docTypeId] || []
+      }));
+    }
+  }, [availableDocTypes]);
+
+  const handleDocTypeChangeWithDocId = async (docId: string, newDocTypeId: string) => {
     const doc = uploadedDocs.find(d => d.id === docId);
     if (!doc) return;
 
@@ -882,7 +922,7 @@ export function UploadModal({
   const handleSaveUploads = async () => {
     const currentDocTypeId = getCurrentDocTypeId();
     const currentDocs = getCurrentTabDocuments();
-    
+
     if (currentDocs.length === 0) {
       toast.error('Please upload at least one document.');
       return;
@@ -927,7 +967,7 @@ export function UploadModal({
   const handleFinalSaveAndClose = () => {
     const allDocTypeIds = Object.keys(uploadedDocs);
     const unsavedDocTypes = allDocTypeIds.filter(id => !savedDocTypes.has(id));
-    
+
     if (unsavedDocTypes.length > 0) {
       setValidationDialog({
         isOpen: true,
@@ -957,7 +997,7 @@ export function UploadModal({
 
     try {
       const currentDocs = docTypeId ? (uploadedDocs[docTypeId] || []) : [];
-      
+
       const entityIdToUse = isCompanyUpload ? (company?.id || entityId) : (selectedMember?.id || entityId);
       const entityNameToUse = isCompanyUpload
         ? (companyName || company?.company_name || entityName || 'Unknown Company')

@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
 import { AutomationMappingDialog } from "./AutomationMappingDialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
+import { isDocumentApplicable } from "../overall-view/tableUtils"
 
 interface EditableStageCellProps {
   stage: any
@@ -34,41 +35,6 @@ interface EditableStageCellProps {
   departments?: any[]
   renderMode?: 'date' | 'actions'  // NEW: Specify what to render
 }
-
-// Helper functions remain the same
-const isDocumentApplicable = (doc: any, task: any): boolean => {
-  if (!doc || !task) return false;
-  if (!doc.isSpecial) return true;
-
-  const taskClassId = task.class_id?.toString();
-  const taskSubdeptId = task.subdepartment?.id?.toString() || task.subdepartment_id?.toString();
-
-  if (Array.isArray(doc.targetEntities) && doc.targetEntities.length > 0) {
-    return doc.targetEntities.some((entity: any) => {
-      const classMatch = !entity.class_id || entity.class_id.toString() === taskClassId;
-      const subdeptMatch = !entity.subdept_id || entity.subdept_id.toString() === taskSubdeptId;
-      return classMatch && subdeptMatch;
-    });
-  }
-
-  const docClassId = doc.class_id?.toString();
-  const docSubdeptId = doc.subdept_id?.toString();
-  const docSubclassId = doc.subclass_id?.toString();
-
-  switch (doc.entityType) {
-    case 'class':
-      if (docSubdeptId) return taskClassId === docClassId && taskSubdeptId === docSubdeptId;
-      return taskClassId === docClassId;
-    case 'subdept':
-      return taskSubdeptId === docSubdeptId;
-    case 'subclass':
-      return taskSubdeptId === docSubdeptId && taskClassId === docClassId && task.subclass_id?.toString() === docSubclassId;
-    default:
-      if (docClassId && docSubdeptId) return taskSubdeptId === docSubdeptId && taskClassId === docClassId;
-      if (docSubdeptId) return taskSubdeptId === docSubdeptId;
-      return false;
-  }
-};
 
 const isStageApplicableToTask = (stage: any, task: any, departments: any[] = []): boolean => {
   if (!task || !stage || !Array.isArray(departments) || departments.length === 0) {
@@ -151,7 +117,46 @@ export default function EditableStageCell({
     return firstDoc;
   }, [linkedDocuments, requiresUpload, stage.id, stage.name]);
 
-  const hasLinkedDocument = useMemo(() => !!linkedDocument && !linkedDocument.indicator, [linkedDocument]);
+const hasLinkedDocument = useMemo(() => {
+  if (!linkedDocument) {
+    return false;
+  }
+
+  // First, check if there's actually a document uploaded
+  const hasDocument = linkedDocument.file_path || 
+                     linkedDocument.url || 
+                     linkedDocument.document_url ||
+                     linkedDocument.extracted_details ||
+                     linkedDocument.extracted_data;
+  
+  if (!hasDocument) {
+    console.log('No document file or data found', {
+      documentId: linkedDocument.id,
+      documentName: linkedDocument.name || linkedDocument.document_name,
+      taskId: task.id
+    });
+    return false;
+  }
+
+  // Then check if the document is applicable to this task
+  const isApplicable = isDocumentApplicable(linkedDocument, task);
+  if (!isApplicable) {
+    console.log('Document is not applicable to task', {
+      documentId: linkedDocument.id,
+      documentName: linkedDocument.name || linkedDocument.document_name,
+      taskId: task.id
+    });
+    return false;
+  }
+
+  console.log('Document is linked and applicable', {
+    documentId: linkedDocument.id,
+    documentName: linkedDocument.name || linkedDocument.document_name,
+    taskId: task.id
+  });
+
+  return true;
+}, [linkedDocument, task]);
 
   const stageDate = useMemo(() => {
     const dateFields = [
@@ -445,6 +450,29 @@ export default function EditableStageCell({
     const hasAnyAutomation = requiresUpload && stage.documents?.some((doc: any) =>
       isDocumentApplicable(doc, task) && (doc.automationId || doc.automation?.id)
     );
+
+    if (isDocumentRow && documentData) {
+      const isApplicable = isDocumentApplicable(documentData, task);
+      
+      console.log('Document row rendering check:', {
+        documentId: documentData.id,
+        documentName: documentData.name || documentData.document_name,
+        isApplicable,
+        taskId: task.id,
+        taskClass: task.class_id,
+        taskSubdept: task.subdepartment_id || task.subdepartment?.id,
+        documentTargets: documentData.targetEntities,
+        isSpecial: documentData.isSpecial
+      });
+      
+      if (!isApplicable) {
+        return (
+          <div className="h-full flex items-center justify-center text-gray-400">
+            N/A
+          </div>
+        );
+      }
+    }
 
     return (
       <div className="flex items-center justify-center gap-1">
