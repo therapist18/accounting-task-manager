@@ -269,27 +269,18 @@ export const getCurrentStageStatus = (
 
   const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
   
-  // Log all stages in order with their applicability
-  console.group('Stages for task:', task.id);
-  console.log('All stages in order:');
   sortedStages.forEach((s, idx) => {
     const isApplicable = isStageApplicableToTask(s, task, departments);
-    console.log(`[${idx + 1}] ${s.name} (${isApplicable ? 'Applicable' : 'Not Applicable'}) - Order: ${s.order_num}`);
-  });
+      });
 
 const isStageCompleted = (stage: any, task: any, allDocuments: any[] = []) => {
   if (!task || !stage) {
-    console.log(`[${stage?.name}] No task or stage provided`);
-    return false;
+     return false;
   }
   
   const stageData = task.stages?.[stage.id];
   const requiresDocuments = stage.documents?.length > 0;
-  
-  console.log(`[${stage.name}] Checking completion - ` + 
-              `Requires docs: ${requiresDocuments}, ` + 
-              `Has stage data: ${!!stageData}`);
-
+ 
   // Check if stage is marked as completed in task.stages
   const isCompleted = stageData && (
     stageData.status === 'completed' || 
@@ -298,13 +289,11 @@ const isStageCompleted = (stage: any, task: any, allDocuments: any[] = []) => {
   );
 
   if (isCompleted) {
-    console.log(`[${stage.name}] Stage marked as completed in task.stages`, stageData);
-    return true;
+     return true;
   }
 
   // For non-document stages, check if they have a date
   if (!requiresDocuments && stageData?.date) {
-    console.log(`[${stage.name}] Stage has a date set:`, stageData.date);
     return true;
   }
 
@@ -315,12 +304,10 @@ const isStageCompleted = (stage: any, task: any, allDocuments: any[] = []) => {
     );
     
     if (hasUploadedDocs) {
-      console.log(`[${stage.name}] Found uploaded/linked documents in stage data`);
       return true;
     }
   }
 
-  console.log(`[${stage.name}] Stage not completed`, stageData);
   return false;
 };
 
@@ -337,26 +324,7 @@ const isStageCompleted = (stage: any, task: any, allDocuments: any[] = []) => {
       highestCompletedIndex = i;
       completedStages.push({ index: i, stage });
     }
-    
-    console.log(`Stage: ${stage.name} - ` +
-                `Order: ${stage.order_num} - ` +
-                `Applicable: ${isApplicable} - ` +
-                `Completed: ${completed}`);
-  }
-  
-  // Log completed stages summary
-  console.log('\nCompleted stages:');
-  if (completedStages.length > 0) {
-    completedStages.forEach(({index, stage}) => {
-      console.log(`- [${index + 1}] ${stage.name} (Order: ${stage.order_num})`);
-    });
-  } else {
-    console.log('No stages completed yet');
-  }
-  
-  console.log(`Highest completed stage index: ${highestCompletedIndex} ` + 
-              `${highestCompletedIndex >= 0 ? `(${sortedStages[highestCompletedIndex]?.name})` : ''}`);
-
+       
   // Determine current stage and status
   let currentStage;
   let stageStatus = 'Pending';
@@ -393,8 +361,6 @@ const isStageCompleted = (stage: any, task: any, allDocuments: any[] = []) => {
   }
 
   if (!currentStage) {
-    console.log('No current stage found for task');
-    console.groupEnd();
     return {
       stageName: 'No Stage',
       stageStatus: 'N/A',
@@ -402,12 +368,7 @@ const isStageCompleted = (stage: any, task: any, allDocuments: any[] = []) => {
     };
   }
   
-  // Log final stage determination
-  console.log(`\nSelected current stage: ${currentStage.name} (Order: ${currentStage.order_num})`);
-  console.log(`Stage status: ${stageStatus}`);
-  console.groupEnd();
-
-  return {
+   return {
     stageName: currentStage.name || 'Unknown Stage',
     stageStatus,
     stageFollowUp: currentStage.follow_up || null
