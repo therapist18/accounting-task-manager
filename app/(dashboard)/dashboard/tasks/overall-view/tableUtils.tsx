@@ -137,7 +137,7 @@ export const calculateAge = (dateOfBirth: string | null): number | null => {
   try {
     // First try parsing with our custom parseDate function
     const birthDate = parseDate(dateOfBirth);
-    
+
     // If that fails, try direct Date parsing as fallback
     if (!birthDate || isNaN(birthDate.getTime())) {
       const fallbackDate = new Date(dateOfBirth);
@@ -237,7 +237,7 @@ export const getEnhancedImmigrationStatus = (
   const timeDiff = latestDateInfo.date.getTime() - today.getTime();
   const daysRemaining = Math.ceil(timeDiff / (1000 * 3600 * 24));
 
-  const statusType = isFuture 
+  const statusType = isFuture
     ? (daysRemaining <= 30 ? 'expiring_soon' : 'active')
     : 'expired';
 
@@ -268,63 +268,63 @@ export const getCurrentStageStatus = (
   }
 
   const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-  
+
   sortedStages.forEach((s, idx) => {
     const isApplicable = isStageApplicableToTask(s, task, departments);
-      });
+  });
 
-const isStageCompleted = (stage: any, task: any, allDocuments: any[] = []) => {
-  if (!task || !stage) {
-     return false;
-  }
-  
-  const stageData = task.stages?.[stage.id];
-  const requiresDocuments = stage.documents?.length > 0;
- 
-  // Check if stage is marked as completed in task.stages
-  const isCompleted = stageData && (
-    stageData.status === 'completed' || 
-    stageData.completedAt ||
-    (stageData.documents && Object.keys(stageData.documents).length > 0)
-  );
+  const isStageCompleted = (stage: any, task: any, allDocuments: any[] = []) => {
+    if (!task || !stage) {
+      return false;
+    }
 
-  if (isCompleted) {
-     return true;
-  }
+    const stageData = task.stages?.[stage.id];
+    const requiresDocuments = stage.documents?.length > 0;
 
-  // For non-document stages, check if they have a date
-  if (!requiresDocuments && stageData?.date) {
-    return true;
-  }
-
-  // For document-requiring stages, check if any documents are uploaded
-  if (requiresDocuments && stageData?.documents) {
-    const hasUploadedDocs = Object.values(stageData.documents).some(
-      (doc: any) => doc.status === 'uploaded' || doc.status === 'linked'
+    // Check if stage is marked as completed in task.stages
+    const isCompleted = stageData && (
+      stageData.status === 'completed' ||
+      stageData.completedAt ||
+      (stageData.documents && Object.keys(stageData.documents).length > 0)
     );
-    
-    if (hasUploadedDocs) {
+
+    if (isCompleted) {
       return true;
     }
-  }
 
-  return false;
-};
+    // For non-document stages, check if they have a date
+    if (!requiresDocuments && stageData?.date) {
+      return true;
+    }
+
+    // For document-requiring stages, check if any documents are uploaded
+    if (requiresDocuments && stageData?.documents) {
+      const hasUploadedDocs = Object.values(stageData.documents).some(
+        (doc: any) => doc.status === 'uploaded' || doc.status === 'linked'
+      );
+
+      if (hasUploadedDocs) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   // Find the highest index completed stage and track all completed stages
   let highestCompletedIndex = -1;
-  const completedStages: {index: number, stage: any}[] = [];
-  
+  const completedStages: { index: number, stage: any }[] = [];
+
   for (let i = 0; i < sortedStages.length; i++) {
     const stage = sortedStages[i];
     const isApplicable = isStageApplicableToTask(stage, task, departments);
     const completed = isStageCompleted(stage, task, allDocuments);
-    
+
     if (completed) {
       highestCompletedIndex = i;
       completedStages.push({ index: i, stage });
     }
-       
+  }
+
   // Determine current stage and status
   let currentStage;
   let stageStatus = 'Pending';
@@ -341,7 +341,7 @@ const isStageCompleted = (stage: any, task: any, allDocuments: any[] = []) => {
     currentStage = sortedStages[highestCompletedIndex];
     const stageData = task.stages?.[currentStage.id];
     stageStatus = stageData?.status || currentStage.status || 'Completed';
-    
+
     // Check if there's a next stage that's applicable
     const nextStageIndex = highestCompletedIndex + 1;
     if (nextStageIndex < sortedStages.length) {
@@ -351,7 +351,7 @@ const isStageCompleted = (stage: any, task: any, allDocuments: any[] = []) => {
         task,
         departments
       );
-      
+
       if (nextStage) {
         currentStage = nextStage;
         const nextStageData = task.stages?.[nextStage.id];
@@ -367,8 +367,8 @@ const isStageCompleted = (stage: any, task: any, allDocuments: any[] = []) => {
       stageFollowUp: null
     };
   }
-  
-   return {
+
+  return {
     stageName: currentStage.name || 'Unknown Stage',
     stageStatus,
     stageFollowUp: currentStage.follow_up || null
@@ -390,7 +390,7 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
   const dept = departments.find(d => d.id === (task.department?.id || task.department_id));
   if (!dept) return true;
 
-  const subdept = dept.tm_subdepartments?.find((s: any) => 
+  const subdept = dept.tm_subdepartments?.find((s: any) =>
     s.id === (task.subdepartment?.id || task.subdepartment_id)
   );
 
@@ -428,12 +428,12 @@ const StatusBadge = ({ status, type }: { status: string; type: string }) => {
   );
 };
 
-const ExpandButton = ({ 
-  isExpanded, 
+const ExpandButton = ({
+  isExpanded,
   onClick,
   className = ''
-}: { 
-  isExpanded: boolean; 
+}: {
+  isExpanded: boolean;
   onClick: () => void;
   className?: string;
 }) => (
@@ -465,9 +465,9 @@ export const renderImmigrationStatusCell = (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <StatusBadge status={statusInfo.status} type={statusInfo.type} />
-        <ExpandButton 
-          isExpanded={isExpanded} 
-          onClick={() => toggleExpansion(task.id.toString())} 
+        <ExpandButton
+          isExpanded={isExpanded}
+          onClick={() => toggleExpansion(task.id.toString())}
         />
       </div>
 
@@ -556,13 +556,13 @@ export const getCellContent = (
             />
           )}
           <Button
-            variant="ghost" 
-            size="icon" 
+            variant="ghost"
+            size="icon"
             className="h-8 w-8 text-white hover:bg-blue-100 flex-shrink-0"
             title="Link source documents"
-            onClick={() => { 
-              setLinkingTask(task); 
-              setIsLinkDialogOpen(true); 
+            onClick={() => {
+              setLinkingTask(task);
+              setIsLinkDialogOpen(true);
             }}
           >
             <LinkIcon className="h-4 w-4" />
@@ -571,8 +571,8 @@ export const getCellContent = (
       </div>
     ),
     immigration_document_type: getEnhancedStatus(task).documentType || '-',
-    immigration_expiry_date: getEnhancedStatus(task).date 
-      ? format(getEnhancedStatus(task).date as Date, 'dd MMM yyyy') 
+    immigration_expiry_date: getEnhancedStatus(task).date
+      ? format(getEnhancedStatus(task).date as Date, 'dd MMM yyyy')
       : '-',
     immigration_status: renderStatusCell(task),
     current_stage_name: getStageStatus(task).stageName || 'N/A',
@@ -585,8 +585,8 @@ export const getCellContent = (
     company_name: companies.get(task.company_id) || 'N/A',
     job_level: (() => {
       const hierarchy = getTaskHierarchy(task);
-      return hierarchy?.subclass?.name || hierarchy?.class?.name || 
-             hierarchy?.subdepartment?.name || 'N/A';
+      return hierarchy?.subclass?.name || hierarchy?.class?.name ||
+        hierarchy?.subdepartment?.name || 'N/A';
     })(),
     renewal_new: <span className="text-sm font-semibold">{task.renewal_status || 'New'}</span>,
     case_status: <span className="text-sm font-semibold">{task.status || 'pending'}</span>,
@@ -645,7 +645,7 @@ export const filterTasksBySearch = (
   return tasks.filter(task => {
     const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
     const hierarchy = getTaskHierarchy(task);
-    
+
     // Basic fields to search in
     const searchFields = [
       task.id?.toString(),
