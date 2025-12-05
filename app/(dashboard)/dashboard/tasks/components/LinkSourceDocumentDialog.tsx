@@ -38,11 +38,16 @@ interface Task {
   department?: { id: string } | string;
 }
 
+interface TaskDocumentLink {
+  id: string;
+  source_document_id: Record<string, SelectedDoc[] | SelectedDoc>;
+}
+
 interface Stage {
   id: string;
   name: string;
   order_num?: number;
-  documents?: Array<{ kycId: string }>;
+  documents?: Array<{ kycId: string; isSpecial?: boolean; targetEntities?: any[]; class_id?: string; subdept_id?: string; entityType?: string }>;
 }
 
 interface Document {
@@ -121,6 +126,96 @@ const isStageApplicableToTask = (
   }
 };
 
+// Function to filter documents applicable to the current task context (from StageUploadDialog)
+const isDocumentApplicableToTask = (doc: any, task: any, childContext: any = null) => {
+  if (!doc.isSpecial) return true;
+
+  if (doc.targetEntities?.length > 0) {
+    const matchesTarget = doc.targetEntities.some((entity: any) => {
+      const classMatch = entity.class_id ? entity.class_id.toString() === task.class_id?.toString() : true;
+      const subdeptMatch = entity.subdept_id ? entity.subdept_id.toString() === task.subdepartment?.id?.toString() : true;
+      return classMatch && subdeptMatch;
+    });
+    if (!matchesTarget) return false;
+    return true;
+  }
+
+  const taskClassId = task.class_id?.toString();
+  const taskSubdeptId = task.subdepartment?.id?.toString();
+  const docClassId = doc.class_id?.toString();
+  const docSubdeptId = doc.subdept_id?.toString();
+
+  if (docClassId) {
+    if (docClassId !== taskClassId) return false;
+    if (docSubdeptId && docSubdeptId !== taskSubdeptId) return false;
+    return true;
+  }
+
+  if (docSubdeptId) {
+    return docSubdeptId === taskSubdeptId;
+  }
+
+  if (childContext?.childLevelId && childContext?.childLevelType) {
+    const { childLevelId, childLevelType } = childContext;
+    if (doc[`${childLevelType}_id`] && doc[`${childLevelType}_id`].toString() !== childLevelId) {
+      return false;
+    }
+    if (childLevelType === 'subclass' && doc.class_id && doc.class_id.toString() !== taskClassId) return false;
+    if (childLevelType === 'class' && doc.subdept_id && doc.subdept_id.toString() !== taskSubdeptId) return false;
+  }
+
+  if (doc.entityType === 'class' && doc.class_id) {
+    const classMatch = taskClassId === doc.class_id.toString();
+    if (doc.subdept_id) return classMatch && (taskSubdeptId === doc.subdept_id.toString());
+    return classMatch;
+  }
+
+  if (doc.entityType === 'subdept' && doc.subdept_id) {
+    return taskSubdeptId === doc.subdept_id.toString();
+  }
+
+  return false;
+}
+
+// Function to get documents linked to other tasks
+const getDocumentsLinkedToOtherTasks = async (
+  currentTaskId: string,
+  individualId: string
+): Promise<Set<string>> => {
+  try {
+    const { data: tasks, error } = await supabase
+      .from("tm_tasks")
+      .select("id, source_document_id")
+      .eq("individual_id", individualId)
+      .neq("id", currentTaskId)
+      .not("source_document_id", "is", null);
+
+    if (error) throw error;
+
+    const linkedDocIds = new Set<string>();
+    
+    if (tasks) {
+      tasks.forEach((task: TaskDocumentLink) => {
+        if (task.source_document_id && typeof task.source_document_id === "object") {
+          Object.values(task.source_document_id).forEach((docs) => {
+            const docArray = Array.isArray(docs) ? docs : [docs];
+            docArray.forEach((doc) => {
+              if (doc?.id) {
+                linkedDocIds.add(doc.id.toString());
+              }
+            });
+          });
+        }
+      });
+    }
+
+    return linkedDocIds;
+  } catch (error) {
+    console.error("Error fetching linked documents:", error);
+    return new Set<string>();
+  }
+};
+
 export function LinkSourceDocumentDialog({
   open,
   onOpenChange,
@@ -136,6 +231,8 @@ export function LinkSourceDocumentDialog({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<any>(null);
   const [loadingPreviewId, setLoadingPreviewId] = useState<number | null>(null);
+  const [documentsLinkedToOtherTasks, setDocumentsLinkedToOtherTasks] = useState<Set<string>>(new Set());
+  const [isLoadingLinkedDocs, setIsLoadingLinkedDocs] = useState(false);
 
   const initialSelectedDocs = useMemo(() => {
     const normalized: Record<string, SelectedDoc[]> = {};
@@ -152,6 +249,24 @@ export function LinkSourceDocumentDialog({
     }
     return normalized;
   }, [task?.source_document_id, allDocuments]);
+
+  // Fetch documents linked to other tasks when dialog opens
+  useEffect(() => {
+    if (open && task?.individual_id && task?.id) {
+      setIsLoadingLinkedDocs(true);
+      getDocumentsLinkedToOtherTasks(task.id, task.individual_id)
+        .then(setDocumentsLinkedToOtherTasks)
+        .catch((error) => {
+          console.error("Error loading linked documents:", error);
+          toast({
+            title: "Warning",
+            description: "Could not check for documents linked to other tasks.",
+            variant: "destructive"
+          });
+        })
+        .finally(() => setIsLoadingLinkedDocs(false));
+    }
+  }, [open, task?.id, task?.individual_id]);
 
   useEffect(() => {
     if (open) {
@@ -236,54 +351,51 @@ export function LinkSourceDocumentDialog({
     }));
   }, []);
   
-const handlePreviewClick = useCallback(async (doc: Document) => {
-  setLoadingPreviewId(doc.id);
-  try {
-    const kycDoc = await fetchKycDocumentData(doc.document_id);
-    if (!kycDoc) {
-      toast({ title: 'Error', description: 'Could not load document configuration.', variant: 'destructive' });
-      return;
-    }
-
-    // Get the file name from the path
-    const fileName = doc.file_path?.split('/').pop() || 'document.pdf';
-    
-    // Use the direct URL from the document's file_path
-    // The URL should already be in the format: https://zyszsqgdlrpnunkegipk.supabase.co/storage/v1/object/sign/kyc-documents/...
-    const fileUrl = doc.file_path;
-    
-    if (!fileUrl) {
-      throw new Error('No file URL available for preview');
-    }
-
-    const previewData = {
-      documentId: doc.id,
-      documentName: kycDoc.display_name || kycDoc.name || 'Document',
-      fileUrl: fileUrl,
-      fileName: fileName,
-      extractedData: doc.extracted_data || doc.extracted_details || {},
-      fields: transformKycFieldsToPreviewFormat(kycDoc.fields || []),
-      type: kycDoc.document_type || 'document',
-      file: {
-        url: fileUrl,
-        name: fileName,
-        type: doc.file_type || 'application/pdf'
+  const handlePreviewClick = useCallback(async (doc: Document) => {
+    setLoadingPreviewId(doc.id);
+    try {
+      const kycDoc = await fetchKycDocumentData(doc.document_id);
+      if (!kycDoc) {
+        toast({ title: 'Error', description: 'Could not load document configuration.', variant: 'destructive' });
+        return;
       }
-    };
 
-    setPreviewDocument(previewData);
-    setIsPreviewOpen(true);
-  } catch (error) {
-    console.error("Error preparing preview:", error);
-    toast({ 
-      title: 'Error', 
-      description: 'Failed to prepare document for preview.', 
-      variant: 'destructive' 
-    });
-  } finally {
-    setLoadingPreviewId(null);
-  }
-}, [fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
+      // Get the file name from the path
+      const fileName = doc.file_path?.split('/').pop() || 'document.pdf';
+      
+      const fileUrl = doc.file_path ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${doc.file_path}` : null;
+      if (!fileUrl) {
+        throw new Error('No file URL available for preview');
+      }
+
+      const previewData = {
+        documentId: doc.id,
+        documentName: kycDoc.display_name || kycDoc.name || 'Document',
+        fileUrl: fileUrl,
+        fileName: fileName,
+        extractedData: doc.extracted_data || doc.extracted_details || {},
+        fields: transformKycFieldsToPreviewFormat(kycDoc.fields || []),
+        type: kycDoc.document_type || 'document',
+        file: {
+          url: fileUrl,
+          name: fileName,
+          type: doc.file_type || 'application/pdf'
+        }
+      };
+
+      setPreviewDocument(previewData);
+      setIsPreviewOpen(true);
+    } catch (error) {
+      console.error("Error preparing preview:", error);
+      toast({ 
+        title: 'Error', 
+        description: 'Failed to prepare document for preview.', 
+        variant: 'destructive' 
+      });
+    } finally {
+      setLoadingPreviewId(null);
+    }
+  }, [fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
 
   return (
     <>
@@ -296,83 +408,99 @@ const handlePreviewClick = useCallback(async (doc: Document) => {
 
           <div className="flex-grow overflow-hidden border-t border-b">
             <ScrollArea className="h-full pr-6">
-              <div className="space-y-6 py-4">
-                {applicableStages.map((stage) => {
-                  const stageDocTypes = new Set(stage.documents?.map((d) => d.kycId));
-                  const availableDocs = allDocuments
-                    .filter(
-                      (d) =>
-                        d.director_id?.toString() === task.individual_id?.toString() &&
-                        stageDocTypes.has(d.document_id)
-                    )
-                    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+              {isLoadingLinkedDocs ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+                  <p className="ml-3 text-slate-600">Loading available documents...</p>
+                </div>
+              ) : (
+                <div className="space-y-6 py-4">
+                  {applicableStages.map((stage) => {
+                    // Filter stage documents to only those applicable to this task
+                    const applicableDocuments = stage.documents?.filter((doc) => 
+                      isDocumentApplicableToTask(doc, task)
+                    ) || [];
+                    
+                    // Get KYC IDs only from applicable documents
+                    const stageDocTypes = new Set(applicableDocuments.map((d) => d.kycId));
+                    
+                    const availableDocs = allDocuments
+                      .filter(
+                        (d) =>
+                          d.director_id?.toString() === task.individual_id?.toString() &&
+                          stageDocTypes.has(d.document_id) && // Only fetch documents of applicable types
+                          !documentsLinkedToOtherTasks.has(d.id.toString()) // Filter out docs linked to other tasks
+                      )
+                      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-                  return (
-                    <div key={stage.id} className="p-4 border rounded-lg">
-                      <h3 className="font-semibold text-lg text-slate-800 mb-3">{stage.name}</h3>
-                      {availableDocs.length > 0 ? (
-                        <div className="space-y-2">
-                          {availableDocs.map((doc) => {
-                            const kycDoc = kycDocuments.get(doc.document_id);
-                            const isSelected = selectedDocs[stage.id]?.some(d => d.id.toString() === doc.id.toString()) || false;
+                    return (
+                      <div key={stage.id} className="p-4 border rounded-lg">
+                        <h3 className="font-semibold text-lg text-slate-800 mb-3">{stage.name}</h3>
+                        {availableDocs.length > 0 ? (
+                          <div className="space-y-2">
+                            {availableDocs.map((doc) => {
+                              const kycDoc = kycDocuments.get(doc.document_id);
+                              const isSelected = selectedDocs[stage.id]?.some(d => d.id.toString() === doc.id.toString()) || false;
 
-                            return (
-                              <div
-                                key={doc.id}
-                                className={`flex items-center gap-4 p-3 border rounded-md transition-colors ${isSelected ? "bg-blue-50 border-blue-300" : "hover:bg-slate-50"}`}
-                              >
-                                <div className="flex items-center gap-3 flex-1">
-                                  <Checkbox
-                                    id={`${stage.id}-${doc.id}`}
-                                    checked={isSelected}
-                                    onCheckedChange={(checked) => handleDocSelectionChange(stage.id, doc, !!checked)}
-                                  />
-                                  <div className="min-w-0">
-                                    <Label htmlFor={`${stage.id}-${doc.id}`} className="font-medium text-slate-900 block truncate cursor-pointer">
-                                      {kycDoc?.display_name || kycDoc?.name || doc.document_id}
-                                    </Label>
-                                    <p className="text-xs text-slate-500 truncate">{doc.file_path?.split("/").pop() || "document"}</p>
+                              return (
+                                <div
+                                  key={doc.id}
+                                  className={`flex items-center gap-4 p-3 border rounded-md transition-colors ${isSelected ? "bg-blue-50 border-blue-300" : "hover:bg-slate-50"}`}
+                                >
+                                  <div className="flex items-center gap-3 flex-1">
+                                    <Checkbox
+                                      id={`${stage.id}-${doc.id}`}
+                                      checked={isSelected}
+                                      onCheckedChange={(checked) => handleDocSelectionChange(stage.id, doc, !!checked)}
+                                    />
+                                    <div className="min-w-0">
+                                      <Label htmlFor={`${stage.id}-${doc.id}`} className="font-medium text-slate-900 block truncate cursor-pointer">
+                                        {kycDoc?.display_name || kycDoc?.name || doc.document_id}
+                                      </Label>
+                                      <p className="text-xs text-slate-500 truncate">{doc.file_path?.split("/").pop() || "document"}</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 text-green-600 hover:bg-green-100"
+                                      onClick={() => handlePreviewClick(doc)}
+                                      title="Preview Document"
+                                      disabled={loadingPreviewId !== null}
+                                    >
+                                      {loadingPreviewId === doc.id ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <Eye className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                    <div className="text-xs text-slate-500 text-right">
+                                      <p>Uploaded:</p>
+                                      <p>{format(parseISO(doc.created_at), "dd MMM yyyy")}</p>
+                                    </div>
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 text-green-600 hover:bg-green-100"
-                                    onClick={() => handlePreviewClick(doc)}
-                                    title="Preview Document"
-                                    disabled={loadingPreviewId !== null}
-                                  >
-                                    {loadingPreviewId === doc.id ? (
-                                      <Loader2 className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                      <Eye className="h-4 w-4" />
-                                    )}
-                                  </Button>
-                                  <div className="text-xs text-slate-500 text-right">
-                                    <p>Uploaded:</p>
-                                    <p>{format(parseISO(doc.created_at), "dd MMM yyyy")}</p>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="text-center py-8 text-slate-500">
-                          <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                          <p className="font-medium">No documents found for this stage</p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="text-center py-8 text-slate-500">
+                            <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                            <p className="font-medium">No available documents for this stage</p>
+                            <p className="text-xs mt-1">All documents may be linked to other tasks or not applicable to this task type</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </ScrollArea>
           </div>
           <DialogFooter className="gap-2 pt-4">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={isLoading}>
+            <Button onClick={handleSave} disabled={isLoading || isLoadingLinkedDocs}>
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save Links
             </Button>

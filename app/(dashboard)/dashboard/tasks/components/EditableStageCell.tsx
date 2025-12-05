@@ -34,6 +34,8 @@ interface EditableStageCellProps {
   onAutomationClick?: (e: React.MouseEvent, documentData?: any) => void
   departments?: any[]
   renderMode?: 'date' | 'actions'  // NEW: Specify what to render
+  taskName?: string
+  clientName?: string
 }
 
 const isStageApplicableToTask = (stage: any, task: any, departments: any[] = []): boolean => {
@@ -96,7 +98,9 @@ export default function EditableStageCell({
   linkedDocuments = [],
   documentData = null,
   departments,
-  renderMode = 'date'  // Default to date mode
+  renderMode = 'date' ,
+   taskName,
+  clientName,
 }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
@@ -106,6 +110,27 @@ export default function EditableStageCell({
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<any>(null);
   const [uploadedDocuments, setUploadedDocuments] = useState<any[]>([]);
+
+  // Debug logs
+  useEffect(() => {
+    if (previewDocument) {
+      console.log('Preview Document:', {
+        documentName: previewDocument.documentName,
+        extractedData: previewDocument.extractedData,
+        hasName: !!previewDocument.extractedData?.name,
+        hasFullName: !!previewDocument.extractedData?.fullName,
+        hasClientName: !!previewDocument.extractedData?.clientName
+      });
+    }
+    if (task) {
+      console.log('Task Data:', {
+        name: task.name,
+        client_name: task.client_name,
+        clientName: task.clientName,
+        id: task.id
+      });
+    }
+  }, [previewDocument, task]);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -600,7 +625,10 @@ const handlePreviewSave = useCallback(async (data: any) => {
     <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col">
           <DialogHeader>
-             <DialogTitle>Document Preview: {previewDocument?.documentName || 'Document'}</DialogTitle>
+             <DialogTitle>
+  {task?.name} - {previewDocument?.documentName || 'Document Preview'}
+  {task?.client_name && ` (${task.client_name})`}
+</DialogTitle>
           </DialogHeader>
           <div className="flex-grow overflow-y-auto p-1 space-y-4">
             <div className="border rounded-lg">

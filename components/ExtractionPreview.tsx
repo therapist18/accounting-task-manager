@@ -533,7 +533,9 @@ export const ExtractionPreview = ({
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent className="max-w-[98vw] max-h-[98vh] h-[95vh] p-0 overflow-hidden flex flex-col bg-gray-50">
           <DialogHeader className="p-4 border-b bg-white shrink-0">
-            <DialogTitle>Document Details Extraction: {documentName}</DialogTitle>
+            <DialogTitle>
+              Document Details: {documentName || 'Untitled Document'} {extractedData?.name || extractedData?.fullName || extractedData?.clientName || 'Unknown Individual'}
+            </DialogTitle>
           </DialogHeader>
           <div className="flex-1 overflow-auto p-4 flex items-start justify-center">
             <div className="w-full max-w-[1800px]">

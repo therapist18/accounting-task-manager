@@ -128,8 +128,11 @@ const DocumentTabPanel = ({
 }) => {
   const [useExisting, setUseExisting] = useState(false);
   const [selectedExistingId, setSelectedExistingId] = useState("");
+  
+  // Message/PDF State
   const [messageText, setMessageText] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isConverting, setIsConverting] = useState(false);
+  const [generatedFile, setGeneratedFile] = useState<File | null>(null);
 
   // Sync with locked state
   useEffect(() => {
@@ -142,52 +145,54 @@ const DocumentTabPanel = ({
   const documentName = kycData?.display_name || kycData?.name || doc.name || 'Document';
   const inputType = doc.inputType || (doc.isSpecial ? 'file' : 'both');
 
-  const handleMessageSubmit = async () => {
+  // Convert Text to PDF and pass to UploadModal
+  const handleConvertAndUpload = async () => {
     if (!messageText.trim()) return;
-    setIsProcessing(true);
+    setIsConverting(true);
+
     try {
       const response = await fetch('/api/convert-message-to-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: messageText, documentType: 'message', documentName })
+        body: JSON.stringify({ 
+          message: messageText, 
+          documentType: documentName 
+        })
       });
 
       if (!response.ok) throw new Error('Conversion failed');
+      
       const blob = await response.blob();
-      toast({ title: 'Success', description: 'Message converted to PDF. Please upload using the file upload option.' });
+      
+      // Create a File object
+      const fileName = `${documentName.replace(/\s+/g, '_')}_message.pdf`;
+      const file = new File([blob], fileName, { type: 'application/pdf' });
+      
+      // Pass this file to the UploadModal to trigger the extraction/preview flow
+      setGeneratedFile(file);
+      
     } catch (error) {
       console.error(error);
-      toast({ title: 'Error', description: 'Failed to process message', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Failed to generate PDF', variant: 'destructive' });
     } finally {
-      setIsProcessing(false);
+      setIsConverting(false);
     }
   };
 
   const handlePendingChange = useCallback((docs: any[]) => {
-    // If we have docs, we take the first one (assuming single file upload per tab)
     if (docs && docs.length > 0) {
       const activeDoc = docs[0];
-
-      // We only want to enable the button if there is a file
       if (activeDoc.file) {
-        // Construct the object expected by pendingDocuments
         const payload = {
-          file: activeDoc.file, // The raw File object
+          file: activeDoc.file,
           extractedData: activeDoc.extractedData || {},
           kycId: doc.kycId,
           name: doc.name
         };
-
-        // Update parent state
         onUploadSuccess(payload, doc);
       }
-    } else {
-      // Optional: logic to remove from pendingDocuments if user deleted file in modal
-      // For now, onUploadSuccess usually adds/overwrites. 
-      // If you need removal logic, onUploadSuccess might need a 'remove' flag or a separate handler.
     }
   }, [doc, onUploadSuccess]);
-
 
   return (
     <div className="space-y-4 p-4 rounded-lg border h-full overflow-y-auto">
@@ -258,11 +263,10 @@ const DocumentTabPanel = ({
                 {!isLocked && selectedExistingId && (
                   <Button
                     onClick={() => onUseExistingLink(doc.id, selectedExistingId, doc.kycId)}
-                    disabled={isProcessing}
                     className="ml-6 mt-2"
                     size="sm"
                   >
-                    {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                    <Check className="mr-2 h-4 w-4" />
                     Use Selected
                   </Button>
                 )}
@@ -271,7 +275,8 @@ const DocumentTabPanel = ({
           </div>
         </div>
       )}
-      {/* Upload / Message Section */}
+
+      {/* Main Upload / Message Section */}
       {isLocked ? (
         <div className="text-center p-6 bg-slate-50 border-dashed border-2 border-slate-200 rounded-lg">
           <FileText className="h-8 w-8 mx-auto mb-2 opacity-40 text-slate-500" />
@@ -279,6 +284,7 @@ const DocumentTabPanel = ({
         </div>
       ) : !useExisting && (
         <>
+          {/* File Upload Component - Always rendered, receives generated file if available */}
           {activeDocFields ? (
             <UploadModal
               documentName={documentName}
@@ -287,7 +293,11 @@ const DocumentTabPanel = ({
               selectedMember={{ id: task?.individual_id, name: individualName, full_name: individualName }}
               entityId={task?.individual_id}
               entityName={individualName}
-              onSuccess={(newDoc) => onUploadSuccess(newDoc, doc)}
+              onSuccess={(newDoc) => {
+                onUploadSuccess(newDoc, doc);
+                setGeneratedFile(null); // Clear generated file after success
+                setMessageText(""); // Clear text
+              }}
               targetTable="acc_portal_directors_documents"
               idFieldName="director_id"
               documentIdFieldName="document_id"
@@ -295,6 +305,11 @@ const DocumentTabPanel = ({
               additionalFields={{ expiry_date: null }}
               hideSaveButton={true}
               onPendingChange={handlePendingChange}
+              
+              // NEW PROPS: Pass generated file to trigger modal logic
+              externalFile={generatedFile}
+              onExternalFileClear={() => setGeneratedFile(null)}
+              
               onBeforeUpload={async (recordData) => {
                 if (doc.onBeforeUpload) return doc.onBeforeUpload(recordData);
                 return null;
@@ -304,22 +319,35 @@ const DocumentTabPanel = ({
             <div className="flex justify-center p-10 text-muted-foreground">Initializing fields...</div>
           )}
 
+          {/* Text Input Section */}
           {(inputType === 'message' || inputType === 'both') && (
-            <div className="mt-4 pt-4 border-t">
-              <Label className="font-medium flex items-center gap-2 mb-2">
+            <div className="mt-6 pt-6 border-t space-y-4">
+              <Label className="font-medium flex items-center gap-2">
                 <MessageSquare className="h-4 w-4" />
-                Submit Message as PDF
+                Write Message & Convert to PDF
               </Label>
+              
               <Textarea
-                placeholder={`Type message...`}
-                className="min-h-[100px] resize-none mb-2"
+                placeholder={`Type your message here...`}
+                className="min-h-[120px] resize-none font-mono text-sm"
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
               />
-              <Button onClick={handleMessageSubmit} disabled={!messageText.trim() || isProcessing} variant="outline" className="w-full">
-                {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                Submit as PDF
-              </Button>
+
+              <div className="flex gap-2">
+                <Button 
+                  onClick={handleConvertAndUpload} 
+                  disabled={!messageText.trim() || isConverting} 
+                  variant="outline" 
+                  className="w-full border-dashed border-2 hover:bg-slate-50"
+                >
+                  {isConverting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                  {isConverting ? 'Generating PDF...' : 'Convert to PDF & Review'}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground text-center">
+                This will convert your text into a PDF and open the document preview for final verification.
+              </p>
             </div>
           )}
         </>
@@ -327,9 +355,6 @@ const DocumentTabPanel = ({
     </div>
   );
 };
-
-
-// --- Main Component ---
 
 export function StageUploadDialog({
   open,
@@ -577,16 +602,11 @@ export function StageUploadDialog({
     }));
   }, [stage?.id, task?.id]);
 
- const saveAllDocuments = useCallback(async () => {
+const saveAllDocuments = useCallback(async () => {
     if (!stage?.id || !task?.id) {
-      toast({
-        title: 'Error',
-        description: 'Missing stage or task information',
-        variant: 'destructive'
-      });
+      toast({ title: 'Error', description: 'Missing stage or task information', variant: 'destructive' });
       return;
     }
-
     setIsSaving(true);
 
     try {
@@ -680,9 +700,6 @@ export function StageUploadDialog({
         }
       }
 
-      // --- 2. Calculate Task Status Update (Priority Logic) ---
-      
-      // Define Priority Levels
       const STATUS_PRIORITY: Record<string, number> = {
         'pending': 0, 'new': 0, 'enquiry': 0,
         'in_progress': 1,

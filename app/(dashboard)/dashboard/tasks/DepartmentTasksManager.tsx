@@ -146,6 +146,7 @@ export default function DepartmentTasksManager({
   const [areTabsVisible, setAreTabsVisible] = useState(true);
   const [isAllExpanded, setIsAllExpanded] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [stageDialogKey, setStageDialogKey] = useState(0);
 
 
   useEffect(() => {
@@ -1130,112 +1131,112 @@ export default function DepartmentTasksManager({
     } finally { setIsDownloading(false); }
   }, [allDocuments, getTaskHierarchy, stages]);
 
-const enhancedHandleStageStatusSave = useCallback(async (
-  stageId: string,
-  taskId: string,
-  value: string,
-  updatedExtractedDetails?: Record<string, any>
-) => {
-  try {
-    const task = tasks.find(t => t.id.toString() === taskId.toString());
-    if (!task) {
-      console.error('❌ Task not found in local state');
-      return;
-    }
-
-    // 1. Define Priority Levels
-    const STATUS_PRIORITY: Record<string, number> = {
-      'pending': 0,
-      'new': 0,
-      'enquiry': 0,
-      'in_progress': 1,
-      'write_up_completed': 2,
-      'endorsed': 3
-    };
-
-    // 2. Map Stage IDs to Target Statuses
-    const STAGE_STATUS_MAPPING: Record<string, string> = {
-      'a19b270e-6d1e-4e6d-b2bc-f21db72cde08': 'in_progress',       // Start / In Progress
-      '072b9710-45df-4a05-ba65-01b4ef29d61d': 'write_up_completed', // Write Up Completed
-      '6625f6d2-8017-4bf4-96c2-85335703164c': 'endorsed',          // Endorsement
-      'caefd742-5de5-4341-a3bb-81d7b9dd2b73': 'endorsed'           // Endorsement (Alternative)
-    };
-
-    // 3. Normalize Status Strings for Comparison
-    // Converts "In Progress" -> "in_progress", "Write-Up Completed" -> "write_up_completed"
-    const normalizeStatus = (s: string | null | undefined) => {
-      if (!s) return 'pending';
-      return s.toLowerCase().trim().replace(/[\s-]/g, '_');
-    };
-
-    const currentStatusRaw = task.status;
-    const currentStatusKey = normalizeStatus(currentStatusRaw);
-    const potentialNewStatus = STAGE_STATUS_MAPPING[stageId.toLowerCase()]; // Ensure ID match is case-insensitive
-
-    let taskStatusUpdate = {};
-    const timestamp = new Date().toISOString();
-
-    // 4. Determine if Status Should Update
-    if (potentialNewStatus) {
-      const currentPriority = STATUS_PRIORITY[currentStatusKey] ?? 0; // Default to 0 if unknown
-      const newPriority = STATUS_PRIORITY[potentialNewStatus] ?? 0;
-
-      if (newPriority > currentPriority) {
-        taskStatusUpdate = { status: potentialNewStatus };
+  const enhancedHandleStageStatusSave = useCallback(async (
+    stageId: string,
+    taskId: string,
+    value: string,
+    updatedExtractedDetails?: Record<string, any>
+  ) => {
+    try {
+      const task = tasks.find(t => t.id.toString() === taskId.toString());
+      if (!task) {
+        console.error('❌ Task not found in local state');
+        return;
       }
-    } else {
-    }
 
-    // 5. Prepare Stage Data (Always update this)
-    const updatedStages = {
-      ...task.stages,
-      [stageId]: {
-        ...task.stages?.[stageId],
-        status: 'completed',
-        date: value,
-        completedAt: timestamp,
-        updatedAt: timestamp
+      // 1. Define Priority Levels
+      const STATUS_PRIORITY: Record<string, number> = {
+        'pending': 0,
+        'new': 0,
+        'enquiry': 0,
+        'in_progress': 1,
+        'write_up_completed': 2,
+        'endorsed': 3
+      };
+
+      // 2. Map Stage IDs to Target Statuses
+      const STAGE_STATUS_MAPPING: Record<string, string> = {
+        'a19b270e-6d1e-4e6d-b2bc-f21db72cde08': 'in_progress',       // Start / In Progress
+        '072b9710-45df-4a05-ba65-01b4ef29d61d': 'write_up_completed', // Write Up Completed
+        '6625f6d2-8017-4bf4-96c2-85335703164c': 'endorsed',          // Endorsement
+        'caefd742-5de5-4341-a3bb-81d7b9dd2b73': 'endorsed'           // Endorsement (Alternative)
+      };
+
+      // 3. Normalize Status Strings for Comparison
+      // Converts "In Progress" -> "in_progress", "Write-Up Completed" -> "write_up_completed"
+      const normalizeStatus = (s: string | null | undefined) => {
+        if (!s) return 'pending';
+        return s.toLowerCase().trim().replace(/[\s-]/g, '_');
+      };
+
+      const currentStatusRaw = task.status;
+      const currentStatusKey = normalizeStatus(currentStatusRaw);
+      const potentialNewStatus = STAGE_STATUS_MAPPING[stageId.toLowerCase()]; // Ensure ID match is case-insensitive
+
+      let taskStatusUpdate = {};
+      const timestamp = new Date().toISOString();
+
+      // 4. Determine if Status Should Update
+      if (potentialNewStatus) {
+        const currentPriority = STATUS_PRIORITY[currentStatusKey] ?? 0; // Default to 0 if unknown
+        const newPriority = STATUS_PRIORITY[potentialNewStatus] ?? 0;
+
+        if (newPriority > currentPriority) {
+          taskStatusUpdate = { status: potentialNewStatus };
+        }
+      } else {
       }
-    };
 
-    // Calculate current stage for metadata
-    const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages);
+      // 5. Prepare Stage Data (Always update this)
+      const updatedStages = {
+        ...task.stages,
+        [stageId]: {
+          ...task.stages?.[stageId],
+          status: 'completed',
+          date: value,
+          completedAt: timestamp,
+          updatedAt: timestamp
+        }
+      };
 
-    // 6. Build Payload
-    const updateData: any = {
-      ...taskStatusUpdate, // Spread the status update (if any)
-      stages: updatedStages,
-      updated_at: timestamp
-    };
+      // Calculate current stage for metadata
+      const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages);
 
-       // 7. Execute Update
-    const { error } = await supabase
-      .from('tm_tasks')
-      .update(updateData)
-      .eq('id', taskId);
+      // 6. Build Payload
+      const updateData: any = {
+        ...taskStatusUpdate, // Spread the status update (if any)
+        stages: updatedStages,
+        updated_at: timestamp
+      };
 
-    if (error) throw error;
+      // 7. Execute Update
+      const { error } = await supabase
+        .from('tm_tasks')
+        .update(updateData)
+        .eq('id', taskId);
 
-    // 8. Refresh Data
-    await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+      if (error) throw error;
 
-    const successMessage = ('status' in taskStatusUpdate)
-      ? `Stage completed & Status updated to ${taskStatusUpdate.status?.replace(/_/g, ' ')}`
-      : 'Stage completed';
+      // 8. Refresh Data
+      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
 
-    toast({ title: "Success", description: successMessage });
+      const successMessage = ('status' in taskStatusUpdate)
+        ? `Stage completed & Status updated to ${taskStatusUpdate.status?.replace(/_/g, ' ')}`
+        : 'Stage completed';
 
-  } catch (error) {
-    console.error('❌ Error in enhancedHandleStageStatusSave:', error);
-    toast({
-      title: "Error",
-      description: "Failed to update stage status.",
-      variant: "destructive"
-    });
-  } finally {
-    console.groupEnd();
-  }
-}, [handleStageStatusSave, tasks, stages, determineCurrentStage, loadTasksData, activeDepartmentTab, activeSubdepartmentTab]);
+      toast({ title: "Success", description: successMessage });
+
+    } catch (error) {
+      console.error('❌ Error in enhancedHandleStageStatusSave:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update stage status.",
+        variant: "destructive"
+      });
+    } finally {
+      console.groupEnd();
+    }
+  }, [handleStageStatusSave, tasks, stages, determineCurrentStage, loadTasksData, activeDepartmentTab, activeSubdepartmentTab]);
 
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
     if (!tasks.length) return [];
@@ -1425,7 +1426,6 @@ const enhancedHandleStageStatusSave = useCallback(async (
     return rows
   }, [stages, expandedSections, expandedStages, expandedDocuments, getKycFields, visibleStats, kycDocuments, allDocuments, visibleStageIds, getDocumentForTaskStage, departments])
 
-  // Task stage handlers
   const handleStageDocumentUpload = useCallback((task: any, stage: any) => {
     const enrichedTask = {
       ...task,
@@ -1457,24 +1457,23 @@ const enhancedHandleStageStatusSave = useCallback(async (
       childLevelId,
       childLevelType
     })
+    
+    // INCREMENT KEY TO FORCE FRESH INSTANCE
+    setStageDialogKey(prev => prev + 1);
     setIsStageUploadDialogOpen(true)
   }, [departments])
 
   const handleDeleteDocument = useCallback(async (documentId: string) => {
     try {
-      // Add your delete logic here
-      // For example:
-      // await supabase.from('documents').delete().eq('id', documentId);
-      
-      toast({
+          toast({
         title: 'Success',
         description: 'Document deleted successfully',
         variant: 'default',
       });
-      
+
       // Close the preview
       setPreviewDocument(null);
-      
+
       // Refresh the tasks to update the UI
       await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
     } catch (error) {
@@ -1752,7 +1751,9 @@ const enhancedHandleStageStatusSave = useCallback(async (
         onAutomationClick={(e) => handleAutomationClick(e, row.stage, task.id)}
         getKycFields={getKycFields}
         linkedDocuments={linkedDocs}
-        renderMode={renderMode}  // ✅ Pass the render mode
+        renderMode={renderMode}
+        taskName={task.name}
+        clientName={task.client_name || task.clientName}
       />
     );
   };
@@ -2645,23 +2646,23 @@ const enhancedHandleStageStatusSave = useCallback(async (
                         </div>
 
                         {/* {isWipTab && areTabsVisible && (
-                          <div className="space-y-4 pt-4">
-                            <Tabs value={activeFollowUpFilter} onValueChange={setActiveFollowUpFilter}>
-                              <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
-                                <TabsTrigger value="all" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">All <Badge variant="outline">{wipTasks.length}</Badge></TabsTrigger>
-                                <TabsTrigger value="bcl" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">BCL <Badge variant="outline">{getWIPTasksByFollowUp('bcl').length}</Badge></TabsTrigger>
-                                <TabsTrigger value="officer" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Officers <Badge variant="outline">{getWIPTasksByFollowUp('officer').length}</Badge></TabsTrigger>
-                                <TabsTrigger value="client" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Client <Badge variant="outline">{getWIPTasksByFollowUp('client').length}</Badge></TabsTrigger>
-                              </TabsList>
-                            </Tabs>
+                            <div className="space-y-4 pt-4">
+                              <Tabs value={activeFollowUpFilter} onValueChange={setActiveFollowUpFilter}>
+                                <TabsList className="rounded-lg p-1 shadow-sm bg-slate-100">
+                                  <TabsTrigger value="all" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">All <Badge variant="outline">{wipTasks.length}</Badge></TabsTrigger>
+                                  <TabsTrigger value="bcl" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">BCL <Badge variant="outline">{getWIPTasksByFollowUp('bcl').length}</Badge></TabsTrigger>
+                                  <TabsTrigger value="officer" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Officers <Badge variant="outline">{getWIPTasksByFollowUp('officer').length}</Badge></TabsTrigger>
+                                  <TabsTrigger value="client" className="text-sm md:text-sm gap-2 font-semibold text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-800 data-[state=active]:shadow-sm rounded-md">Client <Badge variant="outline">{getWIPTasksByFollowUp('client').length}</Badge></TabsTrigger>
+                                </TabsList>
+                              </Tabs>
 
-                            {(activeFollowUpFilter === 'bcl' || activeFollowUpFilter === 'officer') && activeSubdepartmentTab && (
-                              <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                                {renderStaffTabs()}
-                              </div>
-                            )}
-                          </div>
-                        )} */}
+                              {(activeFollowUpFilter === 'bcl' || activeFollowUpFilter === 'officer') && activeSubdepartmentTab && (
+                                <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                                  {renderStaffTabs()}
+                                </div>
+                              )}
+                            </div>
+                          )} */}
                       </CardHeader>
                       <CardContent className="p-2 sm:p-4">
                         {activeReport ? (
@@ -2858,6 +2859,7 @@ const enhancedHandleStageStatusSave = useCallback(async (
       />
 
       <StageUploadDialog
+        key={stageDialogKey} // <--- THIS IS THE CRITICAL FIX
         open={isStageUploadDialogOpen}
         onOpenChange={setIsStageUploadDialogOpen}
         selectedStageTask={selectedStageTask}
@@ -2885,78 +2887,78 @@ const enhancedHandleStageStatusSave = useCallback(async (
         />
       )}
 
-   {/* Extraction Preview Dialog */}
-<Dialog open={!!previewDocument} onOpenChange={(isOpen) => !isOpen && setPreviewDocument(null)}>
-  <DialogContent className="max-w-none w-full h-full p-0 m-0">
-    <DialogHeader className="sr-only">
-      <DialogTitle>Document Preview</DialogTitle>
-      <DialogDescription>Preview of the extracted document data</DialogDescription>
-    </DialogHeader>
-    {previewDocument && (
-      <ExtractionPreview
-        documentId={previewDocument.documentId}
-        documentName={previewDocument.documentName}
-        fileUrl={previewDocument.fileUrl}
-        fileName={previewDocument.fileName}
-        extractedData={previewDocument.extractedData || {}}
-        fields={previewDocument.fields || []}
-        // Handle data changes
-        onDataChange={(field, value) => {
-          console.log(`Field ${field} updated to:`, value);
-          // Optional: Update local preview state if needed
-        }}
-        // Handle Deletion - explicitly pass the handler
-        onDelete={async (doc) => {
-          try {
-            const docId = previewDocument.documentId || previewDocument.id;
-            if (docId) {
-              await handleDeleteDocument(docId);
-              setPreviewDocument(null);
-              setIsDocumentPreviewOpen(false);
-            }
-          } catch (error) {
-            console.error('Error deleting document:', error);
-            // toast is handled in handleDeleteDocument or ExtractionPreview wrapper
-          }
-        }}
-        // Handle Retry - explicitly pass the handler
-        onRetryExtraction={async (doc) => {
-          try {
-            const docId = previewDocument.documentId || previewDocument.id;
-            if (docId) {
-              handleTaskAction({
-                type: 'retry-extraction',
-                documentId: docId,
-                taskId: previewDocument.taskId
-              });
-              toast({ title: "Processing", description: "Retry extraction request sent." });
-            }
-          } catch (error) {
-            console.error('Error retrying extraction:', error);
-            toast({ title: "Error", description: "Failed to retry extraction", variant: "destructive" });
-          }
-        }}
-        // Handle Save
-        onSave={async (data) => {
-          try {
-            // Add your save logic here. Example:
-            // await supabase.from('extracted_data').update(data).eq('id', previewDocument.documentId);
-            console.log('Saving document data:', data);
-            toast({ title: "Success", description: "Document details saved." });
-            // Optionally close preview
-            // setPreviewDocument(null); 
-          } catch (error) {
-            console.error('Error saving document:', error);
-            toast({ title: "Error", description: "Failed to save document", variant: "destructive" });
-          }
-        }}
-        file={previewDocument.file}
-        type={previewDocument.type}
-        expanded={true}
-      />
-    )}
-  </DialogContent>
-</Dialog>
+      {/* Extraction Preview Dialog */}
+      <Dialog open={!!previewDocument} onOpenChange={(isOpen) => !isOpen && setPreviewDocument(null)}>
+        <DialogContent className="max-w-none w-full h-full p-0 m-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Document Preview</DialogTitle>
+            <DialogDescription>Preview of the extracted document data</DialogDescription>
+          </DialogHeader>
+          {previewDocument && (
+            <ExtractionPreview
+              documentId={previewDocument.documentId}
+              documentName={previewDocument.documentName}
+              fileUrl={previewDocument.fileUrl}
+              fileName={previewDocument.fileName}
+              extractedData={previewDocument.extractedData || {}}
+              fields={previewDocument.fields || []}
+              // Handle data changes
+              onDataChange={(field, value) => {
+                console.log(`Field ${field} updated to:`, value);
+                // Optional: Update local preview state if needed
+              }}
+              // Handle Deletion - explicitly pass the handler
+              onDelete={async (doc) => {
+                try {
+                  const docId = previewDocument.documentId || previewDocument.id;
+                  if (docId) {
+                    await handleDeleteDocument(docId);
+                    setPreviewDocument(null);
+                    setIsDocumentPreviewOpen(false);
+                  }
+                } catch (error) {
+                  console.error('Error deleting document:', error);
+                  // toast is handled in handleDeleteDocument or ExtractionPreview wrapper
+                }
+              }}
+              // Handle Retry - explicitly pass the handler
+              onRetryExtraction={async (doc) => {
+                try {
+                  const docId = previewDocument.documentId || previewDocument.id;
+                  if (docId) {
+                    handleTaskAction({
+                      type: 'retry-extraction',
+                      documentId: docId,
+                      taskId: previewDocument.taskId
+                    });
+                    toast({ title: "Processing", description: "Retry extraction request sent." });
+                  }
+                } catch (error) {
+                  console.error('Error retrying extraction:', error);
+                  toast({ title: "Error", description: "Failed to retry extraction", variant: "destructive" });
+                }
+              }}
+              // Handle Save
+              onSave={async (data) => {
+                try {
+                  // Add your save logic here. Example:
+                  // await supabase.from('extracted_data').update(data).eq('id', previewDocument.documentId);
+                  console.log('Saving document data:', data);
+                  toast({ title: "Success", description: "Document details saved." });
+                  // Optionally close preview
+                  // setPreviewDocument(null); 
+                } catch (error) {
+                  console.error('Error saving document:', error);
+                  toast({ title: "Error", description: "Failed to save document", variant: "destructive" });
+                }
+              }}
+              file={previewDocument.file}
+              type={previewDocument.type}
+              expanded={true}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Enhanced Class Selection Dialog for Alien Cases */}
       <Dialog open={isClassSelectionOpen} onOpenChange={setIsClassSelectionOpen}>
