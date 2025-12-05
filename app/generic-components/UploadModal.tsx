@@ -72,13 +72,14 @@ interface UploadModalProps {
   targetTable?: string;
   idFieldName?: string;
   documentIdFieldName?: string;
-  isCompanyUpload?: boolean;
+  isCompanyUpload?: boolean;  
   additionalFields?: Record<string, any>;
   // Callback for custom upload handling
   onBeforeUpload?: (recordData: any) => Promise<any>;
-  // Styling
+ onPendingChange?: (docs: any[]) => void;
   className?: string;
   showTitle?: boolean;
+  hideSaveButton?: boolean;
 }
 
 // Validation Dialog Component (Kept as a modal for critical alerts)
@@ -482,9 +483,11 @@ export function UploadModal({
   isCompanyUpload: isCompanyUploadProp,
   additionalFields = {},
   onBeforeUpload,
+  onPendingChange,
   companyName,
   className,
   showTitle = true,
+  hideSaveButton = false,
 }: UploadModalProps) {
   // Store uploaded documents by document type ID
   // State to track form data for each document
@@ -531,7 +534,6 @@ export function UploadModal({
 
   // Blob URL cleanup using useRef to maintain stability across renders
   const blobUrlsRef = useRef<Set<string>>(new Set());
-
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -611,7 +613,12 @@ export function UploadModal({
     }
     return uploadedDocs[docTypeId];
   }, [uploadedDocs, getCurrentDocTypeId]);
-
+  useEffect(() => {
+    if (onPendingChange) {
+      const currentDocs = getCurrentTabDocuments();
+      onPendingChange(currentDocs);
+    }
+  }, [uploadedDocs, onPendingChange, getCurrentTabDocuments]);
   // Update form data when document fields change
   useEffect(() => {
     console.log('[UploadModal] documentFields changed:', {
@@ -1649,32 +1656,34 @@ export function UploadModal({
               })}
             </div>
 
-            <div className="mt-6 flex justify-end">
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  onClick={handleSaveUploads}
-                  disabled={isUploading || isUploadButtonDisabled()}
-                  className="w-full sm:w-auto"
-                >
-                  {isUploading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Saving...
-                    </>
-                  ) : `Save ${finalSelectedDoc?.name || 'Documents'} (${getCurrentTabDocuments().length})`}
-                </Button>
-
-                {allowMultipleTypes && documentTypes && documentTypes.length > 1 && (
+            {!hideSaveButton && (
+              <div className="mt-6 flex justify-end">
+                <div className="flex flex-wrap gap-2">
                   <Button
-                    onClick={handleFinalSaveAndClose}
-                    variant="outline"
-                    className="ml-2"
+                    onClick={handleSaveUploads}
+                    disabled={isUploading || isUploadButtonDisabled()}
+                    className="w-full sm:w-auto"
                   >
-                    Save All & Close
+                    {isUploading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : `Save ${finalSelectedDoc?.name || 'Documents'} (${getCurrentTabDocuments().length})`}
                   </Button>
-                )}
+
+                  {allowMultipleTypes && documentTypes && documentTypes.length > 1 && (
+                    <Button
+                      onClick={handleFinalSaveAndClose}
+                      variant="outline"
+                      className="ml-2"
+                    >
+                      Save All & Close
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </>
         )}
       </div>

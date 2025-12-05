@@ -61,7 +61,7 @@ interface ExtractionPreviewProps {
   onDownloadError?: (error: Error) => void;
 }
 
-// --- HELPER COMPONENTS MOVED OUTSIDE ---
+// --- HELPER COMPONENTS ---
 const RowWrapper = ({ children, className = "", isEven = false }) => (
   <div className={`flex flex-col sm:flex-row border-b last:border-b-0 border-gray-100 ${isEven ? 'bg-white' : 'bg-gray-50/60'} hover:bg-blue-50/50 transition-colors duration-150 ${className}`}>
     {children}
@@ -314,7 +314,7 @@ export const ExtractionPreview = ({
       };
       
       await onDelete(documentData);
-      toast.success('Document deleted successfully');
+      // Removed toast here if it's handled in parent, or keep it if not
     } catch (error) {
       console.error('Error deleting document:', error);
       toast.error(error.message || 'Failed to delete document');
@@ -443,8 +443,7 @@ export const ExtractionPreview = ({
       {/* Extracted Data - Fixed Height with Overflow */}
       <div className="lg:col-span-1 h-[75vh] shadow-sm rounded-lg flex flex-col">
         <div className={`h-full flex flex-col rounded-lg border ${getStylesByType?.(type || 'principal')?.getBgColor() || 'bg-white'} ${getStylesByType?.(type || 'principal')?.getBorderColor() || 'border-gray-200'} overflow-hidden`}>
-          
-          {/* 1. Header Section (Fixed at top) */}
+          {/* Header Section */}
           <div className="p-4 border-b border-gray-200 bg-white flex-shrink-0">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-bold text-gray-800">Extracted Details</h3>
@@ -465,12 +464,15 @@ export const ExtractionPreview = ({
                   }}
                   documentTypes={documentTypes || []}
                   supabase={supabase}
-                  onSave={onSave}
+                  onSave={onSave ? handleSave : undefined}
+                  // Fix: Pass handleDelete wrapper if onDelete prop exists
                   onDelete={onDelete ? handleDelete : undefined}
-                  onRetry={onRetryExtraction}
+                  // Fix: Pass handleRetryExtraction wrapper if onRetryExtraction prop exists
+                  onRetry={onRetryExtraction ? handleRetryExtraction : undefined}
                   onDownloadSuccess={() => toast.success('Download started')}
                   onDownloadError={(error) => toast.error(error.message || 'Download failed')}
                   className="ml-auto"
+                  showLabels={true}
                   showDeleteConfirmation={true}
                 />
               </div>
@@ -540,7 +542,8 @@ export const ExtractionPreview = ({
           </div>
         </DialogContent>
       </Dialog>
-
+      
+      {/* Fallback delete confirmation dialog if DocumentActions doesn't handle it internally (though it does) */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>

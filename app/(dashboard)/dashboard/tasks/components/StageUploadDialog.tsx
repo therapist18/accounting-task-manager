@@ -122,7 +122,6 @@ const DocumentTabPanel = ({
   kycData,
   activeDocFields,
   isSourceDocSelected,
-  onToggleSourceDoc,
   onUploadSuccess,
   onPreviewExisting,
   onUseExistingLink
@@ -164,6 +163,32 @@ const DocumentTabPanel = ({
     }
   };
 
+  const handlePendingChange = useCallback((docs: any[]) => {
+    // If we have docs, we take the first one (assuming single file upload per tab)
+    if (docs && docs.length > 0) {
+      const activeDoc = docs[0];
+
+      // We only want to enable the button if there is a file
+      if (activeDoc.file) {
+        // Construct the object expected by pendingDocuments
+        const payload = {
+          file: activeDoc.file, // The raw File object
+          extractedData: activeDoc.extractedData || {},
+          kycId: doc.kycId,
+          name: doc.name
+        };
+
+        // Update parent state
+        onUploadSuccess(payload, doc);
+      }
+    } else {
+      // Optional: logic to remove from pendingDocuments if user deleted file in modal
+      // For now, onUploadSuccess usually adds/overwrites. 
+      // If you need removal logic, onUploadSuccess might need a 'remove' flag or a separate handler.
+    }
+  }, [doc, onUploadSuccess]);
+
+
   return (
     <div className="space-y-4 p-4 rounded-lg border h-full overflow-y-auto">
       {/* Existing Documents Section */}
@@ -196,30 +221,12 @@ const DocumentTabPanel = ({
                     const fileName = ed.file_path?.split('/').pop() || documentName;
                     return (
                       <div key={ed.id} className={`flex items-center gap-3 p-2 border rounded transition-colors ${isSelected ? 'bg-blue-50 border-blue-200' : 'hover:bg-slate-50'}`}>
-                        <div className="flex items-center gap-2">
-                          <RadioGroupItem
-                            value={ed.id}
-                            id={ed.id}
-                            disabled={isLocked}
-                            className={`${isLocked ? 'opacity-50' : ''}`}
-                          />
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (!isLocked) {
-                                onToggleSourceDoc(ed.id, doc.kycId, !isSourceDocSelected(ed.id));
-                              }
-                            }}
-                            className={`flex items-center justify-center h-5 w-5 rounded border ${isSourceDocSelected(ed.id) ? 'bg-blue-100 border-blue-500' : 'border-gray-300'} ${isLocked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-blue-50'}`}
-                            disabled={isLocked}
-                            aria-label={isSourceDocSelected(ed.id) ? 'Unlink as source document' : 'Link as source document'}
-                          >
-                            {isSourceDocSelected(ed.id) && (
-                              <Check className="h-3.5 w-3.5 text-blue-600" />
-                            )}
-                          </button>
-                        </div>
+                        <RadioGroupItem
+                          value={ed.id}
+                          id={ed.id}
+                          disabled={isLocked}
+                          className={`${isLocked ? 'opacity-50' : ''}`}
+                        />
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
                             <Label htmlFor={ed.id} className="text-sm cursor-pointer">{fileName}</Label>
@@ -286,6 +293,8 @@ const DocumentTabPanel = ({
               documentIdFieldName="document_id"
               isCompanyUpload={false}
               additionalFields={{ expiry_date: null }}
+              hideSaveButton={true}
+              onPendingChange={handlePendingChange}
               onBeforeUpload={async (recordData) => {
                 if (doc.onBeforeUpload) return doc.onBeforeUpload(recordData);
                 return null;
@@ -383,15 +392,27 @@ export function StageUploadDialog({
   // Set initial tab
   useEffect(() => {
     if (open && applicableDocuments.length > 0 && !activeDocumentTab) {
-      setActiveDocumentTab(applicableDocuments[0].id);
+      const firstDocId = applicableDocuments[0]?.id;
+      if (firstDocId) {
+        setActiveDocumentTab(firstDocId);
+      }
     }
-  }, [open, applicableDocuments, activeDocumentTab]);
+  }, [open, applicableDocuments.length]);
 
   // Clean up
   useEffect(() => {
     if (!open) {
-      setActiveDocumentTab('');
-      setPreviewState({ isOpen: false, data: null, loading: false });
+      // Reset states when dialog closes
+      const resetStates = () => {
+        setActiveDocumentTab('');
+        setPreviewState({ isOpen: false, data: null, loading: false });
+        setPendingDocuments({});
+      };
+
+      // Use requestAnimationFrame to batch state updates
+      requestAnimationFrame(() => {
+        resetStates();
+      });
     }
   }, [open]);
 
@@ -556,196 +577,237 @@ export function StageUploadDialog({
     }));
   }, [stage?.id, task?.id]);
 
-const saveAllDocuments = useCallback(async () => {
-  if (!stage?.id || !task?.id || Object.keys(pendingDocuments).length === 0) return;
-
-  setIsSaving(true);
-  try {
-    const currentDate = new Date().toISOString();
-    const updatedLinkedDocs = { ...linkedDocuments };
-    const updatedLockedDocs = { ...lockedDocuments };
-    const updatedSourceDocs = { ...selectedSourceDocs };
-    const uploadedDocIds = new Set<string>();
-
-    // Process all pending documents
-    for (const [docId, docData] of Object.entries(pendingDocuments)) {
-      if (!docData) continue;
-      
-      updatedLinkedDocs[docId] = docData;
-      updatedLockedDocs[docId] = true;
-      uploadedDocIds.add(docId);
-
-      // Update source documents with upload status
-      if (!updatedSourceDocs[stage.id]) {
-        updatedSourceDocs[stage.id] = [];
-      }
-      updatedSourceDocs[stage.id] = [
-        ...(updatedSourceDocs[stage.id]?.filter((d: any) => d.document_id !== docData.document_id) || []),
-        { 
-          ...docData, 
-          uploaded_at: currentDate, 
-          status: 'uploaded',
-          uploaded_document_id: docData.id,
-          uploaded_at_timestamp: currentDate
-        }
-      ];
-    }
-
-    // Get all required documents for this stage
-    const requiredDocuments = stage.documents || [];
-    const uploadedDocuments = requiredDocuments.filter(doc => 
-      updatedLinkedDocs[doc.id] || pendingDocuments[doc.id]
-    );
-    
-    const allRequiredDocsUploaded = requiredDocuments.length > 0 && 
-      requiredDocuments.every(doc => updatedLinkedDocs[doc.id] || pendingDocuments[doc.id]);
-
-    // Get current stage data
-    const currentStageData = task.stages?.[stage.id] || {};
-    const currentUploads = currentStageData.uploads || {};
-    
-    // Update uploads with new document statuses
-    const updatedUploads = { ...currentUploads };
-    for (const docId of Object.keys(pendingDocuments)) {
-      updatedUploads[docId] = {
-        uploaded_at: currentDate,
-        status: 'uploaded',
-        ...pendingDocuments[docId]
-      };
-    }
-
-    // Determine the new status based on document completion and special stage IDs
-    let newStatus: string;
-    let taskStatusUpdate = {};
-    
-    if (allRequiredDocsUploaded) {
-      // All required documents are uploaded - mark as completed with special status if needed
-      if (stage.id === 'caefd742-5de5-4341-a3bb-81d7b9dd2b73') {
-        newStatus = 'endorsed';
-        taskStatusUpdate = { status: 'endorsed' };
-      } else if (stage.id === '072b9710-45df-4a05-ba65-01b4ef29d61d') {
-        newStatus = 'write_up_completed';
-        taskStatusUpdate = { status: 'write_up_completed' };
-      } else {
-        newStatus = 'completed';
-      }
-    } else if (uploadedDocuments.length > 0) {
-      // Some but not all documents are uploaded - mark as in progress
-      newStatus = 'in_progress';
-    } else {
-      // No documents uploaded yet - keep current status or set to not_started
-      newStatus = currentStageData.status || 'not_started';
-    }
-
-    const timestamp = new Date().toISOString();
-    const updatedStages = {
-      ...task.stages,
-      [stage.id]: {
-        ...task.stages?.[stage.id],
-        status: newStatus,
-        date: new Date().toISOString().split('T')[0], // Format as YYYY-MM-DD
-        completedAt: allRequiredDocsUploaded ? timestamp : task.stages?.[stage.id]?.completedAt,
-        documentsUploaded: Object.keys(updatedLinkedDocs).length + Object.keys(pendingDocuments).length,
-        uploads: updatedUploads,
-        lastUpdated: timestamp
-      }
-    };
-
-    // Update the task with the new stage status and source documents
-    await supabase
-      .from('tm_tasks')
-      .update({
-        ...taskStatusUpdate,
-        stages: updatedStages,
-        current_stage_id: allRequiredDocsUploaded ? stage.id : task.current_stage_id,
-        source_document_id: updatedSourceDocs,
-        updated_at: timestamp
-      })
-      .eq('id', task.id);
-
-    // Update local state
-    setLinkedDocuments(updatedLinkedDocs);
-    setLockedDocuments(updatedLockedDocs);
-    setSelectedSourceDocs(updatedSourceDocs);
-    setPendingDocuments({});
-
-    // Show success message
-    toast({
-      title: 'Success',
-      description: allRequiredDocsUploaded
-        ? `Stage ${stage.name} completed successfully!`
-        : 'Documents uploaded successfully. Please upload remaining documents to complete the stage.'
-    });
-
-    // Notify parent components
-    if (allRequiredDocsUploaded) {
-      onStageCompleted?.(stage.id, task.id, {
-        date: updatedStages[stage.id].date,
-        status: newStatus
+  const saveAllDocuments = useCallback(async () => {
+    if (!stage?.id || !task?.id) {
+      toast({
+        title: 'Error',
+        description: 'Missing stage or task information',
+        variant: 'destructive'
       });
+      return;
     }
-    
-    onTaskAction?.({ type: 'refresh', taskId: task.id });
-    onOpenChange(false); // Close the dialog
 
-  } catch (e) {
-    console.error('Error saving documents:', e);
-    toast({
-      title: 'Error',
-      description: 'Failed to save documents',
-      variant: 'destructive'
-    });
-  } finally {
-    setIsSaving(false);
-  }
-}, [stage, task, pendingDocuments, linkedDocuments, lockedDocuments, selectedSourceDocs, onStageCompleted, onTaskAction, onOpenChange]);
-  const handleUploadSuccess = useCallback((newDocument: any, originatingDoc: any) => {
-    if (originatingDoc?.kycId && newDocument?.id && stage?.id) {
-      handleDocumentSelection(
-        originatingDoc.id,
-        newDocument.id.toString(),
-        originatingDoc.kycId
-      );
+    setIsSaving(true);
+    try {
+      const currentDate = new Date().toISOString();
+      const updatedLinkedDocs = { ...linkedDocuments };
+      const updatedLockedDocs = { ...lockedDocuments };
+      const updatedSourceDocs = { ...selectedSourceDocs };
+      const uploadedDocIds = new Set<string>();
+
+      // Process all pending documents
+      for (const [docId, docData] of Object.entries(pendingDocuments)) {
+        if (!docData) continue;
+
+        const docConfig = applicableDocuments.find(doc => doc.id === docId);
+        if (!docConfig) {
+          console.warn(`Document config not found for ID: ${docId}`);
+          continue;
+        }
+
+        // Process document (with or without file)
+        try {
+          const file = docData.file;
+          const documentName = docConfig.name || 'document';
+          let filePath = '';
+          let documentId = docData.id || '';
+
+          if (file) {
+            // If file is available, upload it
+            filePath = `individual-documents/${task.individual_id}/${docConfig.kycId}/${file.name}`;
+
+            // Upload to storage
+            const { error: uploadError } = await supabase.storage
+              .from('kyc-documents')
+              .upload(filePath, file, {
+                cacheControl: '3600',
+                upsert: true,
+                contentType: file.type || 'application/octet-stream'
+              });
+
+            if (uploadError) throw uploadError;
+          } else {  
+             filePath = docData.file_path || '';
+            console.log('Using existing document data for docId:', docId, docData);
+          }
+
+          // Create or update document record
+          let insertedDoc;
+          if (file) {
+            // Insert new document record only if we have a file
+            const { data: newDoc, error: insertError } = await supabase
+              .from('acc_portal_directors_documents')
+              .insert([{
+                director_id: task.individual_id,
+                document_id: docConfig.kycId,
+                extracted_details: docData.extractedData || {},
+                status: 'active',
+                file_path: filePath,
+                created_at: currentDate,
+                updated_at: currentDate
+              }])
+              .select()
+              .single();
+
+            if (insertError) throw insertError;
+            insertedDoc = newDoc;
+            documentId = newDoc.id;
+          } else if (docData.id) {
+            // If no file but we have an existing document ID, use that
+            insertedDoc = { id: docData.id };
+            documentId = docData.id;
+
+            // Optionally update the existing document if needed
+            // const { error: updateError } = await supabase
+            //   .from('acc_portal_directors_documents')
+            //   .update({
+            //     updated_at: currentDate,
+            //     // Add any other fields to update
+            //   })
+            //   .eq('id', docData.id);
+            // if (updateError) console.error('Error updating document:', updateError);
+          }
+
+          // Update local state
+          updatedLinkedDocs[docId] = {
+            id: documentId,
+            document_id: docConfig.kycId,
+            linked_at: docData.linked_at || currentDate,
+            updated_at: currentDate
+          };
+          updatedLockedDocs[docId] = true;
+          uploadedDocIds.add(docId);
+
+          // Update source documents
+          if (!updatedSourceDocs[stage.id]) {
+            updatedSourceDocs[stage.id] = [];
+          }
+          updatedSourceDocs[stage.id] = [
+            ...(updatedSourceDocs[stage.id]?.filter((d: any) => d.document_id !== docConfig.kycId) || []),
+            {
+              id: insertedDoc.id,
+              document_id: docConfig.kycId,
+              linked_at: currentDate,
+              status: 'uploaded',
+              linked_document_id: insertedDoc.id,
+            }
+          ];
+
+        } catch (error) {
+          console.error(`Error processing document ${docId}:`, error);
+          toast({
+            title: 'Error',
+            description: `Failed to upload document: ${docConfig.name || 'Unknown document'}`,
+            variant: 'destructive'
+          });
+          continue; // Continue with other documents even if one fails
+        }
+      }
+
+      // Update task and stage status with document details
+      const updatedStages = {
+        ...task.stages,
+        [stage.id]: {
+          ...task.stages?.[stage.id],
+          status: 'completed',
+          date: currentDate.split('T')[0],
+          completedAt: currentDate,
+          documentsUploaded: Object.keys(updatedLinkedDocs).length,
+          lastUpdated: currentDate,
+          documents: {
+            ...(task.stages?.[stage.id]?.documents || {}),
+            ...Object.fromEntries(
+              Array.from(uploadedDocIds).map(docId => {
+                const docConfig = applicableDocuments.find(doc => doc.id === docId);
+                const docData = pendingDocuments[docId];
+                const file = docData?.file;
+
+                return [docId, {
+                  id: updatedLinkedDocs[docId]?.id,
+                  document_id: docConfig?.kycId,
+                  name: docConfig?.name || 'document',
+                  linked_at: currentDate,
+                  status: 'linked'
+                }];
+              })
+            )
+          }
+        }
+      };
+
+      // Save to database
+      const { error: updateError } = await supabase
+        .from('tm_tasks')
+        .update({
+          stages: updatedStages,
+          source_document_id: updatedSourceDocs,
+          updated_at: currentDate
+        })
+        .eq('id', task.id);
+
+      if (updateError) throw updateError;
+
+      // Update local state
+
+      // Show success message
+      toast({
+        title: 'Success',
+        description: `Successfully uploaded ${uploadedDocIds.size} document(s)`,
+        variant: 'default'
+      });
+
+      // Refresh task data
+      onTaskAction?.({ type: 'refresh', taskId: task.id });
+      onOpenChange(false);
+    } catch (error) {
+      console.error('Error saving documents:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to save documents. Please try again.',
+        variant: 'destructive'
+      });
+    } finally {
+      setIsSaving(false);
     }
-  }, [stage?.id, handleDocumentSelection]);
+  }, [stage, task, pendingDocuments, linkedDocuments, selectedSourceDocs, onTaskAction, onOpenChange]);
+
+  const handleUploadSuccess = useCallback((newDocument: any, originatingDoc: any) => {
+    if (!originatingDoc?.id) return;
+
+    setPendingDocuments(prev => {
+      // Only update if the document is new or changed
+      const existingDoc = prev[originatingDoc.id];
+      if (existingDoc && JSON.stringify(existingDoc) === JSON.stringify({
+        ...newDocument,
+        kycId: originatingDoc.kycId,
+        name: originatingDoc.name
+      })) {
+        return prev; // No change needed
+      }
+
+      return {
+        ...prev,
+        [originatingDoc.id]: {
+          ...newDocument,
+          kycId: originatingDoc.kycId,
+          name: originatingDoc.name
+        }
+      };
+    });
+
+    // Use setTimeout to ensure toast is shown after state is updated
+    setTimeout(() => {
+      toast({
+        title: "Document Added",
+        description: `"${originatingDoc.name}" added to pending uploads`,
+        variant: "default"
+      });
+    }, 0);
+  }, []);
 
   const handleUseExisting = useCallback((docConfigId: string, existingDocId: string, kycId: string) => {
     handleDocumentSelection(docConfigId, existingDocId, kycId);
   }, [handleDocumentSelection]);
-
-  const toggleSourceDocument = useCallback(async (docId: string, kycId: string, isSelected: boolean) => {
-    if (!stage?.id) return;
-    try {
-      const currentDate = new Date().toISOString();
-      let updatedSource = { ...selectedSourceDocs };
-
-      if (isSelected) {
-        updatedSource[stage.id] = [
-          ...(updatedSource[stage.id] || []),
-          { id: docId, document_id: kycId, linked_at: currentDate, updated_at: currentDate }
-        ];
-      } else {
-        updatedSource[stage.id] = (updatedSource[stage.id] || [])
-          .map(doc => doc.id === docId
-            ? { ...doc, updated_at: currentDate, unlinked_at: currentDate }
-            : doc
-          );
-      }
-
-      setSelectedSourceDocs(updatedSource);
-      const { error } = await supabase
-        .from('tm_tasks')
-        .update({ source_document_id: updatedSource, updated_at: currentDate })
-        .eq('id', task.id);
-
-      if (error) throw error;
-      toast({ title: 'Success', description: isSelected ? 'Document linked as source.' : 'Document unlinked from source.' });
-      onTaskAction?.({ type: 'refresh', taskId: task.id });
-    } catch (e) {
-      console.error('Error updating source document:', e);
-      toast({ title: 'Error', variant: 'destructive', description: 'Failed to update source document.' });
-    }
-  }, [task?.id, stage?.id, selectedSourceDocs, onTaskAction]);
 
   const handlePreview = useCallback(async (document: any, kycData: any) => {
     if (!kycData) return;
@@ -833,18 +895,22 @@ const saveAllDocuments = useCallback(async () => {
             <Tabs value={activeDocumentTab} onValueChange={setActiveDocumentTab} className="flex-1 flex flex-col overflow-hidden">
               <div className="px-6 pt-2 border-b bg-muted/10">
                 <TabsList className="w-full justify-start overflow-x-auto h-auto p-1 bg-transparent gap-2">
-                  {applicableDocuments.map((doc: any) => (
-                    <TabsTrigger
-                      key={doc.id}
-                      value={doc.id}
-                      className="relative px-4 py-2 data-[state=active]:bg-white data-[state=active]:shadow-sm border border-transparent data-[state=active]:border-border"
-                    >
-                      {doc.name || 'Document'}
-                      {isDocumentLocked(doc.id) && (
-                        <Check className="h-4 w-4 ml-2 text-green-600" />
-                      )}
-                    </TabsTrigger>
-                  ))}
+                  {applicableDocuments.map((doc: any) => {
+                    const kycDoc = kycDocuments.get(doc.kycId);
+                    const displayName = kycDoc?.display_name || doc.name || 'Document';
+                    return (
+                      <TabsTrigger
+                        key={doc.id}
+                        value={doc.id}
+                        className="relative px-4 py-2 data-[state=active]:bg-white data-[state=active]:shadow-sm border border-transparent data-[state=active]:border-border"
+                      >
+                        {displayName}
+                        {isDocumentLocked(doc.id) && (
+                          <Check className="h-4 w-4 ml-2 text-green-600" />
+                        )}
+                      </TabsTrigger>
+                    );
+                  })}
                 </TabsList>
               </div>
 
@@ -855,8 +921,6 @@ const saveAllDocuments = useCallback(async () => {
                   </div>
                 ) : (
                   applicableDocuments.map((doc: any) => (
-                    // CRITICAL FIX: Use display:none (hidden class) instead of unmounting content.
-                    // This preserves the state of UploadModal when switching tabs.
                     <div
                       key={doc.id}
                       className={`h-full overflow-y-auto p-6 ${activeDocumentTab === doc.id ? 'block' : 'hidden'}`}
@@ -865,16 +929,16 @@ const saveAllDocuments = useCallback(async () => {
                         doc={doc}
                         task={task}
                         individualName={individualName}
-                        existingDocs={existingDocuments[doc.id]}
+                        existingDocs={existingDocuments[doc.id] || []}
                         isLocked={isDocumentLocked(doc.id)}
                         linkedDocInstanceId={isDocumentLocked(doc.id) ? linkedDocuments[doc.id]?.id : null}
                         kycData={doc.kycId ? kycDocuments.get(doc.kycId) : null}
                         activeDocFields={docFieldsMap[doc.id]}
                         isSourceDocSelected={isDocSelectedAsSource}
-                        onToggleSourceDoc={toggleSourceDocument}
-                        onUploadSuccess={handleUploadSuccess}
+                        onUploadSuccess={(newDoc) => handleUploadSuccess(newDoc, doc)}
                         onPreviewExisting={handlePreview}
                         onUseExistingLink={handleUseExisting}
+                        hideSaveButton={true}
                       />
                     </div>
                   ))
