@@ -1035,13 +1035,13 @@ export default function DepartmentTasksManager({
       let skippedMinors = 0;
 
       if (isReEntry) {
-        if (!isPrincipalMember) tasksToCreate.push({ status: 'in_progress', department_id: targetDeptId, subdepartment_id: targetSubDeptId, class_id: applicantClassId ? Number(applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, current_stage_id: null, current_stage_started_at: null, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: false, understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(task.applicant_name || ''), individual_id: String(task.individual_id || '') });
+        if (!isPrincipalMember) tasksToCreate.push({ status: 'in_progress', department_id: targetDeptId, subdepartment_id: targetSubDeptId, class_id: applicantClassId ? Number(applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: false, understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(task.applicant_name || ''), individual_id: String(task.individual_id || '') });
         if (task.dependant_member && Array.isArray(task.dependant_member)) {
           task.dependant_member.forEach(dep => { if (dep?.id && dependantsMap.has(dep.id)) dependants.push({ ...dependantsMap.get(dep.id), relationship: dep.relationship || 'Dependant' }); });
-          for (const dependant of dependants) tasksToCreate.push({ status: 'in_progress', department_id: Number(targetDeptId) || null, subdepartment_id: Number(targetSubDeptId) || null, class_id: dependantClassId || applicantClassId ? Number(dependantClassId || applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, current_stage_id: null, current_stage_started_at: null, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: false, understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(dependant.full_name || ''), individual_id: String(dependant.individual_id || '') });
+          for (const dependant of dependants) tasksToCreate.push({ status: 'in_progress', department_id: Number(targetDeptId) || null, subdepartment_id: Number(targetSubDeptId) || null, class_id: dependantClassId || applicantClassId ? Number(dependantClassId || applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: false, understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(dependant.full_name || ''), individual_id: String(dependant.individual_id || '') });
         }
       } else {
-        const baseTaskData = { status: 'in_progress', department_id: Number(targetDeptId) || null, subdepartment_id: Number(targetSubDeptId) || null, class_id: applicantClassId ? Number(applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, current_stage_id: null, current_stage_started_at: null, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: isPrincipalMember ? 'principal' : 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: Boolean(isPrincipalMember), understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(task.applicant_name || ''), individual_id: String(task.individual_id || '') };
+        const baseTaskData = { status: 'in_progress', department_id: Number(targetDeptId) || null, subdepartment_id: Number(targetSubDeptId) || null, class_id: applicantClassId ? Number(applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: isPrincipalMember ? 'principal' : 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: Boolean(isPrincipalMember), understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(task.applicant_name || ''), individual_id: String(task.individual_id || '') };
         tasksToCreate.push(baseTaskData);
         if (task.dependant_member && Array.isArray(task.dependant_member)) {
           task.dependant_member.forEach(dep => { if (dep?.id && dependantsMap.has(dep.id)) dependants.push({ ...dependantsMap.get(dep.id), relationship: dep.relationship || 'Dependant' }); });
@@ -1130,70 +1130,112 @@ export default function DepartmentTasksManager({
     } finally { setIsDownloading(false); }
   }, [allDocuments, getTaskHierarchy, stages]);
 
-  const enhancedHandleStageStatusSave = useCallback(async (
-    stageId: string,
-    taskId: string,
-    value: string,
-    updatedExtractedDetails?: Record<string, any>
-  ) => {
-    try {
-      if (handleStageStatusSave) await handleStageStatusSave(stageId, taskId, value, updatedExtractedDetails)
-      const task = tasks.find(t => t.id.toString() === taskId.toString())
-      if (!task) return
-
-      // Determine status based on stage ID
-      let status = 'completed';
-      let taskStatusUpdate = {};
-
-      if (stageId === 'caefd742-5de5-4341-a3bb-81d7b9dd2b73') {
-        status = 'endorsed';
-        taskStatusUpdate = { status: 'endorsed' };
-      } else if (stageId === '072b9710-45df-4a05-ba65-01b4ef29d61d') {
-        status = 'write_up_completed';
-        taskStatusUpdate = { status: 'write_up_completed' };
-      } else if (stageId === 'a19b270e-6d1e-4e6d-b2bc-f21db72cde08') {
-        status = 'in_progress';
-        taskStatusUpdate = { status: 'in_progress' };
-      }
-
-      const updatedStages = {
-        ...task.stages,
-        [stageId]: {
-          ...task.stages?.[stageId],
-          status,
-          date: value,
-          completedAt: new Date().toISOString()
-        }
-      }
-
-      const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages)
-      const updateData: any = {
-        ...taskStatusUpdate,
-        stages: updatedStages,
-        updated_at: new Date().toISOString()
-      }
-
-      if (currentStage) {
-        updateData.current_stage_id = currentStage.id;
-        updateData.current_stage_started_at = new Date().toISOString();
-      }
-
-      const { error } = await supabase
-        .from('tm_tasks')
-        .update(updateData)
-        .eq('id', taskId)
-
-      if (error) throw error
-      await loadTasksData(activeDepartmentTab, activeSubdepartmentTab)
-    } catch (error) {
-      console.error('Error updating stage status:', error)
-      toast({
-        title: "Error",
-        description: "Failed to update stage status.",
-        variant: "destructive"
-      })
+const enhancedHandleStageStatusSave = useCallback(async (
+  stageId: string,
+  taskId: string,
+  value: string,
+  updatedExtractedDetails?: Record<string, any>
+) => {
+  try {
+    const task = tasks.find(t => t.id.toString() === taskId.toString());
+    if (!task) {
+      console.error('❌ Task not found in local state');
+      return;
     }
-  }, [handleStageStatusSave, tasks, stages, determineCurrentStage, loadTasksData, activeDepartmentTab, activeSubdepartmentTab])
+
+    // 1. Define Priority Levels
+    const STATUS_PRIORITY: Record<string, number> = {
+      'pending': 0,
+      'new': 0,
+      'enquiry': 0,
+      'in_progress': 1,
+      'write_up_completed': 2,
+      'endorsed': 3
+    };
+
+    // 2. Map Stage IDs to Target Statuses
+    const STAGE_STATUS_MAPPING: Record<string, string> = {
+      'a19b270e-6d1e-4e6d-b2bc-f21db72cde08': 'in_progress',       // Start / In Progress
+      '072b9710-45df-4a05-ba65-01b4ef29d61d': 'write_up_completed', // Write Up Completed
+      '6625f6d2-8017-4bf4-96c2-85335703164c': 'endorsed',          // Endorsement
+      'caefd742-5de5-4341-a3bb-81d7b9dd2b73': 'endorsed'           // Endorsement (Alternative)
+    };
+
+    // 3. Normalize Status Strings for Comparison
+    // Converts "In Progress" -> "in_progress", "Write-Up Completed" -> "write_up_completed"
+    const normalizeStatus = (s: string | null | undefined) => {
+      if (!s) return 'pending';
+      return s.toLowerCase().trim().replace(/[\s-]/g, '_');
+    };
+
+    const currentStatusRaw = task.status;
+    const currentStatusKey = normalizeStatus(currentStatusRaw);
+    const potentialNewStatus = STAGE_STATUS_MAPPING[stageId.toLowerCase()]; // Ensure ID match is case-insensitive
+
+    let taskStatusUpdate = {};
+    const timestamp = new Date().toISOString();
+
+    // 4. Determine if Status Should Update
+    if (potentialNewStatus) {
+      const currentPriority = STATUS_PRIORITY[currentStatusKey] ?? 0; // Default to 0 if unknown
+      const newPriority = STATUS_PRIORITY[potentialNewStatus] ?? 0;
+
+      if (newPriority > currentPriority) {
+        taskStatusUpdate = { status: potentialNewStatus };
+      }
+    } else {
+    }
+
+    // 5. Prepare Stage Data (Always update this)
+    const updatedStages = {
+      ...task.stages,
+      [stageId]: {
+        ...task.stages?.[stageId],
+        status: 'completed',
+        date: value,
+        completedAt: timestamp,
+        updatedAt: timestamp
+      }
+    };
+
+    // Calculate current stage for metadata
+    const currentStage = determineCurrentStage({ ...task, stages: updatedStages }, stages);
+
+    // 6. Build Payload
+    const updateData: any = {
+      ...taskStatusUpdate, // Spread the status update (if any)
+      stages: updatedStages,
+      updated_at: timestamp
+    };
+
+       // 7. Execute Update
+    const { error } = await supabase
+      .from('tm_tasks')
+      .update(updateData)
+      .eq('id', taskId);
+
+    if (error) throw error;
+
+    // 8. Refresh Data
+    await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
+
+    const successMessage = ('status' in taskStatusUpdate)
+      ? `Stage completed & Status updated to ${taskStatusUpdate.status?.replace(/_/g, ' ')}`
+      : 'Stage completed';
+
+    toast({ title: "Success", description: successMessage });
+
+  } catch (error) {
+    console.error('❌ Error in enhancedHandleStageStatusSave:', error);
+    toast({
+      title: "Error",
+      description: "Failed to update stage status.",
+      variant: "destructive"
+    });
+  } finally {
+    console.groupEnd();
+  }
+}, [handleStageStatusSave, tasks, stages, determineCurrentStage, loadTasksData, activeDepartmentTab, activeSubdepartmentTab]);
 
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
     if (!tasks.length) return [];

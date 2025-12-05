@@ -577,7 +577,7 @@ export function StageUploadDialog({
     }));
   }, [stage?.id, task?.id]);
 
-  const saveAllDocuments = useCallback(async () => {
+ const saveAllDocuments = useCallback(async () => {
     if (!stage?.id || !task?.id) {
       toast({
         title: 'Error',
@@ -588,6 +588,7 @@ export function StageUploadDialog({
     }
 
     setIsSaving(true);
+
     try {
       const currentDate = new Date().toISOString();
       const updatedLinkedDocs = { ...linkedDocuments };
@@ -595,7 +596,7 @@ export function StageUploadDialog({
       const updatedSourceDocs = { ...selectedSourceDocs };
       const uploadedDocIds = new Set<string>();
 
-      // Process all pending documents
+      // --- 1. Process all pending documents (Upload & Link) ---
       for (const [docId, docData] of Object.entries(pendingDocuments)) {
         if (!docData) continue;
 
@@ -605,18 +606,14 @@ export function StageUploadDialog({
           continue;
         }
 
-        // Process document (with or without file)
         try {
           const file = docData.file;
-          const documentName = docConfig.name || 'document';
           let filePath = '';
           let documentId = docData.id || '';
 
           if (file) {
-            // If file is available, upload it
             filePath = `individual-documents/${task.individual_id}/${docConfig.kycId}/${file.name}`;
 
-            // Upload to storage
             const { error: uploadError } = await supabase.storage
               .from('kyc-documents')
               .upload(filePath, file, {
@@ -628,13 +625,10 @@ export function StageUploadDialog({
             if (uploadError) throw uploadError;
           } else {  
              filePath = docData.file_path || '';
-            console.log('Using existing document data for docId:', docId, docData);
           }
 
-          // Create or update document record
           let insertedDoc;
           if (file) {
-            // Insert new document record only if we have a file
             const { data: newDoc, error: insertError } = await supabase
               .from('acc_portal_directors_documents')
               .insert([{
@@ -653,22 +647,10 @@ export function StageUploadDialog({
             insertedDoc = newDoc;
             documentId = newDoc.id;
           } else if (docData.id) {
-            // If no file but we have an existing document ID, use that
             insertedDoc = { id: docData.id };
             documentId = docData.id;
-
-            // Optionally update the existing document if needed
-            // const { error: updateError } = await supabase
-            //   .from('acc_portal_directors_documents')
-            //   .update({
-            //     updated_at: currentDate,
-            //     // Add any other fields to update
-            //   })
-            //   .eq('id', docData.id);
-            // if (updateError) console.error('Error updating document:', updateError);
           }
 
-          // Update local state
           updatedLinkedDocs[docId] = {
             id: documentId,
             document_id: docConfig.kycId,
@@ -678,7 +660,6 @@ export function StageUploadDialog({
           updatedLockedDocs[docId] = true;
           uploadedDocIds.add(docId);
 
-          // Update source documents
           if (!updatedSourceDocs[stage.id]) {
             updatedSourceDocs[stage.id] = [];
           }
@@ -695,16 +676,58 @@ export function StageUploadDialog({
 
         } catch (error) {
           console.error(`Error processing document ${docId}:`, error);
-          toast({
-            title: 'Error',
-            description: `Failed to upload document: ${docConfig.name || 'Unknown document'}`,
-            variant: 'destructive'
-          });
-          continue; // Continue with other documents even if one fails
+          continue; 
         }
       }
 
-      // Update task and stage status with document details
+      // --- 2. Calculate Task Status Update (Priority Logic) ---
+      
+      // Define Priority Levels
+      const STATUS_PRIORITY: Record<string, number> = {
+        'pending': 0, 'new': 0, 'enquiry': 0,
+        'in_progress': 1,
+        'write_up_completed': 2,
+        'endorsed': 3
+      };
+
+      // Map Stage IDs to Target Statuses
+      const STAGE_STATUS_MAPPING: Record<string, string> = {
+        'a19b270e-6d1e-4e6d-b2bc-f21db72cde08': 'in_progress',
+        '072b9710-45df-4a05-ba65-01b4ef29d61d': 'write_up_completed',
+        '6625f6d2-8017-4bf4-96c2-85335703164c': 'endorsed',
+        'caefd742-5de5-4341-a3bb-81d7b9dd2b73': 'endorsed'
+      };
+
+      const normalizeStatus = (s: string | null | undefined) => {
+        if (!s) return 'pending';
+        return s.toLowerCase().trim().replace(/[\s-]/g, '_');
+      };
+
+      const currentStatusRaw = task.status;
+      const currentStatusKey = normalizeStatus(currentStatusRaw);
+      const potentialNewStatus = STAGE_STATUS_MAPPING[stage.id];
+
+      let taskStatusUpdate = {};
+
+      if (potentialNewStatus) {
+        const currentPriority = STATUS_PRIORITY[currentStatusKey] ?? 0;
+        const newPriority = STATUS_PRIORITY[potentialNewStatus] ?? 0;
+
+        console.log('📊 Status Priority Check:', {
+          current: { key: currentStatusKey, priority: currentPriority },
+          new: { key: potentialNewStatus, priority: newPriority }
+        });
+
+        // Only update if new priority is strictly greater
+        if (newPriority > currentPriority) {
+          taskStatusUpdate = { status: potentialNewStatus };
+          console.log(`✅ Applying Status Update: ${potentialNewStatus}`);
+        } else {
+          console.log(`ℹ️ Skipping Status Update: ${newPriority} <= ${currentPriority}`);
+        }
+      }
+
+      // --- 3. Prepare Stages JSON ---
       const updatedStages = {
         ...task.stages,
         [stage.id]: {
@@ -719,9 +742,6 @@ export function StageUploadDialog({
             ...Object.fromEntries(
               Array.from(uploadedDocIds).map(docId => {
                 const docConfig = applicableDocuments.find(doc => doc.id === docId);
-                const docData = pendingDocuments[docId];
-                const file = docData?.file;
-
                 return [docId, {
                   id: updatedLinkedDocs[docId]?.id,
                   document_id: docConfig?.kycId,
@@ -735,24 +755,31 @@ export function StageUploadDialog({
         }
       };
 
-      // Save to database
+      // --- 4. Execute DB Update ---
+      const updateData = {
+        ...taskStatusUpdate, // Includes 'status' only if priority check passed
+        stages: updatedStages,
+        source_document_id: updatedSourceDocs,
+        updated_at: currentDate
+      };
+
+      console.log('🚀 Sending Payload:', updateData);
+
       const { error: updateError } = await supabase
         .from('tm_tasks')
-        .update({
-          stages: updatedStages,
-          source_document_id: updatedSourceDocs,
-          updated_at: currentDate
-        })
+        .update(updateData)
         .eq('id', task.id);
 
       if (updateError) throw updateError;
 
-      // Update local state
-
       // Show success message
+      const successMsg = ('status' in taskStatusUpdate) 
+        ? `Documents saved & Status updated to ${taskStatusUpdate.status}`
+        : `Successfully uploaded ${uploadedDocIds.size} document(s)`;
+
       toast({
         title: 'Success',
-        description: `Successfully uploaded ${uploadedDocIds.size} document(s)`,
+        description: successMsg,
         variant: 'default'
       });
 
@@ -768,9 +795,9 @@ export function StageUploadDialog({
       });
     } finally {
       setIsSaving(false);
+      console.groupEnd();
     }
-  }, [stage, task, pendingDocuments, linkedDocuments, selectedSourceDocs, onTaskAction, onOpenChange]);
-
+  }, [stage, task, pendingDocuments, linkedDocuments, selectedSourceDocs, onTaskAction, onOpenChange, applicableDocuments, lockedDocuments]);
   const handleUploadSuccess = useCallback((newDocument: any, originatingDoc: any) => {
     if (!originatingDoc?.id) return;
 
@@ -794,15 +821,6 @@ export function StageUploadDialog({
         }
       };
     });
-
-    // Use setTimeout to ensure toast is shown after state is updated
-    setTimeout(() => {
-      toast({
-        title: "Document Added",
-        description: `"${originatingDoc.name}" added to pending uploads`,
-        variant: "default"
-      });
-    }, 0);
   }, []);
 
   const handleUseExisting = useCallback((docConfigId: string, existingDocId: string, kycId: string) => {
