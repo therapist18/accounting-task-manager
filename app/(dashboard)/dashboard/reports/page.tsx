@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Loader2, LayoutGrid, Rows, Plus, Minus, Briefcase, FileDown,
   ChevronDown, ChevronsRight, ChevronsDown, X, FileText, ArrowLeft,
-  List, ChevronLeft, ChevronRight, RefreshCw, Filter
+  List, ChevronLeft, ChevronRight, RefreshCw, Filter, AlertTriangle
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -190,7 +190,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     refreshData();
-  }, [activeReport]); // removed refreshData from deps to avoid loop, only trigger on report change
+  }, [activeReport]);
 
   const handleSelectReport = (report: any) => {
     setActiveReport(report);
@@ -215,7 +215,6 @@ export default function ReportsPage() {
       if (activeSubDeptId !== 'all' && task.subdepartment_id?.toString() !== activeSubDeptId) return false;
 
       // 3. Status Filter
-      // Define what counts as "Completed" (adjust based on your actual status strings)
       const isCompleted = ['write_up_completed', 'endorsed', 'completed', 'archived'].includes(task.status);
 
       if (activeStatus === 'wip' && isCompleted) return false;
@@ -477,69 +476,86 @@ export default function ReportsPage() {
           </Tabs>
         )}
 
-        {/* --- SECONDARY CONTROLS (Sub-Depts & Status) --- */}
+        {/* --- SUB-DEPARTMENT & STATUS TABS --- */}
         {activeReport && (
-          <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between bg-white p-3 rounded-lg border shadow-sm">
+          <div className="flex flex-col gap-3 bg-white p-3 rounded-lg border shadow-sm">
+            {/* Sub-Department Tabs */}
+            <Tabs value={activeSubDeptId} onValueChange={(v) => { setActiveSubDeptId(v); setCurrentPage(1); }}>
+              <TabsList className="w-full justify-start h-10 bg-slate-50 border p-1 gap-1 overflow-x-auto">
+                <TabsTrigger 
+                  value="all" 
+                  className="px-3 h-8 data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm text-xs"
+                >
+                  All Sub-departments
+                </TabsTrigger>
+                {activeSubDepartments.map((sub) => (
+                  <TabsTrigger
+                    key={sub.id}
+                    value={sub.id.toString()}
+                    className="px-3 h-8 data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm text-xs"
+                  >
+                    {sub.name}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
 
-            {/* Left: Filters */}
-            <div className="flex flex-wrap items-center gap-4">
-              {/* Sub-Department Filter */}
-              <div className="flex items-center gap-2">
-                <Filter className="h-4 w-4 text-slate-400" />
-                <Select value={activeSubDeptId} onValueChange={(v) => { setActiveSubDeptId(v); setCurrentPage(1); }}>
-                  <SelectTrigger className="w-[180px] h-9">
-                    <SelectValue placeholder="All Sub-departments" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Sub-departments</SelectItem>
-                    {activeSubDepartments.map((sub) => (
-                      <SelectItem key={sub.id} value={sub.id.toString()}>{sub.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Status Switcher */}
+            {/* Status Tabs & Pagination Controls */}
+            <div className="flex items-center justify-between gap-4">
+              {/* Status Filter */}
               <Tabs value={activeStatus} onValueChange={(v) => { setActiveStatus(v); setCurrentPage(1); }}>
                 <TabsList className="h-9 bg-slate-100">
+                  <TabsTrigger value="all" className="text-xs px-3">All Tasks</TabsTrigger>
                   <TabsTrigger value="wip" className="text-xs px-3">Work In Progress</TabsTrigger>
                   <TabsTrigger value="completed" className="text-xs px-3">Completed</TabsTrigger>
                 </TabsList>
               </Tabs>
-            </div>
 
-            {/* Right: Pagination */}
-            <div className="flex items-center gap-4 ml-auto">
-              <div className="flex items-center gap-2 text-sm text-slate-600">
-                <span className="hidden sm:inline">Rows:</span>
-                <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
-                  <SelectTrigger className="w-[70px] h-8 text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {[10, 20, 50, 100].map(n => <SelectItem key={n} value={n.toString()}>{n}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center gap-1 bg-slate-50 rounded-md p-1 border">
-                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={currentPage === 1} onClick={handlePreviousPage}><ChevronLeft className="h-4 w-4" /></Button>
-                <span className="text-xs font-medium min-w-[30px] text-center">
-                  {totalItems > 0 ? `${(currentPage - 1) * itemsPerPage + 1}-${Math.min(currentPage * itemsPerPage, totalItems)}` : '0'} / {totalItems}
-                </span>
-                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={currentPage >= totalPages} onClick={handleNextPage}><ChevronRight className="h-4 w-4" /></Button>
-              </div>
-
-              {view === 'transposed' && (
-                <div className="flex gap-1 ml-2">
-                  <Button variant="outline" size="xs" onClick={() => setExpandedSections(new Set([...transposedRows.map(r => r.id)]))}><ChevronsDown className="h-3 w-3" /></Button>
-                  <Button variant="outline" size="xs" onClick={() => setExpandedSections(new Set())}><ChevronsRight className="h-3 w-3" /></Button>
+              {/* Pagination Controls */}
+              <div className="flex items-center gap-4">
+                <div className="text-sm text-slate-600">
+                  Showing <strong>{totalItems > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0}</strong>-<strong>{Math.min(currentPage * itemsPerPage, totalItems)}</strong> of <strong>{totalItems}</strong> tasks
                 </div>
-              )}
+                
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-600">Rows:</span>
+                  <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
+                    <SelectTrigger className="w-[70px] h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {[10, 20, 50, 100].map(n => <SelectItem key={n} value={n.toString()}>{n}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <Button variant="outline" size="sm" className="h-8" disabled={currentPage === 1} onClick={handlePreviousPage}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-xs font-medium min-w-[60px] text-center">
+                    Page {currentPage} of {totalPages || 1}
+                  </span>
+                  <Button variant="outline" size="sm" className="h-8" disabled={currentPage >= totalPages} onClick={handleNextPage}>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                {view === 'transposed' && (
+                  <div className="flex gap-1">
+                    <Button variant="outline" size="sm" className="h-8" onClick={() => setExpandedSections(new Set([...transposedRows.map(r => r.id)]))}>
+                      <ChevronsDown className="h-3 w-3" />
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-8" onClick={() => setExpandedSections(new Set())}>
+                      <ChevronsRight className="h-3 w-3" />
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
 
         {/* --- TABLE CONTENT --- */}
-        <div className="flex-1 bg-white border rounded-lg shadow-sm overflow-auto relative">
+        <div className="flex-1 bg-white border-2 border-slate-300 rounded-lg shadow-sm overflow-auto relative">
           {!activeReport ? (
             <div className="flex flex-col items-center justify-center h-full text-slate-400">
               <FileText className="h-16 w-16 mb-4 opacity-20" />
@@ -547,49 +563,58 @@ export default function ReportsPage() {
               <p className="text-sm">Please select a report from the menu to view data.</p>
             </div>
           ) : loading ? (
-            <div className="flex flex-col items-center justify-center h-full text-blue-600">
-              <Loader2 className="h-10 w-10 animate-spin mb-2" />
-              <p className="text-sm font-medium">Fetching Report Data...</p>
+            <div className="flex flex-col items-center justify-center h-full">
+              <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-2" />
+              <p className="text-sm font-medium text-slate-600">Fetching Report Data...</p>
             </div>
           ) : filteredTasks.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-slate-400">
               <Briefcase className="h-12 w-12 mb-3 opacity-20" />
-              <p className="font-medium">No tasks found</p>
-              <p className="text-xs">Try changing the filters or selecting a different department.</p>
+              <p className="font-medium text-slate-700">No tasks found</p>
+              <p className="text-xs text-slate-500">Try changing the filters or selecting a different department.</p>
             </div>
           ) : (
             view === 'standard' ? (
-              // --- STANDARD VIEW ---
+              // --- STANDARD (ROWS) VIEW ---
               <Table className="border-separate border-spacing-0 w-full">
-                <TableHeader className="sticky top-0 z-30 bg-slate-100 shadow-sm">
+                <TableHeader className="sticky top-0 z-30 bg-slate-100/80 backdrop-blur-sm">
                   {/* Group Header Row */}
-                  <TableRow className="bg-slate-50 hover:bg-slate-50">
-                    <TableHead className="w-12 border-b border-r bg-slate-50 sticky left-0 z-40"></TableHead>
+                  <TableRow className="bg-blue-600 hover:bg-blue-600">
+                    <TableHead className="w-16 border-b border-r border-blue-500 bg-blue-700 text-white sticky left-0 z-40 text-center font-bold">#</TableHead>
                     {columnGroups.map((group, i) => (
-                      <TableHead key={i} colSpan={group.span} className="text-center font-bold text-slate-700 border-b border-r last:border-r-0 bg-slate-100 py-2 h-auto">
+                      <TableHead 
+                        key={i} 
+                        colSpan={group.span} 
+                        className="text-center font-bold text-white border-b border-r border-blue-500 last:border-r-0 bg-blue-600 py-3 text-sm"
+                      >
                         {group.label}
                       </TableHead>
                     ))}
                   </TableRow>
                   {/* Column Header Row */}
-                  <TableRow className="bg-white hover:bg-white shadow-sm">
-                    <TableHead className="w-12 border-b border-r bg-slate-50 sticky left-0 z-40 text-center font-bold text-slate-500">#</TableHead>
+                  <TableRow className="bg-blue-500 hover:bg-blue-500">
+                    <TableHead className="w-16 border-b border-r border-blue-400 bg-blue-600 text-white sticky left-0 z-40 text-center font-semibold text-xs">#</TableHead>
                     {columns.map(col => (
-                      <TableHead key={col.id} className="whitespace-nowrap px-4 py-3 font-semibold text-slate-600 border-b border-r text-xs h-auto bg-white">
+                      <TableHead 
+                        key={col.id} 
+                        className="whitespace-nowrap px-4 py-3 font-semibold text-white border-b border-r border-blue-400 text-xs bg-blue-500"
+                      >
                         {col.label}
                       </TableHead>
                     ))}
                   </TableRow>
                 </TableHeader>
-                <TableBody>
+                <TableBody className="divide-y divide-slate-200">
                   {paginatedTasks.map((task, idx) => (
                     <TableRow key={task.id} className="hover:bg-blue-50/50 transition-colors group">
-                      <TableCell className="sticky left-0 z-20 bg-slate-50 group-hover:bg-blue-100/50 border-r border-b font-medium text-xs text-center text-slate-500">
+                      <TableCell className="sticky left-0 z-20 bg-white group-hover:bg-blue-50/50 border-r border-b border-gray-100 font-medium text-xs text-center text-slate-700">
                         {(currentPage - 1) * itemsPerPage + idx + 1}
                       </TableCell>
                       {columns.map(col => (
-                        <TableCell key={col.id} className="border-b border-r p-2 text-xs truncate max-w-[200px]">
-                          {safeRender(renderCellValue(task, col))}
+                        <TableCell key={col.id} className="border-b border-r border-gray-100 p-3 text-xs align-middle">
+                          <div className="truncate max-w-[200px]">
+                            {safeRender(renderCellValue(task, col))}
+                          </div>
                         </TableCell>
                       ))}
                     </TableRow>
@@ -597,38 +622,56 @@ export default function ReportsPage() {
                 </TableBody>
               </Table>
             ) : (
-              // --- TRANSPOSED VIEW ---
+              // --- TRANSPOSED (COLUMNS) VIEW ---
               <Table className="border-separate border-spacing-0 w-full">
                 <TableHeader className="sticky top-0 z-30 shadow-md">
                   <TableRow className="bg-blue-700 hover:bg-blue-700">
                     <TableHead className="sticky left-0 z-40 w-[280px] min-w-[280px] bg-blue-800 text-white border-r border-blue-600 font-bold text-sm p-4">
-                      Configuration / Applicants
+                      Fields / Tasks →
                     </TableHead>
-                    {paginatedTasks.map(task => (
-                      <TableHead key={task.id} className="min-w-[160px] w-[160px] text-center bg-blue-700 text-white border-r border-blue-600 font-semibold text-xs py-3 px-2 h-auto">
+                    {paginatedTasks.map((task, idx) => (
+                      <TableHead 
+                        key={task.id} 
+                        className="min-w-[180px] w-[180px] text-center bg-blue-700 text-white border-r border-blue-600 font-semibold text-xs py-3 px-2"
+                      >
                         <div className="flex flex-col gap-1">
-                          <span className="truncate block max-w-full" title={task.applicant_name}>{task.applicant_name}</span>
-                          <Badge variant="secondary" className="w-fit mx-auto text-[10px] h-4 px-1 bg-blue-600 text-blue-100 border-none">{task.id}</Badge>
+                          <span className="font-bold">#{(currentPage - 1) * itemsPerPage + idx + 1}</span>
+                          <span className="truncate block max-w-full" title={task.applicant_name}>
+                            {task.applicant_name}
+                          </span>
+                          <Badge variant="secondary" className="w-fit mx-auto text-[10px] h-4 px-1 bg-blue-600 text-blue-100 border-none">
+                            ID: {task.id}
+                          </Badge>
                         </div>
                       </TableHead>
                     ))}
                   </TableRow>
                 </TableHeader>
-                <TableBody>
+                <TableBody className="divide-y divide-slate-200">
                   {transposedRows.map((row, rIdx) => {
                     // Section Header Row
                     if (row.type === 'section_header') {
                       const Icon = row.icon;
                       return (
-                        <TableRow key={row.id} className="bg-slate-100 hover:bg-slate-200 cursor-pointer" onClick={() => toggleSection(row.id)}>
-                          <TableCell className="sticky left-0 z-20 bg-slate-100 border-r border-b border-slate-300 py-2 px-4" colSpan={paginatedTasks.length + 1}>
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2 font-bold text-slate-700">
-                                {Icon && <Icon className="h-4 w-4" />}
-                                {row.label}
+                        <TableRow 
+                          key={row.id} 
+                          className="bg-slate-200 border-y-2 border-slate-400 hover:bg-slate-200 cursor-pointer" 
+                          onClick={() => toggleSection(row.id)}
+                        >
+                          <TableCell 
+                            className="sticky left-0 z-20 bg-slate-200 border-r border-slate-400 p-0" 
+                            colSpan={paginatedTasks.length + 1}
+                          >
+                            <div className="flex items-center justify-between px-4 py-2">
+                              <div className="flex items-center gap-3">
+                                {Icon && <Icon className="h-5 w-5 text-slate-600" />}
+                                <span className="font-bold text-slate-700 text-base">{row.label}</span>
                               </div>
-                              <div className="text-slate-500">
-                                {expandedSections.has(row.id) ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                              <div className="text-slate-600">
+                                {expandedSections.has(row.id) ? 
+                                  <Minus className="h-4 w-4" /> : 
+                                  <Plus className="h-4 w-4" />
+                                }
                               </div>
                             </div>
                           </TableCell>
@@ -639,15 +682,24 @@ export default function ReportsPage() {
                     // Data Row
                     const isSub = row.isSubRow;
                     return (
-                      <TableRow key={rIdx} className="hover:bg-slate-50 group">
-                        <TableCell className="sticky left-0 z-20 bg-white group-hover:bg-slate-50 border-r border-b border-slate-200 py-2 px-3 text-xs font-medium text-slate-600">
-                          <div style={{ paddingLeft: isSub ? '24px' : '0' }} className="flex items-center truncate" title={row.label}>
+                      <TableRow key={rIdx} className="hover:bg-slate-50 group border-b border-slate-200">
+                        <TableCell className="sticky left-0 z-20 bg-white group-hover:bg-slate-50 border-r border-slate-200 py-2 px-3 text-xs font-medium text-slate-600">
+                          <div 
+                            style={{ paddingLeft: isSub ? '24px' : '0' }} 
+                            className="flex items-center truncate" 
+                            title={row.label}
+                          >
                             {safeRender(row.label)}
                           </div>
                         </TableCell>
                         {paginatedTasks.map((task) => (
-                          <TableCell key={task.id} className="text-center border-r border-b border-slate-100 p-2 min-w-[160px]">
-                            {safeRender(renderCellValue(task, row))}
+                          <TableCell 
+                            key={task.id} 
+                            className="text-center border-r border-slate-100 p-3 min-w-[180px] align-middle"
+                          >
+                            <div className="truncate max-w-[180px] mx-auto">
+                              {safeRender(renderCellValue(task, row))}
+                            </div>
                           </TableCell>
                         ))}
                       </TableRow>

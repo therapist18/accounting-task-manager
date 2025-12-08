@@ -73,9 +73,9 @@ const RowWrapper = ({ children, className = "", isEven = false }) => (
 
 const LabelCell = ({ children }) => (
   <div className="w-full sm:w-[160px] flex-shrink-0 p-3 sm:border-r border-gray-100 flex items-center bg-gray-50/50 sm:bg-transparent">
-     <span className="text-xs font-semibold text-gray-500 uppercase tracking-tight break-words">
-        {children}
-     </span>
+    <span className="text-xs font-semibold text-gray-500 uppercase tracking-tight break-words">
+      {children}
+    </span>
   </div>
 );
 
@@ -144,16 +144,16 @@ const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
 
               {/* Image Container with Scrolling/Centering */}
               <div className="w-full h-full flex items-center justify-center overflow-auto bg-gray-900/5">
-                 <div style={{
-                    transform: `scale(${zoom}) rotate(${rotation}deg)`,
-                    transition: 'transform 0.2s ease-out',
-                    width: '100%',
-                    height: '100%',
-                    position: 'relative',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                 }}>
+                <div style={{
+                  transform: `scale(${zoom}) rotate(${rotation}deg)`,
+                  transition: 'transform 0.2s ease-out',
+                  width: '100%',
+                  height: '100%',
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
                   <Image
                     src={displayUrl}
                     alt={documentName || 'Document preview'}
@@ -161,7 +161,7 @@ const DocumentPreview = ({ fileUrl, fileName, documentName }) => {
                     className="object-contain"
                     priority
                   />
-                 </div>
+                </div>
               </div>
             </>
           )
@@ -210,7 +210,7 @@ export const ExtractionPreview = ({
   const [isRetrying, setIsRetrying] = useState(false)
   const [isSaving, setIsSaving] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
-  
+
   // Initialize localData
   const [localData, setLocalData] = useState<Record<string, any>>(() => {
     const initialData: Record<string, any> = {};
@@ -244,7 +244,7 @@ export const ExtractionPreview = ({
     const result: Record<string, any> = {};
     fields.forEach(field => {
       if (!field?.name) return;
-      
+
       const fieldName = field?.name || field?.id || 'field';
       const snakeCase = fieldName
         .toString()
@@ -304,10 +304,10 @@ export const ExtractionPreview = ({
 
   const handleDelete = async (docData?: any) => {
     if (!onDelete) return;
-    
+
     try {
       setIsDeleting(true);
-      
+
       // Create document data with proper ID handling
       const documentData = {
         file_path: fileUrl,
@@ -324,7 +324,7 @@ export const ExtractionPreview = ({
       if (!documentData.id) {
         throw new Error('Cannot delete document: Missing document ID');
       }
-      
+
       await onDelete(documentData);
       toast.success('Document deleted successfully');
     } catch (error) {
@@ -393,23 +393,23 @@ export const ExtractionPreview = ({
         } catch (e) {
           console.warn("Failed to parse extracted JSON string", e);
           // Fallback: assume it is what it is or empty
-          parsedData = {}; 
+          parsedData = {};
         }
       }
 
       // Update Local Data and Notify Parent of Changes
       const newLocalData = { ...localData };
-      
+
       // Update fields based on configuration
       fields.forEach(field => {
         const value = parsedData[field.name];
         if (value !== undefined) {
-           // Handle arrays or primitives
-           newLocalData[field.name] = value;
-           // Notify parent component of field update
-           if (onDataChange) {
-             onDataChange(field.name, value);
-           }
+          // Handle arrays or primitives
+          newLocalData[field.name] = value;
+          // Notify parent component of field update
+          if (onDataChange) {
+            onDataChange(field.name, value);
+          }
         }
       });
 
@@ -430,27 +430,50 @@ export const ExtractionPreview = ({
   };
 
   const handleSave = async () => {
-    if (typeof onSave !== 'function') {
-      console.warn('onSave handler is not defined');
+    if (!documentId && !file?.id) {
+      toast.error('Cannot save: Missing document ID');
       return;
     }
+
     try {
       setIsSaving(true);
-      // Pass both specific fields and raw extracted data
-      await onSave({
-        ...localData,
-        extractedData: {
+      const documentIdToUpdate = documentId || file?.id;
+
+      // Prepare the data to update
+      const updateData = {
+        extracted_details: {
+          ...extractedData,
+          ...localData
+        },
+        updated_at: new Date().toISOString()
+      };
+
+      // Update the document in acc_portal_directors_documents
+      const { error } = await supabase
+        .from('acc_portal_directors_documents')
+        .update(updateData)
+        .eq('id', documentIdToUpdate);
+
+      if (error) throw error;
+
+      toast.success('Document updated successfully');
+
+      // If there's an onSave prop, call it with the updated data
+      if (onSave) {
+        await onSave({
+          ...localData,
+          extractedData: {
             ...extractedData,
             ...localData
-        },
-        fileUrl,
-        fileName,
-        documentName,
-        type,
-        file,
-        documentId
-      });
-      toast.success('Document saved successfully');
+          },
+          fileUrl,
+          fileName,
+          documentName,
+          type,
+          file,
+          documentId: documentIdToUpdate
+        });
+      }
     } catch (error) {
       console.error('Error saving document:', error);
       toast.error(error.message || 'Failed to save document');
@@ -466,7 +489,7 @@ export const ExtractionPreview = ({
     if (Array.isArray(value)) {
       return (
         <RowWrapper key={field.id} className="items-start" isEven={isEven}>
-         <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
+          <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
           <div className="w-full sm:flex-1 p-2">
             <div className="space-y-3">
               {value.length === 0 && <span className="text-sm text-gray-400 italic">No entries found</span>}
@@ -489,7 +512,7 @@ export const ExtractionPreview = ({
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       return (
         <RowWrapper key={field.id} className="items-start" isEven={isEven}>
-         <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
+          <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
           <div className="w-full sm:flex-1 p-2">
             <div className="p-3 border rounded-md bg-white shadow-sm">
               {Object.entries(value).map(([key, val]) => (
@@ -506,7 +529,7 @@ export const ExtractionPreview = ({
 
     return (
       <RowWrapper key={field.id} isEven={isEven}>
-       <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
+        <LabelCell>{field?.name?.replace(/_/g, ' ') || 'Unnamed Field'}</LabelCell>
         <ValueCell>
           <Input
             value={value || ''}
@@ -549,7 +572,10 @@ export const ExtractionPreview = ({
                     file,
                     document_display_name: documentName,
                     document_id: type,
-                    extracted_details: localData,
+                    extracted_details: {
+                      ...extractedData,
+                      ...localData
+                    },
                     id: file?.id || documentId,
                     file_path: fileUrl
                   }}
@@ -558,7 +584,7 @@ export const ExtractionPreview = ({
                   onSave={onSave ? handleSave : undefined}
                   onDelete={onDelete ? handleDelete : undefined}
                   // Pass the enhanced local handler
-                  onRetry={handleRetryExtraction} 
+                  onRetry={handleRetryExtraction}
                   onDownloadSuccess={() => toast.success('Download started')}
                   onDownloadError={(error) => toast.error(error.message || 'Download failed')}
                   className="ml-auto"
@@ -599,18 +625,18 @@ export const ExtractionPreview = ({
 
             {/* Comment Section (Scrolls with content) */}
             {extractedData?.comment && (
-               <div className="p-4 border-t border-gray-200 bg-yellow-50/30">
+              <div className="p-4 border-t border-gray-200 bg-yellow-50/30">
                 <h4 className="text-xs font-bold text-gray-500 mb-2 uppercase">Upload Comment</h4>
                 <div className="p-3 bg-white border border-gray-200 rounded-md text-sm text-gray-700 italic">
                   "{extractedData.comment}"
                 </div>
               </div>
             )}
-            
+
             {/* Bottom Padding */}
             <div className="h-4"></div>
           </div>
-          
+
         </div>
       </div>
     </div>
