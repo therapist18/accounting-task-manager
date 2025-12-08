@@ -91,6 +91,7 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
 }) => {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   const handleDeleteClick = () => {
     if (showDeleteConfirmation) {
@@ -114,16 +115,28 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
     } catch (error) {
       console.error('Error deleting document:', error);
       toast.error(error.message || 'Failed to delete document');
-      throw error; // Re-throw to allow parent component to handle the error if needed
+      throw error;
     } finally {
       setIsDeleting(false);
     }
   };
+  
+  const handleRetry = async () => {
+    if (!onRetry) return;
+    setIsRetrying(true);
+    try {
+        await onRetry(document);
+    } catch (error) {
+        // Error handling usually done in parent/callback, but just in case
+        console.error("Retry failed in Action wrapper", error);
+    } finally {
+        setIsRetrying(false);
+    }
+  }
+
   const handleDownload = async (format: 'document' | 'excel' | 'pdf' = 'document') => {
-    // Early return if no file is available
     if (!document?.file_path && !document?.fileUrl) {
       const error = new Error('No file available for download');
-      console.error('Download error:', error);
       onDownloadError?.(error);
       return;
     }
@@ -132,7 +145,6 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
       await handleDocumentDownload(
         {
           ...document,
-          // Ensure file_path is set, fall back to fileUrl if needed
           file_path: document.file_path || document.fileUrl
         },
         format,
@@ -151,7 +163,6 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
   const hasFile = Boolean(document?.file_path || document?.fileUrl);
   const downloadTitle = hasFile ? 'Download Document' : 'No file available for download';
   
-  // Disable pointer events when no file is available
   const downloadButtonProps = hasFile ? {} : {
     'aria-disabled': true,
     'data-disabled': true,
@@ -161,6 +172,7 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
 
   return (
     <div className={`flex items-center space-x-2 ${className}`}>
+      {/* 1. Download */}
       <div className="relative group">
         <Button
           variant="outline"
@@ -207,19 +219,7 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
         </div>
       </div>
 
-      {onRetry && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onRetry(document)}
-          title="Retry Extraction"
-          className="flex items-center gap-1"
-        >
-          <RefreshCw className="h-4 w-4" />
-          {showLabels && <span>Retry</span>}
-        </Button>
-      )}
-
+      {/* 2. Save */}
       {onSave && (
         <Button
           variant="default"
@@ -233,6 +233,26 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
         </Button>
       )}
 
+      {/* 3. Retry (Next to Delete) */}
+      {onRetry && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleRetry}
+          title="Retry Extraction"
+          className="flex items-center gap-1 hover:bg-blue-50 text-blue-600 border-blue-200"
+          disabled={isRetrying}
+        >
+            {isRetrying ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+                <RefreshCw className="h-4 w-4" />
+            )}
+          {showLabels && <span>Retry</span>}
+        </Button>
+      )}
+
+      {/* 4. Delete */}
       {onDelete && (
         <>
           <Button
@@ -240,7 +260,7 @@ export const DocumentActions: React.FC<DocumentActionsProps> = ({
             size="sm"
             onClick={handleDeleteClick}
             title="Delete Document"
-            className="text-red-600 hover:text-red-700 hover:bg-red-50 flex items-center gap-1"
+            className="text-red-600 hover:text-red-700 hover:bg-red-50 flex items-center gap-1 border-red-200"
             disabled={isDeleting}
           >
             {isDeleting ? (

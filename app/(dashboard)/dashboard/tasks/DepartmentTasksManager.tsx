@@ -2676,27 +2676,20 @@ export default function DepartmentTasksManager({
                                 <X className="mr-2 h-4 w-4" /> Back to Overall Table
                               </Button>
                             </div>
-                            <ReportTable
+                    <ReportTable
                               tasks={tasksToRender}
                               report={activeReport}
-                              companies={companies}
-                              getStaffName={getStaffName}
-                              getDocumentForTaskStage={getDocumentForTaskStage}
                               loading={false}
                               stages={stages}
                               kycDocuments={kycDocuments}
                               tableHeaders={currentTableHeaders}
+                              // Pass RAW data context only
+                              companies={companies}
+                              tmUsers={tmUsers}
+                              allDocuments={allDocuments}
+                              departments={departments}
+                              // Pass computed data models (treated as static data)
                               enhancedTasksData={enhancedTasksData}
-                              taskDependants={taskDependants}
-                              expandedDependants={expandedDependants}
-                              getTaskHierarchy={getTaskHierarchy}
-                              getEnhancedImmigrationStatus={getEnhancedImmigrationStatus}
-                              getCurrentStageStatus={getCurrentStageStatus}
-                              renderImmigrationStatusCell={renderImmigrationStatusCell}
-                              renderCurrentStageStatusCell={renderCurrentStageStatusCell}
-                              toggleDependantsExpansion={toggleDependantsExpansion}
-                              setLinkingTask={setLinkingTask}
-                              setIsLinkDialogOpen={setIsLinkDialogOpen}
                             />
                           </div>
                         ) : isTransposedView ? (

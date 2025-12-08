@@ -3,7 +3,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dayjs from 'dayjs'; // Import dayjs library
 import { API_KEYS } from './apiKeys';
-import { supabase } from "@/utils/supabase/client";
+import supabase from "./supabase/client";
 
 // Initialize the Gemini API
 let currentApiKeyIndex = 0;

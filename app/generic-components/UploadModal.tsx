@@ -13,6 +13,8 @@ import { ExtractionPreview } from '@/components/ExtractionPreview'
 import { toast } from 'sonner'
 import { cn } from "@/lib/utils"
 import supabase from '@/lib/supabase/client'
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 
 interface DocumentField {
   id: string
@@ -76,7 +78,7 @@ interface UploadModalProps {
   additionalFields?: Record<string, any>;
   // Callback for custom upload handling
   onBeforeUpload?: (recordData: any) => Promise<any>;
- onPendingChange?: (docs: any[]) => void;
+  onPendingChange?: (docs: any[]) => void;
   className?: string;
   showTitle?: boolean;
   hideSaveButton?: boolean;
@@ -534,30 +536,25 @@ export function UploadModal({
 
   // Blob URL cleanup using useRef to maintain stability across renders
   const blobUrlsRef = useRef<Set<string>>(new Set());
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      // Clean up all blob URLs
-      Object.values(uploadedDocs).forEach(docs => {
-        docs.forEach(doc => {
-          if (doc.fileUrl) {
-            URL.revokeObjectURL(doc.fileUrl);
-          }
-        });
-      });
-
-      if (blobUrlsRef.current) {
-        blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
-        blobUrlsRef.current.clear();
-      }
-    };
-  }, [uploadedDocs]);
 
   // Helper to add urls
   const addBlobUrl = useCallback((url: string) => {
     if (blobUrlsRef.current) {
       blobUrlsRef.current.add(url);
     }
+  }, []);
+
+  // FIXED: Cleanup ONLY on unmount. 
+  // Dependency array is EMPTY []. This prevents revokeObjectURL from running
+  // when state updates (like extraction finishing), which was causing ERR_FILE_NOT_FOUND.
+  useEffect(() => {
+    return () => {
+      // Clean up all blob URLs when component unmounts
+      if (blobUrlsRef.current) {
+        blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+        blobUrlsRef.current.clear();
+      }
+    };
   }, []);
 
   // Multi-type support: Available document types for selection
@@ -613,12 +610,14 @@ export function UploadModal({
     }
     return uploadedDocs[docTypeId];
   }, [uploadedDocs, getCurrentDocTypeId]);
+
   useEffect(() => {
     if (onPendingChange) {
       const currentDocs = getCurrentTabDocuments();
       onPendingChange(currentDocs);
     }
   }, [uploadedDocs, onPendingChange, getCurrentTabDocuments]);
+
   // Update form data when document fields change
   useEffect(() => {
     console.log('[UploadModal] documentFields changed:', {
@@ -695,7 +694,7 @@ export function UploadModal({
     const newDocs = fileArray.map(file => {
       const docId = generateDocumentId();
       const fileUrl = URL.createObjectURL(file);
-      addBlobUrl(fileUrl);
+      addBlobUrl(fileUrl); // Track URL for cleanup on unmount
 
       return {
         id: docId,
@@ -932,8 +931,13 @@ export function UploadModal({
   };
 
   const handleReExtract = async (docIdToReExtract: string) => {
-    const docToUpdate = uploadedDocs.find(d => d.id === docIdToReExtract);
-    if (!docToUpdate) return;
+    // Get all document arrays from the uploadedDocs object and flatten them
+    const allDocs = Object.values(uploadedDocs).flat();
+    const docToUpdate = allDocs.find(d => d.id === docIdToReExtract);
+    if (!docToUpdate) {
+      console.error(`Document with ID ${docIdToReExtract} not found`);
+      return;
+    }
 
     const docTypeToUse = allowMultipleTypes && docToUpdate.selectedDocTypeId
       ? availableDocTypes.find(dt => dt.id === docToUpdate.selectedDocTypeId)
@@ -944,11 +948,21 @@ export function UploadModal({
       return;
     }
 
-    setUploadedDocs(prevDocs =>
-      prevDocs.map(d =>
-        d.id === docIdToReExtract ? { ...d, validationStatus: 'pending', validationMessage: 'Re-extracting...' } : d
-      )
-    );
+    setUploadedDocs(prevDocs => {
+      // Create a new object for state update
+      const newState = { ...prevDocs };
+      
+      // Find which key holds this document
+      Object.keys(newState).forEach(key => {
+        newState[key] = newState[key].map(doc => 
+          doc.id === docIdToReExtract 
+            ? { ...doc, validationStatus: 'pending', validationMessage: 'Re-extracting...' } 
+            : doc
+        );
+      });
+      
+      return newState;
+    });
 
     const extractionToastId = toast.loading(`Re-extracting from ${docToUpdate.fileName}...`);
     const validationContext = {
@@ -1003,22 +1017,35 @@ export function UploadModal({
 
       const validation = await validateDocument(updatedDocForValidation, validationContext);
 
-      setUploadedDocs(prevDocs =>
-        prevDocs.map(d =>
-          d.id === docIdToReExtract ? {
-            ...updatedDocForValidation,
-            validationStatus: validation.status,
-            validationMessage: validation.message,
-          } : d
-        )
-      );
+      setUploadedDocs(prevDocs => {
+        const newState = { ...prevDocs };
+        Object.keys(newState).forEach(key => {
+          newState[key] = newState[key].map(doc => 
+            doc.id === docIdToReExtract 
+              ? {
+                ...updatedDocForValidation,
+                validationStatus: validation.status,
+                validationMessage: validation.message,
+              }
+              : doc
+          );
+        });
+        return newState;
+      });
+      
     } catch (error) {
       toast.error(`Re-extraction failed for ${docToUpdate.fileName}`, { id: extractionToastId });
-      setUploadedDocs(prevDocs =>
-        prevDocs.map(d =>
-          d.id === docIdToReExtract ? { ...d, validationStatus: 'error', validationMessage: 'Re-extraction failed.' } : d
-        )
-      );
+      setUploadedDocs(prevDocs => {
+        const newState = { ...prevDocs };
+        Object.keys(newState).forEach(key => {
+          newState[key] = newState[key].map(doc => 
+            doc.id === docIdToReExtract 
+              ? { ...doc, validationStatus: 'error', validationMessage: 'Re-extraction failed.' } 
+              : doc
+          );
+        });
+        return newState;
+      });
     }
   };
 
@@ -1301,10 +1328,11 @@ export function UploadModal({
 
   const handleRemoveFile = useCallback((docId: string) => {
     setUploadedDocs(prev => {
-      if (Array.isArray(prev)) {
-        return prev.filter(doc => doc.id !== docId);
-      }
-      return [];
+      const newState = { ...prev };
+      Object.keys(newState).forEach(key => {
+        newState[key] = newState[key].filter(doc => doc.id !== docId);
+      });
+      return newState;
     });
   }, []);
 
@@ -1506,7 +1534,7 @@ export function UploadModal({
 
   return (
     <div className={cn("bg-background", className)}>
-            {dropdowns && dropdowns.length > 0 && (
+      {dropdowns && dropdowns.length > 0 && (
         <div className="space-y-4 mb-6">
           {dropdowns.map((dropdown) => (
             <div key={dropdown.id} className={dropdown.className || ''}>
@@ -1694,4 +1722,4 @@ export function UploadModal({
       />
     </div>
   );
-};  
+};

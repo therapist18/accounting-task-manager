@@ -14,6 +14,8 @@ import { toast } from 'sonner'
 import dynamic from 'next/dynamic'
 import { Textarea } from '@/components/ui/textarea';
 import DocumentActions from '@/app/generic-components/DocumentActions';
+// Import extraction utility
+import { performExtraction } from '@/lib/extractionUtils';
 
 // Dynamically import PDF viewer to avoid SSR issues
 const PDFViewer = dynamic(() => import('@/components/PDFViewer'), { ssr: false })
@@ -59,6 +61,7 @@ interface ExtractionPreviewProps {
   supabase?: any;
   onDownloadSuccess?: () => void;
   onDownloadError?: (error: Error) => void;
+  documentId?: string;
 }
 
 // --- HELPER COMPONENTS ---
@@ -198,6 +201,7 @@ export const ExtractionPreview = ({
   onDownloadSuccess,
   onDownloadError,
   onSave,
+  documentId,
 }: ExtractionPreviewProps) => {
 
   const [isOpen, setIsOpen] = useState(expanded)
@@ -211,10 +215,9 @@ export const ExtractionPreview = ({
   const [localData, setLocalData] = useState<Record<string, any>>(() => {
     const initialData: Record<string, any> = {};
     fields.forEach(field => {
-      // Add null check and provide a fallback empty string if name is undefined
       const fieldName = field?.name || field?.id || 'field';
       const snakeCase = fieldName
-        .toString() // Ensure it's a string
+        .toString()
         .toLowerCase()
         .replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => '_' + chr.toLowerCase())
         .replace(/^_/, '');
@@ -309,12 +312,12 @@ export const ExtractionPreview = ({
         document_name: documentName,
         extracted_details: extractedData,
         document_type: type,
-        id: file?.id,
+        id: file?.id || documentId,
         ...file
       };
       
       await onDelete(documentData);
-      // Removed toast here if it's handled in parent, or keep it if not
+      toast.success('Document deleted successfully');
     } catch (error) {
       console.error('Error deleting document:', error);
       toast.error(error.message || 'Failed to delete document');
@@ -324,25 +327,97 @@ export const ExtractionPreview = ({
     }
   };
 
+  // UPDATED: Now performs extraction locally if no parent handler is provided
   const handleRetryExtraction = async () => {
-    if (!onRetryExtraction) return
-    try {
-      setIsRetrying(true)
-      await onRetryExtraction({
-        fileUrl,
-        fileName,
-        documentName,
-        extractedData,
-        type,
-        file
-      })
-    } catch (error) {
-      console.error('Error retrying extraction:', error)
-      toast.error('Failed to retry extraction')
-    } finally {
-      setIsRetrying(false)
+    // 1. If parent provided specific logic (e.g. UploadModal), yield to it
+    if (onRetryExtraction) {
+      try {
+        setIsRetrying(true);
+        await onRetryExtraction({
+          fileUrl,
+          fileName,
+          documentName,
+          extractedData,
+          type,
+          file,
+          id: documentId
+        });
+      } catch (error) {
+        console.error('Error in parent retry extraction:', error);
+        toast.error('Failed to retry extraction');
+      } finally {
+        setIsRetrying(false);
+      }
+      return;
     }
-  }
+
+    // 2. Local implementation (for Standalone/EditableStageCell usage)
+    if (!fileUrl) {
+      toast.error("No file available for extraction");
+      return;
+    }
+
+    setIsRetrying(true);
+    const toastId = toast.loading("Re-extracting data...");
+
+    try {
+      const { extractedData: newRawData, success } = await performExtraction(
+        fileUrl,
+        fields,
+        documentName,
+        (msg) => toast.loading(msg, { id: toastId }),
+        fileName,
+        type || documentId
+      );
+
+      if (!success) {
+        throw new Error("Extraction service returned failure status");
+      }
+
+      // Parse JSON if returned as string (Markdown block handling)
+      let parsedData = newRawData;
+      if (typeof newRawData === 'string') {
+        try {
+          const match = newRawData.match(/```json\n([\s\S]*?)\n```/);
+          parsedData = match && match[1] ? JSON.parse(match[1]) : JSON.parse(newRawData);
+        } catch (e) {
+          console.warn("Failed to parse extracted JSON string", e);
+          // Fallback: assume it is what it is or empty
+          parsedData = {}; 
+        }
+      }
+
+      // Update Local Data and Notify Parent of Changes
+      const newLocalData = { ...localData };
+      
+      // Update fields based on configuration
+      fields.forEach(field => {
+        const value = parsedData[field.name];
+        if (value !== undefined) {
+           // Handle arrays or primitives
+           newLocalData[field.name] = value;
+           // Notify parent component of field update
+           if (onDataChange) {
+             onDataChange(field.name, value);
+           }
+        }
+      });
+
+      setLocalData(newLocalData);
+      toast.success("Extraction complete", { id: toastId });
+
+      // Auto-save the new results
+      if (onSave) {
+        await handleSave();
+      }
+
+    } catch (error) {
+      console.error('Error in local retry extraction:', error);
+      toast.error(error.message || "Extraction failed", { id: toastId });
+    } finally {
+      setIsRetrying(false);
+    }
+  };
 
   const handleSave = async () => {
     if (typeof onSave !== 'function') {
@@ -351,13 +426,19 @@ export const ExtractionPreview = ({
     }
     try {
       setIsSaving(true);
+      // Pass both specific fields and raw extracted data
       await onSave({
         ...localData,
+        extractedData: {
+            ...extractedData,
+            ...localData
+        },
         fileUrl,
         fileName,
         documentName,
         type,
-        file
+        file,
+        documentId
       });
       toast.success('Document saved successfully');
     } catch (error) {
@@ -459,21 +540,22 @@ export const ExtractionPreview = ({
                     document_display_name: documentName,
                     document_id: type,
                     extracted_details: localData,
-                    id: file?.id,
+                    id: file?.id || documentId,
                     file_path: fileUrl
                   }}
                   documentTypes={documentTypes || []}
                   supabase={supabase}
                   onSave={onSave ? handleSave : undefined}
-                  // Fix: Pass handleDelete wrapper if onDelete prop exists
                   onDelete={onDelete ? handleDelete : undefined}
-                  // Fix: Pass handleRetryExtraction wrapper if onRetryExtraction prop exists
-                  onRetry={onRetryExtraction ? handleRetryExtraction : undefined}
+                  // Pass the enhanced local handler
+                  onRetry={handleRetryExtraction} 
                   onDownloadSuccess={() => toast.success('Download started')}
                   onDownloadError={(error) => toast.error(error.message || 'Download failed')}
                   className="ml-auto"
                   showLabels={true}
                   showDeleteConfirmation={true}
+                  deleteConfirmationTitle="Delete Document"
+                  deleteConfirmationDescription="Are you sure you want to delete this document? This will remove it from storage and update the task stages."
                 />
               </div>
             </div>
@@ -541,31 +623,6 @@ export const ExtractionPreview = ({
             <div className="w-full max-w-[1800px]">
               {content}
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-      
-      {/* Fallback delete confirmation dialog if DocumentActions doesn't handle it internally (though it does) */}
-      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center">
-              <AlertTriangle className="h-6 w-6 text-red-600 mr-2" />
-              Confirm Deletion
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <p className="text-gray-600">
-              Are you sure you want to delete this document? This action cannot be undone.
-            </p>
-          </div>
-          <div className="flex justify-end gap-3 w-full">
-            <Button variant="outline" onClick={() => setShowDeleteDialog(false)} disabled={isDeleting}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={isDeleting}>
-              {isDeleting ? 'Deleting...' : 'Delete Document'}
-            </Button>
           </div>
         </DialogContent>
       </Dialog>

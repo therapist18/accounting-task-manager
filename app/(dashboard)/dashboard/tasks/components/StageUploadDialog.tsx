@@ -15,6 +15,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { format, parseISO } from "date-fns"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { UploadModal } from "@/app/generic-components/UploadModal"
+import { v4 as uuidv4 } from 'uuid'
+import { performExtraction } from '@/lib/extractionUtils'
 
 // --- Helper Functions ---
 
@@ -128,11 +130,35 @@ const DocumentTabPanel = ({
 }) => {
   const [useExisting, setUseExisting] = useState(false);
   const [selectedExistingId, setSelectedExistingId] = useState("");
-  
-  // Message/PDF State
   const [messageText, setMessageText] = useState("");
   const [isConverting, setIsConverting] = useState(false);
   const [generatedFile, setGeneratedFile] = useState<File | null>(null);
+  const [previewState, setPreviewState] = useState<{
+    isOpen: boolean;
+    fileUrl: string;
+    fileName: string;
+    extractedData: { [key: string]: any };
+    fields: any[];
+  }>({
+    isOpen: false,
+    fileUrl: '',
+    fileName: '',
+    extractedData: {},
+    fields: []
+  });
+
+  const [uploadedDocs, setUploadedDocs] = useState<{ [key: string]: Array<{
+    id: string;
+    file: File;
+    fileUrl: string;
+    extractedData: { [key: string]: any };
+    status: string;
+    fileName?: string;
+    validationStatus?: 'pending' | 'valid' | 'warning' | 'error';
+    validationMessage?: string;
+    selectedDocTypeId?: string;
+    isEditing?: boolean;
+  }>}>({});
 
   // Sync with locked state
   useEffect(() => {
@@ -145,12 +171,26 @@ const DocumentTabPanel = ({
   const documentName = kycData?.display_name || kycData?.name || doc.name || 'Document';
   const inputType = doc.inputType || (doc.isSpecial ? 'file' : 'both');
 
-  // Convert Text to PDF and pass to UploadModal
+  // Clean up blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(uploadedDocs).forEach(docs => {
+        docs.forEach(doc => {
+          if (doc.fileUrl) {
+            URL.revokeObjectURL(doc.fileUrl);
+          }
+        });
+      });
+    };
+  }, [uploadedDocs]);
+
+  // Convert Text to PDF and handle upload
   const handleConvertAndUpload = async () => {
     if (!messageText.trim()) return;
     setIsConverting(true);
 
     try {
+      // Convert text to PDF
       const response = await fetch('/api/convert-message-to-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -160,20 +200,121 @@ const DocumentTabPanel = ({
         })
       });
 
-      if (!response.ok) throw new Error('Conversion failed');
+      if (!response.ok) throw new Error('Failed to convert text to PDF');
       
       const blob = await response.blob();
-      
-      // Create a File object
-      const fileName = `${documentName.replace(/\s+/g, '_')}_message.pdf`;
+      const fileName = `${documentName.replace(/\s+/g, '_')}_${Date.now()}.pdf`;
       const file = new File([blob], fileName, { type: 'application/pdf' });
+      const fileUrl = URL.createObjectURL(blob);
       
-      // Pass this file to the UploadModal to trigger the extraction/preview flow
-      setGeneratedFile(file);
-      
+      // Create a new document object
+      const docId = `doc-${uuidv4()}`;
+      const newDoc = {
+        id: docId,
+        file,
+        fileUrl,
+        fileName,
+        extractedData: {},
+        status: 'pending',
+        validationStatus: 'pending' as const,
+        validationMessage: 'Processing...',
+        selectedDocTypeId: doc.kycId,
+        isEditing: false
+      };
+
+      // Add to uploaded docs
+      setUploadedDocs(prev => ({
+        ...prev,
+        [doc.kycId]: [...(prev[doc.kycId] || []), newDoc]
+      }));
+
+      // Perform extraction
+      try {
+        // Ensure we have the correct fields for extraction
+        const fieldsToExtract = activeDocFields || doc.fields || [];
+        
+        const extractionResult = await performExtraction(
+          fileUrl,
+          fieldsToExtract,
+          documentName,
+          (progress) => console.log('Extraction progress:', progress),
+          fileName,
+          doc.kycId
+        );
+
+        // Update with extracted data
+        setUploadedDocs(prev => {
+          const updated = { ...prev };
+          if (updated[doc.kycId]) {
+            updated[doc.kycId] = updated[doc.kycId].map(d => 
+              d.id === docId ? {
+                ...d,
+                extractedData: extractionResult.extractedData || {},
+                status: 'valid',
+                validationStatus: 'valid',
+                validationMessage: 'Extraction complete'
+              } : d
+            );
+          }
+          return updated;
+        });
+
+        // Show preview with extracted data
+        setPreviewState({
+          isOpen: true,
+          fileUrl,
+          fileName,
+          extractedData: extractionResult.extractedData || {},
+          fields: activeDocFields || doc.fields || []
+        });
+
+        // Notify parent component
+        if (onUploadSuccess) {
+          onUploadSuccess({
+            file,
+            extractedData: extractionResult.extractedData || {},
+            kycId: doc.kycId,
+            name: doc.name
+          }, doc);
+        }
+
+        // Clear the message
+        setMessageText('');
+        toast({
+          title: 'Success',
+          description: 'Document processed successfully',
+        });
+      } catch (error) {
+        console.error('Extraction error:', error);
+        toast({
+          title: 'Error',
+          description: 'Document processed but extraction failed',
+          variant: 'destructive',
+        });
+        
+        // Update status to show error
+        setUploadedDocs(prev => {
+          const updated = { ...prev };
+          if (updated[doc.kycId]) {
+            updated[doc.kycId] = updated[doc.kycId].map(d => 
+              d.id === docId ? {
+                ...d,
+                status: 'error',
+                validationStatus: 'error',
+                validationMessage: 'Extraction failed'
+              } : d
+            );
+          }
+          return updated;
+        });
+      }
     } catch (error) {
-      console.error(error);
-      toast({ title: 'Error', description: 'Failed to generate PDF', variant: 'destructive' });
+      console.error('Conversion error:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to process document',
+        variant: 'destructive',
+      });
     } finally {
       setIsConverting(false);
     }
@@ -352,6 +493,36 @@ const DocumentTabPanel = ({
           )}
         </>
       )}
+      {/* Preview Dialog */}
+      <Dialog open={previewState.isOpen} onOpenChange={(open) => setPreviewState(prev => ({ ...prev, isOpen: open }))}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Document Preview: {previewState.fileName}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <ExtractionPreview
+              documentName={previewState.fileName}
+              fileUrl={previewState.fileUrl}
+              fileName={previewState.fileName}
+              extractedData={previewState.extractedData}
+              fields={previewState.fields}
+              onDataChange={(field, value) => {
+                // Handle data changes if needed
+                console.log(`Field ${field} updated to:`, value);
+              }}
+              onSave={async (data) => {
+                // Handle save action
+                toast({
+                  title: 'Success',
+                  description: 'Document data saved successfully',
+                });
+                setPreviewState(prev => ({ ...prev, isOpen: false }));
+              }}
+              showSaveButton={true}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

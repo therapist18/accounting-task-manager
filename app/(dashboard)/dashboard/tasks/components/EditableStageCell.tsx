@@ -108,19 +108,17 @@ export default function EditableStageCell({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
-  const [previewDocument, setPreviewDocument] = useState<any>(null);
-  const [uploadedDocuments, setUploadedDocuments] = useState<any[]>([]);
+  const [previewDocuments, setPreviewDocuments] = useState<any[]>([]);
+  const [currentPreviewIndex, setCurrentPreviewIndex] = useState(0);
 
   // Debug logs
   useEffect(() => {
-    if (previewDocument) {
-      console.log('Preview Document:', {
-        documentName: previewDocument.documentName,
-        extractedData: previewDocument.extractedData,
-        hasName: !!previewDocument.extractedData?.name,
-        hasFullName: !!previewDocument.extractedData?.fullName,
-        hasClientName: !!previewDocument.extractedData?.clientName
-      });
+    if (previewDocuments.length > 0) {
+      console.log('Preview Documents:', previewDocuments.map(doc => ({
+        documentName: doc.documentName,
+        hasExtractedData: !!doc.extractedData,
+        fileUrl: doc.fileUrl
+      })));
     }
     if (task) {
       console.log('Task Data:', {
@@ -130,15 +128,21 @@ export default function EditableStageCell({
         id: task.id
       });
     }
-  }, [previewDocument, task]);
+  }, [previewDocuments, task]);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handlePreviewDataChange = useCallback((docId: string, fieldName: string, value: any) => {
-    setUploadedDocuments(prev => 
+    setPreviewDocuments(prev => 
       prev.map(doc => 
-        doc.id === docId 
-          ? { ...doc, extracted_details: { ...doc.extracted_details, [fieldName]: value } } 
+        doc.documentId === docId 
+          ? { 
+              ...doc, 
+              extractedData: { 
+                ...(doc.extractedData || {}), 
+                [fieldName]: value 
+              } 
+            } 
           : doc
       )
     );
@@ -325,93 +329,111 @@ export default function EditableStageCell({
     }));
   }, []);
 
-const buildPreviewDocumentData = useCallback(async () => {
-  if (!linkedDocument) {
-    console.log('No linked document found');
-    return null;
+const buildPreviewDocumentsData = useCallback(async (documents: any[]) => {
+  if (!documents || documents.length === 0) {
+    console.log('No documents found for preview');
+    return [];
   }
 
-  try {
-    const kycDoc = await fetchKycDocumentData(linkedDocument.document_id);
-    console.log('Fetched KYC doc:', kycDoc);
+  const previewDocuments = [];
+  
+  for (const doc of documents) {
+    try {
+      const kycDoc = await fetchKycDocumentData(doc.document_id || doc.id);
+      console.log('Fetched KYC doc:', kycDoc);
 
-    if (!kycDoc) {
-      console.log('No KYC document configuration found');
-      return null;
-    }
-
-    // Construct the full file URL
-    const filePath = linkedDocument.file_path || linkedDocument.download_url || linkedDocument.url || linkedDocument.document_url;
-    const fileUrl = filePath ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}` : null;
-    const fileName = linkedDocument.file_name || filePath?.split('/').pop() || 'document.pdf';
-    const documentType = linkedDocument.type || kycDoc.document_type || 'document';
-    const documentName = kycDoc.display_name || kycDoc.name || linkedDocument.name || linkedDocument.document_name || 'Document';
-
-    const previewData = {
-      documentId: linkedDocument.id,
-      documentName,
-      fileUrl, // This is now the full URL
-      fileName,
-      extractedData: linkedDocument.extracted_data || linkedDocument.extracted_details || {},
-      fields: transformKycFieldsToPreviewFormat(kycDoc.fields || []),
-      kycDoc,
-      document: linkedDocument,
-      type: documentType,
-      documentType,
-      file: {
-        url: fileUrl,
-        name: fileName,
-        type: linkedDocument.file_type || 'application/pdf'
+      if (!kycDoc) {
+        console.log('No KYC document configuration found for document:', doc.id);
+        continue;
       }
-    };
 
-    console.log('Built preview data:', previewData);
-    return previewData;
-  } catch (error) {
-    console.error('Error building preview data:', error);
+      // Construct the full file URL
+      const filePath = doc.file_path || doc.download_url || doc.url || doc.document_url;
+      const fileUrl = filePath ? 
+        (filePath.startsWith('http') ? filePath : `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/kyc-documents/${filePath}`) 
+        : null;
+      
+      const fileName = doc.file_name || filePath?.split('/').pop() || 'document.pdf';
+      const documentType = doc.type || kycDoc.document_type || 'document';
+      const documentName = kycDoc.display_name || kycDoc.name || doc.name || doc.document_name || 'Document';
+
+      const previewData = {
+        documentId: doc.id,
+        documentName,
+        fileUrl,
+        fileName,
+        extractedData: doc.extracted_data || doc.extracted_details || {},
+        fields: transformKycFieldsToPreviewFormat(kycDoc.fields || []),
+        kycDoc,
+        document: doc,
+        type: documentType,
+        documentType,
+        file: {
+          url: fileUrl,
+          name: fileName,
+          type: doc.file_type || 'application/pdf'
+        },
+        created_at: doc.created_at || new Date().toISOString()
+      };
+
+      console.log('Built preview data for document:', doc.id, previewData);
+      previewDocuments.push(previewData);
+    } catch (error) {
+      console.error(`Error building preview data for document ${doc.id}:`, error);
+      // Continue with other documents even if one fails
+    }
+  }
+
+  if (previewDocuments.length === 0) {
     toast({ 
       title: 'Error', 
-      description: 'Failed to prepare document preview.', 
+      description: 'Failed to prepare document previews.', 
       variant: 'destructive' 
     });
-    return null;
   }
-}, [linkedDocument, fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
+
+  return previewDocuments;
+}, [fetchKycDocumentData, transformKycFieldsToPreviewFormat]);
 
   const handleViewDocument = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!linkedDocument) {
-      console.log('No linked document found');
+    
+    // Use linkedDocuments if available, otherwise fall back to linkedDocument for backward compatibility
+    const documentsToPreview = linkedDocuments && linkedDocuments.length > 0 
+      ? linkedDocuments 
+      : linkedDocument ? [linkedDocument] : [];
+
+    if (documentsToPreview.length === 0) {
+      console.log('No documents found to preview');
       return;
     }
 
-    console.log('Opening document preview for:', {
-      documentId: linkedDocument.id,
-      documentName: linkedDocument.name || linkedDocument.document_name,
-      hasFile: !!(linkedDocument.file_path || linkedDocument.url || linkedDocument.document_url),
-      hasExtractedData: !!(linkedDocument.extracted_data || linkedDocument.extracted_details)
-    });
+    console.log('Opening document preview for documents:', documentsToPreview.map(doc => ({
+      documentId: doc.id,
+      documentName: doc.name || doc.document_name,
+      hasFile: !!(doc.file_path || doc.url || doc.document_url),
+      hasExtractedData: !!(doc.extracted_data || doc.extracted_details)
+    })));
 
     setIsLoading(true);
     try {
-      const previewData = await buildPreviewDocumentData();
-      console.log('Preview data prepared:', {
-        documentId: previewData?.documentId,
-        documentName: previewData?.documentName,
-        hasExtractedData: !!previewData?.extractedData,
-        fieldsCount: previewData?.fields?.length || 0,
-        fileUrl: previewData?.fileUrl
-      });
-
-      setPreviewDocument(previewData || {
-        documentId: linkedDocument.id,
-        documentName: linkedDocument.name || linkedDocument.document_name || 'Document',
-        extractedData: {},
-        documentType: linkedDocument.type || 'document',
-        documentUrl: linkedDocument.url || linkedDocument.file_path || linkedDocument.document_url
-      });
-
-      setIsPreviewOpen(true);
+      const previewDocs = await buildPreviewDocumentsData(documentsToPreview);
+      
+      if (previewDocs.length > 0) {
+        setPreviewDocuments(previewDocs);
+        setCurrentPreviewIndex(0);
+        setIsPreviewOpen(true);
+        
+        console.log('Preview documents prepared:', previewDocs.map(doc => ({
+          documentId: doc.documentId,
+          documentName: doc.documentName,
+          hasExtractedData: !!doc.extractedData,
+          fieldsCount: doc.fields?.length || 0,
+          fileUrl: doc.fileUrl
+        })));
+      } else {
+        throw new Error('No valid documents could be prepared for preview');
+      }
     } catch (error) {
       console.error('Error in handleViewDocument:', error);
       toast({
@@ -422,36 +444,59 @@ const buildPreviewDocumentData = useCallback(async () => {
     } finally {
       setIsLoading(false);
     }
-  }, [buildPreviewDocumentData, linkedDocument]);
+  }, [linkedDocument, linkedDocuments, buildPreviewDocumentsData]);
 
 const handlePreviewSave = useCallback(async (data: any) => {
-  if (!onSave || !previewDocument?.documentId) {
-    console.error('Missing required data for save:', { onSave, previewDocument });
+  if (!onSave || previewDocuments.length === 0) {
+    console.error('Missing required data for save:', { onSave, previewDocuments });
     return;
   }
   
   try {
+    // Get the current document being viewed
+    const currentDoc = previewDocuments[currentPreviewIndex];
+    if (!currentDoc) {
+      throw new Error('No active document to save');
+    }
+
     console.log('Saving document data:', {
       stageId: stage.id,
       taskId: task.id,
-      extractedData: previewDocument.extractedData || data
+      documentId: currentDoc.documentId,
+      extractedData: currentDoc.extractedData || data
     });
     
+    // Save the current document
     await onSave(
       stage.id, 
       task.id, 
       'completed', 
       { 
-        extractedData: previewDocument.extractedData || data,
-        documentId: previewDocument.documentId
+        extractedData: currentDoc.extractedData || data,
+        documentId: currentDoc.documentId
       }
     );
+    
+    // Update the local state to reflect the saved data
+    const updatedDocs = [...previewDocuments];
+    updatedDocs[currentPreviewIndex] = {
+      ...currentDoc,
+      extractedData: { ...(currentDoc.extractedData || {}), ...(data || {}) }
+    };
+    setPreviewDocuments(updatedDocs);
     
     toast({ 
       title: 'Success', 
       description: 'Document data saved successfully.' 
     });
-    setIsPreviewOpen(false);
+    
+    // Only close the preview if this is the last document
+    if (currentPreviewIndex >= previewDocuments.length - 1) {
+      setIsPreviewOpen(false);
+    } else {
+      // Move to the next document
+      setCurrentPreviewIndex(prev => prev + 1);
+    }
   } catch (error) {
     console.error('Error saving document data:', error);
     toast({ 
@@ -460,7 +505,7 @@ const handlePreviewSave = useCallback(async (data: any) => {
       variant: 'destructive' 
     });
   }
-}, [onSave, previewDocument, stage.id, task.id]);
+}, [onSave, previewDocuments, currentPreviewIndex, stage.id, task.id]);
 
   // ========================================
   // RENDER MODE: DATE COLUMN
@@ -623,44 +668,73 @@ const handlePreviewSave = useCallback(async (data: any) => {
       {renderContent()}
       {/* Extraction Preview Dialog */}
     <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-        <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col">
-          <DialogHeader>
-             <DialogTitle>
-  {task?.name} - {previewDocument?.documentName || 'Document Preview'}
-  {task?.client_name && ` (${task.client_name})`}
-</DialogTitle>
-          </DialogHeader>
-          <div className="flex-grow overflow-y-auto p-1 space-y-4">
-            <div className="border rounded-lg">
-              <div className="p-3 bg-gray-50 border-b ">
-                <h3 className="font-medium text-sm">Document (Uploaded: {previewDocument?.created_at ? formatDateDisplay(previewDocument.created_at) : 'N/A'})</h3>
+      <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden">
+        <DialogHeader className="p-6 pb-3 border-b">
+          <DialogTitle className="text-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                {task?.name}
+                {task?.client_name && ` - ${task.client_name}`}
               </div>
-              <div className="p-2">
-                <div className="flex-1 overflow-auto border rounded-lg">
-                  {previewDocument ? (
-                    <ExtractionPreview
-                      key={previewDocument.documentId}
-                      documentName={previewDocument.documentName}
-                      extractedData={previewDocument.extractedData}
-                      fields={previewDocument.fields}
-                      fileUrl={previewDocument.fileUrl}
-                      fileName={previewDocument.fileName}
-                      onSave={handlePreviewSave}
-                      expanded={true}
-                      showSaveButton={!!onSave}
-                      readOnly={false} 
-                      type={previewDocument.type}
-                      file={previewDocument.file}
-                      onDataChange={(fieldName, value) => handlePreviewDataChange(doc.id, fieldName, value)} />
-                  ) : (
-                    <div className="h-full flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /><p className="ml-4">Loading preview...</p></div>
-                  )}
-                </div>
+              <div className="text-sm font-normal text-muted-foreground">
+                {previewDocuments.length} document{previewDocuments.length !== 1 ? 's' : ''}
               </div>
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex-grow overflow-y-auto p-6 space-y-6">
+          {previewDocuments.length > 0 ? (
+            <div className="space-y-6">
+              {previewDocuments.map((doc, index) => (
+                <div key={doc.documentId} className="border rounded-lg overflow-hidden">
+                  <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
+                    <h3 className="font-medium">
+                      {doc.documentName || 'Document'} 
+                      <span className="text-muted-foreground text-sm font-normal ml-2">
+                        (Uploaded: {doc.created_at ? formatDateDisplay(doc.created_at) : 'N/A'})
+                      </span>
+                    </h3>
+                  </div>
+                  <div className="p-4">
+                    <div className="border rounded-lg">
+                      <ExtractionPreview
+                        documentName={doc.documentName}
+                        extractedData={doc.extractedData || {}}
+                        fields={doc.fields || []}
+                        fileUrl={doc.fileUrl}
+                        fileName={doc.fileName}
+                        onSave={handlePreviewSave}
+                        expanded={true}
+                        showSaveButton={!!onSave}
+                        readOnly={false}
+                        type={doc.type}
+                        file={doc.file}
+                        onDataChange={(fieldName, value) => 
+                          handlePreviewDataChange(doc.documentId, fieldName, value)
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="h-full flex items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <p className="ml-4 text-muted-foreground">Loading documents...</p>
+            </div>
+          )}
+        </div>
+        <div className="p-4 border-t flex justify-end">
+          <Button 
+            variant="default" 
+            onClick={() => setIsPreviewOpen(false)}
+          >
+            Close
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  </>
+);
 }

@@ -1,7 +1,7 @@
 // @ts-nocheck
 
-import { supabase } from "@/lib/supabase";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
+import supabase from "../supabase/client";
 
 export const deepEqual = (obj1, obj2) => {
     if (obj1 === obj2) return true;
