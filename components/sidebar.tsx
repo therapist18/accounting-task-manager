@@ -50,11 +50,6 @@ const navItems = [
         icon: CheckSquare,
       },
       {
-        title: "Admin Dashboard",
-        href: "/dashboard/admin-tasks-dashboard",
-        icon: CheckSquare,
-      },
-       {
         title: "Reports Dashboard",
         href: "/dashboard/reports",
         icon: CheckSquare,
