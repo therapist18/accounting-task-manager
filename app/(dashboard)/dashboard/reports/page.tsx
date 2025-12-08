@@ -79,8 +79,6 @@ const safeRender = (content: any) => {
 };
 
 export default function ReportsPage() {
-  const router = useRouter();
-  const pathname = usePathname();
 
   // --- State ---
   const [activeReport, setActiveReport] = useState<any | null>(null);
