@@ -405,64 +405,25 @@ export default function ReportsPage() {
   // --- RENDER ---
   if (reportLoading) return <div className="h-screen flex items-center justify-center bg-slate-50"><Loader2 className="h-10 w-10 animate-spin text-blue-600" /></div>;
 
-  const stageMap = new Map();
-  columns.filter(c => c.type !== 'task').forEach(col => {
-    if (!stageMap.has(col.stageId)) stageMap.set(col.stageId, { id: col.stageId, label: '', count: 0 });
-    const group = stageMap.get(col.stageId);
-    const stageName = stages.find(s => s.id === col.stageId)?.name || 'Stage Info';
-    group.label = stageName;
-    group.count++;
-  });
-  stageMap.forEach(g => groups.push({ id: g.id, label: g.label, span: g.count }));
-  return groups;
-}, [columns, stages]);
+  return (
+    <div className="flex flex-col h-screen bg-slate-50/50">
+      
+      {/* 1. TOP HEADER */}
+      <header className="bg-white border-b px-6 py-3 flex items-center justify-between shadow-sm sticky top-0 z-50">
+        <div className="flex items-center gap-4">
+          <MemorizedReportDialog
+            open={isReportDialogOpen}
+            onOpenChange={setIsReportDialogOpen}
+            department={departments.find(d => d.id.toString() === activeDeptId) || null}
+            stages={stages}
+            kycDocuments={kycDocuments}
+            onApplyReport={handleSelectReport}
+            tableHeaders={ENHANCED_TABLE_HEADERS_IMMIGRATION}
+          />
 
-const transposedRows = useMemo(() => {
-  if (!activeReport) return [];
-  const rows = [];
-  rows.push({ type: 'section_header', id: 'task_details', label: 'Task Details', icon: Briefcase });
-  if (expandedSections.has('task_details')) {
-    columns.filter(c => c.type === 'task').forEach(c => rows.push({ ...c, isSubRow: true }));
-  }
-  const stageGroups = new Set(columns.filter(c => c.type !== 'task').map(c => c.stageId));
-  stageGroups.forEach(stageId => {
-    const stage = stages.find(s => s.id === stageId);
-    if (!stage) return;
-    rows.push({ type: 'section_header', id: stage.id, label: stage.name, icon: stage.icon || Briefcase });
-    if (expandedSections.has(stage.id)) {
-      columns.filter(c => c.stageId === stageId).forEach(c => {
-         let label = c.label;
-         if(c.type === 'stage_date') label = "Completion Date";
-         if(c.type === 'extracted_field') label = c.label.split(' - ')[1] || c.label; 
-         rows.push({ ...c, label, isSubRow: true });
-      });
-    }
-  });
-  return rows;
-}, [activeReport, columns, expandedSections, stages]);
+          <div className="h-8 w-px bg-slate-200" />
 
-// --- 7. Export ---
-const handleExport = async (type: 'excel' | 'pdf') => {
-  if(type === 'excel') {
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet('Report');
-    const headerRow = columns.map(c => c.label);
-    ws.addRow(['Task ID', ...headerRow]);
-    filteredTasks.forEach(t => {
-      const row = [t.id, ...columns.map(c => {
-        const content = renderCellValue(t, c);
-        return typeof content === 'object' ? JSON.stringify(content).substring(0, 50) : content;
-      })];
-      ws.addRow(row);
-    });
-    const buffer = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `Report_${activeReport.name}.xlsx`;
-    link.click();
-  }
-};
+          <div>
              <h1 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                {activeReport ? activeReport.name : "Select a Report"}
              </h1>
