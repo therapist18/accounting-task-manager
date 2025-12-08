@@ -12,7 +12,7 @@ import { fetchUserVisibilitySettings } from "./utils/visibilitySettings"
 import { ENHANCED_TABLE_HEADERS_IMMIGRATION } from "../tasks/overall-view/tableUtils"
 import { EnhancedTable } from "../tasks/overall-view/EnhancedTable"
 import { fetchDepartments } from "../departments/departments/database"
-import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, formatDateValue, fetchTmUsers } from "../tasks/utils/taskManagerData"
+import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, formatDateValue} from "../tasks/utils/taskManagerData"
 import * as XLSX from 'xlsx'
 import { saveAs } from 'file-saver'
 import { RowVisibilityManagementDialog } from "./row-visibility-dialog"
@@ -57,8 +57,7 @@ export default function AdminStageDashboard() {
 
         const [deptsData, compsData, usersMap] = await Promise.all([
           fetchDepartments(),
-          fetchCompanies(),
-          fetchTmUsers() // Helper to fetch user ID -> Name mapping
+          fetchCompanies()
         ]);
 
         setDepartments(deptsData);
