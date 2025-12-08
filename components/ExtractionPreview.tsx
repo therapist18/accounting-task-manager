@@ -304,23 +304,33 @@ export const ExtractionPreview = ({
 
   const handleDelete = async (docData?: any) => {
     if (!onDelete) return;
+    
     try {
       setIsDeleting(true);
-      const documentData = docData || {
+      
+      // Create document data with proper ID handling
+      const documentData = {
         file_path: fileUrl,
         file_name: fileName,
         document_name: documentName,
         extracted_details: extractedData,
         document_type: type,
-        id: file?.id || documentId,
-        ...file
+        id: docData?.id || file?.id || documentId,
+        ...(docData || {}),
+        ...(file || {})
       };
+
+      // Ensure we have a valid ID before proceeding
+      if (!documentData.id) {
+        throw new Error('Cannot delete document: Missing document ID');
+      }
       
       await onDelete(documentData);
       toast.success('Document deleted successfully');
     } catch (error) {
       console.error('Error deleting document:', error);
-      toast.error(error.message || 'Failed to delete document');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to delete document';
+      toast.error(errorMessage);
       throw error;
     } finally {
       setIsDeleting(false);

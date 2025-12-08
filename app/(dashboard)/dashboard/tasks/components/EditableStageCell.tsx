@@ -272,6 +272,135 @@ export default function EditableStageCell({
     }
   }, [editValue, onSave, stage.id, task.id, linkedDocument]);
 
+const handleDeleteDocument = useCallback(async (documentToDelete: any) => {
+    if (!documentToDelete) {
+      toast({ 
+        title: 'Error', 
+        description: 'No document to delete', 
+        variant: 'destructive' 
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      // 1. Delete file from storage bucket
+      if (documentToDelete.file_path) {
+        const filePath = documentToDelete.file_path.startsWith('kyc-documents/') 
+          ? documentToDelete.file_path.substring('kyc-documents/'.length)
+          : documentToDelete.file_path;
+
+        const { error: storageError } = await supabase.storage
+          .from('kyc-documents')
+          .remove([filePath]);
+
+        if (storageError) {
+          console.error('Storage deletion error:', storageError);
+        }
+      }
+
+      // 2. Get the document ID with proper validation
+      const documentId = documentToDelete.id || documentToDelete.file?.id || documentToDelete.documentId;
+      
+      // Ensure we have a valid ID before attempting to delete
+      if (!documentId) {
+        throw new Error('Cannot delete document: Missing document ID');
+      }
+
+      // 3. Delete document record from database
+      const { error: dbError } = await supabase
+        .from('acc_portal_directors_documents')
+        .delete()
+        .eq('id', documentId);
+
+      if (dbError) throw dbError;
+
+      // 4. Update task's stages JSON and source_document_id
+      const currentTask = await supabase
+        .from('tm_tasks')
+        .select('stages, source_document_id')
+        .eq('id', task.id)
+        .single();
+
+      if (currentTask.error) throw currentTask.error;
+
+      const updatedStages = { ...currentTask.data.stages };
+      const updatedSourceDocIds = { ...currentTask.data.source_document_id };
+
+      // 4. Update source_document_id JSON - remove document reference
+      if (updatedSourceDocIds[stage.id]) {
+        if (Array.isArray(updatedSourceDocIds[stage.id])) {
+          updatedSourceDocIds[stage.id] = updatedSourceDocIds[stage.id].filter(
+            (doc: any) => {
+              const docId = typeof doc === 'string' ? doc : doc.id;
+              return docId !== (documentToDelete.id || documentToDelete.file?.id);
+            }
+          );
+          // Remove the stage key if no documents left
+          if (updatedSourceDocIds[stage.id].length === 0) {
+            delete updatedSourceDocIds[stage.id];
+            // Also reset the stage to pending
+            if (updatedStages[stage.id]) {
+              delete updatedStages[stage.id];
+            }
+          }
+        } else {
+          const docId = typeof updatedSourceDocIds[stage.id] === 'string' 
+            ? updatedSourceDocIds[stage.id] 
+            : updatedSourceDocIds[stage.id].id;
+          
+          if (docId === (documentToDelete.id || documentToDelete.file?.id)) {
+            delete updatedSourceDocIds[stage.id];
+            // Also reset the stage to pending
+            if (updatedStages[stage.id]) {
+              delete updatedStages[stage.id];
+            }
+          }
+        }
+      }
+
+      // 5. Update the task record
+      const { error: updateError } = await supabase
+        .from('tm_tasks')
+        .update({
+          stages: updatedStages,
+          source_document_id: updatedSourceDocIds,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', task.id);
+
+      if (updateError) throw updateError;
+
+      // Update preview documents list
+      const updatedPreviewDocs = previewDocuments.filter(
+        (doc) => doc.documentId !== (documentToDelete.id || documentToDelete.file?.id)
+      );
+      setPreviewDocuments(updatedPreviewDocs);
+
+      // Close preview if no more documents
+      if (updatedPreviewDocs.length === 0) {
+        setIsPreviewOpen(false);
+      } else if (currentPreviewIndex >= updatedPreviewDocs.length) {
+        setCurrentPreviewIndex(updatedPreviewDocs.length - 1);
+      }
+
+      // Trigger a refresh of the task data
+      if (onSave) {
+        await onSave(stage.id, task.id, '', {});
+      }
+
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      toast({ 
+        title: 'Error', 
+        description: error instanceof Error ? error.message : 'Failed to delete document', 
+        variant: 'destructive' 
+      });
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [stage.id, task.id, onSave, previewDocuments, currentPreviewIndex]);
   const handleCancel = useCallback(() => {
     setIsEditing(false);
     if (stageDate) {
@@ -697,22 +826,24 @@ const handlePreviewSave = useCallback(async (data: any) => {
                   </div>
                   <div className="p-4">
                     <div className="border rounded-lg">
-                      <ExtractionPreview
-                        documentName={doc.documentName}
-                        extractedData={doc.extractedData || {}}
-                        fields={doc.fields || []}
-                        fileUrl={doc.fileUrl}
-                        fileName={doc.fileName}
-                        onSave={handlePreviewSave}
-                        expanded={true}
-                        showSaveButton={!!onSave}
-                        readOnly={false}
-                        type={doc.type}
-                        file={doc.file}
-                        onDataChange={(fieldName, value) => 
-                          handlePreviewDataChange(doc.documentId, fieldName, value)
-                        }
-                      />
+                    <ExtractionPreview
+  documentId={doc.documentId}  // ← ADD THIS LINE
+  documentName={doc.documentName}
+  extractedData={doc.extractedData || {}}
+  fields={doc.fields || []}
+  fileUrl={doc.fileUrl}
+  fileName={doc.fileName}
+  onSave={handlePreviewSave}
+  onDelete={handleDeleteDocument}
+  expanded={true}
+  showSaveButton={!!onSave}
+  readOnly={false}
+  type={doc.type}
+  file={doc.file}
+  onDataChange={(fieldName, value) => 
+    handlePreviewDataChange(doc.documentId, fieldName, value)
+  }
+/>
                     </div>
                   </div>
                 </div>
