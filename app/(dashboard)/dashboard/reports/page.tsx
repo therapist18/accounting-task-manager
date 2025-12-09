@@ -552,18 +552,24 @@ export default function ReportsPage() {
   // --- 7. Configuration Building with Auto WEF/TO ---
   const columns = useMemo(() => {
     if (!activeReport || !stages.length) return [];
-    const getLabel = (id) => id.replace(/_/g, ' ').toUpperCase();
-    const cols = [];
+    console.log("🔎 Building Columns...");
+    
+    const getLabel = (id: string) => id.replace(/_/g, ' ').toUpperCase();
+    const cols: any[] = [];
 
-    activeReport.configuration?.taskFields?.forEach(field => {
+    activeReport.configuration?.taskFields?.forEach((field: any) => {
       cols.push({ id: `task_${field}`, label: getLabel(field), type: 'task', field });
     });
 
     const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
+    
     stages.filter(s => activeStageIds.includes(s.id)).forEach(stage => {
       const config = activeReport.configuration.stages[stage.id];
       const isSpecialStage = SPECIAL_STAGE_IDS.includes(stage.id);
 
+      console.log(`🔎 Processing Stage: ${stage.name} (${stage.id}) - Special: ${isSpecialStage}`);
+
+      // 1. Add Stage Date Column if configured
       if (config.isStageDateSelected) {
         cols.push({ 
           id: `stage_date_${stage.id}`, 
@@ -575,31 +581,43 @@ export default function ReportsPage() {
       }
 
       if (config.documents) {
-        // For special stages, add WEF and TO columns ONCE (from first document with these fields)
+        // 2. Special Stages Logic: Force add WEF and TO columns
         if (isSpecialStage) {
           let wefAdded = false;
           let toAdded = false;
+          
+          const docEntries = Object.entries(config.documents);
+          console.log(`🔎   Checking ${docEntries.length} documents for WEF/TO definitions`);
 
-          // Find the first document that has WEF and TO fields
-          for (const [kycId, docConfig] of Object.entries(config.documents)) {
-            if (wefAdded && toAdded) break; // Both fields found, exit early
+          // Iterate through ALL documents to find WEF/TO definitions
+          for (const [kycId, docConfig] of docEntries) {
+            if (wefAdded && toAdded) {
+               console.log("🔎   Both WEF and TO found. Stopping search.");
+               break; 
+            }
 
             const kycDoc = kycDocuments.get(kycId);
-            if (!kycDoc) continue;
+            if (!kycDoc) {
+                console.warn(`🔎   Document ${kycId} not found in kycDocuments map`);
+                continue;
+            }
+
+            console.log(`🔎   Inspecting Doc: ${kycDoc.name}`);
 
             // Find the WEF field if not already added
             if (!wefAdded) {
-              const wefField = kycDoc.fields?.find(f => 
-                f.name === 'With_Effect_From' || 
-                f.isEffectiveFrom === true ||
-                f.name?.toLowerCase().includes('effect_from') ||
-                f.name?.toLowerCase().includes('effective_from')
-              );
+              const wefField = kycDoc.fields?.find((f: any) => {
+                 const name = (f.name || f.fieldName || '').toLowerCase();
+                 return name === 'with_effect_from' || 
+                        f.isEffectiveFrom === true ||
+                        name.includes('effect_from') ||
+                        name.includes('effective_from');
+              });
 
               if (wefField) {
                 const wefFieldId = wefField.id || wefField.name;
                 cols.push({
-                  id: `field_${stage.id}_wef`,
+                  id: `field_${stage.id}_wef`, // Generic ID for special stage
                   label: `${stage.name} - WEF`,
                   type: 'extracted_field',
                   stageId: stage.id, 
@@ -610,22 +628,24 @@ export default function ReportsPage() {
                   isAutoAdded: true
                 });
                 wefAdded = true;
+                console.log(`🔎     -> Added WEF column based on field: ${wefField.name}`);
               }
             }
 
             // Find the TO field if not already added
             if (!toAdded) {
-              const toField = kycDoc.fields?.find(f => 
-                f.name === 'Expiry_Date' || 
-                f.isEffectiveTo === true ||
-                f.name?.toLowerCase().includes('expiry') ||
-                f.name?.toLowerCase().includes('effective_to')
-              );
+              const toField = kycDoc.fields?.find((f: any) => {
+                 const name = (f.name || f.fieldName || '').toLowerCase();
+                 return name === 'expiry_date' || 
+                        f.isEffectiveTo === true ||
+                        name.includes('expiry') ||
+                        name.includes('effective_to');
+              });
 
               if (toField) {
                 const toFieldId = toField.id || toField.name;
                 cols.push({
-                  id: `field_${stage.id}_to`,
+                  id: `field_${stage.id}_to`, // Generic ID for special stage
                   label: `${stage.name} - TO`,
                   type: 'extracted_field',
                   stageId: stage.id, 
@@ -636,28 +656,26 @@ export default function ReportsPage() {
                   isAutoAdded: true
                 });
                 toAdded = true;
+                console.log(`🔎     -> Added TO column based on field: ${toField.name}`);
               }
             }
           }
+          
+          if (!wefAdded) console.warn(`🔎   Warning: Could not find a 'WEF' field definition in any document for stage ${stage.name}`);
+          if (!toAdded) console.warn(`🔎   Warning: Could not find a 'TO' field definition in any document for stage ${stage.name}`);
         }
 
-        // Add ALL other configured fields from ALL documents (but skip WEF/TO for special stages)
-        Object.entries(config.documents).forEach(([kycId, docConfig]: [string, any]) => {
-          const kycDoc = kycDocuments.get(kycId);
-          if (!kycDoc) return;
+        // 3. General Fields Logic: 
+        // ONLY run this for non-special stages. 
+        // If it IS a special stage, we skip this loop entirely to hide other columns (Permit #, Type, etc).
+        if (!isSpecialStage) {
+          Object.entries(config.documents).forEach(([kycId, docConfig]: [string, any]) => {
+            const kycDoc = kycDocuments.get(kycId);
+            if (!kycDoc) return;
 
-          docConfig.fields?.forEach(fieldId => {
-            const field = kycDoc.fields?.find(f => f.id === fieldId);
-            if (field) {
-              // Skip if this field is WEF/TO on a special stage (already added above)
-              const isWefToField = isSpecialStage && (
-                field.isEffectiveFrom === true || 
-                field.isEffectiveTo === true ||
-                field.name === 'With_Effect_From' ||
-                field.name === 'Expiry_Date'
-              );
-
-              if (!isWefToField) {
+            docConfig.fields?.forEach((fieldId: any) => {
+              const field = kycDoc.fields?.find((f: any) => f.id === fieldId);
+              if (field) {
                 cols.push({
                   id: `field_${stage.id}_${kycId}_${fieldId}`,
                   label: `${kycDoc.display_name || kycDoc.name} - ${field.fieldName || field.name}`,
@@ -669,9 +687,9 @@ export default function ReportsPage() {
                   fieldType: field.fieldType || field.type
                 });
               }
-            }
+            });
           });
-        });
+        }
       }
     });
     return cols;
