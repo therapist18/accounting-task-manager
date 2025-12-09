@@ -64,25 +64,33 @@ export function DepartmentSelect({
     loadDepts();
   }, []);
 
-  const selectedDepartment = departments.find((d) => d.id === value);
+  // Find selected department (compare as strings just in case)
+  const selectedDepartment = departments.find((d) => String(d.id) === String(value));
   const subdepartments = selectedDepartment?.tm_subdepartments || [];
 
   // --- Subdepartment Selection Logic ---
 
   const handleSingleSubChange = (val: string) => {
-    onSubDepartmentChange?.(val);
+    onSubDepartmentChange?.(String(val));
   };
 
-  const handleMultiSubToggle = (subId: string) => {
+  const handleMultiSubToggle = (subId: string | number) => {
     if (!onSubDepartmentChange) return;
 
-    const currentValues = Array.isArray(subDepartmentValue) ? subDepartmentValue : [];
+    // Convert to string to ensure consistency
+    const strId = String(subId);
+    
+    // Ensure currentValues is an array of strings
+    const currentValues = Array.isArray(subDepartmentValue) 
+      ? subDepartmentValue.map(String) 
+      : [];
+      
     let newValues;
 
-    if (currentValues.includes(subId)) {
-      newValues = currentValues.filter((id) => id !== subId);
+    if (currentValues.includes(strId)) {
+      newValues = currentValues.filter((id) => id !== strId);
     } else {
-      newValues = [...currentValues, subId];
+      newValues = [...currentValues, strId];
     }
     onSubDepartmentChange(newValues);
   };
@@ -90,20 +98,25 @@ export function DepartmentSelect({
   const handleRemoveSub = (subId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!onSubDepartmentChange) return;
-    const currentValues = Array.isArray(subDepartmentValue) ? subDepartmentValue : [];
-    onSubDepartmentChange(currentValues.filter((id) => id !== subId));
+    
+    const strId = String(subId);
+    const currentValues = Array.isArray(subDepartmentValue) 
+      ? subDepartmentValue.map(String) 
+      : [];
+      
+    onSubDepartmentChange(currentValues.filter((id) => id !== strId));
   };
 
   return (
     <div className="space-y-3">
       {/* Department Select (Always Single) */}
-      <Select value={value} onValueChange={onChange} disabled={loading}>
+      <Select value={value ? String(value) : undefined} onValueChange={onChange} disabled={loading}>
         <SelectTrigger className="w-full bg-white">
           <SelectValue placeholder="Select Department" />
         </SelectTrigger>
         <SelectContent>
           {departments.map((dept) => (
-            <SelectItem key={dept.id} value={dept.id}>
+            <SelectItem key={dept.id} value={String(dept.id)}>
               {dept.name}
             </SelectItem>
           ))}
@@ -126,14 +139,15 @@ export function DepartmentSelect({
                   <div className="flex flex-wrap gap-1 items-center w-full overflow-hidden">
                     {Array.isArray(subDepartmentValue) && subDepartmentValue.length > 0 ? (
                       subDepartmentValue.map((id) => {
-                        const sub = subdepartments.find((s: any) => s.id === id);
+                        // FIX: Compare as strings so "1" finds ID 1
+                        const sub = subdepartments.find((s: any) => String(s.id) === String(id));
                         return (
                           <Badge key={id} variant="secondary" className="mr-1 mb-1">
                             {sub?.name || 'Unknown'}
                             <div
                               className="ml-1 ring-offset-background rounded-full outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 cursor-pointer"
                               onMouseDown={(e) => e.preventDefault()}
-                              onClick={(e) => handleRemoveSub(id, e)}
+                              onClick={(e) => handleRemoveSub(String(id), e)}
                             >
                               <X className="h-3 w-3 text-muted-foreground hover:text-foreground" />
                             </div>
@@ -154,11 +168,14 @@ export function DepartmentSelect({
                     <CommandEmpty>No subdepartment found.</CommandEmpty>
                     <CommandGroup>
                       {subdepartments.map((sub: any) => {
-                        const isSelected = Array.isArray(subDepartmentValue) && subDepartmentValue.includes(sub.id);
+                        // FIX: Ensure ID comparison is string vs string
+                        const isSelected = Array.isArray(subDepartmentValue) && 
+                                         subDepartmentValue.map(String).includes(String(sub.id));
+                        
                         return (
                           <CommandItem
                             key={sub.id}
-                            value={sub.name} // Search by name
+                            value={sub.name} 
                             onSelect={() => handleMultiSubToggle(sub.id)}
                           >
                             <div
@@ -181,9 +198,9 @@ export function DepartmentSelect({
               </PopoverContent>
             </Popover>
           ) : (
-            // --- SINGLE SELECT MODE (Standard Select) ---
+            // --- SINGLE SELECT MODE ---
             <Select
-              value={subDepartmentValue as string}
+              value={subDepartmentValue ? String(subDepartmentValue) : undefined}
               onValueChange={handleSingleSubChange}
             >
               <SelectTrigger className="w-full bg-white">
@@ -191,7 +208,7 @@ export function DepartmentSelect({
               </SelectTrigger>
               <SelectContent>
                 {subdepartments.map((sub: any) => (
-                  <SelectItem key={sub.id} value={sub.id}>
+                  <SelectItem key={sub.id} value={String(sub.id)}>
                     {sub.name}
                   </SelectItem>
                 ))}

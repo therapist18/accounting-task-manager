@@ -27,6 +27,22 @@ import { DepartmentSelect } from '@/components/department-select';
 import { User, Mail, Lock, Calendar, Building2, Plus, Clock, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+// Helper Row Component (Outside main function)
+const FormRow = ({ label, icon: Icon, children, className, description }: any) => (
+  <div className={cn("grid grid-cols-12 gap-4 items-start p-4 border-b last:border-0 hover:bg-gray-50/50 transition-colors", className)}>
+    <div className="col-span-12 sm:col-span-4 space-y-1 mt-2">
+      <FormLabel className="text-sm font-medium text-gray-700 flex items-center gap-2">
+        {Icon && <Icon className="h-4 w-4 text-gray-500" />}
+        {label}
+      </FormLabel>
+      {description && <p className="text-xs text-gray-500 font-normal">{description}</p>}
+    </div>
+    <div className="col-span-12 sm:col-span-8">
+      {children}
+    </div>
+  </div>
+);
+
 interface OfficerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -50,7 +66,7 @@ export function OfficerDialog({
       email: '',
       password: '',
       department_id: '',
-      subdepartment_ids: [], // Array for multi-select
+      subdepartment_ids: [],
       department_start_date: new Date().toISOString().split('T')[0],
       department_end_date: '',
       start_date: new Date().toISOString().split('T')[0],
@@ -72,19 +88,18 @@ export function OfficerDialog({
           } catch (e) { return ''; }
         };
 
-        // Normalize subdepartment IDs to array
         let initialSubIds: string[] = [];
         if (currentDept?.subdepartment_ids && Array.isArray(currentDept.subdepartment_ids)) {
-          initialSubIds = currentDept.subdepartment_ids;
+          initialSubIds = currentDept.subdepartment_ids.map((id: any) => String(id));
         } else if (currentDept?.subdepartment_id) {
-          initialSubIds = [currentDept.subdepartment_id];
+          initialSubIds = [String(currentDept.subdepartment_id)];
         }
 
         form.reset({
           name: officer.name || '',
           email: officer.email || '',
           password: '', 
-          department_id: currentDept?.department_id || '',
+          department_id: currentDept?.department_id ? String(currentDept.department_id) : '',
           subdepartment_ids: initialSubIds,
           department_start_date: formatDate(currentDept?.start_date),
           department_end_date: formatDate(currentDept?.end_date),
@@ -109,21 +124,16 @@ export function OfficerDialog({
     }
   }, [open, officer, form]);
 
-  // Helper row component
-  const FormRow = ({ label, icon: Icon, children, className, description }: any) => (
-    <div className={cn("grid grid-cols-12 gap-4 items-start p-4 border-b last:border-0 hover:bg-gray-50/50 transition-colors", className)}>
-      <div className="col-span-12 sm:col-span-4 space-y-1 mt-2">
-        <FormLabel className="text-sm font-medium text-gray-700 flex items-center gap-2">
-          {Icon && <Icon className="h-4 w-4 text-gray-500" />}
-          {label}
-        </FormLabel>
-        {description && <p className="text-xs text-gray-500 font-normal">{description}</p>}
-      </div>
-      <div className="col-span-12 sm:col-span-8">
-        {children}
-      </div>
-    </div>
-  );
+  // --- FIX: Custom Submit Handler ---
+  // This ensures subdepartment_ids is included even if Zod strips it
+  const handleFormSubmit = (data: OfficerFormValues) => {
+    const subIds = form.getValues('subdepartment_ids');
+    const enrichedData = {
+      ...data,
+      subdepartment_ids: subIds // Manually merge the array
+    };
+    onSubmit(enrichedData);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -147,7 +157,8 @@ export function OfficerDialog({
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col max-h-[75vh]">
+          {/* Use custom handleFormSubmit here */}
+          <form onSubmit={form.handleSubmit(handleFormSubmit)} className="flex flex-col max-h-[75vh]">
             <div className="overflow-y-auto">
               
               {/* --- GROUP 1: ESSENTIALS --- */}
@@ -227,16 +238,21 @@ export function OfficerDialog({
                           <DepartmentSelect
                             value={field.value}
                             onChange={(value) => {
-                              field.onChange(value);
-                              form.setValue('subdepartment_ids', []); // Reset on dept change
+                              field.onChange(String(value));
+                              form.setValue('subdepartment_ids', []); 
                             }}
                             subDepartmentValue={form.watch('subdepartment_ids')}
                             onSubDepartmentChange={(value) => {
-                              // Ensure value is treated as array
-                              form.setValue('subdepartment_ids', Array.isArray(value) ? value : [value]);
+                              const valArray = Array.isArray(value) ? value : [value];
+                              const stringArray = valArray.map((v) => String(v));
+                              
+                              form.setValue('subdepartment_ids', stringArray, {
+                                shouldValidate: true,
+                                shouldDirty: true,
+                              });
                             }}
                             required={true}
-                            isMultiSelectSub={true} // Enable multi-select mode
+                            isMultiSelectSub={true} 
                           />
                         </FormControl>
                         <FormMessage className="mt-1" />

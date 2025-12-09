@@ -9,9 +9,7 @@ import { OfficerDialog } from '../../users-management/officers/components/office
 import { format } from 'date-fns';
 import { 
   MoreHorizontal, Search, FileSpreadsheet, Plus, 
-  ArrowUpDown, ChevronDown, ChevronRight, Columns,
-  PanelLeftClose,
-  PanelLeftOpen
+  ArrowUpDown, ChevronDown, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -132,7 +130,6 @@ export default function OfficersPage() {
   }, [officers]);
 
   // --- Helpers ---
-
   const getCurrentDepartment = (officer: Officer) => {
     const currentDept = officer.department_history?.[0];
     if (!currentDept) return { name: '-', subNames: [], startDate: null, endDate: null };
@@ -140,17 +137,13 @@ export default function OfficersPage() {
     let deptName = 'Unknown Department';
     let subDeptNames: string[] = [];
 
-    // Department Lookup
     if (currentDept.department_id && departments[currentDept.department_id]) {
       deptName = departments[currentDept.department_id].name;
-      
-      // Subdepartment Lookup (Handle Array or Single)
       if (currentDept.subdepartment_ids && Array.isArray(currentDept.subdepartment_ids)) {
         subDeptNames = currentDept.subdepartment_ids
             .map((id: string) => departments[currentDept.department_id]?.subdepartments[id])
             .filter(Boolean);
       } 
-      // Legacy fallback
       else if (currentDept.subdepartment_id && departments[currentDept.department_id]?.subdepartments[currentDept.subdepartment_id]) {
         subDeptNames = [departments[currentDept.department_id].subdepartments[currentDept.subdepartment_id]];
       }
@@ -167,7 +160,6 @@ export default function OfficersPage() {
   };
 
   // --- Sorting Logic ---
-
   const handleSort = (key: SortKey) => {
     let direction: 'asc' | 'desc' = 'asc';
     if (sortConfig.key === key && sortConfig.direction === 'asc') {
@@ -221,10 +213,11 @@ export default function OfficersPage() {
   const sortedActiveOfficers = useMemo(() => getSortedOfficers(activeOfficers), [activeOfficers, searchTerm, sortConfig, departments]);
   const sortedInactiveOfficers = useMemo(() => getSortedOfficers(inactiveOfficers), [inactiveOfficers, searchTerm, sortConfig, departments]);
 
-  // --- CRUD Operations ---
-
   const handleSaveOfficer = async (formData: any) => {
     setIsLoading(true);
+    // DEBUG: Verify subdepartment_ids are now present
+    console.log("Submitting form data:", formData); 
+
     try {
       const {
         department_id,
@@ -236,6 +229,10 @@ export default function OfficersPage() {
         ...coreUserData
       } = formData;
 
+      // Ensure we work with an array even if undefined
+      const subDeptIdsArray = Array.isArray(subdepartment_ids) ? subdepartment_ids : [];
+
+      // --- STEP 1: Update 'tm_users' Table ---
       const officerData = {
         name: coreUserData.name,
         email: coreUserData.email || null,
@@ -247,10 +244,11 @@ export default function OfficersPage() {
           end_date: end_date || null
         }],
         
+        // This updates the tm_users JSONB column
         department_history: [{
           department_id: department_id,
-          subdepartment_ids: subdepartment_ids || [], 
-          subdepartment_id: subdepartment_ids && subdepartment_ids.length > 0 ? subdepartment_ids[0] : null,
+          subdepartment_ids: subDeptIdsArray, 
+          subdepartment_id: subDeptIdsArray.length > 0 ? subDeptIdsArray[0] : null,
           start_date: department_start_date || new Date().toISOString(),
           end_date: department_end_date || null
         }],
@@ -264,35 +262,121 @@ export default function OfficersPage() {
         savedOfficerId = selectedOfficer.id;
         savedOfficer = await updateOfficer(selectedOfficer.id, officerData);
         setOfficers(officers.map(o => o.id === selectedOfficer.id ? savedOfficer : o));
-        toast.success('Officer updated successfully');
+        toast.success('Officer profile updated');
       } else {
         savedOfficer = await createOfficer(officerData);
         savedOfficerId = savedOfficer.id;
         setOfficers([...officers, savedOfficer]);
-        toast.success('Officer created successfully');
+        toast.success('Officer created');
       }
 
-      if (subdepartment_ids && subdepartment_ids.length > 0) {
-        // Logic to update subdepartment history (omitted for brevity, same as original)
+      // --- STEP 2: Update 'tm_subdepartments' Table ---
+      // We only run this if there are subdepartments selected
+      if (savedOfficerId && subDeptIdsArray.length > 0) {
+        console.log(`Updating ${subDeptIdsArray.length} subdepartments for Officer ID: ${savedOfficerId}`);
+
+        const updatePromises = subDeptIdsArray.map(async (subId: string | number) => {
+          // A. Fetch current history for this specific subdepartment
+          const { data: subDeptData, error: fetchError } = await supabase
+            .from('tm_subdepartments')
+            .select('officer_history')
+            .eq('id', subId)
+            .single();
+
+          if (fetchError) {
+            console.error(`Error fetching subdept ${subId}:`, fetchError);
+            return;
+          }
+
+          // B. Append new history entry
+          const currentHistory = Array.isArray(subDeptData?.officer_history) 
+            ? subDeptData.officer_history 
+            : [];
+
+          const newHistoryEntry = {
+            officer_id: savedOfficerId,
+            officer_name: coreUserData.name,
+            start_date: department_start_date || new Date().toISOString(),
+            end_date: department_end_date || null,
+            updated_at: new Date().toISOString()
+          };
+
+          // C. Update the table with the new array
+          const { error: updateError } = await supabase
+            .from('tm_subdepartments')
+            .update({ 
+              officer_history: [...currentHistory, newHistoryEntry],
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', subId);
+
+          if (updateError) {
+            console.error(`Error updating subdept ${subId}:`, updateError);
+            toast.error(`Failed to assign to subdepartment ${subId}`);
+          }
+        });
+
+        // Wait for all updates to complete
+        await Promise.all(updatePromises);
       }
 
       setIsDialogOpen(false);
       setSelectedOfficer(undefined);
     } catch (error) {
       console.error('Error saving officer:', error);
-      toast.error('Failed to save officer');
+      toast.error('Failed to save officer data');
     } finally {
       setIsLoading(false);
     }
   };
 
+  // --- UPDATED DELETE FUNCTION ---
   const handleDeleteOfficer = async (officerId: string) => {
-    if (!confirm('Are you sure you want to delete this officer?')) return;
+    if (!confirm('Are you sure you want to delete this officer? This will remove them from all assigned departments.')) return;
     setIsLoading(true);
     try {
+      // 1. Get the officer's current subdepartments from local state
+      const officerToDelete = officers.find(o => o.id === officerId);
+      const subIdsToCheck = officerToDelete?.department_history?.[0]?.subdepartment_ids || [];
+
+      // 2. Remove officer from 'tm_subdepartments' history (Update Table 1)
+      if (subIdsToCheck.length > 0) {
+        const cleanupPromises = subIdsToCheck.map(async (subId: any) => {
+          // Fetch current history
+          const { data: subData } = await supabase
+            .from('tm_subdepartments')
+            .select('officer_history')
+            .eq('id', subId)
+            .single();
+
+          if (subData && Array.isArray(subData.officer_history)) {
+            // Filter out the officer being deleted
+            // We check against 'officer_id' or 'id' to be safe with JSON variations
+            const updatedHistory = subData.officer_history.filter((record: any) => 
+               String(record.officer_id) !== String(officerId) && 
+               String(record.id) !== String(officerId)
+            );
+
+            // Only update if changes were made
+            if (updatedHistory.length !== subData.officer_history.length) {
+              await supabase
+                .from('tm_subdepartments')
+                .update({ officer_history: updatedHistory })
+                .eq('id', subId);
+            }
+          }
+        });
+
+        await Promise.all(cleanupPromises);
+      }
+
+      // 3. Delete from 'tm_users' (Delete Table 2)
       await deleteOfficer(officerId);
+      
+      // 4. Update UI
       setOfficers(officers.filter(officer => officer.id !== officerId));
-      toast.success('Officer deleted');
+      toast.success('Officer deleted completely');
+
     } catch (error) {
       console.error('Error deleting officer:', error);
       toast.error('Failed to delete officer');
@@ -349,8 +433,6 @@ export default function OfficersPage() {
       }
   };
 
-  // --- UI Components ---
-
   const renderSortArrow = (key: SortKey) => {
     if (sortConfig.key !== key) return <ArrowUpDown className="ml-2 h-3 w-3 opacity-50" />;
     return sortConfig.direction === 'asc' ? 
@@ -358,12 +440,11 @@ export default function OfficersPage() {
       <ChevronDown className="ml-2 h-3 w-3 text-white transition-transform" />;
   };
 
-  // Calculate dynamic colspan based on visible columns
   const getTotalColumns = () => {
-    let cols = 7; // Index, Name, Email, Dept, Sub, Status, Actions (Base)
-    if (showDeptDates) cols += 2; // Start, End
-    if (showStatusDates) cols += 1; // Since
-    cols += 2; // Created, Updated
+    let cols = 7; 
+    if (showDeptDates) cols += 2;
+    if (showStatusDates) cols += 1;
+    cols += 2;
     return cols;
   };
 
@@ -373,16 +454,12 @@ export default function OfficersPage() {
         <TableHeader className="sticky top-0 z-10 bg-white shadow-sm">
           <TableRow className="bg-blue-600 hover:bg-blue-600 border-none">
             <TableHead className="w-[50px] text-white font-semibold">#</TableHead>
-            
             <TableHead className="text-white font-semibold cursor-pointer hover:bg-blue-700 transition-colors" onClick={() => handleSort('name')}>
               <div className="flex items-center">Name {renderSortArrow('name')}</div>
             </TableHead>
-            
             <TableHead className="text-white font-semibold cursor-pointer hover:bg-blue-700 transition-colors" onClick={() => handleSort('email')}>
               <div className="flex items-center">Email {renderSortArrow('email')}</div>
             </TableHead>
-            
-            {/* Department Header with Toggle */}
             <TableHead className="text-white font-semibold transition-colors min-w-[200px]">
               <div className="flex items-center justify-between">
                 <div className="flex items-center cursor-pointer hover:underline" onClick={() => handleSort('department')}>
@@ -399,13 +476,9 @@ export default function OfficersPage() {
                 </Button>
               </div>
             </TableHead>
-
-            {/* Subdepartments */}
             <TableHead className="text-white font-semibold cursor-pointer hover:bg-blue-700 transition-colors min-w-[200px]" onClick={() => handleSort('subdepartment')}>
               <div className="flex items-center">Subdepartments {renderSortArrow('subdepartment')}</div>
             </TableHead>
-
-            {/* Conditional Date Columns for Dept/SubDept */}
             {showDeptDates && (
                 <>
                     <TableHead className="text-white font-semibold bg-blue-700 animate-in fade-in slide-in-from-left-2">
@@ -416,8 +489,6 @@ export default function OfficersPage() {
                     </TableHead>
                 </>
             )}
-
-            {/* Status Header with Toggle */}
             <TableHead className="text-white font-semibold transition-colors">
                  <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center cursor-pointer hover:underline" onClick={() => handleSort('status')}>
@@ -434,14 +505,11 @@ export default function OfficersPage() {
                     </Button>
                 </div>
             </TableHead>
-
-            {/* Conditional Status Date Column */}
             {showStatusDates && (
                  <TableHead className="text-white font-semibold bg-blue-700 animate-in fade-in slide-in-from-left-2">
                     Status Since
                 </TableHead>
             )}
-
             <TableHead className="text-white font-semibold cursor-pointer hover:bg-blue-700 transition-colors" onClick={() => handleSort('created_at')}>
               <div className="flex items-center">Created {renderSortArrow('created_at')}</div>
             </TableHead>
@@ -474,14 +542,12 @@ export default function OfficersPage() {
                     <TableCell className="font-medium">{officer.name}</TableCell>
                     <TableCell>{officer.email || '-'}</TableCell>
                     
-                    {/* Department Name */}
                     <TableCell>
                         <span className={cn("font-medium", !deptInfo.name && "text-muted-foreground")}>
                             {deptInfo.name}
                         </span>
                     </TableCell>
 
-                    {/* Subdepartments */}
                     <TableCell>
                         <div className="flex flex-wrap gap-1">
                             {deptInfo.subNames.length > 0 ? (
@@ -499,7 +565,6 @@ export default function OfficersPage() {
                         </div>
                     </TableCell>
 
-                    {/* Expanded Department Dates */}
                     {showDeptDates && (
                         <>
                             <TableCell className="bg-blue-50/30 text-xs animate-in fade-in slide-in-from-left-2 whitespace-nowrap">
@@ -511,14 +576,12 @@ export default function OfficersPage() {
                         </>
                     )}
 
-                    {/* Status Badge */}
                     <TableCell>
                         <Badge variant={statusInfo?.status === 'active' ? 'default' : 'secondary'}>
                             {statusInfo?.status || 'Unknown'}
                         </Badge>
                     </TableCell>
 
-                    {/* Expanded Status Date */}
                     {showStatusDates && (
                         <TableCell className="bg-blue-50/30 text-xs animate-in fade-in slide-in-from-left-2 whitespace-nowrap">
                             {statusInfo?.start_date ? format(new Date(statusInfo.start_date), 'MMM d, yyyy') : '-'}
@@ -561,7 +624,6 @@ export default function OfficersPage() {
       </Table>
     </div>
   );
-
   return (
     <div className="mx-auto py-6 px-4 space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
