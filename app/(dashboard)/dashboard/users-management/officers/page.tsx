@@ -294,8 +294,7 @@ export default function OfficersPage() {
             : [];
 
           const newHistoryEntry = {
-            officer_id: savedOfficerId,
-            officer_name: coreUserData.name,
+            id: savedOfficerId,
             start_date: department_start_date || new Date().toISOString(),
             end_date: department_end_date || null,
             updated_at: new Date().toISOString()

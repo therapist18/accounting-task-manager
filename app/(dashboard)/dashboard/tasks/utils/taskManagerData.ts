@@ -241,7 +241,7 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
       const { data, error } = await supabase
         .from('acc_portal_directors_documents')
         .select('*')
-        .order('created_at', { ascending: false })
+        .order('director_id', { ascending: true })
 
       if (error) throw error
       

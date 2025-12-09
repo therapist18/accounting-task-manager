@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,28 +9,30 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
-import { Card, CardContent, CardHeader, CardDescription, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ChevronDown, ChevronUp, Plus, Trash2, Layers, User as UserIcon, ChevronsUpDown, FolderPlus, Edit, Building, Workflow, Loader2, Shield, X, BoxSelect, Calendar, Users, FileText, History } from "lucide-react"
+import { Plus, Trash2, Layers, User as UserIcon, ChevronsUpDown, FolderPlus, Edit, Building, Workflow, Loader2, Shield, X, Calendar, Users, FileText, History } from "lucide-react"
 
-import { Department, Subdepartment, Class, SubClass, Requirement, SubdepartmentForm, ClassForm, SubClassForm, RequirementForm, User as UserType, DepartmentForm } from "../database"
-import { updateNestedState } from "../page"
+import { DepartmentForm, ClassForm, SubClassForm, RequirementForm, User as UserType } from "../database"
 
-// Helper function for hierarchical numbering
-const generateHierarchicalIndex = (
-  deptIndex: number,
-  subdeptIndex?: number,
-  classIndex?: number,
-  subClassIndex?: number,
-  reqIndex?: number
-) => {
-  let index = `${deptIndex + 1}`;
-  if (subdeptIndex !== undefined) index += `.${subdeptIndex + 1}`;
-  if (classIndex !== undefined) index += `.${classIndex + 1}`;
-  if (subClassIndex !== undefined) index += `.${subClassIndex + 1}`;
-  if (reqIndex !== undefined) index += `.${reqIndex + 1}`;
-  return index;
+// Helper function for deep cloning
+const deepClone = (obj: any) => JSON.parse(JSON.stringify(obj))
+
+// Helper function for updating nested state (Included locally to avoid import issues)
+const updateNestedState = (state: any, path: (string | number)[], value: any) => {
+  const newState = deepClone(state)
+  let current = newState
+  for (let i = 0; i < path.length - 1; i++) {
+    const key = path[i];
+    if (current[key] === undefined) {
+      const nextKey = path[i + 1];
+      current[key] = typeof nextKey === 'number' ? [] : {};
+    }
+    current = current[key];
+  }
+  current[path[path.length - 1]] = value;
+  return newState;
 };
 
 // Requirement Component
@@ -228,7 +230,7 @@ function ClassComponent({
   );
 }
 
-// Updated DepartmentDialog with multi-officer management at subdepartment level only
+// Updated DepartmentDialog
 interface DepartmentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -255,7 +257,6 @@ export default function DepartmentDialog({
   isSaving
 }: DepartmentDialogProps) {
   const [selectedManagerId, setSelectedManagerId] = useState<string>('');
-  const [isExpanded, setIsExpanded] = useState(true);
 
   // Get current assignments from history (no end date or end date in future)
   const getCurrentAssignments = (history: any[] = []) => {
@@ -266,48 +267,8 @@ export default function DepartmentDialog({
     });
   };
 
-  // Get user details by ID
-  const getUserDetails = (id: string) => {
-    return users.find(user => user.id === id);
-  };
-
-  // Format date for display
-  const formatDate = (dateString: string | null) => {
-    if (!dateString) return '';
-    return new Date(dateString).toLocaleDateString();
-  };
-
-  // Debug effect to log initial props and form changes
-  React.useEffect(() => {
-    console.log('DepartmentDialog mounted with props:', {
-      open,
-      departmentForm: {
-        ...departmentForm,
-        subdepartments: departmentForm.subdepartments?.map(sd => ({
-          name: sd.name,
-          officer_history: sd.officer_history,
-          manager_history: sd.manager_history,
-          assistant_history: sd.assistant_history,
-          officers: sd.officers,
-          taskManagers: sd.taskManagers,
-          taskAssistants: sd.taskAssistants
-        }))
-      },
-      users: users?.length || 0,
-      officers: officers?.length || 0,
-      editingDepartmentId,
-      editingSubdepartmentId,
-      isSaving
-    });
-  }, [open]); // Only run when the dialog opens
-
   const updateFormState = (path: string[], value: any) => {
-    console.log('Updating form state:', { path, value });
-    setDepartmentForm(prevState => {
-      const newState = updateNestedState(prevState, path, value);
-      console.log('New form state:', newState);
-      return newState;
-    });
+    setDepartmentForm(prevState => updateNestedState(prevState, path, value));
   };
 
   const isCreatingNewDepartment = !editingDepartmentId && !editingSubdepartmentId;
@@ -351,14 +312,13 @@ export default function DepartmentDialog({
 
   const handleSubdepartmentChange = (subdeptIndex: number, field: string, value: any) => updateFormState(['subdepartments', subdeptIndex, field], value);
 
-  // ⭐ START: New and updated role management functions
+  // --- ROLE MANAGEMENT FUNCTIONS ---
   const createNewAssignment = (id: string, managerId?: string) => {
     const assignment = {
       id,
       start_date: new Date().toISOString().split('T')[0],
       end_date: ''
     };
-
     if (managerId) {
       return { ...assignment, manager_id: managerId };
     }
@@ -368,7 +328,6 @@ export default function DepartmentDialog({
   const handleAddRoleAssignment = (subdeptIndex: number, role: 'officers' | 'taskManagers' | 'taskAssistants', userId: string) => {
     if (!userId || userId === 'none') return;
 
-    // Determine the history field name
     const historyField = role === 'officers' ? 'officer_history' :
       role === 'taskManagers' ? 'manager_history' :
         'assistant_history';
@@ -380,7 +339,7 @@ export default function DepartmentDialog({
       item.id === userId && (!item.end_date || new Date(item.end_date) > new Date())
     );
 
-    if (existingActive) return; // User already has active assignment
+    if (existingActive) return; 
 
     const newAssignment = createNewAssignment(userId);
     updateFormState(['subdepartments', subdeptIndex, historyField], [...currentHistory, newAssignment]);
@@ -419,7 +378,7 @@ export default function DepartmentDialog({
     if (!managerId || !userId) return;
 
     const currentHistory = departmentForm.subdepartments[subdeptIndex].assistant_history || [];
-
+    
     // Check if user already has active assignment with this manager
     const existingActive = currentHistory.find(item =>
       item.id === userId && item.manager_id === managerId &&
@@ -447,6 +406,7 @@ export default function DepartmentDialog({
         </DialogHeader>
 
         <div className="space-y-6 overflow-y-auto p-1">
+          {/* Department Details (Only visible when managing Department entity) */}
           {(isCreatingNewDepartment || isEditingDepartment) && (
             <div className="space-y-4 p-4 bg-blue-50 rounded-lg border">
               <h3 className="text-lg font-semibold text-blue-800 flex items-center gap-2"><Building className="h-5 w-5" />Department Details</h3>
@@ -467,12 +427,13 @@ export default function DepartmentDialog({
             </div>
           )}
 
+          {/* Subdepartments List */}
           {departmentForm.subdepartments.length > 0 && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold flex items-center gap-2"><Workflow className="h-5 w-5 text-blue-600" />{isCreatingSubdepartment || isEditingSubdepartment ? 'Subdepartment Details' : 'Subdepartments'}</h3>
                 {isCreatingNewDepartment && (
-                  <Button variant="outline" size="sm" onClick={() => updateFormState(['subdepartments'], [...departmentForm.subdepartments, { name: '', description: '', classes: [], officers: [], taskManagers: [], taskAssistants: [], default_display: true }])}>
+                  <Button variant="outline" size="sm" onClick={() => updateFormState(['subdepartments'], [...departmentForm.subdepartments, { name: '', description: '', classes: [], officers: [], taskManagers: [], taskAssistants: [], default_display: true, officer_history: [], manager_history: [], assistant_history: [] }])}>
                     <Plus className="h-4 w-4 mr-1" /> Add Subdepartment
                   </Button>
                 )}
@@ -494,6 +455,8 @@ export default function DepartmentDialog({
                         </TabsList>
                       </CardHeader>
                       <CardContent className="p-0">
+                        
+                        {/* Tab: Details */}
                         <TabsContent value="details" className="p-6 space-y-4">
                           <h4 className="text-lg font-semibold text-gray-800 flex items-center gap-2">Basic Information</h4>
                           <div>
@@ -506,6 +469,7 @@ export default function DepartmentDialog({
                           </div>
                         </TabsContent>
 
+                        {/* Tab: Roles */}
                         <TabsContent value="roles" className="p-6 space-y-6">
                           {[{
                             title: "Officers",
@@ -526,15 +490,8 @@ export default function DepartmentDialog({
                             badge: (user) => user.role === 'task_manager' ? 'Manager' : user.role === 'admin' ? 'Admin' : 'User',
                             historyField: 'manager_history'
                           }].map(roleConfig => {
-                            // Get the actual history data
                             const historyData = subdept[roleConfig.historyField] || [];
                             const currentAssignments = getCurrentAssignments(historyData);
-
-                            console.log(`${roleConfig.title} data:`, {
-                              historyField: roleConfig.historyField,
-                              historyData,
-                              currentAssignments
-                            });
 
                             return (
                               <div key={roleConfig.role} className={`space-y-4 p-4 border-l-4 border-${roleConfig.color}-500 bg-${roleConfig.color}-50/30 rounded-r-lg`}>
@@ -562,8 +519,6 @@ export default function DepartmentDialog({
                                 <div className="space-y-3 max-h-64 overflow-y-auto border rounded-md bg-white p-2">
                                   {currentAssignments.map((assignment, index) => {
                                     const userData = roleConfig.source.find(u => u.id === assignment.id);
-                                    console.log(`Assignment ${index}:`, assignment, 'User data:', userData);
-
                                     return userData ? (
                                       <div key={`${assignment.id}-${index}`} className="p-3 border-b last:border-b-0 hover:bg-gray-50 rounded-md">
                                         <div className="flex items-center justify-between mb-2">
@@ -584,13 +539,10 @@ export default function DepartmentDialog({
                                               size="icon"
                                               className="h-8 w-8 text-red-500 hover:bg-red-50"
                                               onClick={() => {
-                                                // Find the actual index in the history array
                                                 const actualIndex = historyData.findIndex(h =>
                                                   h.id === assignment.id && h.start_date === assignment.start_date
                                                 );
-                                                if (actualIndex >= 0) {
-                                                  handleRemoveRoleAssignment(subdeptIndex, roleConfig.role, actualIndex);
-                                                }
+                                                if (actualIndex >= 0) handleRemoveRoleAssignment(subdeptIndex, roleConfig.role, actualIndex);
                                               }}
                                             >
                                               <X className="h-4 w-4" />
@@ -606,12 +558,8 @@ export default function DepartmentDialog({
                                               type="date"
                                               value={assignment.start_date ? new Date(assignment.start_date).toISOString().split('T')[0] : ''}
                                               onChange={(e) => {
-                                                const actualIndex = historyData.findIndex(h =>
-                                                  h.id === assignment.id && h.start_date === assignment.start_date
-                                                );
-                                                if (actualIndex >= 0) {
-                                                  handleAssignmentDateChange(subdeptIndex, roleConfig.role, actualIndex, 'start_date', e.target.value);
-                                                }
+                                                const actualIndex = historyData.findIndex(h => h.id === assignment.id && h.start_date === assignment.start_date);
+                                                if (actualIndex >= 0) handleAssignmentDateChange(subdeptIndex, roleConfig.role, actualIndex, 'start_date', e.target.value);
                                               }}
                                               className="text-sm mt-1"
                                               required
@@ -625,12 +573,8 @@ export default function DepartmentDialog({
                                               type="date"
                                               value={assignment.end_date ? new Date(assignment.end_date).toISOString().split('T')[0] : ''}
                                               onChange={(e) => {
-                                                const actualIndex = historyData.findIndex(h =>
-                                                  h.id === assignment.id && h.start_date === assignment.start_date
-                                                );
-                                                if (actualIndex >= 0) {
-                                                  handleAssignmentDateChange(subdeptIndex, roleConfig.role, actualIndex, 'end_date', e.target.value);
-                                                }
+                                                 const actualIndex = historyData.findIndex(h => h.id === assignment.id && h.start_date === assignment.start_date);
+                                                 if (actualIndex >= 0) handleAssignmentDateChange(subdeptIndex, roleConfig.role, actualIndex, 'end_date', e.target.value);
                                               }}
                                               className="text-sm mt-1"
                                               min={assignment.start_date}
@@ -646,114 +590,11 @@ export default function DepartmentDialog({
                                     </div>
                                   )}
                                 </div>
-
-                                {/* Full History - Show all assignments as editable cards */}
-                                {historyData.length > 0 && (
-                                  <div className="mt-4 border-t pt-4">
-                                    <div className="flex items-center justify-between mb-3">
-                                      <Label className="text-sm font-medium text-gray-700 flex items-center gap-1">
-                                        <History className="h-4 w-4" />
-                                        All Assignment History
-                                      </Label>
-                                      <Badge variant="outline" className="text-xs">
-                                        {historyData.length} total entries
-                                      </Badge>
-                                    </div>
-                                    <div className="space-y-3 max-h-80 overflow-y-auto border rounded-md p-3 bg-gray-50">
-                                      {historyData
-                                        ?.sort((a, b) => new Date(b.start_date) - new Date(a.start_date))
-                                        .map((history, historyIndex) => {
-                                          const historyUser = roleConfig.source.find(u => u.id === history.id);
-                                          const isCurrent = !history.end_date || new Date(history.end_date) > new Date();
-                                          const actualIndex = historyData.findIndex(h =>
-                                            h.id === history.id && h.start_date === history.start_date
-                                          );
-
-                                          return (
-                                            <div key={`history-${historyIndex}`}
-                                              className={`p-4 bg-white rounded-lg border-2 ${isCurrent ? 'border-green-200 bg-green-50/50' : 'border-gray-200'} hover:shadow-sm transition-all`}>
-                                              <div className="flex justify-between items-start mb-3">
-                                                <div className="flex items-center gap-3">
-                                                  <roleConfig.icon className={`h-5 w-5 text-${roleConfig.color}-600 flex-shrink-0`} />
-                                                  <div>
-                                                    <div className="font-medium text-gray-900 flex items-center gap-2">
-                                                      {historyUser?.name || 'Unknown User'}
-                                                      {isCurrent && (
-                                                        <Badge variant="outline" className="h-5 px-2 text-green-700 bg-green-100 text-xs border-green-300">
-                                                          Current
-                                                        </Badge>
-                                                      )}
-                                                    </div>
-                                                    {historyUser?.email && (
-                                                      <div className="text-sm text-gray-500">{historyUser.email}</div>
-                                                    )}
-                                                    {roleConfig.badge && roleConfig.badge(historyUser) && (
-                                                      <Badge variant="secondary" className="mt-1 text-xs">
-                                                        {roleConfig.badge(historyUser)}
-                                                      </Badge>
-                                                    )}
-                                                  </div>
-                                                </div>
-                                                <Button
-                                                  variant="ghost"
-                                                  size="icon"
-                                                  className="h-8 w-8 text-red-500 hover:bg-red-50"
-                                                  onClick={() => {
-                                                    const updatedHistory = historyData.filter((_, i) => i !== actualIndex);
-                                                    updateFormState(['subdepartments', subdeptIndex, roleConfig.historyField], updatedHistory);
-                                                  }}
-                                                >
-                                                  <X className="h-4 w-4" />
-                                                </Button>
-                                              </div>
-
-                                              {/* Editable date fields */}
-                                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                <div>
-                                                  <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                                                    <Calendar className="h-3 w-3" />Start Date *
-                                                  </Label>
-                                                  <Input
-                                                    type="date"
-                                                    value={history.start_date ? new Date(history.start_date).toISOString().split('T')[0] : ''}
-                                                    onChange={(e) => {
-                                                      const updatedHistory = [...historyData];
-                                                      updatedHistory[actualIndex] = { ...updatedHistory[actualIndex], start_date: e.target.value };
-                                                      updateFormState(['subdepartments', subdeptIndex, roleConfig.historyField], updatedHistory);
-                                                    }}
-                                                    className="text-sm mt-1"
-                                                    required
-                                                  />
-                                                </div>
-                                                <div>
-                                                  <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                                                    <Calendar className="h-3 w-3" />End Date (Optional)
-                                                  </Label>
-                                                  <Input
-                                                    type="date"
-                                                    value={history.end_date ? new Date(history.end_date).toISOString().split('T')[0] : ''}
-                                                    onChange={(e) => {
-                                                      const updatedHistory = [...historyData];
-                                                      updatedHistory[actualIndex] = { ...updatedHistory[actualIndex], end_date: e.target.value };
-                                                      updateFormState(['subdepartments', subdeptIndex, roleConfig.historyField], updatedHistory);
-                                                    }}
-                                                    className="text-sm mt-1"
-                                                    min={history.start_date}
-                                                  />
-                                                </div>
-                                              </div>
-
-                                                                                      </div>
-                                          );
-                                        })}
-                                    </div>
-                                  </div>
-                                )}
                               </div>
                             );
                           })}
 
-                          {/* Task Assistants section - Update similarly */}
+                          {/* Task Assistants section */}
                           <div className="space-y-4 p-4 border-l-4 border-green-500 bg-green-50/30 rounded-r-lg">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
@@ -792,7 +633,7 @@ export default function DepartmentDialog({
                                     onValueChange={(userId) => {
                                       if (userId && userId !== 'none') {
                                         handleAddBlankTaskAssistant(subdeptIndex, selectedManagerId, userId);
-                                        setSelectedManagerId(''); // Reset after adding
+                                        setSelectedManagerId(''); 
                                       }
                                     }}
                                   >
@@ -817,13 +658,10 @@ export default function DepartmentDialog({
 
                             {/* Current Active Assistants */}
                             <div className="space-y-3 max-h-64 overflow-y-auto border rounded-md bg-white p-3">
-                              <div className="font-medium text-sm text-gray-700 mb-2 flex items-center gap-2">
-                                <Badge variant="outline" className="bg-green-100 text-green-700">Active Assignments</Badge>
-                              </div>
                               {getCurrentAssignments(subdept.assistant_history || []).map((assistant, index) => {
                                 const assistantUser = users.find(u => u.id === assistant.id);
                                 const managerUser = users.find(u => u.id === assistant.manager_id);
-                                const actualIndex = subdept.assistant_history.findIndex(a =>
+                                const actualIndex = (subdept.assistant_history || []).findIndex(a =>
                                   a.id === assistant.id && a.start_date === assistant.start_date && a.manager_id === assistant.manager_id
                                 );
 
@@ -896,110 +734,10 @@ export default function DepartmentDialog({
                                 </div>
                               )}
                             </div>
-
-                            {/* Full Assistant History */}
-                            {subdept.assistant_history?.length > 0 && (
-                              <div className="mt-4 border-t pt-4">
-                                <div className="flex items-center justify-between mb-3">
-                                  <Label className="text-sm font-medium text-gray-700 flex items-center gap-1">
-                                    <History className="h-4 w-4" />
-                                    All Assistant Assignment History
-                                  </Label>
-                                  <Badge variant="outline" className="text-xs">
-                                    {subdept.assistant_history?.length} total entries
-                                  </Badge>
-                                </div>
-                                <div className="space-y-3 max-h-80 overflow-y-auto border rounded-md p-3 bg-gray-50">
-                                  {subdept.assistant_history
-                                    ?.sort((a, b) => new Date(b.start_date) - new Date(a.start_date))
-                                    .map((history, historyIndex) => {
-                                      const historyUser = users.find(u => u.id === history.id);
-                                      const managerUser = users.find(u => u.id === history.manager_id);
-                                      const isCurrent = !history.end_date || new Date(history.end_date) > new Date();
-                                      const actualIndex = subdept.assistant_history.findIndex(h =>
-                                        h.id === history.id && h.start_date === history.start_date && h.manager_id === history.manager_id
-                                      );
-
-                                      return (
-                                        <div key={`assistant-history-${historyIndex}`}
-                                          className={`p-4 bg-white rounded-lg border-2 ${isCurrent ? 'border-green-200 bg-green-50/50' : 'border-gray-200'} hover:shadow-sm transition-all`}>
-                                          <div className="flex justify-between items-start mb-3">
-                                            <div className="flex items-center gap-3">
-                                              <Users className="h-5 w-5 text-green-600 flex-shrink-0" />
-                                              <div>
-                                                <div className="font-medium text-gray-900 flex items-center gap-2">
-                                                  {historyUser?.name || 'Unknown User'}
-                                                  {isCurrent && (
-                                                    <Badge variant="outline" className="h-5 px-2 text-green-700 bg-green-100 text-xs border-green-300">
-                                                      Current
-                                                    </Badge>
-                                                  )}
-                                                </div>
-                                                {historyUser?.email && (
-                                                  <div className="text-sm text-gray-500">{historyUser.email}</div>
-                                                )}
-                                                <div className="text-xs text-green-600 mt-1">
-                                                  Manager: {managerUser?.name || 'Unknown Manager'}
-                                                </div>
-                                              </div>
-                                            </div>
-                                            <Button
-                                              variant="ghost"
-                                              size="icon"
-                                              className="h-8 w-8 text-red-500 hover:bg-red-50"
-                                              onClick={() => {
-                                                const updatedHistory = subdept.assistant_history.filter((_, i) => i !== actualIndex);
-                                                updateFormState(['subdepartments', subdeptIndex, 'assistant_history'], updatedHistory);
-                                              }}
-                                            >
-                                              <X className="h-4 w-4" />
-                                            </Button>
-                                          </div>
-
-                                          {/* Editable fields */}
-                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div>
-                                              <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                                                <Calendar className="h-3 w-3" />Start Date *
-                                              </Label>
-                                              <Input
-                                                type="date"
-                                                value={history.start_date ? new Date(history.start_date).toISOString().split('T')[0] : ''}
-                                                onChange={(e) => {
-                                                  const updatedHistory = [...subdept.assistant_history];
-                                                  updatedHistory[actualIndex] = { ...updatedHistory[actualIndex], start_date: e.target.value };
-                                                  updateFormState(['subdepartments', subdeptIndex, 'assistant_history'], updatedHistory);
-                                                }}
-                                                className="text-sm mt-1"
-                                                required
-                                              />
-                                            </div>
-                                            <div>
-                                              <Label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                                                <Calendar className="h-3 w-3" />End Date (Optional)
-                                              </Label>
-                                              <Input
-                                                type="date"
-                                                value={history.end_date ? new Date(history.end_date).toISOString().split('T')[0] : ''}
-                                                onChange={(e) => {
-                                                  const updatedHistory = [...subdept.assistant_history];
-                                                  updatedHistory[actualIndex] = { ...updatedHistory[actualIndex], end_date: e.target.value };
-                                                  updateFormState(['subdepartments', subdeptIndex, 'assistant_history'], updatedHistory);
-                                                }}
-                                                className="text-sm mt-1"
-                                                min={history.start_date}
-                                              />
-                                            </div>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                </div>
-                              </div>
-                            )}
                           </div>
                         </TabsContent>
 
+                        {/* Tab: Classes */}
                         <TabsContent value="classes" className="p-6 space-y-4">
                           <div className="flex items-center justify-between">
                             <h4 className="font-semibold text-gray-800">Classes</h4>
@@ -1025,7 +763,7 @@ export default function DepartmentDialog({
             <div className="text-center py-8 border-2 border-dashed rounded-lg bg-gray-50">
               <Workflow className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-600 mb-4">This department doesn't have any subdepartments yet.</p>
-              <Button variant="outline" onClick={() => updateFormState(['subdepartments'], [{ name: '', description: '', classes: [], officers: [], taskManagers: [], taskAssistants: [], default_display: true }])}>
+              <Button variant="outline" onClick={() => updateFormState(['subdepartments'], [{ name: '', description: '', classes: [], officers: [], taskManagers: [], taskAssistants: [], default_display: true, officer_history: [], manager_history: [], assistant_history: [] }])}>
                 <Plus className="h-4 w-4 mr-1" /> Add First Subdepartment
               </Button>
             </div>
