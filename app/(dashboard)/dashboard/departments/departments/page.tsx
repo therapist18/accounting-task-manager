@@ -37,7 +37,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Loader2, Building, FolderPlus, Edit, Trash2, ChevronDown, ChevronUp, Plus, Minus, Search, BarChart3, Workflow, Layers, Target, User as UserIcon, Shield, Users, History } from "lucide-react"
+import { Loader2, Building, FolderPlus, Edit, Trash2, ChevronDown, ChevronUp, Plus, Minus, Search, BarChart3, Workflow, Layers, Target, User as UserIcon, Shield, Users, History, FileSpreadsheet, DownloadCloud } from "lucide-react"
 import { DepartmentStats } from "./components/DepartmentStats"
 import supabase from "@/lib/supabase/client"
 import { toast } from "sonner"
@@ -48,7 +48,8 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-
+import ExcelJS from 'exceljs'
+import { saveAs } from 'file-saver'
 // Helper function for deep cloning
 const deepClone = (obj: any) => JSON.parse(JSON.stringify(obj))
 
@@ -1209,6 +1210,134 @@ const updateExistingDepartment = async (formData: DepartmentForm) => {
     </div>
   );
 
+  const handleExportExcel = async () => {
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('Departments Structure');
+
+      // 1. Define Columns
+      sheet.columns = [
+        { header: 'Index', key: 'index', width: 15 },
+        { header: 'Name', key: 'name', width: 60 },
+        { header: 'Description', key: 'description', width: 40 },
+        { header: 'Officer', key: 'officer', width: 25 },
+        { header: 'Task Manager', key: 'manager', width: 25 },
+        { header: 'Task Assistants', key: 'assistants', width: 40 },
+        { header: 'Default Display', key: 'display', width: 15 },
+        { header: 'Item Type', key: 'type', width: 15 }, // Hidden helper column
+      ];
+
+      // 2. Style the Header
+      sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 };
+      sheet.getRow(1).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF2563EB' } // Tailwind Blue-600
+      };
+
+      // Helper to get user name safely
+      const getName = (id: string) => users.find(u => u.id === id)?.name || '-';
+      const getBoolean = (val: boolean) => val ? 'Yes' : 'No';
+
+      // 3. Iterate and Build Rows
+      filteredDepartments.forEach((dept, dIdx) => {
+        const currentDeptOfficer = getCurrentOfficer(dept.officers_history || []);
+        
+        // --- Level 0: Department ---
+        const deptRow = sheet.addRow({
+          index: `${dIdx + 1}`,
+          name: dept.name,
+          description: dept.description || '',
+          officer: currentDeptOfficer ? getName(currentDeptOfficer.id) : '-',
+          manager: '-', // Depts don't have task managers in your UI
+          assistants: '-',
+          display: getBoolean(dept.default_display),
+          type: 'Department'
+        });
+
+        // Style Department Row
+        deptRow.font = { bold: true, size: 12 };
+        deptRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF6FF' } }; // Blue-50
+        
+        // Iterate Subdepartments
+        (dept.tm_subdepartments || []).forEach((sub, sIdx) => {
+          const currentSubOfficer = getCurrentOfficer(sub.officer_history || []);
+          const currentManager = getCurrentManager(sub.manager_history || []);
+          const currentAssistants = getCurrentAssistants(sub.assistant_history || []);
+          
+          // --- Level 1: Subdepartment ---
+          const subRow = sheet.addRow({
+            index: `${dIdx + 1}.${sIdx + 1}`,
+            name: `    ${sub.name}`, // Visual Indent
+            description: sub.description || '',
+            officer: currentSubOfficer ? getName(currentSubOfficer.id) : '-',
+            manager: currentManager ? getName(currentManager.id) : '-',
+            assistants: currentAssistants.map(a => getName(a.id)).join(', '),
+            display: getBoolean(sub.default_display),
+            type: 'Subdepartment'
+          });
+
+          // Grouping & Styling
+          subRow.outlineLevel = 1; // Level 1 Group
+          subRow.font = { bold: true, color: { argb: 'FF374151' } }; // Gray-700
+          
+          // Iterate Classes
+          (sub.classes || []).forEach((cls, cIdx) => {
+            // --- Level 2: Class ---
+            const classRow = sheet.addRow({
+              index: `${dIdx + 1}.${sIdx + 1}.${cIdx + 1}`,
+              name: `        ${cls.name}`, // Double Indent
+              description: cls.description || '',
+              officer: '-',
+              manager: '-',
+              assistants: '-',
+              display: getBoolean(cls.default_display),
+              type: 'Class'
+            });
+
+            classRow.outlineLevel = 2; // Level 2 Group
+            classRow.font = { italic: true, color: { argb: 'FF4B5563' } }; // Gray-600
+
+            // Iterate SubClasses
+            (cls.subClasses || []).forEach((subCls, scIdx) => {
+              // --- Level 3: SubClass ---
+              const subClassRow = sheet.addRow({
+                index: `${dIdx + 1}.${sIdx + 1}.${cIdx + 1}.${scIdx + 1}`,
+                name: `            ${subCls.name}`, // Triple Indent
+                description: subCls.description || '',
+                officer: '-',
+                manager: '-',
+                assistants: '-',
+                display: getBoolean(subCls.default_display),
+                type: 'SubClass'
+              });
+
+              subClassRow.outlineLevel = 3; // Level 3 Group
+              subClassRow.font = { color: { argb: 'FF6B7280' } }; // Gray-500
+            });
+          });
+        });
+      });
+
+      // 4. Finalize
+      // Auto-filter for columns
+      sheet.autoFilter = {
+        from: { row: 1, column: 1 },
+        to: { row: 1, column: 8 }
+      };
+
+      // Write to buffer and save
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `Departments_Structure_${new Date().toISOString().split('T')[0]}.xlsx`);
+
+      toast.success("Excel exported successfully!");
+    } catch (error) {
+      console.error('Export failed:', error);
+      toast.error("Failed to export Excel.");
+    }
+  };
+
   return (
     <div className="flex-1 space-y-6 p-2 md:p-4 min-h-screen">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -1227,6 +1356,15 @@ const updateExistingDepartment = async (formData: DepartmentForm) => {
           >
             <BarChart3 className="h-4 w-4" />
             Statistics
+          </Button>
+           <Button 
+            variant="outline" 
+            onClick={handleExportExcel}
+            className="flex items-center gap-2 text-green-700 border-green-200 hover:bg-green-50 hover:text-green-800"
+            title="Export to Excel with Groups"
+          >
+            <DownloadCloud className="h-4 w-4" />
+            Export Excel
           </Button>
           {isOrderChanged && (
             <Button onClick={handleSaveOrder} disabled={savingOrder}>

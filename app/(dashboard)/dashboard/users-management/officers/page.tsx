@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Officer, OfficerStatus } from '@/app/(dashboard)/dashboard/users-management/officers/components/officers-fields';
 import { OfficerDialog } from '../../users-management/officers/components/officer-dialog';
 import { format, formatDistanceToNow } from 'date-fns';
-import { MoreHorizontal, Calendar, Building2, Layers } from 'lucide-react';
+import { MoreHorizontal, Calendar, Building2, Layers, Search, FileSpreadsheet, Plus, Download } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Input } from '@/components/ui/input';
 import {
   Popover,
   PopoverContent,
@@ -33,11 +34,14 @@ import {
 } from '@/components/ui/table';
 import { fetchOfficers, createOfficer, updateOfficer, deleteOfficer } from '@/app/(dashboard)/dashboard/users-management/officers/components/officers';
 import { fetchDepartments } from '../departments';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
+import { toast } from 'sonner';
 
 interface DepartmentMap {
   [key: string]: {
     name: string;
-    subdepartments: {[key: string]: string};
+    subdepartments: { [key: string]: string };
   };
 }
 
@@ -50,6 +54,10 @@ export default function OfficersPage() {
   const [selectedOfficer, setSelectedOfficer] = useState<Officer | undefined>();
   const [isLoading, setIsLoading] = useState(false);
 
+  // New States
+  const [searchTerm, setSearchTerm] = useState("");
+  const [activeTab, setActiveTab] = useState("active");
+
   // Load departments and officers data
   useEffect(() => {
     const loadData = async () => {
@@ -57,30 +65,30 @@ export default function OfficersPage() {
       try {
         // Load departments first
         const deptsData = await fetchDepartments();
-        
+
         // Create a map of department and subdepartment names
         const deptMap: DepartmentMap = {};
-        
+
         deptsData.forEach(dept => {
           deptMap[dept.id] = {
             name: dept.name,
             subdepartments: {}
           };
-          
+
           // Add subdepartments
           (dept.tm_subdepartments || []).forEach((sub: any) => {
             deptMap[dept.id].subdepartments[sub.id] = sub.name;
           });
         });
-        
+
         setDepartments(deptMap);
-        
+
         // Then load officers
         const officersData = await fetchOfficers();
         setOfficers(officersData);
       } catch (error) {
         console.error('Error loading data:', error);
-        // Optionally show error to user
+        toast.error('Failed to load data');
       } finally {
         setIsLoading(false);
       }
@@ -107,7 +115,7 @@ export default function OfficersPage() {
         const status = officer.status_history?.[0];
         return status?.status === 'active' && !status?.end_date;
       }));
-      
+
       setInactiveOfficers(processedOfficers.filter(officer => {
         const status = officer.status_history?.[0];
         return status?.status === 'inactive' || status?.end_date;
@@ -118,39 +126,121 @@ export default function OfficersPage() {
     }
   }, [officers]);
 
+  // Filter logic based on search term
+  const filterOfficers = (list: Officer[]) => {
+    if (!searchTerm) return list;
+    const lowerTerm = searchTerm.toLowerCase();
+    return list.filter(officer =>
+      officer.name.toLowerCase().includes(lowerTerm) ||
+      officer.email?.toLowerCase().includes(lowerTerm)
+    );
+  };
+
+  const filteredActiveOfficers = filterOfficers(activeOfficers);
+  const filteredInactiveOfficers = filterOfficers(inactiveOfficers);
+
+  // Export to Excel Functionality
+  const handleExportExcel = async () => {
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const sheetName = activeTab === 'active' ? 'Active Officers' : 'Inactive Officers';
+      const sheet = workbook.addWorksheet(sheetName);
+      const dataToExport = activeTab === 'active' ? filteredActiveOfficers : filteredInactiveOfficers;
+
+      // Define Columns
+      sheet.columns = [
+        { header: '#', key: 'index', width: 10 },
+        { header: 'Name', key: 'name', width: 30 },
+        { header: 'Email', key: 'email', width: 35 },
+        { header: 'Department', key: 'department', width: 30 },
+        { header: 'Subdepartment', key: 'subdepartment', width: 30 },
+        { header: 'Status', key: 'status', width: 15 },
+        { header: 'Assignment Start', key: 'startDate', width: 20 },
+        { header: 'Created At', key: 'createdAt', width: 20 },
+      ];
+
+      // Style Header
+      sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+
+      // Add Data
+      dataToExport.forEach((officer, index) => {
+        const deptInfo = getCurrentDepartment(officer);
+
+        sheet.addRow({
+          index: index + 1,
+          name: officer.name,
+          email: officer.email || '-',
+          department: deptInfo.name,
+          subdepartment: deptInfo.subName !== 'No Subdepartment' ? deptInfo.subName : '-',
+          status: activeTab === 'active' ? 'Active' : 'Inactive',
+          startDate: formatDate(officer.departmentStartDate) || '-',
+          createdAt: formatDate(officer.created_at) || '-'
+        });
+      });
+
+      // Export
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `Officers_${sheetName.replace(' ', '_')}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+
+      toast.success('Export successful');
+    } catch (error) {
+      console.error('Export failed:', error);
+      toast.error('Failed to export Excel');
+    }
+  };
+
   const handleSaveOfficer = async (formData: any) => {
     setIsLoading(true);
     try {
-      // Prepare the data for the API
+      const {
+        department_id,
+        subdepartment_id,
+        department_start_date,
+        department_end_date,
+        start_date,
+        end_date,
+        ...coreUserData
+      } = formData;
+
       const officerData = {
-        ...formData,
-        // Ensure status_history is properly formatted
+        name: coreUserData.name,
+        email: coreUserData.email || null, // Handle optional email
+
+        ...(coreUserData.password ? { password: coreUserData.password } : {}),
+
         status_history: [{
           status: 'active',
-          start_date: formData.status_history?.[0]?.start_date || new Date().toISOString(),
-          end_date: formData.status_history?.[0]?.end_date || null
+          start_date: start_date || new Date().toISOString(),
+          end_date: end_date || null
         }],
-        // Flatten department and subdepartment for the API
-        department_id: formData.department_id,
-        subdepartment_id: formData.subdepartment_id || null,
-        department_start_date: formData.department_start_date,
-        department_end_date: formData.department_end_date || null
+
+        department_history: [{
+          department_id: department_id,
+          subdepartment_id: subdepartment_id || null,
+          start_date: department_start_date || new Date().toISOString(),
+          end_date: department_end_date || null
+        }]
       };
-      
+
       let savedOfficer;
       if (selectedOfficer) {
         savedOfficer = await updateOfficer(selectedOfficer.id, officerData);
+
         setOfficers(officers.map(o => o.id === selectedOfficer.id ? savedOfficer : o));
+        toast.success('Officer updated successfully');
       } else {
         savedOfficer = await createOfficer(officerData);
         setOfficers([...officers, savedOfficer]);
+        toast.success('Officer created successfully');
       }
-      
+
       setIsDialogOpen(false);
       setSelectedOfficer(undefined);
     } catch (error) {
       console.error('Error saving officer:', error);
-      // Optionally show error to user
+      toast.error(error.message || 'Failed to save officer');
     } finally {
       setIsLoading(false);
     }
@@ -158,38 +248,37 @@ export default function OfficersPage() {
 
   const handleDeleteOfficer = async (officerId: string) => {
     if (!confirm('Are you sure you want to delete this officer?')) return;
-    
+
     setIsLoading(true);
     try {
       await deleteOfficer(officerId);
-      // Update local state
       setOfficers(officers.filter(officer => officer.id !== officerId));
+      toast.success('Officer deleted');
     } catch (error) {
       console.error('Error deleting officer:', error);
-      // Optionally show error to user
+      toast.error('Failed to delete officer');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Department history popover component
-  const DepartmentInfoPopover = ({ 
-    department, 
-    subdepartment, 
-    startDate, 
+  const DepartmentInfoPopover = ({
+    department,
+    subdepartment,
+    startDate,
     endDate,
-    children 
-  }: { 
-    department: any; 
+    children
+  }: {
+    department: any;
     subdepartment: any;
-    startDate?: string | null; 
+    startDate?: string | null;
     endDate?: string | null;
     children: React.ReactNode;
   }) => {
     // Get department info from the department object or try to look it up by ID
     let deptName = 'Unknown Department';
     let deptId = 'N/A';
-    
+
     if (department) {
       deptName = department.name || 'Unknown Department';
       deptId = department.id || 'N/A';
@@ -197,11 +286,11 @@ export default function OfficersPage() {
       deptName = departments[department.id].name;
       deptId = department.id;
     }
-    
+
     // Get subdepartment info
     let subDeptName = 'No Subdepartment';
     let subDeptId = 'N/A';
-    
+
     if (subdepartment) {
       subDeptName = subdepartment.name || 'No Subdepartment';
       subDeptId = subdepartment.id || 'N/A';
@@ -209,9 +298,9 @@ export default function OfficersPage() {
       subDeptName = departments[department.id].subdepartments[subdepartment.id];
       subDeptId = subdepartment.id;
     }
-    
+
     const isActive = !endDate || new Date(endDate) > new Date();
-    
+
     return (
       <Popover>
         <PopoverTrigger asChild>
@@ -228,7 +317,7 @@ export default function OfficersPage() {
                   {isActive ? 'Active' : 'Inactive'}
                 </Badge>
               </div>
-              
+
               <div className="space-y-3">
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
@@ -240,7 +329,7 @@ export default function OfficersPage() {
                   </div>
                   <div className="pl-6 text-sm">{deptName}</div>
                 </div>
-                
+
                 {(subDeptName !== 'No Subdepartment') && (
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
@@ -255,9 +344,9 @@ export default function OfficersPage() {
                 )}
               </div>
             </div>
-            
+
             <Separator />
-            
+
             <div className="space-y-2">
               <h4 className="font-medium text-sm">Assignment Period</h4>
               <div className="flex items-center gap-2 text-sm">
@@ -276,17 +365,17 @@ export default function OfficersPage() {
                   </span>
                 </div>
               </div>
-              
+
               {startDate && (
                 <div className="text-xs text-muted-foreground mt-1">
-                  {isActive 
+                  {isActive
                     ? `Assigned ${formatDistanceToNow(new Date(startDate), { addSuffix: true })}`
                     : `Assignment ended ${formatDistanceToNow(new Date(endDate!), { addSuffix: true })}`
                   }
                 </div>
               )}
             </div>
-            
+
             <div className="pt-2 text-xs text-muted-foreground">
               Click outside to close
             </div>
@@ -301,40 +390,40 @@ export default function OfficersPage() {
     if (!deptId || !departments[deptId]) {
       return { name: 'Unknown Department', subName: 'No Subdepartment' };
     }
-    
+
     const deptName = departments[deptId].name;
     let subDeptName = 'No Subdepartment';
-    
+
     if (subDeptId && departments[deptId].subdepartments[subDeptId]) {
       subDeptName = departments[deptId].subdepartments[subDeptId];
     }
-    
+
     return { name: deptName, subName: subDeptName };
   };
 
   // Helper function to get current department info
   const getCurrentDepartment = (officer: Officer) => {
     const currentDept = officer.department_history?.[0];
-    if (!currentDept) return { 
-      name: '-', 
+    if (!currentDept) return {
+      name: '-',
       subName: '-',
       department: null,
       subdepartment: null,
       startDate: null,
       endDate: null
     };
-    
+
     // Get department info using the most reliable method available
     let deptName = 'Unknown Department';
     let subDeptName = 'No Subdepartment';
-    
+
     // Try to get from department object first
     if (currentDept.department?.name) {
       deptName = currentDept.department.name;
       if (currentDept.subdepartment?.name) {
         subDeptName = currentDept.subdepartment.name;
       }
-    } 
+    }
     // Fall back to ID-based lookup
     else if (currentDept.department_id) {
       const deptInfo = getDepartmentInfo(
@@ -344,7 +433,7 @@ export default function OfficersPage() {
       deptName = deptInfo.name;
       subDeptName = deptInfo.subName;
     }
-    
+
     return {
       name: deptName,
       subName: subDeptName,
@@ -354,10 +443,10 @@ export default function OfficersPage() {
         id: currentDept.department_id,
         name: deptName
       },
-      subdepartment: currentDept.subdepartment || 
-        (currentDept.subdepartment_id ? { 
-          id: currentDept.subdepartment_id, 
-          name: subDeptName 
+      subdepartment: currentDept.subdepartment ||
+        (currentDept.subdepartment_id ? {
+          id: currentDept.subdepartment_id,
+          name: subDeptName
         } : null)
     };
   };
@@ -413,58 +502,93 @@ export default function OfficersPage() {
   );
 
   return (
-    <div className="mx-auto py-10">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Officer Management</h1>
-        <Button onClick={() => {
-          setSelectedOfficer(undefined);
-          setIsDialogOpen(true);
-        }}>
-          Add Officer
-        </Button>
+    <div className="mx-auto py-6 px-4 space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Officer Management</h1>
+          <p className="text-sm text-gray-500">Manage officer accounts, assignments, and statuses.</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          {/* Search Bar */}
+          <div className="relative w-full md:w-64">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
+            <Input
+              type="text"
+              placeholder="Search by name or email..."
+              className="pl-9 bg-white"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+
+          {/* Export Button */}
+          <Button
+            variant="outline"
+            onClick={handleExportExcel}
+            className="text-green-700 border-green-200 hover:bg-green-50 hover:text-green-800 gap-2"
+            title="Export to Excel"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            <span className="hidden sm:inline">Export</span>
+          </Button>
+
+          {/* Add Button */}
+          <Button
+            onClick={() => {
+              setSelectedOfficer(undefined);
+              setIsDialogOpen(true);
+            }}
+            className="bg-blue-600 hover:bg-blue-700 gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Add Officer
+          </Button>
+        </div>
       </div>
 
-      <Tabs defaultValue="active" className="w-full">
+      <Tabs defaultValue="active" className="w-full" onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="active">Active Officers ({activeOfficers.length})</TabsTrigger>
-          <TabsTrigger value="inactive">Inactive Officers ({inactiveOfficers.length})</TabsTrigger>
+          <TabsTrigger value="active">Active Officers ({filteredActiveOfficers.length})</TabsTrigger>
+          <TabsTrigger value="inactive">Inactive Officers ({filteredInactiveOfficers.length})</TabsTrigger>
         </TabsList>
-        
+
         <TabsContent value="active">
-          <div className="rounded-md border">
+          {/* Added overflow-auto and max-height for scrolling */}
+          <div className="rounded-md border bg-white overflow-auto max-h-[70vh] relative shadow-sm">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="bg-blue-600 border-r text-white">#</TableHead>
-                  <TableHead className="bg-blue-600 border-r text-white">Name</TableHead>
-                  <TableHead className="bg-blue-600 border-r text-white">Email</TableHead>
-                  <TableHead className="bg-blue-600 border-r text-white">Department</TableHead>
-                  <TableHead className="bg-blue-600 border-r text-white">Subdepartment</TableHead>
-                  <TableHead className="bg-blue-600 border-r text-white">Status</TableHead>
-                  <TableHead className="bg-blue-600 border-r text-white">Created</TableHead>
-                  <TableHead className="w-[50px] bg-blue-600 border-r text-white">Actions</TableHead>
+              <TableHeader className="sticky top-0 z-10">
+                <TableRow className="bg-blue-600 hover:bg-blue-600">
+                  <TableHead className="w-[50px] text-white border border-gray-200 font-semibold">#</TableHead>
+                  <TableHead className="text-white border border-gray-200 font-semibold">Name</TableHead>
+                  <TableHead className="text-white border border-gray-200 font-semibold">Email</TableHead>
+                  <TableHead className="text-white border border-gray-200 font-semibold">Department</TableHead>
+                  <TableHead className="text-white border border-gray-200 font-semibold">Subdepartment</TableHead>
+                  <TableHead className="text-white border border-gray-200 font-semibold">Status</TableHead>
+                  <TableHead className="text-white border border-gray-200 font-semibold">Created</TableHead>
+                  <TableHead className="w-[50px] text-white border border-gray-200 font-semibold">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center">
+                    <TableCell colSpan={8} className="h-24 text-center">
                       Loading...
                     </TableCell>
                   </TableRow>
-                ) : activeOfficers.length === 0 ? (
+                ) : filteredActiveOfficers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center">
-                      No active officers found.
+                    <TableCell colSpan={8} className="h-24 text-center text-gray-500">
+                      {searchTerm ? 'No matching officers found.' : 'No active officers found.'}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  activeOfficers.map((officer, index) => (
-                    <TableRow key={officer.id}>
-                      <TableCell className="font-medium border-r">{index + 1}</TableCell>
-                      <TableCell className="font-medium border-r">{officer.name}</TableCell>
-                      <TableCell className="border-r">{officer.email || '-'}</TableCell>
-                      <TableCell className="border-r">
+                  filteredActiveOfficers.map((officer, index) => (
+                    <TableRow key={officer.id} className="hover:bg-blue-50/50">
+                      <TableCell className="font-medium text-gray-500 border border-gray-200">{index + 1}</TableCell>
+                      <TableCell className="font-medium border border-gray-200">{officer.name}</TableCell>
+                      <TableCell className='border border-gray-200'>{officer.email || '-'}</TableCell>
+                      <TableCell className='border border-gray-200'>
                         <DepartmentInfoPopover
                           department={officer.currentDepartment}
                           subdepartment={officer.currentSubdepartment}
@@ -472,14 +596,14 @@ export default function OfficersPage() {
                           endDate={officer.department_history?.[0]?.end_date}
                         >
                           <span className={cn(
-                            'hover:underline cursor-pointer',
+                            'hover:underline cursor-pointer text-blue-600 font-medium',
                             !officer.currentDepartment?.name && 'text-muted-foreground'
                           )}>
                             {getCurrentDepartment(officer).name}
                           </span>
                         </DepartmentInfoPopover>
                       </TableCell>
-                      <TableCell className="border-r">
+                      <TableCell className='border border-gray-200'>
                         {officer.currentSubdepartment ? (
                           <DepartmentInfoPopover
                             department={officer.currentDepartment}
@@ -492,14 +616,14 @@ export default function OfficersPage() {
                             </span>
                           </DepartmentInfoPopover>
                         ) : (
-                          <span className="text-muted-foreground border-r">
+                          <span className="text-muted-foreground text-xs italic">
                             {officer.department_history?.[0]?.subdepartment_id ? 'No Subdept' : '-'}
                           </span>
                         )}
                       </TableCell>
-                      <TableCell className="border-r">{getStatusBadge(officer.status_history)}</TableCell>
-                      <TableCell className="border-r">{officer.created_at ? format(new Date(officer.created_at), 'MMM d, yyyy') : '-'}</TableCell>
-                      <TableCell className="border-r">{renderActions(officer)}</TableCell>
+                      <TableCell className='border border-gray-200'>{getStatusBadge(officer.status_history)}</TableCell>
+                      <TableCell className="text-gray-500 text-sm border border-gray-200">{officer.created_at ? format(new Date(officer.created_at), 'MMM d, yyyy') : '-'}</TableCell>
+                      <TableCell className='border border-gray-200'>{renderActions(officer)}</TableCell>
                     </TableRow>
                   ))
                 )}
@@ -507,12 +631,14 @@ export default function OfficersPage() {
             </Table>
           </div>
         </TabsContent>
-        
+
         <TabsContent value="inactive">
-          <div className="rounded-md border">
+          {/* Added overflow-auto and max-height for scrolling */}
+          <div className="rounded-md border bg-white overflow-auto max-h-[70vh] relative shadow-sm">
             <Table>
-              <TableHeader>
-                <TableRow>
+              <TableHeader className="sticky top-0 z-10">
+                <TableRow className="bg-gray-100 hover:bg-gray-100">
+                  <TableHead className="w-[50px]">#</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Department</TableHead>
@@ -525,19 +651,20 @@ export default function OfficersPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center">
+                    <TableCell colSpan={8} className="h-24 text-center">
                       Loading...
                     </TableCell>
                   </TableRow>
-                ) : inactiveOfficers.length === 0 ? (
+                ) : filteredInactiveOfficers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center">
-                      No inactive officers found.
+                    <TableCell colSpan={8} className="h-24 text-center text-gray-500">
+                      {searchTerm ? 'No matching officers found.' : 'No inactive officers found.'}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  inactiveOfficers.map((officer) => (
+                  filteredInactiveOfficers.map((officer, index) => (
                     <TableRow key={officer.id}>
+                      <TableCell className="font-medium text-gray-500">{index + 1}</TableCell>
                       <TableCell className="font-medium">{officer.name}</TableCell>
                       <TableCell>{officer.email || '-'}</TableCell>
                       <TableCell>
@@ -568,13 +695,13 @@ export default function OfficersPage() {
                             </span>
                           </DepartmentInfoPopover>
                         ) : (
-                          <span className="text-muted-foreground">
+                          <span className="text-muted-foreground text-xs italic">
                             {officer.department_history?.[0]?.subdepartment_id ? 'No Subdept' : '-'}
                           </span>
                         )}
                       </TableCell>
                       <TableCell>{getStatusBadge(officer.status_history)}</TableCell>
-                      <TableCell>{officer.created_at ? format(new Date(officer.created_at), 'MMM d, yyyy') : '-'}</TableCell>
+                      <TableCell className="text-gray-500 text-sm">{officer.created_at ? format(new Date(officer.created_at), 'MMM d, yyyy') : '-'}</TableCell>
                       <TableCell>{renderActions(officer)}</TableCell>
                     </TableRow>
                   ))
