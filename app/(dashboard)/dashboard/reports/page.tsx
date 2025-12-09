@@ -57,6 +57,12 @@ declare module 'jspdf' {
   }
 }
 
+// Special stage IDs that should always show WEF and TO columns
+const SPECIAL_STAGE_IDS = [
+  '072b9710-45df-4a05-ba65-01b4ef29d61d', // Status stage
+  'caefd742-5de5-4341-a3bb-81d7b9dd2b73'  // Endorsement stage
+];
+
 // --- Safe Render Utility ---
 const safeRender = (content: any) => {
   if (React.isValidElement(content)) return content;
@@ -100,7 +106,7 @@ export default function ReportsPage() {
   // Filter State
   const [activeDeptId, setActiveDeptId] = useState<string>("");
   const [activeSubDeptId, setActiveSubDeptId] = useState<string>("all");
-  const [activeStatus, setActiveStatus] = useState<string>("wip"); // 'wip' | 'completed'
+  const [activeStatus, setActiveStatus] = useState<string>("wip"); // 'wip' | 'write_up_completed' | 'endorsed'
 
   // View & Pagination State
   const [view, setView] = useState<'standard' | 'transposed'>('standard');
@@ -197,7 +203,81 @@ export default function ReportsPage() {
     setIsReportDialogOpen(false);
   };
 
-  // --- 3. Filtering Logic ---
+  // --- 3. Applicability Functions ---
+  
+  /**
+   * Determines if a stage is applicable to a specific task
+   * Checks department, subdepartment, and class-level applicability
+   */
+  const isStageApplicableToTask = useCallback((stage: any, task: any): boolean => {
+    if (!task || !stage || !departments?.length) {
+      return true; // Default to applicable if data is missing
+    }
+
+    try {
+      // Find the department for this task
+      const dept = departments.find(d => d?.id === (task.department?.id || task.department_id));
+      if (!dept) return true;
+
+      // Find the subdepartment for this task
+      const subdept = dept.tm_subdepartments?.find((s: any) => 
+        s?.id === (task.subdepartment?.id || task.subdepartment_id)
+      );
+      if (!subdept) return true;
+
+      // Check class-level stage applicability if class_id exists (highest priority)
+      if (task.class_id) {
+        const cls = subdept.classes?.find((c: any) => 
+          c?.id?.toString() === task.class_id?.toString()
+        );
+        const classStage = cls?.stages?.find((s: any) => s.stage_id === stage.id);
+        if (classStage && typeof classStage.applicable === 'boolean') {
+          return classStage.applicable;
+        }
+      }
+
+      // Check subdepartment-level stage applicability
+      const subdeptStage = subdept.stages?.find((s: any) => s.stage_id === stage.id);
+      if (subdeptStage && typeof subdeptStage.applicable === 'boolean') {
+        return subdeptStage.applicable;
+      }
+
+      // Check department-level applicability
+      const deptStage = dept.stages?.find((s: any) => s.stage_id === stage.id);
+      return deptStage?.applicable !== false;
+
+    } catch (error) {
+      console.error('Error in isStageApplicableToTask:', error);
+      return true; // Failsafe: assume applicable if error occurs
+    }
+  }, [departments]);
+
+  /**
+   * Determines if a document is applicable to a specific task
+   * Non-special documents are always applicable
+   * Special documents need matching targetEntities
+   */
+  const isDocumentApplicable = useCallback((doc: any, task: any): boolean => {
+    if (!doc || !task) return false;
+    
+    // Non-special documents are always applicable
+    if (doc.isSpecial !== true) return true;
+    
+    // Special documents need target entities
+    if (!Array.isArray(doc.targetEntities) || doc.targetEntities.length === 0) return false;
+    
+    const taskClassId = task.class_id?.toString();
+    const taskSubdeptId = task.subdepartment?.id?.toString() || task.subdepartment_id?.toString();
+    
+    // Check if any target entity matches the task
+    return doc.targetEntities.some((entity: any) => {
+      const classMatch = !entity.class_id || entity.class_id.toString() === taskClassId;
+      const subdeptMatch = !entity.subdept_id || entity.subdept_id.toString() === taskSubdeptId;
+      return classMatch && subdeptMatch;
+    });
+  }, []);
+
+  // --- 4. Filtering Logic ---
   const activeDepartment = useMemo(() =>
     departments.find(d => d.id.toString() === activeDeptId),
     [departments, activeDeptId]);
@@ -215,16 +295,19 @@ export default function ReportsPage() {
       if (activeSubDeptId !== 'all' && task.subdepartment_id?.toString() !== activeSubDeptId) return false;
 
       // 3. Status Filter
-      const isCompleted = ['write_up_completed', 'endorsed', 'completed', 'archived'].includes(task.status);
+      const isWriteUpCompleted = task.status === 'write_up_completed';
+      const isEndorsed = task.status === 'endorsed';
+      const isCompleted = isWriteUpCompleted || isEndorsed || ['completed', 'archived'].includes(task.status);
 
       if (activeStatus === 'wip' && isCompleted) return false;
-      if (activeStatus === 'completed' && !isCompleted) return false;
+      if (activeStatus === 'write_up_completed' && !isWriteUpCompleted) return false;
+      if (activeStatus === 'endorsed' && !isEndorsed) return false;
 
       return true;
     });
   }, [tasks, activeDeptId, activeSubDeptId, activeStatus]);
 
-  // --- 4. Pagination Logic ---
+  // --- 5. Pagination Logic ---
   const totalItems = filteredTasks.length;
   const totalPages = Math.ceil(totalItems / itemsPerPage);
 
@@ -240,10 +323,11 @@ export default function ReportsPage() {
     setCurrentPage(1);
   };
 
-  // --- 5. Cell Render Logic ---
+  // --- 6. Cell Render Helpers ---
   const getCurrentStageStatusWrapper = useCallback((task) => getCurrentStageStatus(task, stages, departments, allDocuments), [stages, departments, allDocuments]);
   const getEnhancedImmigrationStatusWrapper = useCallback((task) => getEnhancedImmigrationStatus(task, stages, allDocuments, kycDocuments), [stages, allDocuments, kycDocuments]);
   const getStaffName = useCallback(() => '', []);
+  
   const getDocumentForTaskStage = useCallback((task, stage) => {
     const linked = task.source_document_id?.[stage.id];
     if (!linked) return [];
@@ -253,29 +337,108 @@ export default function ReportsPage() {
   }, [allDocuments]);
 
   const renderCellValue = (task, col) => {
-    console.log('Rendering cell:', {
-      column: col.field,
-      type: col.type,
-      taskId: task.id,
-      taskData: {
-        job_level: task.job_level,
-        officer: task.officer,
-        officer_name: task.officer_name,
-        task_manager: task.task_manager,
-        task_manager_name: task.task_manager_name,
-        assigned_to_name: task.assigned_to_name
-      }
-    });
+    // Handle stage date columns with applicability check
+    if (col.type === 'stage_date') {
+      const stage = stages.find(s => s.id === col.stageId);
+      if (!stage) return <span className="text-slate-300">-</span>;
 
+      // Check if stage is applicable to this task
+      const isApplicable = isStageApplicableToTask(stage, task);
+      if (!isApplicable) {
+        return <span className="text-sm text-gray-400 italic">N/A</span>;
+      }
+
+      const d = task.stages?.[col.stageId]?.date;
+      return d ? <span className="text-xs">{formatDateValue(d)}</span> : <span className="text-slate-300">-</span>;
+    }
+
+    // Handle extracted field columns with applicability check
+    if (col.type === 'extracted_field') {
+      const stage = stages.find(s => s.id === col.stageId);
+      
+      if (!stage) {
+        return <span className="text-slate-300">-</span>;
+      }
+
+      // Check if stage is applicable to this task
+      const isStageApplicable = isStageApplicableToTask(stage, task);
+      if (!isStageApplicable) {
+        return <span className="text-sm text-gray-400 italic">N/A</span>;
+      }
+
+      // For auto-added WEF/TO fields, search across ALL documents in the stage
+      if (col.isAutoAdded) {
+        // Try to find the value from any applicable document in this stage
+        let foundValue = null;
+        let foundDoc = null;
+
+        for (const stageDocInfo of (stage.documents || [])) {
+          // Check if document is applicable
+          const isDocApplicable = isDocumentApplicable(stageDocInfo, task);
+          if (!isDocApplicable) continue;
+
+          // Get linked document
+          const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
+          if (!linked || linked.indicator) continue;
+
+          // Try to find the field value in this document
+          const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
+          if (val) {
+            foundValue = val;
+            foundDoc = linked;
+            break; // Found a value, stop searching
+          }
+        }
+
+        if (!foundDoc) {
+          return <Badge variant="outline" className="text-[10px] text-slate-400 font-normal px-1 h-5 border-dashed">Missing</Badge>;
+        }
+
+        const isOld = foundDoc.created_at && task.created_at && new Date(foundDoc.created_at) < new Date(task.created_at);
+        const display = col.fieldType === 'Date' ? formatDateValue(foundValue) : foundValue;
+
+        return <span className={`text-xs ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || '-'}</span>;
+      }
+
+      // For regular fields, use the specific document (existing logic)
+      const stageDocInfo = stage?.documents?.find((d) => d.kycId === col.kycId);
+      
+      if (!stageDocInfo) {
+        return <span className="text-slate-300">-</span>;
+      }
+
+      // Check if document is applicable to this task
+      const isDocApplicable = isDocumentApplicable(stageDocInfo, task);
+      if (!isDocApplicable) {
+        return <span className="text-sm text-gray-400 italic">N/A</span>;
+      }
+
+      // Get linked document
+      const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
+      
+      if (!linked) {
+        return <Badge variant="outline" className="text-[10px] text-slate-400 font-normal px-1 h-5 border-dashed">Missing</Badge>;
+      }
+      
+      if (linked.indicator) {
+        return <Badge variant="destructive" className="text-[10px] px-1 h-5">Indicator</Badge>;
+      }
+
+      const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
+      const isOld = linked.created_at && task.created_at && new Date(linked.created_at) < new Date(task.created_at);
+      const display = col.fieldType === 'Date' ? formatDateValue(val) : val;
+
+      return <span className={`text-xs ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || '-'}</span>;
+    }
+
+    // Handle task fields
     if (col.type === 'task') {
       const value = (() => {
         switch (col.field) {
           case 'applicant_name':
-            // Handle both direct access and enhanced task data
             return task.applicant_name || enhancedTasksData.get(task.id.toString())?.applicant_name || 'N/A';
 
           case 'company_name':
-            // Handle both direct access and enhanced task data
             const companyId = task.company_id || enhancedTasksData.get(task.id.toString())?.company_id;
             if (companyId) {
               return companies.get(companyId) || 'N/A';
@@ -283,14 +446,9 @@ export default function ReportsPage() {
             return 'N/A';
 
           case 'job_level':
-            console.log('Processing job_level field:', task.job_level);
             const jobLevel = task.job_level;
-            if (!jobLevel) {
-              console.log('No job level data');
-              return '-';
-            }
+            if (!jobLevel) return '-';
 
-            // Handle both string and object formats
             if (typeof jobLevel === 'string') {
               const levels = jobLevel.split('>').map(s => s.trim());
               return levels[levels.length - 1] || '-';
@@ -298,14 +456,9 @@ export default function ReportsPage() {
 
             if (typeof jobLevel === 'object' && jobLevel !== null) {
               try {
-                // Find department
                 const department = departments.find(d => d.id == jobLevel.department_id);
-                if (!department) {
-                  console.log('Department not found for job level:', jobLevel.department_id);
-                  return '-';
-                }
+                if (!department) return '-';
 
-                // Find subdepartment
                 let subDepartment = null;
                 if (department.tm_subdepartments && jobLevel.subdepartment_id) {
                   subDepartment = department.tm_subdepartments.find(
@@ -313,7 +466,6 @@ export default function ReportsPage() {
                   );
                 }
 
-                // Find class if class_id exists
                 let className = '';
                 if (jobLevel.class_id && subDepartment?.classes) {
                   const classItem = subDepartment.classes.find(
@@ -322,7 +474,6 @@ export default function ReportsPage() {
                   className = classItem?.name || '';
                 }
 
-                // Find subclass if subclass_id exists
                 if (jobLevel.subclass_id) {
                   const classItem = subDepartment?.classes?.find(
                     c => c.id == jobLevel.class_id
@@ -337,17 +488,8 @@ export default function ReportsPage() {
                   }
                 }
 
-                // If no subclass but has class, return class name
-                if (className) {
-                  return className;
-                }
-
-                // If no class but has subdepartment, return subdepartment name
-                if (subDepartment?.name) {
-                  return subDepartment.name;
-                }
-
-                // Fallback to department name
+                if (className) return className;
+                if (subDepartment?.name) return subDepartment.name;
                 return department.name || '-';
               } catch (error) {
                 console.error('Error processing job level:', error);
@@ -355,25 +497,19 @@ export default function ReportsPage() {
               }
             }
             return '-';
+
           case 'officer':
-            console.log('Processing officer field');
-            const officerValue = task.officer_name ||
+            return task.officer_name ||
               (typeof task.officer === 'string' ? task.officer : task.officer?.name) ||
               '-';
-            console.log('Officer value:', officerValue);
-            return officerValue;
 
           case 'task_manager':
-            console.log('Processing task_manager field');
-            const managerValue = task.task_manager_name ||
+            return task.task_manager_name ||
               (typeof task.task_manager === 'string' ? task.task_manager : task.task_manager?.name) ||
               task.assigned_to_name ||
               '-';
-            console.log('Task manager value:', managerValue);
-            return managerValue;
 
-          default: {
-            console.log('Using getCellContent for field:', col.field);
+          default:
             const cellResult = getCellContent(
               task,
               col.field,
@@ -381,62 +517,31 @@ export default function ReportsPage() {
               taskDependants,
               new Set(),
               companies,
-              (t) => {
-                console.log('Getting department info for task:', t.id);
-                return {
-                  department: departments.find(d => d.id === t.department_id),
-                  job_level: t.job_level,
-                  officer: t.officer || t.officer_name,
-                  task_manager: t.task_manager || t.task_manager_name || t.assigned_to_name
-                };
-              },
+              (t) => ({
+                department: departments.find(d => d.id === t.department_id),
+                job_level: t.job_level,
+                officer: t.officer || t.officer_name,
+                task_manager: t.task_manager || t.task_manager_name || t.assigned_to_name
+              }),
               getStaffName,
               getEnhancedImmigrationStatusWrapper,
               getCurrentStageStatusWrapper,
-              (t) => {
-                console.log('Rendering immigration status for task:', t.id);
-                return renderImmigrationStatusCell(t, getEnhancedImmigrationStatusWrapper, new Set(), () => { });
-              },
-              (t) => {
-                console.log('Rendering current stage status for task:', t.id);
-                return renderCurrentStageStatusCell(t, getCurrentStageStatusWrapper);
-              },
+              (t) => renderImmigrationStatusCell(t, getEnhancedImmigrationStatusWrapper, new Set(), () => { }),
+              (t) => renderCurrentStageStatusCell(t, getCurrentStageStatusWrapper),
               () => { },
               () => { },
               () => { }
             );
-            console.log('getCellContent result for', col.field, ':', cellResult);
             return cellResult;
-          }
         }
       })();
 
-      console.log('Final value for', col.field, ':', value);
       if (value === '-') {
         return <span className="text-slate-300">-</span>;
       }
       return value;
     }
 
-    if (col.type === 'stage_date') {
-      const d = task.stages?.[col.stageId]?.date;
-      return d ? <span className="text-xs">{formatDateValue(d)}</span> : <span className="text-slate-300">-</span>;
-    }
-    if (col.type === 'extracted_field') {
-      const stage = stages.find(s => s.id === col.stageId);
-      const stageDocInfo = stage?.documents?.find((d) => d.kycId === col.kycId);
-      if (!stage || !stageDocInfo) return <span className="text-slate-300">-</span>;
-
-      const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
-      if (!linked) return <Badge variant="outline" className="text-[10px] text-slate-400 font-normal px-1 h-5 border-dashed">Missing</Badge>;
-      if (linked.indicator) return <Badge variant="destructive" className="text-[10px] px-1 h-5">Indicator</Badge>;
-
-      const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
-      const isOld = linked.created_at && task.created_at && new Date(linked.created_at) < new Date(task.created_at);
-      const display = col.fieldType === 'Date' ? formatDateValue(val) : val;
-
-      return <span className={`text-xs ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || '-'}</span>;
-    }
     return <span className="text-slate-300">-</span>;
   };
 
@@ -444,7 +549,7 @@ export default function ReportsPage() {
     const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
 
-  // --- 6. Configuration Building ---
+  // --- 7. Configuration Building with Auto WEF/TO ---
   const columns = useMemo(() => {
     if (!activeReport || !stages.length) return [];
     const getLabel = (id) => id.replace(/_/g, ' ').toUpperCase();
@@ -457,22 +562,113 @@ export default function ReportsPage() {
     const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
     stages.filter(s => activeStageIds.includes(s.id)).forEach(stage => {
       const config = activeReport.configuration.stages[stage.id];
+      const isSpecialStage = SPECIAL_STAGE_IDS.includes(stage.id);
+
       if (config.isStageDateSelected) {
-        cols.push({ id: `stage_date_${stage.id}`, label: `${stage.name} (Date)`, type: 'stage_date', stageId: stage.id, stageName: stage.name });
+        cols.push({ 
+          id: `stage_date_${stage.id}`, 
+          label: `${stage.name} (Date)`, 
+          type: 'stage_date', 
+          stageId: stage.id, 
+          stageName: stage.name 
+        });
       }
+
       if (config.documents) {
+        // For special stages, add WEF and TO columns ONCE (from first document with these fields)
+        if (isSpecialStage) {
+          let wefAdded = false;
+          let toAdded = false;
+
+          // Find the first document that has WEF and TO fields
+          for (const [kycId, docConfig] of Object.entries(config.documents)) {
+            if (wefAdded && toAdded) break; // Both fields found, exit early
+
+            const kycDoc = kycDocuments.get(kycId);
+            if (!kycDoc) continue;
+
+            // Find the WEF field if not already added
+            if (!wefAdded) {
+              const wefField = kycDoc.fields?.find(f => 
+                f.name === 'With_Effect_From' || 
+                f.isEffectiveFrom === true ||
+                f.name?.toLowerCase().includes('effect_from') ||
+                f.name?.toLowerCase().includes('effective_from')
+              );
+
+              if (wefField) {
+                const wefFieldId = wefField.id || wefField.name;
+                cols.push({
+                  id: `field_${stage.id}_wef`,
+                  label: `${stage.name} - WEF`,
+                  type: 'extracted_field',
+                  stageId: stage.id, 
+                  kycId, 
+                  fieldId: wefFieldId, 
+                  fieldName: wefField.name || wefField.fieldName,
+                  fieldType: wefField.type || wefField.fieldType || 'date',
+                  isAutoAdded: true
+                });
+                wefAdded = true;
+              }
+            }
+
+            // Find the TO field if not already added
+            if (!toAdded) {
+              const toField = kycDoc.fields?.find(f => 
+                f.name === 'Expiry_Date' || 
+                f.isEffectiveTo === true ||
+                f.name?.toLowerCase().includes('expiry') ||
+                f.name?.toLowerCase().includes('effective_to')
+              );
+
+              if (toField) {
+                const toFieldId = toField.id || toField.name;
+                cols.push({
+                  id: `field_${stage.id}_to`,
+                  label: `${stage.name} - TO`,
+                  type: 'extracted_field',
+                  stageId: stage.id, 
+                  kycId, 
+                  fieldId: toFieldId, 
+                  fieldName: toField.name || toField.fieldName,
+                  fieldType: toField.type || toField.fieldType || 'date',
+                  isAutoAdded: true
+                });
+                toAdded = true;
+              }
+            }
+          }
+        }
+
+        // Add ALL other configured fields from ALL documents (but skip WEF/TO for special stages)
         Object.entries(config.documents).forEach(([kycId, docConfig]: [string, any]) => {
           const kycDoc = kycDocuments.get(kycId);
           if (!kycDoc) return;
-          docConfig.fields.forEach(fieldId => {
+
+          docConfig.fields?.forEach(fieldId => {
             const field = kycDoc.fields?.find(f => f.id === fieldId);
             if (field) {
-              cols.push({
-                id: `field_${stage.id}_${kycId}_${fieldId}`,
-                label: `${kycDoc.display_name || kycDoc.name} - ${field.fieldName}`,
-                type: 'extracted_field',
-                stageId: stage.id, kycId, fieldId, fieldName: field.fieldName, fieldType: field.fieldType
-              });
+              // Skip if this field is WEF/TO on a special stage (already added above)
+              const isWefToField = isSpecialStage && (
+                field.isEffectiveFrom === true || 
+                field.isEffectiveTo === true ||
+                field.name === 'With_Effect_From' ||
+                field.name === 'Expiry_Date'
+              );
+
+              if (!isWefToField) {
+                cols.push({
+                  id: `field_${stage.id}_${kycId}_${fieldId}`,
+                  label: `${kycDoc.display_name || kycDoc.name} - ${field.fieldName || field.name}`,
+                  type: 'extracted_field',
+                  stageId: stage.id, 
+                  kycId, 
+                  fieldId, 
+                  fieldName: field.fieldName || field.name, 
+                  fieldType: field.fieldType || field.type
+                });
+              }
             }
           });
         });
@@ -515,7 +711,14 @@ export default function ReportsPage() {
         columns.filter(c => c.stageId === stageId).forEach(c => {
           let label = c.label;
           if (c.type === 'stage_date') label = "Completion Date";
-          if (c.type === 'extracted_field') label = c.label.split(' - ')[1] || c.label;
+          if (c.type === 'extracted_field') {
+            // For auto-added fields, keep the simple label (WEF/TO)
+            if (c.isAutoAdded) {
+              label = c.label.split(' - ')[1] || c.label;
+            } else {
+              label = c.label.split(' - ')[1] || c.label;
+            }
+          }
           rows.push({ ...c, label, isSubRow: true });
         });
       }
@@ -523,7 +726,7 @@ export default function ReportsPage() {
     return rows;
   }, [activeReport, columns, expandedSections, stages]);
 
-  // --- 7. Export ---
+  // --- 8. Export ---
   const handleExport = async (type: 'excel' | 'pdf') => {
     if (type === 'excel') {
       const wb = new ExcelJS.Workbook();
@@ -663,7 +866,8 @@ export default function ReportsPage() {
                 <TabsList className="h-9 bg-slate-100">
                   <TabsTrigger value="all" className="text-xs px-3">All Tasks</TabsTrigger>
                   <TabsTrigger value="wip" className="text-xs px-3">Work In Progress</TabsTrigger>
-                  <TabsTrigger value="completed" className="text-xs px-3">Completed</TabsTrigger>
+                  <TabsTrigger value="write_up_completed" className="text-xs px-3">Write Up Completed</TabsTrigger>
+                  <TabsTrigger value="endorsed" className="text-xs px-3">Endorsed</TabsTrigger>
                 </TabsList>
               </Tabs>
 

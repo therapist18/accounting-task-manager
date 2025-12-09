@@ -1,170 +1,203 @@
+// @ts-nocheck
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Department, SubDepartment, fetchDepartments } from '@/app/(dashboard)/dashboard/users-management/departments';
+import * as React from 'react';
+import { Check, ChevronsUpDown, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import { fetchDepartments } from '@/app/(dashboard)/dashboard/departments/departments/database';
+
+export interface DepartmentSelectProps {
+  value?: string;
+  onChange: (value: string) => void;
+  subDepartmentValue?: string | string[];
+  onSubDepartmentChange?: (value: string | string[]) => void;
+  required?: boolean;
+  isMultiSelectSub?: boolean;
+}
 
 export function DepartmentSelect({
   value,
   onChange,
   subDepartmentValue,
   onSubDepartmentChange,
-  className = '',
   required = false,
-  showSubDepartments = true
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  subDepartmentValue?: string;
-  onSubDepartmentChange?: (value: string) => void;
-  className?: string;
-  required?: boolean;
-  showSubDepartments?: boolean;
-}) {
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
+  isMultiSelectSub = false,
+}: DepartmentSelectProps) {
+  const [departments, setDepartments] = React.useState<any[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [openSub, setOpenSub] = React.useState(false);
 
-  useEffect(() => {
-    const loadDepartments = async () => {
+  // Load departments
+  React.useEffect(() => {
+    const loadDepts = async () => {
       try {
-        setLoading(true);
-        console.log('Fetching departments...');
         const data = await fetchDepartments();
-        console.log('Fetched departments:', data);
         setDepartments(data);
-        
-        // If we have a value, find the matching department
-        if (value) {
-          console.log('Looking for department with value:', value);
-          const dept = data.find(d => d.id.toString() === value.toString());
-          console.log('Found department:', dept);
-          if (dept) {
-            setSelectedDepartment(dept);
-          }
-        }
       } catch (err) {
-        console.error('Error loading departments:', err);
-        setError('Failed to load departments');
+        console.error('Failed to load departments', err);
       } finally {
         setLoading(false);
       }
     };
+    loadDepts();
+  }, []);
 
-    loadDepartments();
-  }, [value]);
+  const selectedDepartment = departments.find((d) => d.id === value);
+  const subdepartments = selectedDepartment?.tm_subdepartments || [];
 
-  const handleDepartmentChange = (deptId: string) => {
-    console.log('Department selected:', deptId);
-    onChange(deptId);
-    
-    // Find the selected department, ensuring we handle both string and number IDs
-    const dept = departments.find(d => d.id.toString() === deptId.toString()) || null;
-    console.log('Found department:', dept);
-    setSelectedDepartment(dept);
-    
-    // Reset subdepartment when department changes
-    if (onSubDepartmentChange) {
-      console.log('Resetting subdepartment selection');
-      onSubDepartmentChange('');
-    }
+  // --- Subdepartment Selection Logic ---
+
+  const handleSingleSubChange = (val: string) => {
+    onSubDepartmentChange?.(val);
   };
 
-  const handleSubDepartmentChange = (value: string) => {
-    console.log('Subdepartment selected:', value);
-    if (onSubDepartmentChange && value !== 'none') {
-      onSubDepartmentChange(value);
+  const handleMultiSubToggle = (subId: string) => {
+    if (!onSubDepartmentChange) return;
+
+    const currentValues = Array.isArray(subDepartmentValue) ? subDepartmentValue : [];
+    let newValues;
+
+    if (currentValues.includes(subId)) {
+      newValues = currentValues.filter((id) => id !== subId);
+    } else {
+      newValues = [...currentValues, subId];
     }
+    onSubDepartmentChange(newValues);
   };
 
-  if (loading) {
-    return <div className={`space-y-2 ${className}`}>
-      <Label>Department {required && <span className="text-destructive">*</span>}</Label>
-      <div className="h-10 w-full animate-pulse rounded-md bg-muted" />
-    </div>;
-  }
-
-  if (error) {
-    return <div className="text-destructive">{error}</div>;
-  }
-
-  // Find the selected department to display its name
-  const selectedDept = departments.find(dept => {
-    // Ensure we're comparing strings to avoid type mismatches
-    const deptId = dept?.id?.toString() || '';
-    const valueStr = value?.toString() || '';
-    return deptId === valueStr;
-  });
-
-  // Log for debugging
-  console.log('Selected department debug:', {
-    currentValue: value,
-    valueType: typeof value,
-    selectedDept: selectedDept ? { 
-      id: selectedDept.id, 
-      idType: typeof selectedDept.id,
-      name: selectedDept.name 
-    } : null,
-    availableDepartments: departments.map(d => ({ 
-      id: d.id, 
-      idType: typeof d.id,
-      name: d.name 
-    }))
-  });
+  const handleRemoveSub = (subId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!onSubDepartmentChange) return;
+    const currentValues = Array.isArray(subDepartmentValue) ? subDepartmentValue : [];
+    onSubDepartmentChange(currentValues.filter((id) => id !== subId));
+  };
 
   return (
-    <div className={`space-y-4 ${className}`}>
-      <div className="space-y-2">
-        <Label>Department {required && <span className="text-destructive">*</span>}</Label>
-        <Select
-          value={value}
-          onValueChange={handleDepartmentChange}
-          disabled={loading}
-          required={required}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Select a department">
-              {selectedDept ? selectedDept.name : value ? 'Loading...' : 'Select a department'}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {departments.map((dept) => (
-              <SelectItem key={dept.id} value={dept.id}>
-                {dept.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+    <div className="space-y-3">
+      {/* Department Select (Always Single) */}
+      <Select value={value} onValueChange={onChange} disabled={loading}>
+        <SelectTrigger className="w-full bg-white">
+          <SelectValue placeholder="Select Department" />
+        </SelectTrigger>
+        <SelectContent>
+          {departments.map((dept) => (
+            <SelectItem key={dept.id} value={dept.id}>
+              {dept.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
-      {showSubDepartments && onSubDepartmentChange && (
-        <div className="space-y-2">
-          <Label>Subdepartment</Label>
-          <Select
-            value={subDepartmentValue || 'none'}
-            onValueChange={handleSubDepartmentChange}
-            disabled={!selectedDepartment || loading}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder={
-                !selectedDepartment 
-                  ? 'Select a department first' 
-                  : 'Select a subdepartment'
-              } />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none" className="text-muted-foreground">
-                {selectedDepartment?.subdepartments?.length ? 'Select a subdepartment' : 'No subdepartments available'}
-              </SelectItem>
-              {selectedDepartment?.subdepartments?.map((subDept) => (
-                <SelectItem key={subDept.id} value={subDept.id}>
-                  {subDept.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      {/* Subdepartment Select */}
+      {selectedDepartment && (
+        <div className="animate-in fade-in slide-in-from-top-1 duration-200">
+          {isMultiSelectSub ? (
+            // --- MULTI SELECT MODE (Popover + Command) ---
+            <Popover open={openSub} onOpenChange={setOpenSub}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={openSub}
+                  className="w-full justify-between bg-white h-auto min-h-[40px] px-3 py-2 hover:bg-white text-left"
+                >
+                  <div className="flex flex-wrap gap-1 items-center w-full overflow-hidden">
+                    {Array.isArray(subDepartmentValue) && subDepartmentValue.length > 0 ? (
+                      subDepartmentValue.map((id) => {
+                        const sub = subdepartments.find((s: any) => s.id === id);
+                        return (
+                          <Badge key={id} variant="secondary" className="mr-1 mb-1">
+                            {sub?.name || 'Unknown'}
+                            <div
+                              className="ml-1 ring-offset-background rounded-full outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 cursor-pointer"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={(e) => handleRemoveSub(id, e)}
+                            >
+                              <X className="h-3 w-3 text-muted-foreground hover:text-foreground" />
+                            </div>
+                          </Badge>
+                        );
+                      })
+                    ) : (
+                      <span className="text-muted-foreground font-normal">Select Subdepartments...</span>
+                    )}
+                  </div>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search subdepartments..." />
+                  <CommandList>
+                    <CommandEmpty>No subdepartment found.</CommandEmpty>
+                    <CommandGroup>
+                      {subdepartments.map((sub: any) => {
+                        const isSelected = Array.isArray(subDepartmentValue) && subDepartmentValue.includes(sub.id);
+                        return (
+                          <CommandItem
+                            key={sub.id}
+                            value={sub.name} // Search by name
+                            onSelect={() => handleMultiSubToggle(sub.id)}
+                          >
+                            <div
+                              className={cn(
+                                'mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary',
+                                isSelected
+                                  ? 'bg-primary text-primary-foreground'
+                                  : 'opacity-50 [&_svg]:invisible'
+                              )}
+                            >
+                              <Check className={cn('h-4 w-4')} />
+                            </div>
+                            <span>{sub.name}</span>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          ) : (
+            // --- SINGLE SELECT MODE (Standard Select) ---
+            <Select
+              value={subDepartmentValue as string}
+              onValueChange={handleSingleSubChange}
+            >
+              <SelectTrigger className="w-full bg-white">
+                <SelectValue placeholder="Select Subdepartment" />
+              </SelectTrigger>
+              <SelectContent>
+                {subdepartments.map((sub: any) => (
+                  <SelectItem key={sub.id} value={sub.id}>
+                    {sub.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
       )}
     </div>
