@@ -5,7 +5,7 @@ import { format, isAfter, isEqual, isValid, parse, startOfToday } from 'date-fns
 import { Plus, Minus, LinkIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import React, { useMemo, useCallback } from "react";
+import React, { useMemo, useCallback, useEffect, useState } from "react";
 
 // Types
 interface TableHeader {
@@ -455,20 +455,29 @@ export const renderImmigrationStatusCell = (
   toggleExpansion: (id: string) => void
 ) => {
   const statusInfo = getEnhancedStatus(task);
-  const isExpanded = expandedStatuses.has(task.id.toString());
+  const isExpanded = task?.id ? expandedStatuses.has(task.id.toString()) : false;
 
   if (statusInfo.type === 'na') {
     return <StatusBadge status={statusInfo.status} type={statusInfo.type} />;
   }
 
+  const handleExpandClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (task?.id) {
+      toggleExpansion(task.id.toString());
+    }
+  };
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <StatusBadge status={statusInfo.status} type={statusInfo.type} />
-        <ExpandButton
-          isExpanded={isExpanded}
-          onClick={() => toggleExpansion(task.id.toString())}
-        />
+        {task?.id && (
+          <ExpandButton
+            isExpanded={isExpanded}
+            onClick={handleExpandClick}
+          />
+        )}
       </div>
 
       {isExpanded && (
@@ -518,6 +527,7 @@ export const renderCurrentStageStatusCell = (task: any, getStageStatus: (task: a
 
 // Data processing
 export const getCellContent = (
+  departments: any[],
   task: any,
   headerId: string,
   enhancedTasksData: Map<string, any>,
@@ -534,9 +544,18 @@ export const getCellContent = (
   setLinkingTask: (task: any) => void,
   setIsLinkDialogOpen: (open: boolean) => void
 ) => {
-  const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
-  const taskDeps = taskDependants.get(task.id.toString()) || [];
-  const isExpanded = expandedDependants.has(task.id.toString());
+  // Log departments data
+  useEffect(() => {
+    console.log('Departments data in getCellContent:', {
+      departments,
+      taskId: task?.id,
+      headerId
+    });
+  }, [departments, task?.id, headerId]);
+
+ const enhancedTask = task?.id ? enhancedTasksData.get(task.id.toString()) || task : task;
+const taskDeps = task?.id ? taskDependants.get(task.id.toString()) || [] : [];
+const isExpanded = task?.id ? expandedDependants.has(task.id.toString()) : false;
 
   const cellContentMap = {
     id: task.id,
@@ -583,11 +602,54 @@ export const getCellContent = (
       return <span className="whitespace-nowrap text-sm text-white">{stageFollowUp}</span>;
     })(),
     company_name: companies.get(task.company_id) || 'N/A',
-    job_level: (() => {
-      const hierarchy = getTaskHierarchy(task);
-      return hierarchy?.subclass?.name || hierarchy?.class?.name ||
-        hierarchy?.subdepartment?.name || 'N/A';
-    })(),
+ job_level: (() => {
+  const jobLevel = task.job_level;
+  
+  if (!jobLevel) return 'N/A';
+
+  // Handle both string and object formats
+  if (typeof jobLevel === 'string') {
+    const levels = jobLevel.split('>').map(s => s.trim());
+    return levels[levels.length - 1] || 'N/A';
+  }
+
+  if (typeof jobLevel === 'object' && jobLevel !== null) {
+    try {
+      // Get the subdepartment from the task
+      const subdepartment = task.subdepartment;
+      
+      // If we have a subclass_id, try to find it
+      if (jobLevel.subclass_id && subdepartment?.classes) {
+        for (const classItem of subdepartment.classes) {
+          if (classItem.subClasses) {
+            const subclass = classItem.subClasses.find((sc: any) => sc.id == jobLevel.subclass_id);
+            if (subclass?.name) return subclass.name;
+          }
+        }
+      }
+      
+      // If we have a class_id, try to find it
+      if (jobLevel.class_id && subdepartment?.classes) {
+        const classItem = subdepartment.classes.find((c: any) => c.id == jobLevel.class_id);
+        if (classItem?.name) return classItem.name;
+      }
+      
+      // Fallback to subdepartment or department name
+      if (subdepartment?.name) return subdepartment.name;
+      if (task.department?.name) return task.department.name;
+      
+      // Last resort - show IDs
+      if (jobLevel.class_id) return `Class ${jobLevel.class_id}`;
+      if (jobLevel.subclass_id) return `Subclass ${jobLevel.subclass_id}`;
+      if (jobLevel.subdepartment_id) return `SubDept ${jobLevel.subdepartment_id}`;
+      if (jobLevel.department_id) return `Dept ${jobLevel.department_id}`;
+    } catch (error) {
+      console.error('Error processing job level:', error);
+    }
+  }
+  
+  return 'N/A';
+})(),
     renewal_new: <span className="text-sm font-semibold">{task.renewal_status || 'New'}</span>,
     case_status: <span className="text-sm font-semibold">{task.status || 'pending'}</span>,
     nationality: enhancedTask.nationality || 'N/A',

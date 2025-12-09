@@ -1,77 +1,89 @@
   // utils/taskManagerData.ts
-  import { supabase } from "@/lib/supabase/client"
-  import { toast } from "@/hooks/use-toast"
+import { supabase } from "@/lib/supabase/client"
+import { toast } from "@/hooks/use-toast"
 
-  // Types
-  export interface Task {
-    id: number;
-    applicant_name: string;
-    company_id: number;
+// Types
+export interface Task {
+  id: number;
+  applicant_name: string;
+  company_id: number;
+  department_id: number;
+  subdepartment_id: number;
+  class_id?: string;
+  subclass_id?: string;
+  status: string;
+  renewal_status?: string;
+  nationality?: string;
+  age?: number;
+  individual_id: number;
+  created_at: string;
+  current_stage_id?: number;
+  job_description?: string;
+  job_level?: {
+    level: number;
+    class_id: string;
+    subclass_id: string | null;
     department_id: number;
     subdepartment_id: number;
-    class_id?: string;
-    subclass_id?: string;
-    status: string;
-    renewal_status?: string;
-    nationality?: string;
-    age?: number;
-    individual_id: number;
-    created_at: string;
-    current_stage_id?: number;
-    job_description?: string;
-    dependant_member?: any[];
-    dependnats_members?: any[];
-    stages?: Record<string, any>;
-    department?: any;
-    subdepartment?: any;
-    current_stage?: any;
-  }
+  };
+  officer?: any;
+  officer_name?: string;
+  task_manager?: any;
+  task_manager_name?: string;
+  assigned_to_name?: string;
+  dependant_member?: any[];
+  dependnats_members?: any[];
+  stages?: Record<string, any>;
+  department?: any;
+  subdepartment?: any;
+  current_stage?: any;
+}
 
-  export interface Department {
-    id: number;
-    name: string;
-    stages: any[];
-    tm_subdepartments?: any[];
-  }
+export interface Department {
+  id: number;
+  name: string;
+  stages: any[];
+  tm_subdepartments?: any[];
+}
 
-  export interface KycDocument {
-    id: string;
-    name: string;
-    display_name?: string;
-    fields: any[];
-  }
+export interface KycDocument {
+  id: string;
+  name: string;
+  display_name?: string;
+  fields: any[];
+}
 
-  export interface Document {
-    id: number;
-    director_id: number;
-    document_id: string;
-    file_path: string;
-    extracted_details?: any;
-    indicator?: boolean;
-    created_at: string;
-  }
+export interface Document {
+  id: number;
+  director_id: number;
+  document_id: string;
+  file_path: string;
+  extracted_details?: any;
+  indicator?: boolean;
+  created_at: string;
+}
 
-  // Recursive helper to transform KYC fields, handling nested arrays
-  const transformKycFields = (fields: any[]): any[] => {
-    if (!Array.isArray(fields)) return []
+// Recursive helper to transform KYC fields, handling nested arrays
+const transformKycFields = (fields: any[]): any[] => {
+  if (!Array.isArray(fields)) return []
 
-    return fields.map((field: any) => {
-      const isArray = field.type === 'array' || field.isArray === true
+  return fields.map((field: any) => {
+    const isArray = field.type === 'array' || field.isArray === true
 
-      const transformedField: any = {
-        id: field.id || field.fieldName || '',
-        fieldName: field.name || field.fieldName || '',
-        description: field.description || '',
-        isRequired: field.isRequired !== false,
-        fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
-        parentField: field.parentField,
-        isArray: isArray,
-      }
+    const transformedField: any = {
+      id: field.id || field.fieldName || '',
+      fieldName: field.name || field.fieldName || '',
+      description: field.description || '',
+      isRequired: field.isRequired !== false,
+      fieldType: isArray ? 'array' : (field.type || field.fieldType || 'text'),
+      parentField: field.parentField,
+      isArray: isArray,
+    }
 
-      if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
-        transformedField.arrayConfig = {
-          maxItems: field.arrayConfig.maxItems,
-          fields: transformKycFields(field.arrayConfig.fields)
+    if (isArray && field.arrayConfig && Array.isArray(field.arrayConfig.fields)) {
+      transformedField.arrayConfig = {
+        maxItems: field.arrayConfig.maxItems,
+        fields: transformKycFields(field.arrayConfig.fields)
         }
       }
 
@@ -106,54 +118,82 @@
   /**
    * Fetch tasks with related data
    */
-  export const fetchTasks = async (departmentId?: string, subdepartmentId?: string): Promise<Task[]> => {
-    try {
-      let query = supabase
-        .from('tm_tasks')
-        .select(`*, 
-          department:department_id (id, name), 
-          subdepartment:subdepartment_id (id, name)
-        `)
-        .order('created_at', { ascending: false })
+export const fetchTasks = async (departmentId?: string, subdepartmentId?: string): Promise<Task[]> => {
+  try {
+    let query = supabase
+      .from('tm_tasks')
+      .select(`
+        *,
+        department:department_id (id, name),
+        subdepartment:subdepartment_id (id, name),
+        job_level,
+        officer:officer_id (id, name, email),
+        task_manager:task_manager_id (id, name, email)
+      `)
+      .order('created_at', { ascending: false });
 
-      if (departmentId) {
-        query = query.eq('department_id', departmentId)
-      }
-
-      if (subdepartmentId) {
-        query = query.eq('subdepartment_id', subdepartmentId)
-      }
-
-      const { data, error } = await query
-
-      if (error) throw error
-
-      // Mock dependants for demonstration (you can remove this in production)
-      const tasksWithMockedDependants = (data || []).map(task => {
-        if (task.id === 2 && task.dependant_member?.length > 0) {
-          return {
-            ...task,
-            dependnats_members: [
-              { id: 766, name: 'Pooja J Suthar', relationship: 'wife', nationality: 'Indian', age: 40 },
-              { id: 765, name: 'Tisha J Suthar', relationship: 'daughter', nationality: 'Indian', age: 15 }
-            ]
-          }
-        }
-        return task
-      })
-
-      return tasksWithMockedDependants
-    } catch (error) {
-      console.error('Error fetching tasks:', error)
-      toast({ 
-        title: "Error", 
-        description: "Failed to load tasks.", 
-        variant: "destructive" 
-      })
-      return []
+    if (departmentId) {
+      query = query.eq('department_id', departmentId);
     }
-  }
 
+    if (subdepartmentId) {
+      query = query.eq('subdepartment_id', subdepartmentId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) throw error;
+
+    // Process the data to ensure consistent structure
+    const processedTasks = (data || []).map(task => {
+      const processedTask: Task = {
+        ...task,
+        // Ensure job_level has the correct structure
+        job_level: task.job_level ? {
+          level: task.job_level.level || 0,
+          class_id: task.job_level.class_id || '',
+          subclass_id: task.job_level.subclass_id || null,
+          department_id: task.job_level.department_id || task.department_id,
+          subdepartment_id: task.job_level.subdepartment_id || task.subdepartment_id
+        } : undefined,
+        // Ensure officer data is properly structured
+        officer: task.officer || (task.officer_id ? {
+          id: task.officer_id,
+          name: task.officer_name || '',
+          email: '',
+          phone: ''
+        } : undefined),
+        // Ensure task_manager data is properly structured
+        task_manager: task.task_manager || (task.task_manager_id ? {
+          id: task.task_manager_id,
+          name: task.task_manager_name || '',
+          email: '',
+          phone: ''
+        } : undefined)
+      };
+
+      // Handle mock dependants for demonstration
+      if (task.id === 2 && task.dependant_member?.length > 0) {
+        processedTask.dependnats_members = [
+          { id: 766, name: 'Pooja J Suthar', relationship: 'wife', nationality: 'Indian', age: 40 },
+          { id: 765, name: 'Tisha J Suthar', relationship: 'daughter', nationality: 'Indian', age: 15 }
+        ];
+      }
+
+      return processedTask;
+    });
+
+    return processedTasks;
+  } catch (error) {
+    console.error('Error fetching tasks:', error);
+    toast({ 
+      title: "Error", 
+      description: "Failed to load tasks.", 
+      variant: "destructive" 
+    });
+    return [];
+  }
+};
   /**
    * Fetch and process stages for a department
    */

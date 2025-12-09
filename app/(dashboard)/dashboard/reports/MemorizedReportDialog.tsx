@@ -316,8 +316,8 @@ export function MemorizedReportDialog({
                     const kycDoc = kycDocuments.get(doc.kycId);
                     if (!kycDoc) return null;
                     return (
-                      <Accordion key={doc.kycId} type="single" collapsible className="w-full pl-4 border-l ml-2">
-                        <AccordionItem value={`doc-${doc.kycId}`}>
+                      <Accordion key={`${stage.id}-${doc.kycId}`} type="single" collapsible className="w-full pl-4 border-l ml-2">
+                        <AccordionItem value={`doc-${stage.id}-${doc.kycId}`}>
                            <AccordionTrigger>
                               <div className="flex items-center space-x-2">
                                 <Checkbox id={`doc-${stage.id}-${doc.kycId}`} checked={!!reportConfig.stages?.[stage.id]?.documents?.[doc.kycId]} onCheckedChange={() => toggleDocument(stage.id, doc.kycId)} onClick={(e) => e.stopPropagation()}/>
@@ -325,8 +325,8 @@ export function MemorizedReportDialog({
                               </div>
                            </AccordionTrigger>
                            <AccordionContent className="pl-6 pt-2">
-                            <div className="grid grid-cols-2 gap-2">{kycDoc.fields?.map(field => (
-                               <div key={field.id} className="flex items-center space-x-2">
+                            <div className="grid grid-cols-2 gap-2">{kycDoc.fields?.map((field, index) => (
+                               <div key={`${stage.id}-${doc.kycId}-${field.id}-${index}`} className="flex items-center space-x-2">
                                 <Checkbox id={`field-${stage.id}-${doc.kycId}-${field.id}`} disabled={!reportConfig.stages?.[stage.id]?.documents?.[doc.kycId]} checked={reportConfig.stages?.[stage.id]?.documents?.[doc.kycId]?.fields.includes(field.id)} onCheckedChange={() => toggleField(stage.id, doc.kycId, field.id)}/>
                                 <Label htmlFor={`field-${stage.id}-${doc.kycId}-${field.id}`} className="font-normal text-sm cursor-pointer">{field.fieldName}</Label>
                                </div>))}

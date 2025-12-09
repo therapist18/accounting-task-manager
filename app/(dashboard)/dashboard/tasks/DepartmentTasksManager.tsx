@@ -124,10 +124,6 @@ export default function DepartmentTasksManager({
   const [visibleStats, setVisibleStats] = useState<Set<string>>(new Set(STATS_HEADERS.filter(h => h.default).map(h => h.id)))
   const [visibleStageIds, setVisibleStageIds] = useState<Set<string>>(new Set())
   const [showNAStages, setShowNAStages] = useState<boolean>(false);
-  // Debug log when showNAStages changes
-  useEffect(() => {
-    console.log('showNAStages changed:', showNAStages);
-  }, [showNAStages]);
   const [expandedDependants, setExpandedDependants] = useState<Set<string>>(new Set())
   const [kycDocuments, setKycDocuments] = useState<Map<string, KycDocument>>(new Map())
   const [allKycFields, setAllKycFields] = useState<Record<string, any[]>>({})
@@ -182,6 +178,19 @@ export default function DepartmentTasksManager({
   const [tableRows, setTableRows] = useState([]);
   const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
+
+  useEffect(() => {
+  const loadDepartments = async () => {
+    try {
+      const depts = await fetchDepartments();
+      setDepartments(depts);
+    } catch (error) {
+      console.error('Error loading departments:', error);
+    }
+  };
+  loadDepartments();
+  console.log('Departments data:', JSON.stringify(departments, null, 2));
+}, []);
 
   const isStageApplicableToTask = useCallback((stage: any, task: any, departments: any[]): boolean => {
     if (!task || !stage || !Array.isArray(departments) || departments.length === 0) {
@@ -730,17 +739,17 @@ export default function DepartmentTasksManager({
     });
   }, []);
 
-  const toggleDependantsExpansion = useCallback((taskId: string) => {
-    setExpandedDependants(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(taskId)) {
-        newSet.delete(taskId);
-      } else {
-        newSet.add(taskId);
-      }
-      return newSet;
-    });
-  }, []);
+ const toggleDependantsExpansion = useCallback((taskId: string) => {
+  setExpandedDependants(prev => {
+    const newSet = new Set(prev);
+    if (newSet.has(taskId)) {
+      newSet.delete(taskId);
+    } else {
+      newSet.add(taskId);
+    }
+    return newSet;
+  });
+}, []);
 
   const expandAll = () => {
     setExpandedSections(new Set(['case_details', 'stages', 'stats']));
@@ -1942,23 +1951,35 @@ export default function DepartmentTasksManager({
   }, [sortConfig, companies])
 
   const getCellContentWrapper = useCallback((task: any, headerId: string) => {
-    return utilGetCellContent(
-      task,
-      headerId,
-      enhancedTasksData,
-      taskDependants,
-      expandedDependants,
-      companies,
-      getTaskHierarchy,
-      getStaffName,
-      getEnhancedImmigrationStatusWrapper,
-      getCurrentStageStatusWrapper,
-      (task: any) => renderImmigrationStatusCell(task, getEnhancedImmigrationStatusWrapper, expandedImmigrationStatus, toggleImmigrationStatusExpansion),
-      (task: any) => renderCurrentStageStatusCell(task, getCurrentStageStatusWrapper),
-      toggleDependantsExpansion,
-      setLinkingTask,
-      setIsLinkDialogOpen
-    );
+ return utilGetCellContent(
+    departments,
+    task,
+    headerId,
+    enhancedTasksData,
+    taskDependants,
+    expandedDependants,
+    companies,
+    getTaskHierarchy,
+    getStaffName,
+    getEnhancedImmigrationStatusWrapper,
+    getCurrentStageStatusWrapper,
+    (task) => renderImmigrationStatusCell(
+      task, 
+      getEnhancedImmigrationStatusWrapper, 
+      expandedImmigrationStatus, 
+      (id) => {
+        // Wrap the toggle in a function to prevent immediate execution
+        toggleImmigrationStatusExpansion(id);
+      }
+    ),
+    (task) => renderCurrentStageStatusCell(task, getCurrentStageStatusWrapper),
+    (id) => {
+      // Wrap the toggle in a function to prevent immediate execution
+      toggleDependantsExpansion(id);
+    },
+    setLinkingTask,
+    setIsLinkDialogOpen
+  );
   }, [
     enhancedTasksData,
     taskDependants,
@@ -2694,6 +2715,7 @@ export default function DepartmentTasksManager({
                           </div>
                         ) : isTransposedView ? (
                           <EnhancedTable
+                          departments={departments}
                             tasks={tasksToRender}
                             tableType={title}
                             ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
@@ -2776,6 +2798,7 @@ export default function DepartmentTasksManager({
                         ) : (
 
                           <StandardTable
+                          departments={departments}
                             tasks={tasksToRender}
                             tableType={title}
                             ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}

@@ -196,7 +196,7 @@ export default function OfficersPage() {
     try {
       const {
         department_id,
-        subdepartment_id,
+        subdepartment_ids, // Expecting array now
         department_start_date,
         department_end_date,
         start_date,
@@ -204,43 +204,98 @@ export default function OfficersPage() {
         ...coreUserData
       } = formData;
 
+      // 1. Prepare User Payload
+      // We store the subdepartment_ids array directly in the user's history
       const officerData = {
         name: coreUserData.name,
-        email: coreUserData.email || null, // Handle optional email
-
+        email: coreUserData.email || null,
         ...(coreUserData.password ? { password: coreUserData.password } : {}),
-
+        
         status_history: [{
           status: 'active',
           start_date: start_date || new Date().toISOString(),
           end_date: end_date || null
         }],
-
+        
         department_history: [{
           department_id: department_id,
-          subdepartment_id: subdepartment_id || null,
+          subdepartment_ids: subdepartment_ids || [], // Store array
+          // Fallback for backward compatibility if needed:
+          subdepartment_id: subdepartment_ids && subdepartment_ids.length > 0 ? subdepartment_ids[0] : null,
           start_date: department_start_date || new Date().toISOString(),
           end_date: department_end_date || null
-        }]
+        }],
+        updated_at: new Date().toISOString(),
       };
 
+      let savedOfficerId;
       let savedOfficer;
-      if (selectedOfficer) {
-        savedOfficer = await updateOfficer(selectedOfficer.id, officerData);
 
+      // 2. Update/Create User in tm_users
+      if (selectedOfficer) {
+        savedOfficerId = selectedOfficer.id;
+        savedOfficer = await updateOfficer(selectedOfficer.id, officerData);
         setOfficers(officers.map(o => o.id === selectedOfficer.id ? savedOfficer : o));
         toast.success('Officer updated successfully');
       } else {
         savedOfficer = await createOfficer(officerData);
+        savedOfficerId = savedOfficer.id;
         setOfficers([...officers, savedOfficer]);
         toast.success('Officer created successfully');
+      }
+
+      // 3. Update tm_subdepartments (officer_history)
+      // Only if subdepartments are selected
+      if (subdepartment_ids && subdepartment_ids.length > 0) {
+        
+        const newHistoryEntry = {
+          id: savedOfficerId, // The ID of the officer we just saved
+          start_date: department_start_date || new Date().toISOString(),
+          end_date: department_end_date || null
+        };
+
+        // Iterate through each selected subdepartment to update its history
+        const updatePromises = subdepartment_ids.map(async (subId: string) => {
+          try {
+            // A. Fetch current history for this subdepartment
+            const { data: currentSub, error: fetchError } = await supabase
+              .from('tm_subdepartments')
+              .select('officer_history')
+              .eq('id', subId)
+              .single();
+
+            if (fetchError) throw fetchError;
+
+            // B. Append new officer to history
+            // We use a safe spread. If officer_history is null, start a new array.
+            const currentHistory = currentSub.officer_history || [];
+            const updatedHistory = [...currentHistory, newHistoryEntry];
+
+            // C. Update the subdepartment record
+            const { error: updateError } = await supabase
+              .from('tm_subdepartments')
+              .update({ 
+                officer_history: updatedHistory,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', subId);
+
+            if (updateError) throw updateError;
+            
+          } catch (err) {
+            console.error(`Failed to update history for subdept ${subId}`, err);
+            // We don't throw here to ensure other subdepartments might still succeed
+          }
+        });
+
+        await Promise.all(updatePromises);
       }
 
       setIsDialogOpen(false);
       setSelectedOfficer(undefined);
     } catch (error) {
       console.error('Error saving officer:', error);
-      toast.error(error.message || 'Failed to save officer');
+      toast.error('Failed to save officer');
     } finally {
       setIsLoading(false);
     }

@@ -86,7 +86,7 @@ const processDocumentsForTasks = (tasks: any[], allDocuments: any[] = []) => {
 const safeRender = (content: any) => {
   // 1. Valid React Element (JSX) - Pass through
   if (React.isValidElement(content)) return content;
-  
+
   // 2. Primitives - Pass through
   if (typeof content === 'string' || typeof content === 'number') return content;
   if (content === null || content === undefined) return null;
@@ -100,21 +100,21 @@ const safeRender = (content: any) => {
   if (typeof content === 'object') {
     // If the object has a 'status' property
     if ('status' in content) {
-       const status = content.status;
-       
-       // If status is primitive, return it
-       if (typeof status === 'string' || typeof status === 'number') return status;
-       
-       // If status is a React Element, return it directly
-       if (React.isValidElement(status)) return status;
-       
-       // If status is null/undefined
-       if (!status) return null;
-       
-       // If status is an object/array, stringify it
-       return JSON.stringify(status);
+      const status = content.status;
+
+      // If status is primitive, return it
+      if (typeof status === 'string' || typeof status === 'number') return status;
+
+      // If status is a React Element, return it directly
+      if (React.isValidElement(status)) return status;
+
+      // If status is null/undefined
+      if (!status) return null;
+
+      // If status is an object/array, stringify it
+      return JSON.stringify(status);
     }
-    
+
     // Fallback for objects without status: Stringify to prevent crash
     return <span className="text-xs text-gray-500 truncate max-w-[100px] inline-block" title={JSON.stringify(content)}>{JSON.stringify(content)}</span>;
   }
@@ -205,7 +205,7 @@ const MemoizedTableRow = React.memo(({
         {/* ✅ FIXED: Wrapped stageOrder in safeRender just in case */}
         {safeRender(row.stageOrder) || (row.type !== 'stage' && row.type !== 'document' && row.type !== 'field' && row.type !== 'actions' ? (rowIndex + 1) : '')}
       </TableCell>
-      
+
       {/* Row Label */}
       <TableCell className={`sticky left-20 z-10 ${rowBg.split('/')[0]} group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm text-slate-700 p-2 min-w-[300px]`}>
         <div className="flex items-center gap-2 justify-between">
@@ -225,12 +225,12 @@ const MemoizedTableRow = React.memo(({
           )}
         </div>
       </TableCell>
-      
+
       {/* Task Columns - Now DOUBLED: Date column + Actions column for each task */}
       {paginatedHeaderStructure.map((item, colIndex) => (
         <React.Fragment key={`${row.key}-${colIndex}`}>
           {/* DATE COLUMN */}
-          <TableCell 
+          <TableCell
             className={`text-center text-sm py-1 px-2 align-middle border-l-4 border-t border-b border-gray-100 w-[150px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
           >
             {item.type === 'principal' ? (
@@ -240,9 +240,9 @@ const MemoizedTableRow = React.memo(({
               <span className="text-sm text-gray-400">-</span>
             )}
           </TableCell>
-          
+
           {/* ACTIONS COLUMN */}
-          <TableCell 
+          <TableCell
             className={`text-center text-sm py-1 px-2 align-middle border-r-4 border-t border-b border-gray-100 w-[120px] ${item.type === 'dependant' ? 'bg-orange-50/50' : ''}`}
           >
             {item.type === 'principal' ? (
@@ -261,6 +261,7 @@ const MemoizedTableRow = React.memo(({
 // --- Main EnhancedTable Component ---
 
 interface EnhancedTableProps {
+  departments: any[];
   tasks: any[]
   tableType: string
   ENHANCED_TABLE_HEADERS_IMMIGRATION: any[]
@@ -271,7 +272,7 @@ interface EnhancedTableProps {
   tableRows: any[]
   loading: boolean
   error: string | null
-  getCellContent: (task: any, headerId: string) => any
+  getCellContent: (task: any, headerId: string, departments: any[]) => any
   renderCellContent: (row: any, task: any, columnType?: 'date' | 'actions') => any
   toggleSectionExpansion: (sectionId: string) => void
   toggleStageExpansion: (stageId: string) => void
@@ -283,6 +284,7 @@ interface EnhancedTableProps {
 }
 
 export const EnhancedTable: React.FC<EnhancedTableProps> = ({
+  departments,
   tasks,
   tableType,
   ENHANCED_TABLE_HEADERS_IMMIGRATION,
@@ -448,7 +450,7 @@ export const EnhancedTable: React.FC<EnhancedTableProps> = ({
                 <TableCell className="sticky left-20 z-10 bg-blue-600 text-white group-hover:bg-blue-50/50 border border-gray-100 font-medium text-sm p-2 min-w-[300px]">
                   {header.label}
                 </TableCell>
-                
+
                 {/* ✅ NEW: Each task now gets TWO header columns */}
                 {paginatedHeaderStructure.map((item) => (
                   <React.Fragment key={`header-${header.id}-${item.key}`}>

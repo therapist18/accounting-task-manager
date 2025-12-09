@@ -13,6 +13,7 @@ import { formatDateValue, isDocumentOlderThanTask } from "../utils/taskManagerDa
 
 // --- INTERFACE (No Change) ---
 interface StandardTableProps {
+  departments: any[]
   tasks: any[]
   tableType: string
   ENHANCED_TABLE_HEADERS_IMMIGRATION: any[]
@@ -53,7 +54,7 @@ interface StandardTableProps {
 
 // --- COMPONENT ---
 export const StandardTable: React.FC<StandardTableProps> = ({
-  tasks, tableType, ENHANCED_TABLE_HEADERS_IMMIGRATION, stages,
+  departments, tasks, tableType, ENHANCED_TABLE_HEADERS_IMMIGRATION, stages,
   companies, visibleHeaders, visibleStageIds, expandedStages,
   expandedDocuments, expandedDependants, taskDependants, kycDocuments, allDocuments,
   sortConfig, dataLoading = {}, error, isPushingCase, isDownloading,
@@ -112,7 +113,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
     });
     return rows;
   }, [sortedTasks, taskDependants, expandedDependants]);
-    
+
   // --- HANDLERS & HELPERS ---
   const handleAutomationClick = (classId: string, requirementId: number, taskId: string) => {
     const task = tasks.find(t => t.id === taskId);
@@ -134,7 +135,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
     if (sortConfig?.key !== key) return <ChevronUp className="h-4 w-4 opacity-30" />;
     return sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />;
   };
-    
+
   // UPDATED: Colspan calculation now accounts for the persistent document cell
   const getStageColSpan = useCallback((stage: any) => {
     if (!expandedStages.has(stage.id.toString())) {
@@ -142,7 +143,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
     }
     const docs = stage.documents || [];
     if (docs.length === 0) return 1;
-    
+
     return docs.reduce((total, doc) => {
       let docSpan = 1; // Collapsed doc takes 1 column
       if (expandedDocuments.has(doc.id.toString())) {
@@ -179,7 +180,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                 ))}
                 {visibleStages.map(stage => (
                   <TableHead key={stage.id} colSpan={getStageColSpan(stage)} className="text-center text-sm p-3 border-r bg-gradient-to-b from-blue-600 to-blue-700 text-white border-b border-blue-500/30 font-semibold shadow-md min-w-[180px]">
-                     <div className="flex items-center justify-center gap-2"><span className="truncate">{stage.name}</span>{stage.documents?.length > 0 && (<Button variant="ghost" size="icon" className="h-6 w-6 p-0 rounded-md text-white/80 hover:text-white hover:bg-white/20" onClick={() => toggleStageExpansion(stage.id.toString())}>{expandedStages.has(stage.id.toString()) ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}</Button>)}</div>
+                    <div className="flex items-center justify-center gap-2"><span className="truncate">{stage.name}</span>{stage.documents?.length > 0 && (<Button variant="ghost" size="icon" className="h-6 w-6 p-0 rounded-md text-white/80 hover:text-white hover:bg-white/20" onClick={() => toggleStageExpansion(stage.id.toString())}>{expandedStages.has(stage.id.toString()) ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}</Button>)}</div>
                   </TableHead>
                 ))}
                 <TableHead rowSpan={3} className="text-center text-sm p-3 bg-gradient-to-b from-gray-600 to-gray-700 text-white border-l border-gray-500/30 font-semibold shadow-md min-w-[150px]">Actions</TableHead>
@@ -190,13 +191,13 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                 {visibleStages.flatMap(stage => {
                   if (!expandedStages.has(stage.id.toString())) return [];
                   return (stage.documents || []).map(doc => {
-                     const kycData = kycDocuments.get(doc.kycId);
-                     const docDisplayName = kycData?.display_name || kycData?.name || doc.display_name || doc.name || 'Document';
-                     if (!expandedDocuments.has(doc.id.toString())) {
-                       return <TableHead key={`doc-header-${doc.id}`} rowSpan={2} className="text-center text-xs p-2 border-r border-b bg-gradient-to-b from-slate-100 to-slate-200 text-slate-800 border-slate-300 font-medium"><div className="flex items-center justify-center gap-1.5"><span className="truncate">{docDisplayName}</span>{doc.kycId && (<Button variant="ghost" size="icon" className="h-5 w-5 p-0 rounded-md" onClick={() => toggleDocumentExpansion(doc.id.toString())}><Plus className="h-3 w-3" /></Button>)}</div></TableHead>
-                     }
-                     const fields = documentFields.get(doc.id.toString()) || [];
-                     return <TableHead key={`doc-header-${doc.id}`} colSpan={1 + fields.length} className="text-center text-xs p-2 border-r border-b bg-gradient-to-b from-slate-100 to-slate-200 text-slate-800 border-slate-300 font-medium"><div className="flex items-center justify-center gap-1.5"><span className="truncate">{docDisplayName}</span>{doc.kycId && (<Button variant="ghost" size="icon" className="h-5 w-5 p-0 rounded-md" onClick={() => toggleDocumentExpansion(doc.id.toString())}><Minus className="h-3 w-3" /></Button>)}</div></TableHead>
+                    const kycData = kycDocuments.get(doc.kycId);
+                    const docDisplayName = kycData?.display_name || kycData?.name || doc.display_name || doc.name || 'Document';
+                    if (!expandedDocuments.has(doc.id.toString())) {
+                      return <TableHead key={`doc-header-${doc.id}`} rowSpan={2} className="text-center text-xs p-2 border-r border-b bg-gradient-to-b from-slate-100 to-slate-200 text-slate-800 border-slate-300 font-medium"><div className="flex items-center justify-center gap-1.5"><span className="truncate">{docDisplayName}</span>{doc.kycId && (<Button variant="ghost" size="icon" className="h-5 w-5 p-0 rounded-md" onClick={() => toggleDocumentExpansion(doc.id.toString())}><Plus className="h-3 w-3" /></Button>)}</div></TableHead>
+                    }
+                    const fields = documentFields.get(doc.id.toString()) || [];
+                    return <TableHead key={`doc-header-${doc.id}`} colSpan={1 + fields.length} className="text-center text-xs p-2 border-r border-b bg-gradient-to-b from-slate-100 to-slate-200 text-slate-800 border-slate-300 font-medium"><div className="flex items-center justify-center gap-1.5"><span className="truncate">{docDisplayName}</span>{doc.kycId && (<Button variant="ghost" size="icon" className="h-5 w-5 p-0 rounded-md" onClick={() => toggleDocumentExpansion(doc.id.toString())}><Minus className="h-3 w-3" /></Button>)}</div></TableHead>
                   });
                 })}
               </TableRow>
@@ -215,7 +216,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
                 })}
               </TableRow>
             </TableHeader>
-            
+
             {/* UPDATED: Declarative Table Body */}
             <TableBody>
               {dataLoading.tasks ? (
@@ -225,7 +226,7 @@ export const StandardTable: React.FC<StandardTableProps> = ({
               ) : (
                 taskRows.map((row, rowIndex) => (
                   <TableRow key={row.key} className={`h-16 align-middle group transition-all duration-200 ${row.type === 'dependant' ? 'bg-gradient-to-r from-amber-50/80 to-white' : (rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50/30')} hover:bg-blue-50 border-b border-slate-200/60`}>
-                    
+
                     {/* Index & Applicant Cells */}
                     <TableCell className={`sticky left-0 z-10 border-r border-slate-200/60 font-semibold text-sm p-3 text-center w-16 transition-colors ${row.type === 'dependant' ? 'bg-amber-50/80 text-amber-700' : (rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50/30')} group-hover:bg-blue-50`}>{row.taskIndex + 1}</TableCell>
                     <TableCell className={`sticky left-16 z-10 border-r border-slate-200/60 p-3 min-w-[280px] transition-colors ${row.type === 'dependant' ? 'bg-amber-50/80' : (rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50/30')} group-hover:bg-blue-50`}>
@@ -239,34 +240,34 @@ export const StandardTable: React.FC<StandardTableProps> = ({
 
                     {/* Stage, Document, and Field Cells */}
                     {visibleStages.flatMap(stage => {
-                       if (row.type === 'dependant') {
-                         return [<TableCell key={`dep-stage-${stage.id}`} colSpan={getStageColSpan(stage)} className="text-center text-xs p-3 border-r border-slate-200/60 text-gray-400">-</TableCell>];
-                       }
-                       // COLLAPSED STAGE
-                       if (!expandedStages.has(stage.id.toString())) {
-                           return [<TableCell key={stage.id} className="text-center text-sm p-1 border-r border-slate-200/60 min-w-[180px]"><EditableStageCell stage={stage} task={row.task} value={row.task.stages?.[stage.id]?.status} onSave={enhancedHandleStageStatusSave} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={handleViewDocument} onAutomationClick={(e) => { e.stopPropagation(); if (stage.automation) { handleAutomationClick(row.task.class_id?.toString() || '', stage.automation.requirementId || 0, row.task.id.toString()); } }} getKycFields={getKycFields} allDocuments={allDocuments} /></TableCell>];
-                       }
-                       if (!stage.documents || stage.documents.length === 0) {
-                           return [<TableCell key={`stage-empty-${stage.id}`} className="text-center text-xs p-3 border-r border-slate-200/60 min-w-[180px] text-gray-400">-</TableCell>];
-                       }
-                       // EXPANDED STAGE
-                       return (stage.documents || []).flatMap(doc => {
-                           // COLLAPSED DOCUMENT
-                           if (!expandedDocuments.has(doc.id.toString())) {
-                               return [<TableCell key={doc.id} className="text-center text-sm p-1 border-r border-slate-200/60 min-w-[180px] bg-slate-50/30"><EditableStageCell isDocumentRow={true} stage={stage} task={row.task} documentData={doc} onSave={enhancedHandleStageStatusSave} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={(task, stg) => handleViewDocument(task, { ...stg, documents: [doc] })} onAutomationClick={(e, docData) => { e.stopPropagation(); if (docData?.automation) { handleAutomationClick(row.task.class_id?.toString() || '', docData.automation.requirementId || 0, row.task.id.toString()); } }} getKycFields={getKycFields} allDocuments={allDocuments} /></TableCell>];
-                           }
-                           // EXPANDED DOCUMENT - Renders its own cell + field cells
-                           const fields = documentFields.get(doc.id.toString()) || [];
-                           const docCell = <TableCell key={`doc-cell-${doc.id}`} className="text-center text-sm p-1 border-r border-slate-200/60 min-w-[180px] bg-slate-50/30"><EditableStageCell isDocumentRow={true} stage={stage} task={row.task} documentData={doc} onSave={enhancedHandleStageStatusSave} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={(task, stg) => handleViewDocument(task, { ...stg, documents: [doc] })} /></TableCell>;
-                           
-                           const linkedDocument = getDocumentForTaskStage(row.task, { ...stage, documents: [doc] });
-                           const fieldCells = fields.map(field => {
-                               const value = linkedDocument?.extracted_details?.[field.fieldName] || 'N/A';
-                               return <TableCell key={`field-cell-${doc.id}-${field.id}`} className="text-center text-xs p-2 border-r border-slate-200/60 min-w-[180px] bg-slate-50/50"><div className="truncate" title={value}>{field?.fieldType?.toLowerCase() === 'date' ? formatDateValue(value) : value}</div></TableCell>;
-                           });
-                           
-                           return [docCell, ...fieldCells];
-                       });
+                      if (row.type === 'dependant') {
+                        return [<TableCell key={`dep-stage-${stage.id}`} colSpan={getStageColSpan(stage)} className="text-center text-xs p-3 border-r border-slate-200/60 text-gray-400">-</TableCell>];
+                      }
+                      // COLLAPSED STAGE
+                      if (!expandedStages.has(stage.id.toString())) {
+                        return [<TableCell key={stage.id} className="text-center text-sm p-1 border-r border-slate-200/60 min-w-[180px]"><EditableStageCell stage={stage} task={row.task} value={row.task.stages?.[stage.id]?.status} onSave={enhancedHandleStageStatusSave} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={handleViewDocument} onAutomationClick={(e) => { e.stopPropagation(); if (stage.automation) { handleAutomationClick(row.task.class_id?.toString() || '', stage.automation.requirementId || 0, row.task.id.toString()); } }} getKycFields={getKycFields} allDocuments={allDocuments} /></TableCell>];
+                      }
+                      if (!stage.documents || stage.documents.length === 0) {
+                        return [<TableCell key={`stage-empty-${stage.id}`} className="text-center text-xs p-3 border-r border-slate-200/60 min-w-[180px] text-gray-400">-</TableCell>];
+                      }
+                      // EXPANDED STAGE
+                      return (stage.documents || []).flatMap(doc => {
+                        // COLLAPSED DOCUMENT
+                        if (!expandedDocuments.has(doc.id.toString())) {
+                          return [<TableCell key={doc.id} className="text-center text-sm p-1 border-r border-slate-200/60 min-w-[180px] bg-slate-50/30"><EditableStageCell isDocumentRow={true} stage={stage} task={row.task} documentData={doc} onSave={enhancedHandleStageStatusSave} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={(task, stg) => handleViewDocument(task, { ...stg, documents: [doc] })} onAutomationClick={(e, docData) => { e.stopPropagation(); if (docData?.automation) { handleAutomationClick(row.task.class_id?.toString() || '', docData.automation.requirementId || 0, row.task.id.toString()); } }} getKycFields={getKycFields} allDocuments={allDocuments} /></TableCell>];
+                        }
+                        // EXPANDED DOCUMENT - Renders its own cell + field cells
+                        const fields = documentFields.get(doc.id.toString()) || [];
+                        const docCell = <TableCell key={`doc-cell-${doc.id}`} className="text-center text-sm p-1 border-r border-slate-200/60 min-w-[180px] bg-slate-50/30"><EditableStageCell isDocumentRow={true} stage={stage} task={row.task} documentData={doc} onSave={enhancedHandleStageStatusSave} onDocumentUpload={handleStageDocumentUpload} onShowDocuments={(task, stg) => handleViewDocument(task, { ...stg, documents: [doc] })} /></TableCell>;
+
+                        const linkedDocument = getDocumentForTaskStage(row.task, { ...stage, documents: [doc] });
+                        const fieldCells = fields.map(field => {
+                          const value = linkedDocument?.extracted_details?.[field.fieldName] || 'N/A';
+                          return <TableCell key={`field-cell-${doc.id}-${field.id}`} className="text-center text-xs p-2 border-r border-slate-200/60 min-w-[180px] bg-slate-50/50"><div className="truncate" title={value}>{field?.fieldType?.toLowerCase() === 'date' ? formatDateValue(value) : value}</div></TableCell>;
+                        });
+
+                        return [docCell, ...fieldCells];
+                      });
                     })}
 
                     {/* Actions Cell */}

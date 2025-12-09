@@ -253,15 +253,159 @@ export default function ReportsPage() {
   }, [allDocuments]);
 
   const renderCellValue = (task, col) => {
+    console.log('Rendering cell:', {
+      column: col.field,
+      type: col.type,
+      taskId: task.id,
+      taskData: {
+        job_level: task.job_level,
+        officer: task.officer,
+        officer_name: task.officer_name,
+        task_manager: task.task_manager,
+        task_manager_name: task.task_manager_name,
+        assigned_to_name: task.assigned_to_name
+      }
+    });
+
     if (col.type === 'task') {
-      return getCellContent(task, col.field, enhancedTasksData, taskDependants, new Set(), companies,
-        (t) => ({ department: departments.find(d => d.id === t.department_id) }),
-        getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper,
-        (t) => renderImmigrationStatusCell(t, getEnhancedImmigrationStatusWrapper, new Set(), () => { }),
-        (t) => renderCurrentStageStatusCell(t, getCurrentStageStatusWrapper),
-        () => { }, () => { }, () => { }
-      );
+      const value = (() => {
+        switch (col.field) {
+          case 'job_level':
+            console.log('Processing job_level field:', task.job_level);
+            const jobLevel = task.job_level;
+            if (!jobLevel) {
+              console.log('No job level data');
+              return '-';
+            }
+
+            // Handle both string and object formats
+            if (typeof jobLevel === 'string') {
+              const levels = jobLevel.split('>').map(s => s.trim());
+              return levels[levels.length - 1] || '-';
+            }
+
+            if (typeof jobLevel === 'object' && jobLevel !== null) {
+              try {
+                // Find department
+                const department = departments.find(d => d.id == jobLevel.department_id);
+                if (!department) {
+                  console.log('Department not found for job level:', jobLevel.department_id);
+                  return '-';
+                }
+
+                // Find subdepartment
+                let subDepartment = null;
+                if (department.tm_subdepartments && jobLevel.subdepartment_id) {
+                  subDepartment = department.tm_subdepartments.find(
+                    sd => sd.id == jobLevel.subdepartment_id
+                  );
+                }
+
+                // Find class if class_id exists
+                let className = '';
+                if (jobLevel.class_id && subDepartment?.classes) {
+                  const classItem = subDepartment.classes.find(
+                    c => c.id == jobLevel.class_id
+                  );
+                  className = classItem?.name || '';
+                }
+
+                // Find subclass if subclass_id exists
+                if (jobLevel.subclass_id) {
+                  const classItem = subDepartment?.classes?.find(
+                    c => c.id == jobLevel.class_id
+                  );
+                  if (classItem?.subClasses) {
+                    const subClassItem = classItem.subClasses.find(
+                      sc => sc.id == jobLevel.subclass_id
+                    );
+                    if (subClassItem?.name) {
+                      return subClassItem.name;
+                    }
+                  }
+                }
+
+                // If no subclass but has class, return class name
+                if (className) {
+                  return className;
+                }
+
+                // If no class but has subdepartment, return subdepartment name
+                if (subDepartment?.name) {
+                  return subDepartment.name;
+                }
+
+                // Fallback to department name
+                return department.name || '-';
+              } catch (error) {
+                console.error('Error processing job level:', error);
+                return '-';
+              }
+            }
+            return '-';
+          case 'officer':
+            console.log('Processing officer field');
+            const officerValue = task.officer_name ||
+              (typeof task.officer === 'string' ? task.officer : task.officer?.name) ||
+              '-';
+            console.log('Officer value:', officerValue);
+            return officerValue;
+
+          case 'task_manager':
+            console.log('Processing task_manager field');
+            const managerValue = task.task_manager_name ||
+              (typeof task.task_manager === 'string' ? task.task_manager : task.task_manager?.name) ||
+              task.assigned_to_name ||
+              '-';
+            console.log('Task manager value:', managerValue);
+            return managerValue;
+
+          default: {
+            console.log('Using getCellContent for field:', col.field);
+            const cellResult = getCellContent(
+              task,
+              col.field,
+              enhancedTasksData,
+              taskDependants,
+              new Set(),
+              companies,
+              (t) => {
+                console.log('Getting department info for task:', t.id);
+                return {
+                  department: departments.find(d => d.id === t.department_id),
+                  job_level: t.job_level,
+                  officer: t.officer || t.officer_name,
+                  task_manager: t.task_manager || t.task_manager_name || t.assigned_to_name
+                };
+              },
+              getStaffName,
+              getEnhancedImmigrationStatusWrapper,
+              getCurrentStageStatusWrapper,
+              (t) => {
+                console.log('Rendering immigration status for task:', t.id);
+                return renderImmigrationStatusCell(t, getEnhancedImmigrationStatusWrapper, new Set(), () => { });
+              },
+              (t) => {
+                console.log('Rendering current stage status for task:', t.id);
+                return renderCurrentStageStatusCell(t, getCurrentStageStatusWrapper);
+              },
+              () => { },
+              () => { },
+              () => { }
+            );
+            console.log('getCellContent result for', col.field, ':', cellResult);
+            return cellResult;
+          }
+        }
+      })();
+
+      console.log('Final value for', col.field, ':', value);
+      if (value === '-') {
+        return <span className="text-slate-300">-</span>;
+      }
+      return value;
     }
+
     if (col.type === 'stage_date') {
       const d = task.stages?.[col.stageId]?.date;
       return d ? <span className="text-xs">{formatDateValue(d)}</span> : <span className="text-slate-300">-</span>;
@@ -281,7 +425,7 @@ export default function ReportsPage() {
 
       return <span className={`text-xs ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || '-'}</span>;
     }
-    return '-';
+    return <span className="text-slate-300">-</span>;
   };
 
   const toggleSection = (id) => setExpandedSections(p => {
@@ -482,8 +626,8 @@ export default function ReportsPage() {
             {/* Sub-Department Tabs */}
             <Tabs value={activeSubDeptId} onValueChange={(v) => { setActiveSubDeptId(v); setCurrentPage(1); }}>
               <TabsList className="w-full justify-start h-10 bg-slate-50 border p-1 gap-1 overflow-x-auto">
-                <TabsTrigger 
-                  value="all" 
+                <TabsTrigger
+                  value="all"
                   className="px-3 h-8 data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm text-xs"
                 >
                   All Sub-departments
@@ -516,7 +660,7 @@ export default function ReportsPage() {
                 <div className="text-sm text-slate-600">
                   Showing <strong>{totalItems > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0}</strong>-<strong>{Math.min(currentPage * itemsPerPage, totalItems)}</strong> of <strong>{totalItems}</strong> tasks
                 </div>
-                
+
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-slate-600">Rows:</span>
                   <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
@@ -582,9 +726,9 @@ export default function ReportsPage() {
                   <TableRow className="bg-blue-600 hover:bg-blue-600">
                     <TableHead className="w-16 border-b border-r border-blue-500 bg-blue-700 text-white sticky left-0 z-40 text-center font-bold">#</TableHead>
                     {columnGroups.map((group, i) => (
-                      <TableHead 
-                        key={i} 
-                        colSpan={group.span} 
+                      <TableHead
+                        key={i}
+                        colSpan={group.span}
                         className="text-center font-bold text-white border-b border-r border-blue-500 last:border-r-0 bg-blue-600 py-3 text-sm"
                       >
                         {group.label}
@@ -595,8 +739,8 @@ export default function ReportsPage() {
                   <TableRow className="bg-blue-500 hover:bg-blue-500">
                     <TableHead className="w-16 border-b border-r border-blue-400 bg-blue-600 text-white sticky left-0 z-40 text-center font-semibold text-xs">#</TableHead>
                     {columns.map(col => (
-                      <TableHead 
-                        key={col.id} 
+                      <TableHead
+                        key={col.id}
                         className="whitespace-nowrap px-4 py-3 font-semibold text-white border-b border-r border-blue-400 text-xs bg-blue-500"
                       >
                         {col.label}
@@ -630,8 +774,8 @@ export default function ReportsPage() {
                       Fields / Tasks →
                     </TableHead>
                     {paginatedTasks.map((task, idx) => (
-                      <TableHead 
-                        key={task.id} 
+                      <TableHead
+                        key={task.id}
                         className="min-w-[180px] w-[180px] text-center bg-blue-700 text-white border-r border-blue-600 font-semibold text-xs py-3 px-2"
                       >
                         <div className="flex flex-col gap-1">
@@ -653,13 +797,13 @@ export default function ReportsPage() {
                     if (row.type === 'section_header') {
                       const Icon = row.icon;
                       return (
-                        <TableRow 
-                          key={row.id} 
-                          className="bg-slate-200 border-y-2 border-slate-400 hover:bg-slate-200 cursor-pointer" 
+                        <TableRow
+                          key={row.id}
+                          className="bg-slate-200 border-y-2 border-slate-400 hover:bg-slate-200 cursor-pointer"
                           onClick={() => toggleSection(row.id)}
                         >
-                          <TableCell 
-                            className="sticky left-0 z-20 bg-slate-200 border-r border-slate-400 p-0" 
+                          <TableCell
+                            className="sticky left-0 z-20 bg-slate-200 border-r border-slate-400 p-0"
                             colSpan={paginatedTasks.length + 1}
                           >
                             <div className="flex items-center justify-between px-4 py-2">
@@ -668,8 +812,8 @@ export default function ReportsPage() {
                                 <span className="font-bold text-slate-700 text-base">{row.label}</span>
                               </div>
                               <div className="text-slate-600">
-                                {expandedSections.has(row.id) ? 
-                                  <Minus className="h-4 w-4" /> : 
+                                {expandedSections.has(row.id) ?
+                                  <Minus className="h-4 w-4" /> :
                                   <Plus className="h-4 w-4" />
                                 }
                               </div>
@@ -684,17 +828,17 @@ export default function ReportsPage() {
                     return (
                       <TableRow key={rIdx} className="hover:bg-slate-50 group border-b border-slate-200">
                         <TableCell className="sticky left-0 z-20 bg-white group-hover:bg-slate-50 border-r border-slate-200 py-2 px-3 text-xs font-medium text-slate-600">
-                          <div 
-                            style={{ paddingLeft: isSub ? '24px' : '0' }} 
-                            className="flex items-center truncate" 
+                          <div
+                            style={{ paddingLeft: isSub ? '24px' : '0' }}
+                            className="flex items-center truncate"
                             title={row.label}
                           >
                             {safeRender(row.label)}
                           </div>
                         </TableCell>
                         {paginatedTasks.map((task) => (
-                          <TableCell 
-                            key={task.id} 
+                          <TableCell
+                            key={task.id}
                             className="text-center border-r border-slate-100 p-3 min-w-[180px] align-middle"
                           >
                             <div className="truncate max-w-[180px] mx-auto">
