@@ -544,18 +544,9 @@ export const getCellContent = (
   setLinkingTask: (task: any) => void,
   setIsLinkDialogOpen: (open: boolean) => void
 ) => {
-  // Log departments data
-  useEffect(() => {
-    console.log('Departments data in getCellContent:', {
-      departments,
-      taskId: task?.id,
-      headerId
-    });
-  }, [departments, task?.id, headerId]);
-
- const enhancedTask = task?.id ? enhancedTasksData.get(task.id.toString()) || task : task;
-const taskDeps = task?.id ? taskDependants.get(task.id.toString()) || [] : [];
-const isExpanded = task?.id ? expandedDependants.has(task.id.toString()) : false;
+  const enhancedTask = task?.id ? enhancedTasksData.get(task.id.toString()) || task : task;
+  const taskDeps = task?.id ? taskDependants.get(task.id.toString()) || [] : [];
+  const isExpanded = task?.id ? expandedDependants.has(task.id.toString()) : false;
 
   const cellContentMap = {
     id: task.id,
@@ -602,54 +593,48 @@ const isExpanded = task?.id ? expandedDependants.has(task.id.toString()) : false
       return <span className="whitespace-nowrap text-sm text-white">{stageFollowUp}</span>;
     })(),
     company_name: companies.get(task.company_id) || 'N/A',
- job_level: (() => {
-  const jobLevel = task.job_level;
-  
-  if (!jobLevel) return 'N/A';
+    job_level: (() => {
+      const jobLevel = task.job_level;
 
-  // Handle both string and object formats
-  if (typeof jobLevel === 'string') {
-    const levels = jobLevel.split('>').map(s => s.trim());
-    return levels[levels.length - 1] || 'N/A';
-  }
+      if (!jobLevel) return 'N/A';
 
-  if (typeof jobLevel === 'object' && jobLevel !== null) {
-    try {
-      // Get the subdepartment from the task
-      const subdepartment = task.subdepartment;
-      
-      // If we have a subclass_id, try to find it
-      if (jobLevel.subclass_id && subdepartment?.classes) {
-        for (const classItem of subdepartment.classes) {
-          if (classItem.subClasses) {
-            const subclass = classItem.subClasses.find((sc: any) => sc.id == jobLevel.subclass_id);
-            if (subclass?.name) return subclass.name;
+      // Handle both string and object formats
+      if (typeof jobLevel === 'string') {
+        const levels = jobLevel.split('>').map(s => s.trim());
+        return levels[levels.length - 1] || 'N/A';
+      }
+
+      if (typeof jobLevel === 'object' && jobLevel !== null) {
+        try {
+          // Find the department
+          const department = departments.find(d => d.id == jobLevel.department_id);
+          if (!department) return 'N/A';
+
+          // Find the subdepartment
+          const subdepartment = department.tm_subdepartments?.find(
+            (sd: any) => sd.id == jobLevel.subdepartment_id
+          );
+
+          // Find the class
+          if (subdepartment?.classes?.length && jobLevel.class_id) {
+            const classItem = subdepartment.classes.find(
+              (c: any) => c.id == jobLevel.class_id
+            );
+            if (classItem?.name) return classItem.name;
           }
+
+          // Fallback to showing just the ID if name not found
+          if (jobLevel.class_id) return `Class ${jobLevel.class_id}`;
+          if (jobLevel.subclass_id) return `Subclass ${jobLevel.subclass_id}`;
+          if (jobLevel.subdepartment_id) return `SubDept ${jobLevel.subdepartment_id}`;
+          if (jobLevel.department_id) return `Dept ${jobLevel.department_id}`;
+        } catch (error) {
+          console.error('Error processing job level:', error);
         }
       }
-      
-      // If we have a class_id, try to find it
-      if (jobLevel.class_id && subdepartment?.classes) {
-        const classItem = subdepartment.classes.find((c: any) => c.id == jobLevel.class_id);
-        if (classItem?.name) return classItem.name;
-      }
-      
-      // Fallback to subdepartment or department name
-      if (subdepartment?.name) return subdepartment.name;
-      if (task.department?.name) return task.department.name;
-      
-      // Last resort - show IDs
-      if (jobLevel.class_id) return `Class ${jobLevel.class_id}`;
-      if (jobLevel.subclass_id) return `Subclass ${jobLevel.subclass_id}`;
-      if (jobLevel.subdepartment_id) return `SubDept ${jobLevel.subdepartment_id}`;
-      if (jobLevel.department_id) return `Dept ${jobLevel.department_id}`;
-    } catch (error) {
-      console.error('Error processing job level:', error);
-    }
-  }
-  
-  return 'N/A';
-})(),
+
+      return 'N/A';
+    })(),
     renewal_new: <span className="text-sm font-semibold">{task.renewal_status || 'New'}</span>,
     case_status: <span className="text-sm font-semibold">{task.status || 'pending'}</span>,
     nationality: enhancedTask.nationality || 'N/A',
