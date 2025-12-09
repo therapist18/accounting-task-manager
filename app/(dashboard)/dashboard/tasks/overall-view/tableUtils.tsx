@@ -592,7 +592,13 @@ export const getCellContent = (
       if (!stageFollowUp) return '-';
       return <span className="whitespace-nowrap text-sm text-white">{stageFollowUp}</span>;
     })(),
-    company_name: companies.get(task.company_id) || 'N/A',
+   company_name: (() => {
+  if (!task.company_id) return 'N/A';
+  if (companies instanceof Map) {
+    return companies.get(task.company_id) || 'N/A';
+  }
+  return companies?.[task.company_id] || 'N/A';
+})(),
     job_level: (() => {
       const jobLevel = task.job_level;
 

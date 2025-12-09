@@ -270,6 +270,18 @@ export default function ReportsPage() {
     if (col.type === 'task') {
       const value = (() => {
         switch (col.field) {
+          case 'applicant_name':
+            // Handle both direct access and enhanced task data
+            return task.applicant_name || enhancedTasksData.get(task.id.toString())?.applicant_name || 'N/A';
+
+          case 'company_name':
+            // Handle both direct access and enhanced task data
+            const companyId = task.company_id || enhancedTasksData.get(task.id.toString())?.company_id;
+            if (companyId) {
+              return companies.get(companyId) || 'N/A';
+            }
+            return 'N/A';
+
           case 'job_level':
             console.log('Processing job_level field:', task.job_level);
             const jobLevel = task.job_level;
