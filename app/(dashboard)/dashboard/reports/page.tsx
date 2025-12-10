@@ -68,8 +68,6 @@ const SPECIAL_STAGE_IDS = [
   'caefd742-5de5-4341-a3bb-81d7b9dd2b73'  // Endorsement stage
 ];
 
-// --- 1. UPDATED DATE UTILITIES (Strict DD/MM/YYYY) ---
-
 const parseDateString = (dateInput: any): Date | null => {
   if (!dateInput) return null;
 
@@ -80,25 +78,42 @@ const parseDateString = (dateInput: any): Date | null => {
 
   try {
     const strInput = String(dateInput).trim();
+    if (!strInput) return null;
 
-    // Handle DD/MM/YYYY format explicitly
-    if (strInput.includes('/')) {
-      const parts = strInput.split('/');
-      if (parts.length === 3) {
-        const day = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10) - 1; // JS months are 0-indexed
-        const year = parseInt(parts[2], 10);
-        const d = new Date(year, month, day);
-        return isValid(d) ? d : null;
-      }
+    // Handle YYYY-MM-DD HH:MM:SS format (with or without time)
+    const dateTimeMatch = strInput.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?: (\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (dateTimeMatch) {
+      const [_, year, month, day, hours = 0, minutes = 0, seconds = 0] = dateTimeMatch.map(Number);
+      // Adjust month to 0-indexed for JavaScript Date
+      const d = new Date(year, month - 1, day, hours, minutes, seconds);
+      return isValid(d) ? d : null;
     }
 
-    // Handle ISO string (YYYY-MM-DD or ISO timestamp from DB)
-    const isoDate = new Date(strInput);
-    if (isValid(isoDate)) return isoDate;
+    // Handle DD/MM/YYYY format
+    const dmyMatch = strInput.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (dmyMatch) {
+      const [_, day, month, year] = dmyMatch.map(Number);
+      const d = new Date(year, month - 1, day);
+      return isValid(d) ? d : null;
+    }
 
+    // Try parsing as ISO date string
+    const isoDate = new Date(strInput);
+    if (isValid(isoDate)) {
+      return isoDate;
+    }
+
+    // Try parsing as timestamp (milliseconds since epoch)
+    if (/^\d+$/.test(strInput)) {
+      const timestamp = parseInt(strInput, 10);
+      const d = new Date(timestamp);
+      return isValid(d) ? d : null;
+    }
+
+    console.warn("Unrecognized date format:", strInput);
     return null;
   } catch (e) {
+    console.error("Error parsing date:", e, "Input:", dateInput);
     return null;
   }
 };
@@ -106,10 +121,16 @@ const parseDateString = (dateInput: any): Date | null => {
 const formatDateForDisplay = (date: any): string => {
   const d = parseDateString(date);
   if (!d) return '-';
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  return `${day}/${month}/${year}`;
+  
+  try {
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  } catch (e) {
+    console.error("Error formatting date:", e, "Input:", date);
+    return '-';
+  }
 };
 
 // --- Time Formatting Helpers ---
@@ -411,11 +432,27 @@ export default function ReportsPage() {
   const getEnhancedImmigrationStatusWrapper = useCallback((task) => getEnhancedImmigrationStatus(task, stages, allDocuments, kycDocuments), [stages, allDocuments, kycDocuments]);
   const getStaffName = useCallback(() => '', []);
 
+  // UPDATED getDocumentForTaskStage to check task.stages too
   const getDocumentForTaskStage = useCallback((task, stage) => {
-    const linked = task.source_document_id?.[stage.id];
+    let linked = task.source_document_id?.[stage.id];
+    
+    // Fallback: Check task.stages[stage.id].documents
+    if (!linked && task.stages?.[stage.id]?.documents) {
+        linked = Object.values(task.stages[stage.id].documents).map((doc:any) => 
+            doc.document_id || doc.id // Handle different ID locations
+        );
+    }
+
     if (!linked) return [];
-    return (Array.isArray(linked) ? linked : [linked])
-      .map(ref => allDocuments.find(d => d.id.toString() === (typeof ref === 'string' ? ref : ref.id).toString()))
+    
+    const linkedIds = Array.isArray(linked) ? linked : [linked];
+    
+    return linkedIds
+      .map(ref => {
+          const docId = typeof ref === 'string' ? ref : ref.id;
+          if (!docId) return null;
+          return allDocuments.find(d => d.id.toString() === docId.toString());
+      })
       .filter(Boolean);
   }, [allDocuments]);
 
@@ -583,23 +620,86 @@ export default function ReportsPage() {
       // --- 2. DETERMINE COMPLETION DATE (Priority: Manually entered Date > Extracted > Timestamp) ---
       let completionDateStr = stageData?.date;
 
-      if (!completionDateStr && stage.documents?.length > 0) {
-        const docConfig = stage.documents.find(d => isDocumentApplicable(d, task));
-        if (docConfig) {
-          const linkedDocs = getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
-          const linkedDoc = linkedDocs[0];
-          if (linkedDoc && !linkedDoc.indicator) {
-            const dateFields = ['date', 'Date', 'application_date', 'upload_date', 'created_date', 'With_Effect_From'];
-            const details = linkedDoc.extracted_details || {};
-            for (const field of dateFields) {
-              if (details[field]) { completionDateStr = details[field]; break; }
-            }
-          }
+      console.log(`[DEBUG] Processing Task: ${task.applicant_name}`);
+      console.log(`[DEBUG] Stage: ${stage.name}`);
+      console.log(`[DEBUG] Initial Date from Stage Data:`, completionDateStr);
+
+      // FORCE DOCUMENT CHECK EVEN IF DATE EXISTS (To ensure we catch latest document date if applicable)
+      if (stage.documents?.length > 0) {
+        
+        // Log raw links to debug availability
+        const rawLinks = task.source_document_id?.[stage.id];
+        console.log(`[DEBUG] Raw Task Source Docs for ${stage.name}:`, rawLinks);
+
+        const allLinkedDocs = stage.documents.flatMap(docConfig => {
+             // Log the doc config we are trying to match
+             console.log(`[DEBUG] Checking Doc Config:`, docConfig);
+
+             const isApplicable = isDocumentApplicable(docConfig, task);
+             console.log(`[DEBUG] Is Applicable? ${isApplicable}`);
+
+             if (!isApplicable) return [];
+
+             // This now calls the updated helper which checks both source_document_id and task.stages
+             const foundDocs = getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
+             console.log(`[DEBUG] Found ${foundDocs.length} linked documents for this config`);
+             
+             // Log details of found docs
+             foundDocs.forEach(d => {
+                 console.log(`[DEBUG] Found Doc ID: ${d.id}, Extracted:`, d.extracted_details);
+             });
+
+             return foundDocs;
+          })
+          .filter(d => d && !d.indicator);
+
+        console.log(`[DEBUG] Total Linked Docs Found: ${allLinkedDocs.length}`);
+
+        if (allLinkedDocs.length > 0) {
+           // We need to find the LATEST date among all uploaded documents
+           // Fields to check in priority order
+           const dateFields = [
+             'application_date', 'date', 'Date', 'upload_date', 'created_date', 'With_Effect_From', 'date_and_time_generated',
+             'date_of_application', 'Application Date', 'submission_date', 'Submission Date'
+           ];
+           
+           let validDates = [];
+           
+           allLinkedDocs.forEach(linkedDoc => {
+              const details = linkedDoc.extracted_details || {};
+              
+              for (const field of dateFields) {
+                 // Try strict match first, then case-insensitive
+                 const key = Object.keys(details).find(k => k.toLowerCase() === field.toLowerCase()) || field;
+                 
+                 if (details[key]) {
+                    const parsed = parseDateString(details[key]);
+                    if (parsed) {
+                        validDates.push(parsed);
+                        console.log(`[DEBUG] Found valid date in field '${field}': ${parsed}`);
+                        break; // Stop at first valid date field for THIS document
+                    }
+                 }
+              }
+           });
+           
+           if (validDates.length > 0) {
+              // Sort descending and pick the latest date as completion
+              validDates.sort((a, b) => b.getTime() - a.getTime());
+              const latestDocDate = validDates[0];
+              
+              // Always use the document date if found, regardless of completionDateStr
+              completionDateStr = latestDocDate;
+              console.log(`[DEBUG] Using extracted document date:`, latestDocDate);
+           } else {
+              console.log(`[DEBUG] No valid dates found in extracted details.`);
+           }
         }
       }
 
       if (!completionDateStr && stageData?.status === 'completed' && stageData?.completedAt) {
         completionDateStr = stageData.completedAt;
+        console.log(`[DEBUG] Using completedAt timestamp:`, completionDateStr);
       }
 
       const completionDate = parseDateString(completionDateStr);
@@ -805,6 +905,9 @@ export default function ReportsPage() {
   const columns = useMemo(() => {
     if (!activeReport || !stages.length) return [];
 
+    console.log("[DEBUG] Building Columns for Report:", activeReport.name);
+    console.log("[DEBUG] Config Stages Keys:", Object.keys(activeReport.configuration?.stages || {}));
+
     const getLabel = (id: string) => id.replace(/_/g, ' ').toUpperCase();
     const cols: any[] = [];
 
@@ -824,18 +927,31 @@ export default function ReportsPage() {
 
     const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
 
+    // Iterate through ALL stages (filtered by active report config)
     stages.filter(s => activeStageIds.includes(s.id)).forEach(stage => {
+      console.log(`[DEBUG] Processing Column for Stage: ${stage.name} (${stage.id})`);
 
-      if (!isStageApplicableToCurrentFilter(stage.id)) {
-        return;
+      // Check if applicable to current filter (but log it regardless)
+      const isApplicable = isStageApplicableToCurrentFilter(stage.id);
+      if (!isApplicable) {
+         console.log(`[DEBUG] Skipping stage ${stage.name} due to filter non-applicability`);
+         return; 
       }
 
       const config = activeReport.configuration.stages[stage.id];
       const isSpecialStage = SPECIAL_STAGE_IDS.includes(stage.id);
 
-      if (config.isStageDateSelected) {
+      // FORCE ADD DATE COLUMN IF EITHER EXPLICITLY SELECTED *OR* DOCUMENTS ARE PRESENT
+      const shouldShowDateColumn = config.isStageDateSelected || (config.documents && Object.keys(config.documents).length > 0);
+
+      if (shouldShowDateColumn) {
+        console.log(`[DEBUG] Adding Date Column for: ${stage.name}`);
         cols.push({
-          id: `stage_date_${stage.id}`, label: `${stage.name} (Date)`, type: 'stage_date', stageId: stage.id, stageName: stage.name
+          id: `stage_date_${stage.id}`, 
+          label: `${stage.name} (Date)`, 
+          type: 'stage_date', 
+          stageId: stage.id, 
+          stageName: stage.name
         });
       }
 
@@ -863,7 +979,17 @@ export default function ReportsPage() {
                 return name === 'expiry_date' || f.isEffectiveTo === true || name.includes('expiry') || name.includes('effective_to');
               });
               if (toField) {
-                cols.push({ id: `field_${stage.id}_to`, label: `${stage.name} - TO`, type: 'extracted_field', stageId: stage.id, kycId, fieldId: toField.id || toField.name, fieldName: toField.name || toField.fieldName, fieldType: toField.type || toField.fieldType || 'date', isAutoAdded: true });
+                cols.push({ 
+                  id: `field_${stage.id}_to`, 
+                  label: `${stage.name} - TO`, 
+                  type: 'extracted_field', 
+                  stageId: stage.id, 
+                  kycId, 
+                  fieldId: toField.id || toField.name, 
+                  fieldName: toField.name || toField.fieldName, 
+                  fieldType: toField.type || toField.fieldType || 'date', 
+                  isAutoAdded: true 
+                });
                 toAdded = true;
               }
             }
@@ -886,6 +1012,7 @@ export default function ReportsPage() {
     return cols;
   }, [activeReport, stages, kycDocuments, isStageApplicableToCurrentFilter]);
 
+  // ... [Keep rest of the component exactly as is] ...
   const sortedTasks = useMemo(() => {
     if (!sortConfig || !columns.length) return searchedTasks;
     const sorted = [...searchedTasks];
