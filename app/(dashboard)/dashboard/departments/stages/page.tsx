@@ -1749,176 +1749,397 @@ export default function Stages() {
 
   const currentDept = getCurrentDepartment()
 
-  const handleExportToExcel = () => {
-    if (!currentDept) return
+ const styleCell = (cell: ExcelJS.Cell, customStyle: Partial<ExcelJS.Style> = {}) => {
+    cell.font = { name: 'Calibri', size: 11, ...customStyle.font };
+    cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true, ...customStyle.alignment };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFD4D4D4' } },
+      left: { style: 'thin', color: { argb: 'FFD4D4D4' } },
+      right: { style: 'thin', color: { argb: 'FFD4D4D4' } },
+      bottom: { style: 'thin', color: { argb: 'FFD4D4D4' } },
+    };
+    if (customStyle.fill) {
+      cell.fill = customStyle.fill;
+    }
+  };
 
-    const processedSubdepartments = getProcessedSubdepartments(currentDept)
-    const dataToExport = []
+  // 3. REPLACE THE handleExportToExcel FUNCTION
+  const handleExportToExcel = async () => {
+    if (!currentDept) return;
 
-    if (isTransposed) {
-      // Export transposed data - stages as rows, entities as columns
-      const leafEntities = getLeafEntities(currentDept)
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const viewType = isTransposed ? "Transposed" : "Standard";
+      const worksheet = workbook.addWorksheet(`${viewType} View`, {
+        properties: { outlineProperties: { summaryBelow: false, summaryRight: false } },
+      });
 
-      currentDept.stages.forEach((stage, stageIndex) => {
-        const rowData = {
-          "Stage #": stage.order_num,
-          "Stage Name": stage.name,
-          Duration: minutesToTimeString(stage.estimated_time),
-          "Follow Up": stage.follow_up || "-",
-          Documents: stage.documents?.length || 0,
-          "KYC Docs": stage.documents?.filter((doc) => doc.kycId).length || 0,
+      // --- COMMON HEADER METADATA ---
+      worksheet.mergeCells('A1:E1');
+      worksheet.getCell('A1').value = `Stages: ${currentDept.name}`;
+      worksheet.getCell('A1').font = { name: 'Calibri', size: 16, bold: true };
+      
+      worksheet.mergeCells('A2:E2');
+      worksheet.getCell('A2').value = `Export Date: ${new Date().toLocaleDateString()}`;
+      worksheet.getCell('A2').font = { name: 'Calibri', size: 12 };
+
+      // Set outline levels base
+      worksheet.properties.outlineLevels = { row: 3, column: 0 };
+
+      if (isTransposed) {
+        // ==========================================
+        // TRANSPOSED VIEW (Stages as Rows)
+        // ==========================================
+        const leafEntities = getLeafEntities(currentDept);
+        const headerStartRow = 4;
+
+        // 1. Setup Columns
+        // Fixed columns based on visibility
+        const fixedHeaders = [];
+        if (columnVisibility.index) fixedHeaders.push({ header: '#', key: 'index', width: 6 });
+        if (columnVisibility.entity) fixedHeaders.push({ header: 'Stage Name', key: 'name', width: 30 });
+        if (columnVisibility.stageName) {
+           fixedHeaders.push({ header: 'Duration', key: 'duration', width: 15 });
+           fixedHeaders.push({ header: 'Follow Up', key: 'followUp', width: 15 });
         }
 
-        // Add entity data for each leaf entity
-        leafEntities.forEach((entity) => {
-          let stageAllocation
+        // 2. Build Header Rows
+        const mainHeaderRow = worksheet.getRow(headerStartRow);
+        const subHeaderRow = worksheet.getRow(headerStartRow + 1);
+        
+        let colIndex = 1;
 
-          if (entity.type === "subdepartment") {
-            const subdept = processedSubdepartments.find((sd) => sd.id === entity.subdeptId)
-            stageAllocation = subdept?.stages?.find((s) => s.stage_id === stage.id)
-          } else if (entity.type === "class" && entity.classIndex !== undefined) {
-            const subdept = processedSubdepartments.find((sd) => sd.id === entity.subdeptId)
-            // Need to find the original class index as getProcessedSubdepartments filters the array
-            const originalSubdept = currentDept.subdepartments.find(sd => sd.id === entity.subdeptId);
-            const originalCls = originalSubdept?.classes?.[entity.classIndex];
-            const processedCls = subdept?.classes?.find(c => c.id === originalCls.id);
+        // Write Fixed Headers
+        fixedHeaders.forEach(h => {
+          // Merge vertical for fixed headers
+          worksheet.mergeCells(headerStartRow, colIndex, headerStartRow + 1, colIndex);
+          const cell = mainHeaderRow.getCell(colIndex);
+          cell.value = h.header;
+          worksheet.getColumn(colIndex).width = h.width;
+          styleCell(cell, { 
+            font: { bold: true, color: { argb: 'FFFFFFFF' } }, 
+            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } },
+            alignment: { horizontal: 'center' }
+          });
+          // Apply style to the merged cell bottom just to be safe
+          styleCell(subHeaderRow.getCell(colIndex), { border: { bottom: { style: 'thin' } } });
+          colIndex++;
+        });
 
-            stageAllocation = processedCls?.stages?.find((s) => s.stage_id === stage.id)
-          } else if (
-            entity.type === "subclass" &&
-            entity.classIndex !== undefined &&
-            entity.subclassIndex !== undefined
-          ) {
-            const subdept = processedSubdepartments.find((sd) => sd.id === entity.subdeptId)
-            const originalSubdept = currentDept.subdepartments.find(sd => sd.id === entity.subdeptId);
-            const originalCls = originalSubdept?.classes?.[entity.classIndex];
-            const originalSubCls = originalCls?.subClasses?.[entity.subclassIndex];
-            const processedCls = subdept?.classes?.find(c => c.id === originalCls.id);
-            const processedSubCls = processedCls?.subClasses?.find(sc => sc.id === originalSubCls.id);
-            stageAllocation = processedSubCls?.stages?.find((s) => s.stage_id === stage.id)
+        // Write Entity Headers (Dynamic Columns)
+        leafEntities.forEach(entity => {
+          // Determine span (Controls visibility)
+          const span = columnVisibility.controls ? 2 : 1;
+          
+          if (span > 1) {
+            worksheet.mergeCells(headerStartRow, colIndex, headerStartRow, colIndex + span - 1);
+          }
+          
+          const mainCell = mainHeaderRow.getCell(colIndex);
+          mainCell.value = entity.name; // Top header is Entity Name
+          styleCell(mainCell, {
+             font: { bold: true, color: { argb: 'FFFFFFFF' } },
+             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } }, // Lighter blue
+             alignment: { horizontal: 'center' }
+          });
+
+          // Sub headers
+          if (columnVisibility.controls) {
+            const sub1 = subHeaderRow.getCell(colIndex);
+            sub1.value = "App.";
+            styleCell(sub1, { font: { size: 9, bold: true }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }, alignment: { horizontal: 'center' }});
+            
+            const sub2 = subHeaderRow.getCell(colIndex + 1);
+            sub2.value = "Disp.";
+            styleCell(sub2, { font: { size: 9, bold: true }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }, alignment: { horizontal: 'center' }});
+            
+            worksheet.getColumn(colIndex).width = 8;
+            worksheet.getColumn(colIndex + 1).width = 8;
+          } else {
+             const sub1 = subHeaderRow.getCell(colIndex);
+             sub1.value = "Status";
+             styleCell(sub1, { font: { size: 9 }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }});
+             worksheet.getColumn(colIndex).width = 10;
           }
 
-          const isApplicable = stageAllocation?.applicable ?? true
-          const isDisplayed = stageAllocation?.display ?? true
+          colIndex += span;
+        });
 
-          rowData[`${entity.name} - Applicable`] = isApplicable ? "yes" : "no"
-          rowData[`${entity.name} - Display`] = isDisplayed ? "yes" : "no"
-        })
+        // 3. Write Data Rows (Stages)
+        currentDept.stages.forEach((stage, idx) => {
+          const row = worksheet.addRow([]);
+          let currentCell = 1;
 
-        dataToExport.push(rowData)
-      })
-    } else {
-      // Export normal data - entities as rows, stages as columns
-      let entityIndex = 1
-      processedSubdepartments.forEach((subdept) => {
-        const hasClasses = subdept.classes && subdept.classes.length > 0
-        if (!hasClasses) {
-          // Subdepartment without classes - add as leaf node
-          const rowData = {
-            Department: currentDept.name,
-            "#": entityIndex++,
-            Entity: subdept.name,
+          // Fixed Data
+          if (columnVisibility.index) {
+             const c = row.getCell(currentCell++); 
+             c.value = stage.order_num;
+             styleCell(c, { alignment: { horizontal: 'center' }});
+          }
+          if (columnVisibility.entity) {
+             const c = row.getCell(currentCell++);
+             c.value = stage.name;
+             styleCell(c, { font: { bold: true } });
+          }
+          if (columnVisibility.stageName) {
+             const cDur = row.getCell(currentCell++);
+             cDur.value = minutesToTimeString(stage.estimated_time);
+             const cFol = row.getCell(currentCell++);
+             cFol.value = stage.follow_up || '-';
           }
 
-          // Add stage data for each stage
-          currentDept.stages.forEach((stage) => {
-            const stageAllocation = subdept.stages?.find((s) => s.stage_id === stage.id)
-            const isApplicable = stageAllocation?.applicable ?? true
-            const isDisplayed = stageAllocation?.display ?? true
+          // Dynamic Entity Data
+          leafEntities.forEach(entity => {
+             const allocation = getStageAllocation(stage, entity);
+             
+             if (columnVisibility.controls) {
+                // Applicable Cell
+                const cApp = row.getCell(currentCell++);
+                cApp.value = allocation.applicable ? "Yes" : "No";
+                styleCell(cApp, { 
+                  font: { color: { argb: allocation.applicable ? 'FF006100' : 'FF9C0006' } },
+                  fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: allocation.applicable ? 'FFC6EFCE' : 'FFFFC7CE' } }, // Light Green / Light Red
+                  alignment: { horizontal: 'center' }
+                });
 
-            rowData[`${stage.name} - Stage Name`] = stage.name
-            rowData[`${stage.name} - Duration`] = minutesToTimeString(stage.estimated_time)
-            rowData[`${stage.name} - Follow Up`] = stage.follow_up || "-"
-            rowData[`${stage.name} - Applicable`] = isApplicable ? "yes" : "no"
-            rowData[`${stage.name} - Display`] = isDisplayed ? "yes" : "no"
-          })
+                // Display Cell
+                const cDisp = row.getCell(currentCell++);
+                cDisp.value = allocation.display ? "Yes" : "No";
+                styleCell(cDisp, { 
+                   font: { color: { argb: allocation.display ? 'FF000000' : 'FF808080' } },
+                   alignment: { horizontal: 'center' }
+                });
+             } else {
+                // Single Status Cell
+                const cStat = row.getCell(currentCell++);
+                cStat.value = allocation.applicable ? "Active" : "-";
+             }
+          });
+        });
 
-          dataToExport.push(rowData)
-        } else {
-          // Subdepartment with classes
-          subdept.classes.forEach((cls) => {
-            const hasSubClasses = cls.subClasses && cls.subClasses.length > 0
-            if (!hasSubClasses) {
-              // Class without subclasses - add as leaf node
-              const rowData = {
-                Department: currentDept.name,
-                "#": entityIndex++,
-                Entity: cls.name,
+      } else {
+        // ==========================================
+        // STANDARD VIEW (Entities as Rows - HIERARCHICAL)
+        // ==========================================
+        
+        // 1. Calculate Dynamic Columns per Stage
+        // What columns do we show for each stage?
+        const stageSubCols = [];
+        if (columnVisibility.duration) stageSubCols.push({ label: 'Dur.', width: 8 });
+        if (columnVisibility.followUp) stageSubCols.push({ label: 'F/U', width: 8 });
+        if (columnVisibility.status) stageSubCols.push({ label: 'Status', width: 10 });
+        if (columnVisibility.controls) {
+           stageSubCols.push({ label: 'App.', width: 6 });
+           stageSubCols.push({ label: 'Disp.', width: 6 });
+        }
+        
+        const colsPerStage = stageSubCols.length;
+        if (colsPerStage === 0) {
+           toast({ title: "No stage columns visible", variant: "destructive" });
+           return;
+        }
+
+        const headerStartRow = 4;
+        const mainHeaderRow = worksheet.getRow(headerStartRow);
+        const subHeaderRow = worksheet.getRow(headerStartRow + 1);
+        mainHeaderRow.height = 25;
+
+        // 2. Build Headers
+        let colIndex = 1;
+
+        // Static Headers (Index, Entity)
+        if (columnVisibility.index) {
+           worksheet.mergeCells(headerStartRow, colIndex, headerStartRow + 1, colIndex);
+           const c = mainHeaderRow.getCell(colIndex);
+           c.value = "#";
+           worksheet.getColumn(colIndex).width = 6;
+           styleCell(c, { 
+             font: { bold: true, color: { argb: 'FFFFFFFF' } }, 
+             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } },
+             alignment: { horizontal: 'center' }
+           });
+           colIndex++;
+        }
+
+        if (columnVisibility.entity) {
+           worksheet.mergeCells(headerStartRow, colIndex, headerStartRow + 1, colIndex);
+           const c = mainHeaderRow.getCell(colIndex);
+           c.value = "Department / Entity";
+           worksheet.getColumn(colIndex).width = 40;
+           styleCell(c, { 
+             font: { bold: true, color: { argb: 'FFFFFFFF' } }, 
+             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF002060' } }
+           });
+           colIndex++;
+        }
+
+        // Dynamic Stage Headers
+        currentDept.stages.forEach(stage => {
+           // Merge cells for Stage Name
+           worksheet.mergeCells(headerStartRow, colIndex, headerStartRow, colIndex + colsPerStage - 1);
+           const mainC = mainHeaderRow.getCell(colIndex);
+           mainC.value = stage.name;
+           styleCell(mainC, { 
+             font: { bold: true, color: { argb: 'FFFFFFFF' } }, 
+             fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } }, // Medium Blue
+             alignment: { horizontal: 'center' }
+           });
+
+           // Sub columns
+           stageSubCols.forEach((subCol, i) => {
+              const subC = subHeaderRow.getCell(colIndex + i);
+              subC.value = subCol.label;
+              worksheet.getColumn(colIndex + i).width = subCol.width;
+              styleCell(subC, { 
+                 font: { size: 10, bold: true }, 
+                 fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7E6E6' } }, // Light Gray
+                 alignment: { horizontal: 'center' }
+              });
+           });
+           
+           colIndex += colsPerStage;
+        });
+
+        // 3. Write Data with Hierarchy
+        const processedSubdepartments = getProcessedSubdepartments(currentDept);
+        let rowCounter = 0;
+
+        // Helper to add a row
+        const addEntityRow = (entityName: string, entityObj: any, level: number, subdeptId: number, clsId: number | null, subClsId: number | null) => {
+           rowCounter++;
+           const row = worksheet.addRow([]);
+           row.outlineLevel = level;
+           let currCell = 1;
+
+           // Index
+           if (columnVisibility.index) {
+              row.getCell(currCell++).value = rowCounter; // Could make this 1.1, 1.1.1 if desired
+           }
+           
+           // Entity Name with indentation
+           if (columnVisibility.entity) {
+              const c = row.getCell(currCell++);
+              c.value = entityName;
+              styleCell(c, { alignment: { indent: level } });
+           }
+
+           // Background colors for group rows
+           const bgColors = ['FFDDEBF7', 'FFF2F2F2', 'FFFFFFFF']; // Level 0 (Blue), 1 (Gray), 2 (White)
+           const bgColor = bgColors[level] || 'FFFFFFFF';
+           const isGroupHeader = (level === 0) || (level === 1 && subClsId === null && entityObj.subClasses && entityObj.subClasses.length > 0);
+
+           if (isGroupHeader) {
+             row.eachCell({ includeEmpty: true }, c => {
+                c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+                c.font = { bold: true };
+                c.border = { bottom: { style: 'thin', color: { argb: 'FFD4D4D4' } } };
+             });
+           }
+
+           // Stage Data
+           currentDept.stages.forEach(stage => {
+              // Calculate allocation manually based on ids passed
+              let stageAllocation;
+              
+              if (subClsId !== null && clsId !== null) {
+                 // Subclass
+                 stageAllocation = entityObj.stages?.find((s:any) => s.stage_id === stage.id);
+              } else if (clsId !== null) {
+                 // Class
+                 stageAllocation = entityObj.stages?.find((s:any) => s.stage_id === stage.id);
+                 // Check inheritance if visual only (not done here for raw data export, sticking to direct allocation)
+              } else {
+                 // Subdept
+                 stageAllocation = entityObj.stages?.find((s:any) => s.stage_id === stage.id);
               }
 
-              currentDept.stages.forEach((stage) => {
-                const stageAllocation = cls.stages?.find((s) => s.stage_id === stage.id)
-                const isApplicable = stageAllocation?.applicable ?? true
-                const isDisplayed = stageAllocation?.display ?? true
+              const isApp = stageAllocation?.applicable ?? true;
+              const isDisp = stageAllocation?.display ?? true;
 
-                rowData[`${stage.name} - Stage Name`] = stage.name
-                rowData[`${stage.name} - Duration`] = minutesToTimeString(stage.estimated_time)
-                rowData[`${stage.name} - Follow Up`] = stage.follow_up || "-"
-                rowData[`${stage.name} - Applicable`] = isApplicable ? "yes" : "no"
-                rowData[`${stage.name} - Display`] = isDisplayed ? "yes" : "no"
-              })
+              // Write columns
+              if (columnVisibility.duration) {
+                 const c = row.getCell(currCell++);
+                 c.value = minutesToTimeString(stage.estimated_time);
+                 c.alignment = { horizontal: 'center' };
+              }
+              if (columnVisibility.followUp) {
+                 const c = row.getCell(currCell++);
+                 c.value = stage.follow_up || '-';
+                 c.alignment = { horizontal: 'center' };
+              }
+              if (columnVisibility.status) {
+                 const c = row.getCell(currCell++);
+                 c.value = stage.status || '-';
+                 c.alignment = { horizontal: 'center' };
+              }
+              if (columnVisibility.controls) {
+                 // Applicable
+                 const cApp = row.getCell(currCell++);
+                 if (!hasClasses(entityObj, level)) { // Only show controls for "leaves" or editable rows? 
+                    // Current logic allows editing everywhere, so show everywhere
+                    cApp.value = isApp ? "Yes" : "No";
+                    styleCell(cApp, { 
+                       font: { color: { argb: isApp ? 'FF006100' : 'FF9C0006' }, size: 10 },
+                       fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isApp ? 'FFC6EFCE' : 'FFFFC7CE' } },
+                       alignment: { horizontal: 'center' }
+                    });
+                 } else {
+                    cApp.value = "-"; // Group header visual filler
+                 }
 
-              dataToExport.push(rowData)
-            } else {
-              // Class with subclasses
-              cls.subClasses.forEach((subCls) => {
-                const rowData = {
-                  Department: currentDept.name,
-                  "#": entityIndex++,
-                  Entity: subCls.name,
-                }
+                 // Display
+                 const cDisp = row.getCell(currCell++);
+                 if (!hasClasses(entityObj, level)) {
+                    cDisp.value = isDisp ? "Yes" : "No";
+                    styleCell(cDisp, { alignment: { horizontal: 'center' }, font: { size: 10 } });
+                 } else {
+                    cDisp.value = "-";
+                 }
+              }
+           });
+        };
 
-                currentDept.stages.forEach((stage) => {
-                  const stageAllocation = subCls.stages?.find((s) => s.stage_id === stage.id)
-                  const isApplicable = stageAllocation?.applicable ?? true
-                  const isDisplayed = stageAllocation?.display ?? true
+        // Helper to check if an object acts as a group header (has children)
+        const hasClasses = (obj: any, level: number) => {
+           if (level === 0) return obj.classes && obj.classes.length > 0;
+           if (level === 1) return obj.subClasses && obj.subClasses.length > 0;
+           return false;
+        };
 
-                  rowData[`${stage.name} - Stage Name`] = stage.name
-                  rowData[`${stage.name} - Duration`] = minutesToTimeString(stage.estimated_time)
-                  rowData[`${stage.name} - Follow Up`] = stage.follow_up || "-"
-                  rowData[`${stage.name} - Applicable`] = isApplicable ? "yes" : "no"
-                  rowData[`${stage.name} - Display`] = isDisplayed ? "yes" : "no"
-                })
+        // Iterate Hierarchy
+        processedSubdepartments.forEach(subdept => {
+           addEntityRow(subdept.name, subdept, 0, subdept.id, null, null);
 
-                dataToExport.push(rowData)
-              })
-            }
-          })
-        }
-      })
+           if (subdept.classes && subdept.classes.length > 0) {
+              subdept.classes.forEach((cls: any, clsIndex: number) => {
+                 addEntityRow(cls.name, cls, 1, subdept.id, cls.id || clsIndex, null);
+
+                 if (cls.subClasses && cls.subClasses.length > 0) {
+                    cls.subClasses.forEach((subCls: any, subClsIndex: number) => {
+                       addEntityRow(subCls.name, subCls, 2, subdept.id, cls.id || clsIndex, subCls.id || subClsIndex);
+                    });
+                 }
+              });
+           }
+        });
+      }
+
+      // --- SAVE FILE ---
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const kycDocCount = allKycDocuments.size;
+      saveAs(blob, `${currentDept.name}_Stages_${viewType}_${kycDocCount}Docs_${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      toast({ 
+         title: "Export Successful", 
+         description: `Exported ${viewType} view to Excel` 
+      });
+
+    } catch (error) {
+      console.error("Export to Excel failed:", error);
+      toast({ title: "Export Failed", description: "Check console for details", variant: "destructive" });
     }
-
-    if (dataToExport.length === 0) {
-      toast({
-        title: "No Data to Export",
-        description: "There is no applicable stage data for the currently visible entities.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    // Create workbook
-    const wb = XLSX.utils.book_new()
-    const ws = XLSX.utils.json_to_sheet(dataToExport)
-
-    // Set column widths
-    const colWidths = Object.keys(dataToExport[0] || {}).map((key) => ({ wch: 15 }))
-    ws["!cols"] = colWidths
-
-    // Add the worksheet to workbook
-    const viewType = isTransposed ? "Transposed" : "Standard"
-    XLSX.utils.book_append_sheet(wb, ws, `${viewType} View`)
-
-    // Generate file
-    const kycDocCount = allKycDocuments.size
-    const fileName = `${currentDept.name}_Stages_${viewType}_KYC_${kycDocCount}_docs_${new Date().toISOString().split("T")[0]}.xlsx`
-    XLSX.writeFile(wb, fileName)
-
-    toast({
-      title: "Export Successful",
-      description: `Exported ${dataToExport.length} rows in ${viewType.toLowerCase()} view with ${kycDocCount} KYC documents to Excel`,
-    })
-  }
+  };
 
   // Function to get stage allocation for an entity
   const getStageAllocation = (stage: Stage, entity: any) => {
