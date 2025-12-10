@@ -3,19 +3,23 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, Loader2, Pencil } from "lucide-react"
+import { Upload, Calendar, Check, X, Clock, Eye, AlertTriangle, Zap, Loader2, Pencil, SkipForward } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase/client"
 import { format, parse, isValid } from "date-fns"
 import { AutomationMappingDialog } from "./AutomationMappingDialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import { isDocumentApplicable } from "../overall-view/tableUtils"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface EditableStageCellProps {
   stage: any
+  stages?: any[]
   task: any
   value?: string | null
   onSave?: (
@@ -88,6 +92,7 @@ const findDateInObject = (obj: any, dateFields: string[]): string | null => {
 // Main Component
 export default function EditableStageCell({
   stage,
+  stages = [],
   task,
   value,
   onSave,
@@ -110,6 +115,14 @@ export default function EditableStageCell({
   const [isAutomationRunning, setIsAutomationRunning] = useState(false);
   const [previewDocuments, setPreviewDocuments] = useState<any[]>([]);
   const [currentPreviewIndex, setCurrentPreviewIndex] = useState(0);
+  const [isSkipDialogOpen, setIsSkipDialogOpen] = useState(false);
+  const [skipReason, setSkipReason] = useState('');
+  const [selectedSkipReason, setSelectedSkipReason] = useState('');
+  const [isCheckingPreviousStages, setIsCheckingPreviousStages] = useState(false);
+  // Add this near the top with other state variables
+  const isStageCompleted = useMemo(() => {
+    return task.stages?.[stage.id]?.status === 'completed' || task.stages?.[stage.id]?.status === 'skipped';
+  }, [task.stages, stage.id]);
 
   // Debug logs
   useEffect(() => {
@@ -225,44 +238,121 @@ export default function EditableStageCell({
       setEditValue('');
     }
   }, [stageDate]);
-
-  const formatDateDisplay = (dateStr: string): string => {
-    if (!dateStr) return '';
-    const formatsToTry = ['dd/MM/yyyy', 'yyyy-MM-dd'];
-    for (const fmt of formatsToTry) {
-      const date = parse(dateStr, fmt, new Date());
-      if (isValid(date)) {
-        return format(date, 'dd/MM/yyyy');
+const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string): string => {
+  if (status === 'skipped') {
+    if (skippedAt) {
+      try {
+        const date = new Date(skippedAt);
+        if (isValid(date)) {
+          return `Skipped (${format(date, 'dd/MM/yyyy')})`;
+        }
+      } catch (e) {
+        console.error('Error formatting skipped date:', e);
       }
     }
-    return dateStr;
-  };
+    return 'Skipped';
+  }
+  
+  if (!dateStr) return '';
+  
+  const formatsToTry = ['dd/MM/yyyy', 'yyyy-MM-dd', 'MM/dd/yyyy', 'dd-MM-yyyy'];
+  for (const formatStr of formatsToTry) {
+    const parsedDate = parse(dateStr, formatStr, new Date());
+    if (isValid(parsedDate)) {
+      return format(parsedDate, 'dd/MM/yyyy');
+    }
+  }
 
-  const handleSave = useCallback(async () => {
+  return dateStr;
+};
+  const handleSave = useCallback(async (isSkipped = false, skipReason = '') => {
     if (!onSave) {
       toast({ title: "Error", description: "Save handler not available", variant: "destructive" });
       return;
     }
 
     const dateObj = parse(editValue, 'yyyy-MM-dd', new Date());
-    if (!editValue.trim() || !isValid(dateObj)) {
+    const formattedDate = isSkipped ? '' : format(dateObj, 'dd/MM/yyyy');
+
+    if (!isSkipped && (!editValue.trim() || !isValid(dateObj))) {
       toast({ title: "Error", description: "Please enter a valid date", variant: "destructive" });
       return;
     }
 
     setIsLoading(true);
     try {
-      const formattedDate = format(dateObj, 'dd/MM/yyyy');
-      await onSave(stage.id, task.id, formattedDate, linkedDocument?.extracted_details || {});
+      const status = isSkipped ? 'skipped' : 'completed';
+      const skipData = isSkipped ? {
+        skippedAt: new Date().toISOString(),
+        skippedBy: 'userId', // Replace with actual user ID from auth
+        reason: skipReason || selectedSkipReason || 'Not specified',
+      } : {};
+
+      await onSave(stage.id, task.id, formattedDate, {
+        ...(linkedDocument?.extracted_details || {}),
+        status,
+        ...skipData,
+      });
+
       setIsEditing(false);
-      toast({ title: "Success", description: "Date saved successfully" });
+      setIsSkipDialogOpen(false);
+
+      toast({
+        title: "Success",
+        description: isSkipped
+          ? "Stage marked as skipped"
+          : "Date saved successfully"
+      });
     } catch (error) {
-      console.error('Date save error:', error);
-      toast({ title: "Error", description: error instanceof Error ? error.message : "Failed to save date", variant: "destructive" });
+      console.error('Save error:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to save",
+        variant: "destructive"
+      });
     } finally {
       setIsLoading(false);
     }
-  }, [editValue, onSave, stage.id, task.id, linkedDocument]);
+  }, [editValue, onSave, stage.id, task.id, linkedDocument, selectedSkipReason]);
+
+  const checkPreviousStages = useCallback(async () => {
+    if (!task.stages || !stages || stages.length === 0) return true;
+
+    const currentStageIndex = stages.findIndex(s => s.id === stage.id);
+    if (currentStageIndex <= 0) return true; // First stage, nothing to check
+
+    // Check all previous stages
+    for (let i = 0; i < currentStageIndex; i++) {
+      const prevStage = stages[i];
+      const stageStatus = task.stages[prevStage.id]?.status;
+
+      if (!stageStatus || (stageStatus !== 'completed' && stageStatus !== 'skipped')) {
+        return false; // Found an incomplete stage
+      }
+    }
+
+    return true; // All previous stages are complete or skipped
+  }, [stage.id, stages, task.stages]);
+
+  const handleSkipClick = async () => {
+    setIsSkipDialogOpen(true);
+  };
+
+  const confirmSkip = async () => {
+    const allPreviousStagesComplete = await checkPreviousStages();
+    if (!allPreviousStagesComplete) {
+      const confirmSkip = window.confirm(
+        'You have not completed all previous stages. Do you want to skip them and mark this stage as skipped?'
+      );
+
+      if (!confirmSkip) {
+        setIsSkipDialogOpen(false);
+        return;
+      }
+    }
+
+    handleSave(true, skipReason || selectedSkipReason);
+  };
 
   const handleDeleteDocument = useCallback(async (documentToDelete: any) => {
     if (!documentToDelete) {
@@ -393,6 +483,7 @@ export default function EditableStageCell({
       setIsLoading(false);
     }
   }, [stage.id, task.id, onSave, previewDocuments, currentPreviewIndex]);
+
   const handleCancel = useCallback(() => {
     setIsEditing(false);
     if (stageDate) {
@@ -628,15 +719,53 @@ export default function EditableStageCell({
     }
   }, [onSave, previewDocuments, currentPreviewIndex, stage.id, task.id]);
 
-  // ========================================
-  // RENDER MODE: DATE COLUMN
-  // ========================================
   if (renderMode === 'date') {
     if (!isStageApplicable) {
       return <span className="text-sm text-gray-400 italic">N/A</span>;
     }
+    
+    // Get status variables early
+    const stageData = task.stages?.[stage.id];
+    const stageStatus = stageData?.status;
+    const isSkipped = stageStatus === 'skipped';
 
-    // Date editing mode for non-document stages
+    // 1. RENDER SKIPPED BADGE WITH TOOLTIP
+    if (isSkipped) {
+      const skippedAt = stageData?.skippedAt;
+      const reason = stageData?.reason || 'No reason provided';
+      
+      let formattedSkippedDate = 'N/A';
+      if (skippedAt) {
+        try {
+          // Handle ISO string from skippedAt
+          const date = new Date(skippedAt);
+          if (isValid(date)) formattedSkippedDate = format(date, 'dd/MM/yyyy');
+        } catch (e) { console.error(e); }
+      }
+
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge 
+                variant="secondary" 
+                className="bg-amber-100 text-amber-700 hover:bg-amber-200 border-amber-200 cursor-help font-normal"
+              >
+                Skipped
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent className="bg-slate-900 text-white border-slate-800">
+              <div className="text-xs text-left space-y-1">
+                <p><span className="font-semibold text-slate-300">Reason:</span> {reason}</p>
+                <p><span className="font-semibold text-slate-300">Date:</span> {formattedSkippedDate}</p>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      );
+    }
+
+    // 2. Date editing mode (Only if NOT skipped)
     if (isEditing && !requiresUpload) {
       return (
         <div className="flex items-center gap-2 min-w-[150px]">
@@ -660,7 +789,7 @@ export default function EditableStageCell({
       );
     }
 
-    // Display date or "Add Date" button
+    // 3. Displaying Completed Date
     if (stageDate && stageDate !== 'NaN/NaN/NaN') {
       return (
         <div
@@ -670,16 +799,14 @@ export default function EditableStageCell({
             if (!requiresUpload) setIsEditing(true);
           }}
         >
-          <div
-            className="text-gray-800 hover:bg-blue-200 flex"
-          >
+          <div className="text-gray-800 hover:bg-blue-100 px-2 py-0.5 rounded transition-colors">
             {formatDateDisplay(stageDate)}
           </div>
         </div>
       );
     }
 
-    // No date available
+    // 4. Add Date Button
     if (!requiresUpload) {
       return (
         <Button
@@ -694,13 +821,71 @@ export default function EditableStageCell({
       );
     }
 
-    // Document stage without linked document
     return <span className="text-sm text-gray-500 italic">-</span>;
   }
 
-  // ========================================
-  // RENDER MODE: ACTIONS COLUMN
-  // ========================================
+  const SkipStageDialog = () => (
+    <Dialog open={isSkipDialogOpen} onOpenChange={setIsSkipDialogOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Skip Stage</DialogTitle>
+          <DialogDescription>
+            Please provide a reason for skipping this stage.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Select a reason</label>
+            <Select onValueChange={setSelectedSkipReason}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select a reason" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Not Sure">Not Sure</SelectItem>
+                <SelectItem value="Already Completed">Already Completed</SelectItem>
+                <SelectItem value="Cancelled">Cancelled</SelectItem>
+                <SelectItem value="custom">Custom Reason</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {(selectedSkipReason === 'custom' || !selectedSkipReason) && (
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                {selectedSkipReason === 'custom' ? 'Custom reason' : 'Or enter your own reason'}
+              </label>
+              <Textarea
+                placeholder="Enter reason for skipping this stage"
+                value={skipReason}
+                onChange={(e) => setSkipReason(e.target.value)}
+                rows={3}
+              />
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsSkipDialogOpen(false)}
+              disabled={isLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSkip}
+              disabled={isLoading || (!selectedSkipReason && !skipReason)}
+            >
+              {isLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Confirm Skip
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 
   const renderContent = () => {
     if (renderMode === 'actions') {
@@ -765,6 +950,17 @@ export default function EditableStageCell({
             </Button>
           )}
 
+          {!isStageCompleted && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-amber-600 hover:bg-amber-50"
+              onClick={handleSkipClick}
+              title="Skip this stage"
+            >
+              <SkipForward className="h-3.5 w-3.5" />
+            </Button>
+          )}
           {/* Upload document button */}
           {requiresUpload && (
             <Button
@@ -777,7 +973,6 @@ export default function EditableStageCell({
               <Upload className="h-3.5 w-3.5" />
             </Button>
           )}
-
         </div>
       );
     }
@@ -787,6 +982,7 @@ export default function EditableStageCell({
   return (
     <>
       {renderContent()}
+      <SkipStageDialog />
       {/* Extraction Preview Dialog */}
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="max-w-[90vw] w-full max-h-[90vh] flex flex-col p-0 overflow-hidden">

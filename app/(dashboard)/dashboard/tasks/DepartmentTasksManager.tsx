@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AutomationDialog } from "@/app/(dashboard)/dashboard/settings/automation/components/AutomationDialog";
-import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, Zap, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle } from "lucide-react"
+import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
 import { Building, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
@@ -180,17 +180,17 @@ export default function DepartmentTasksManager({
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
 
   useEffect(() => {
-  const loadDepartments = async () => {
-    try {
-      const depts = await fetchDepartments();
-      setDepartments(depts);
-    } catch (error) {
-      console.error('Error loading departments:', error);
-    }
-  };
-  loadDepartments();
-  console.log('Departments data:', JSON.stringify(departments, null, 2));
-}, []);
+    const loadDepartments = async () => {
+      try {
+        const depts = await fetchDepartments();
+        setDepartments(depts);
+      } catch (error) {
+        console.error('Error loading departments:', error);
+      }
+    };
+    loadDepartments();
+    console.log('Departments data:', JSON.stringify(departments, null, 2));
+  }, []);
 
   const isStageApplicableToTask = useCallback((stage: any, task: any, departments: any[]): boolean => {
     if (!task || !stage || !Array.isArray(departments) || departments.length === 0) {
@@ -739,17 +739,17 @@ export default function DepartmentTasksManager({
     });
   }, []);
 
- const toggleDependantsExpansion = useCallback((taskId: string) => {
-  setExpandedDependants(prev => {
-    const newSet = new Set(prev);
-    if (newSet.has(taskId)) {
-      newSet.delete(taskId);
-    } else {
-      newSet.add(taskId);
-    }
-    return newSet;
-  });
-}, []);
+  const toggleDependantsExpansion = useCallback((taskId: string) => {
+    setExpandedDependants(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(taskId)) {
+        newSet.delete(taskId);
+      } else {
+        newSet.add(taskId);
+      }
+      return newSet;
+    });
+  }, []);
 
   const expandAll = () => {
     setExpandedSections(new Set(['case_details', 'stages', 'stats']));
@@ -1144,7 +1144,7 @@ export default function DepartmentTasksManager({
     stageId: string,
     taskId: string,
     value: string,
-    updatedExtractedDetails?: Record<string, any>
+    updatedExtractedDetails: Record<string, any> = {}
   ) => {
     try {
       const task = tasks.find(t => t.id.toString() === taskId.toString());
@@ -1172,7 +1172,6 @@ export default function DepartmentTasksManager({
       };
 
       // 3. Normalize Status Strings for Comparison
-      // Converts "In Progress" -> "in_progress", "Write-Up Completed" -> "write_up_completed"
       const normalizeStatus = (s: string | null | undefined) => {
         if (!s) return 'pending';
         return s.toLowerCase().trim().replace(/[\s-]/g, '_');
@@ -1180,32 +1179,42 @@ export default function DepartmentTasksManager({
 
       const currentStatusRaw = task.status;
       const currentStatusKey = normalizeStatus(currentStatusRaw);
-      const potentialNewStatus = STAGE_STATUS_MAPPING[stageId.toLowerCase()]; // Ensure ID match is case-insensitive
+      const potentialNewStatus = STAGE_STATUS_MAPPING[stageId.toLowerCase()];
+      const isSkipped = updatedExtractedDetails?.status === 'skipped';
 
       let taskStatusUpdate = {};
       const timestamp = new Date().toISOString();
 
-      // 4. Determine if Status Should Update
-      if (potentialNewStatus) {
-        const currentPriority = STATUS_PRIORITY[currentStatusKey] ?? 0; // Default to 0 if unknown
+      // 4. Determine if Status Should Update (only for completed stages, not skipped)
+      if (potentialNewStatus && !isSkipped) {
+        const currentPriority = STATUS_PRIORITY[currentStatusKey] ?? 0;
         const newPriority = STATUS_PRIORITY[potentialNewStatus] ?? 0;
 
         if (newPriority > currentPriority) {
           taskStatusUpdate = { status: potentialNewStatus };
         }
-      } else {
       }
 
-      // 5. Prepare Stage Data (Always update this)
+      // 5. Prepare Stage Data
+      const stageUpdate: any = {
+        ...task.stages?.[stageId],
+        date: value,
+        updatedAt: timestamp
+      };
+
+      if (isSkipped) {
+        stageUpdate.status = 'skipped';
+        stageUpdate.skippedAt = updatedExtractedDetails.skippedAt || timestamp;
+        stageUpdate.skippedBy = updatedExtractedDetails.skippedBy || 'system';
+        stageUpdate.reason = updatedExtractedDetails.reason || 'Not specified';
+      } else {
+        stageUpdate.status = 'completed';
+        stageUpdate.completedAt = timestamp;
+      }
+
       const updatedStages = {
         ...task.stages,
-        [stageId]: {
-          ...task.stages?.[stageId],
-          status: 'completed',
-          date: value,
-          completedAt: timestamp,
-          updatedAt: timestamp
-        }
+        [stageId]: stageUpdate
       };
 
       // Calculate current stage for metadata
@@ -1213,10 +1222,16 @@ export default function DepartmentTasksManager({
 
       // 6. Build Payload
       const updateData: any = {
-        ...taskStatusUpdate, // Spread the status update (if any)
+        ...taskStatusUpdate,
         stages: updatedStages,
         updated_at: timestamp
       };
+
+      // Only update current_stage_id for completed stages, not skipped ones
+      if (!isSkipped && currentStage) {
+        updateData.current_stage_id = currentStage.id;
+        updateData.current_stage_started_at = timestamp;
+      }
 
       // 7. Execute Update
       const { error } = await supabase
@@ -1229,9 +1244,11 @@ export default function DepartmentTasksManager({
       // 8. Refresh Data
       await loadTasksData(activeDepartmentTab, activeSubdepartmentTab);
 
-      const successMessage = ('status' in taskStatusUpdate)
-        ? `Stage completed & Status updated to ${taskStatusUpdate.status?.replace(/_/g, ' ')}`
-        : 'Stage completed';
+      const successMessage = isSkipped
+        ? 'Stage marked as skipped'
+        : ('status' in taskStatusUpdate)
+          ? `Stage completed & Status updated to ${taskStatusUpdate.status?.replace(/_/g, ' ')}`
+          : 'Stage completed';
 
       toast({ title: "Success", description: successMessage });
 
@@ -1242,10 +1259,8 @@ export default function DepartmentTasksManager({
         description: "Failed to update stage status.",
         variant: "destructive"
       });
-    } finally {
-      console.groupEnd();
     }
-  }, [handleStageStatusSave, tasks, stages, determineCurrentStage, loadTasksData, activeDepartmentTab, activeSubdepartmentTab]);
+  }, [tasks, stages, determineCurrentStage, loadTasksData, activeDepartmentTab, activeSubdepartmentTab]);
 
   const generateEnhancedTableRows = useCallback(async (tasks: UtilTask[]) => {
     if (!tasks.length) return [];
@@ -1466,7 +1481,7 @@ export default function DepartmentTasksManager({
       childLevelId,
       childLevelType
     })
-    
+
     // INCREMENT KEY TO FORCE FRESH INSTANCE
     setStageDialogKey(prev => prev + 1);
     setIsStageUploadDialogOpen(true)
@@ -1474,7 +1489,7 @@ export default function DepartmentTasksManager({
 
   const handleDeleteDocument = useCallback(async (documentId: string) => {
     try {
-          toast({
+      toast({
         title: 'Success',
         description: 'Document deleted successfully',
         variant: 'default',
@@ -1951,35 +1966,35 @@ export default function DepartmentTasksManager({
   }, [sortConfig, companies])
 
   const getCellContentWrapper = useCallback((task: any, headerId: string) => {
- return utilGetCellContent(
-    departments,
-    task,
-    headerId,
-    enhancedTasksData,
-    taskDependants,
-    expandedDependants,
-    companies,
-    getTaskHierarchy,
-    getStaffName,
-    getEnhancedImmigrationStatusWrapper,
-    getCurrentStageStatusWrapper,
-    (task) => renderImmigrationStatusCell(
-      task, 
-      getEnhancedImmigrationStatusWrapper, 
-      expandedImmigrationStatus, 
+    return utilGetCellContent(
+      departments,
+      task,
+      headerId,
+      enhancedTasksData,
+      taskDependants,
+      expandedDependants,
+      companies,
+      getTaskHierarchy,
+      getStaffName,
+      getEnhancedImmigrationStatusWrapper,
+      getCurrentStageStatusWrapper,
+      (task) => renderImmigrationStatusCell(
+        task,
+        getEnhancedImmigrationStatusWrapper,
+        expandedImmigrationStatus,
+        (id) => {
+          // Wrap the toggle in a function to prevent immediate execution
+          toggleImmigrationStatusExpansion(id);
+        }
+      ),
+      (task) => renderCurrentStageStatusCell(task, getCurrentStageStatusWrapper),
       (id) => {
         // Wrap the toggle in a function to prevent immediate execution
-        toggleImmigrationStatusExpansion(id);
-      }
-    ),
-    (task) => renderCurrentStageStatusCell(task, getCurrentStageStatusWrapper),
-    (id) => {
-      // Wrap the toggle in a function to prevent immediate execution
-      toggleDependantsExpansion(id);
-    },
-    setLinkingTask,
-    setIsLinkDialogOpen
-  );
+        toggleDependantsExpansion(id);
+      },
+      setLinkingTask,
+      setIsLinkDialogOpen
+    );
   }, [
     enhancedTasksData,
     taskDependants,
@@ -2697,7 +2712,7 @@ export default function DepartmentTasksManager({
                                 <X className="mr-2 h-4 w-4" /> Back to Overall Table
                               </Button>
                             </div>
-                    <ReportTable
+                            <ReportTable
                               tasks={tasksToRender}
                               report={activeReport}
                               loading={false}
@@ -2715,7 +2730,7 @@ export default function DepartmentTasksManager({
                           </div>
                         ) : isTransposedView ? (
                           <EnhancedTable
-                          departments={departments}
+                            departments={departments}
                             tasks={tasksToRender}
                             tableType={title}
                             ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}
@@ -2798,7 +2813,7 @@ export default function DepartmentTasksManager({
                         ) : (
 
                           <StandardTable
-                          departments={departments}
+                            departments={departments}
                             tasks={tasksToRender}
                             tableType={title}
                             ENHANCED_TABLE_HEADERS_IMMIGRATION={currentTableHeaders}

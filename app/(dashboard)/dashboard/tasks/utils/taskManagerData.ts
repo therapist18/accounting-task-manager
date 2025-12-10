@@ -53,7 +53,7 @@ export interface KycDocument {
   fields: any[];
 }
 
-export interface Document {
+export interface DirectorDocument {
   id: number;
   director_id: number;
   document_id: string;
@@ -236,7 +236,7 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
   /**
    * Fetch all documents from the database
    */
-  export const fetchAllDocuments = async (): Promise<Document[]> => {
+  export const fetchAllDocuments = async (): Promise<DirectorDocument[]> => {
     try {
       const { data, error } = await supabase
         .from('acc_portal_directors_documents')
@@ -269,6 +269,7 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
       const { data, error } = await supabase
         .from('acc_portal_kyc')
         .select('id, fields, name, display_name')
+        .order('display_name', { ascending: true })
 
       if (error) throw error
 
@@ -376,8 +377,8 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
   export const getDocumentForTaskStage = (
     task: Task, 
     stage: any, 
-    documents: Document[] = []
-  ): Document | null => {
+    documents: DirectorDocument[] = []
+  ): DirectorDocument | null => {
     if (!task.individual_id || !stage.documents?.[0]?.kycId) return null
 
     const relevantDocs = documents.filter(doc =>
