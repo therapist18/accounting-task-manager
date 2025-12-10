@@ -578,22 +578,22 @@ export default function ReportsPage() {
     }
     if (['imm_status_doc', 'imm_status_expiry', 'imm_status_days'].includes(col.type)) {
       const statusData = getEnhancedImmigrationStatusWrapper(task);
-      
+
       if (col.type === 'imm_status_doc') {
-        return statusData?.documentType 
-          ? <span className="text-xs font-medium text-slate-700">{statusData.documentType}</span> 
+        return statusData?.documentType
+          ? <span className="text-xs font-medium text-slate-700">{statusData.documentType}</span>
           : <span className="text-red-500 text-xs font-semibold">Missing</span>;
       }
-      
+
       if (col.type === 'imm_status_expiry') {
         const expiryDate = statusData?.date;
         return <span className="text-xs text-slate-700">{
-          expiryDate 
-            ? formatDateForDisplay(expiryDate) 
+          expiryDate
+            ? formatDateForDisplay(expiryDate)
             : 'N/A'
         }</span>;
       }
-      
+
       if (col.type === 'imm_status_days') {
         const expiryDate = statusData?.date;
         if (!expiryDate) return <span className="text-gray-400 text-xs">-</span>;
@@ -669,7 +669,7 @@ export default function ReportsPage() {
           allLinkedDocs.forEach(linkedDoc => {
             const details = linkedDoc.extracted_details || {};
             const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
-            
+
             if (kycDoc?.fields) {
               // Get all fields that are marked as immigration dates
               const immigrationDateFields = kycDoc.fields
@@ -678,12 +678,12 @@ export default function ReportsPage() {
                 .filter(Boolean);
 
               // If no specific immigration date fields, check all date fields
-              const dateFieldsToCheck = immigrationDateFields.length > 0 
-                ? immigrationDateFields 
+              const dateFieldsToCheck = immigrationDateFields.length > 0
+                ? immigrationDateFields
                 : kycDoc.fields
-                    .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
-                    .map((field: any) => field.fieldName || field.name || '')
-                    .filter(Boolean);
+                  .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
+                  .map((field: any) => field.fieldName || field.name || '')
+                  .filter(Boolean);
 
               // Check each potential date field
               for (const field of dateFieldsToCheck) {
@@ -738,23 +738,68 @@ export default function ReportsPage() {
       const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
       const currentStageIndex = sortedStages.findIndex(s => s.id === col.stageId);
 
-      // If there is a previous stage, assume start time is when previous stage finished
-      if (currentStageIndex > 0) {
-        const prevStage = sortedStages[currentStageIndex - 1];
-        const prevStageData = task.stages?.[prevStage.id];
+  // In the section where we determine the effective start time for a stage (around line 735-760)
+if (currentStageIndex > 0) {
+  const prevStage = sortedStages[currentStageIndex - 1];
+  const prevStageData = task.stages?.[prevStage.id];
 
-        if (prevStageData) {
-          // Priority: Manual Date > SkippedAt > CompletedAt
-          if (prevStageData.date) {
-            effectiveStartTime = parseDateString(prevStageData.date);
-          } else if (prevStageData.status === 'skipped' && prevStageData.skippedAt) {
-            effectiveStartTime = parseDateString(prevStageData.skippedAt);
-          } else if (prevStageData.completedAt) {
-            effectiveStartTime = parseDateString(prevStageData.completedAt);
+  if (prevStageData) {
+    let docDate = null;
+    
+    // 1. First priority: Check for document date
+    if (prevStage.documents?.length > 0) {
+      const allLinkedDocs = prevStage.documents.flatMap(docConfig => {
+        const isApplicable = isDocumentApplicable(docConfig, task);
+        if (!isApplicable) return [];
+
+        const foundDocs = getDocumentForTaskStage(task, { ...prevStage, documents: [docConfig] });
+        return foundDocs;
+      }).filter(d => d && !d.indicator);
+
+      // Find the latest document date
+      if (allLinkedDocs.length > 0) {
+        allLinkedDocs.forEach(linkedDoc => {
+          const details = linkedDoc.extracted_details || {};
+          const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
+          
+          if (kycDoc?.fields) {
+            const dateFields = kycDoc.fields
+              .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
+              .map((field: any) => field.fieldName || field.name || '')
+              .filter(Boolean);
+
+            for (const field of dateFields) {
+              const dateValue = details[field];
+              if (dateValue) {
+                const parsedDate = parseDateString(dateValue);
+                if (parsedDate && (!docDate || parsedDate > docDate)) {
+                  docDate = parsedDate;
+                }
+              }
+            }
           }
-        }
+        });
       }
+    }
 
+    // Set effectiveStartTime based on priority
+    if (docDate) {
+      effectiveStartTime = docDate;
+    } 
+    // 2. Second priority: Manual date from stage data
+    else if (prevStageData.date) {
+      effectiveStartTime = parseDateString(prevStageData.date);
+    } 
+    // 3. Third priority: completedAt date
+    else if (prevStageData.completedAt) {
+      effectiveStartTime = parseDateString(prevStageData.completedAt);
+    }
+    // Keep the existing fallback for skipped status
+    else if (prevStageData.status === 'skipped' && prevStageData.skippedAt) {
+      effectiveStartTime = parseDateString(prevStageData.skippedAt);
+    }
+  }
+}
       // Fallback to task initiation if explicit start time missing
       if (!effectiveStartTime && task.date_initiated) {
         effectiveStartTime = parseDateString(task.date_initiated);
@@ -771,7 +816,10 @@ export default function ReportsPage() {
         <Tooltip>
           <TooltipTrigger asChild>
             <div className="flex flex-col gap-1 min-w-[100px]">
-              <span className="text-xs font-medium text-slate-700">In Progress</span>
+          <span className={`text-xs font-medium ${isOverdue ? 'text-red-600' : 'text-slate-700'}`}>
+  {isOverdue ? 'Overdue' : 'In Progress'}
+</span>
+
               {hasEstimate ? (
                 <div className="flex justify-between items-center text-[9px] text-gray-500">
                   <span>{timeStatus?.formattedElapsed} elapsed</span>

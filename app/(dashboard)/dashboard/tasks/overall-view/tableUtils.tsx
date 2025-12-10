@@ -272,8 +272,8 @@ export const getEnhancedImmigrationStatus = (
 
     return {
       status: isFuture
-        ? `Valid until ${format(latestDoc.date, 'dd MMM yyyy')} (from ${latestDoc.sourceField})`
-        : `Expired on ${format(latestDoc.date, 'dd MMM yyyy')} (from ${latestDoc.sourceField})`,
+        ? `Valid until ${format(latestDoc.date, 'dd MMM yyyy')}`
+        : `Expired on ${format(latestDoc.date, 'dd MMM yyyy')}`,
       date: latestDoc.date,
       type: statusType,
       documentType: latestDoc.documentType,
