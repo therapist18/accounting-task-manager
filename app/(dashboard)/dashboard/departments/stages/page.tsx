@@ -18,6 +18,7 @@ import type { Department, Stage, DepartmentOption } from "./stagesdb"
 import ColumnVisibilityControl, { type ColumnVisibilityOption } from "../main-shared-components/column-visibility"
 import EntityVisibilityControl, { type EntityVisibilityOption } from "../main-shared-components/entity-visibility"
 import * as XLSX from "xlsx"
+import * as ExcelJS from "exceljs"
 import { toast } from "@/hooks/use-toast"
 
 // Simple UUID generator for client-side use
