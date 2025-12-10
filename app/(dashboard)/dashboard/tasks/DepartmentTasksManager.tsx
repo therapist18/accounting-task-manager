@@ -7,10 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { AutomationDialog } from "@/app/(dashboard)/dashboard/settings/automation/components/AutomationDialog";
-import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle } from "lucide-react"
+import { Settings, Search, X, TableProperties, RotateCcw, Pencil, AlertCircle, Plus, Minus, Download, Edit, Trash2, ChevronDown, Send, DownloadCloud, Eye, FileText, Save, PanelLeftClose, PanelLeftOpen, ChevronRight, EyeOff, CheckCircle2, XCircle, Briefcase } from "lucide-react"
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog"
-import { Building, Briefcase } from "lucide-react"
 import { EnquiryDialog } from "./components/EnquiryDialog"
 import { format } from 'date-fns';
 import { toast } from "@/hooks/use-toast"
@@ -31,26 +29,9 @@ import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKyc
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
-import {
-  ENHANCED_TABLE_HEADERS_IMMIGRATION,
-  STATS_HEADERS,
-  calculateAge,
-  getEnhancedImmigrationStatus,
-  getCurrentStageStatus,
-  renderImmigrationStatusCell,
-  renderCurrentStageStatusCell,
-  getCellContent as utilGetCellContent,
-  sortTasks,
-  filterTasksBySearch,
-  ENHANCED_TABLE_HEADERS,
-  isDocumentApplicable
-} from './overall-view/tableUtils';
+import { ENHANCED_TABLE_HEADERS_IMMIGRATION, STATS_HEADERS, calculateAge, getEnhancedImmigrationStatus, getCurrentStageStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, getCellContent as utilGetCellContent, sortTasks, filterTasksBySearch, ENHANCED_TABLE_HEADERS, isDocumentApplicable } from './overall-view/tableUtils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { OtherDialog } from "./components/OtherDialog"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
-import { ReportTable } from "./components/ReportTable"
-import { MemorizedReportDialog } from "./components/MemorizedReportDialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import EditableStageCell from "./components/EditableStageCell"
 
@@ -116,8 +97,6 @@ export default function DepartmentTasksManager({
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null)
   const [isPushingCase, setIsPushingCase] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [taskToDelete, setTaskToDelete] = useState<any>(null)
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('')
   const [currentTableHeaders, setCurrentTableHeaders] = useState(ENHANCED_TABLE_HEADERS)
   const [visibleHeaders, setVisibleHeaders] = useState<Set<string>>(new Set(ENHANCED_TABLE_HEADERS.filter(h => h.default).map(h => h.id)))
@@ -133,18 +112,11 @@ export default function DepartmentTasksManager({
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['case_details', 'stages']))
   const [expandedImmigrationStatus, setExpandedImmigrationStatus] = useState<Set<string>>(new Set())
-
-  // States for Memorized Reports
-  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
   const [activeReport, setActiveReport] = useState<any | null>(null);
-
-  // New states for UI enhancements
   const [areTabsVisible, setAreTabsVisible] = useState(true);
   const [isAllExpanded, setIsAllExpanded] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [stageDialogKey, setStageDialogKey] = useState(0);
-
-
   useEffect(() => {
     const headers = activeDepartmentTab === '1'
       ? ENHANCED_TABLE_HEADERS_IMMIGRATION
@@ -237,12 +209,6 @@ export default function DepartmentTasksManager({
 
     loadKycData();
   }, []);
-
-  const handleApplyReport = (report: MemorizedReport) => {
-    setActiveReport(report);
-    // When a report is applied, switch to standard (columnar) view if not already
-    setIsTransposedView(false);
-  };
 
   // Enhanced function to fetch all dependants and applicant data
   const fetchAllDependantsAndApplicants = useCallback(async (tasks: UtilTask[]) => {
@@ -379,20 +345,6 @@ export default function DepartmentTasksManager({
     return user?.name || `User ${userId}`;
   }, [tmUsers]);
 
-  const getCurrentOfficer = useCallback((officerHistory) => {
-    if (!officerHistory || !Array.isArray(officerHistory)) return null;
-    return officerHistory.find(officer => !officer.end_date) || null;
-  }, []);
-
-  const getCurrentManager = useCallback((managerHistory) => {
-    if (!managerHistory || !Array.isArray(managerHistory)) return null;
-    return managerHistory.find(manager => !manager.end_date) || null;
-  }, []);
-
-  const getCurrentAssistants = useCallback((assistantHistory) => {
-    if (!assistantHistory || !Array.isArray(assistantHistory)) return [];
-    return assistantHistory.filter(assistant => !assistant.end_date);
-  }, []);
   const getDocumentForTaskStage = useCallback((
     task: UtilTask,
     stage: {
@@ -1144,7 +1096,11 @@ export default function DepartmentTasksManager({
     stageId: string,
     taskId: string,
     value: string,
-    updatedExtractedDetails: Record<string, any> = {}
+    { extractedData, documentId, ...rest } = {} as {
+      extractedData?: Record<string, any>,
+      documentId?: string,
+      [key: string]: any
+    }
   ) => {
     try {
       const task = tasks.find(t => t.id.toString() === taskId.toString());
@@ -1177,6 +1133,18 @@ export default function DepartmentTasksManager({
         return s.toLowerCase().trim().replace(/[\s-]/g, '_');
       };
 
+      let statusValue = value;
+      let updatedExtractedDetails = rest;
+
+      if (typeof value === 'object' && value !== null) {
+        // If value is an object, it's the extracted data
+        extractedData = value;
+        statusValue = 'completed';
+      } else if (rest && typeof rest === 'object') {
+        // Handle the case where extractedData is in the rest parameter
+        updatedExtractedDetails = rest;
+      }
+
       const currentStatusRaw = task.status;
       const currentStatusKey = normalizeStatus(currentStatusRaw);
       const potentialNewStatus = STAGE_STATUS_MAPPING[stageId.toLowerCase()];
@@ -1184,6 +1152,7 @@ export default function DepartmentTasksManager({
 
       let taskStatusUpdate = {};
       const timestamp = new Date().toISOString();
+
 
       // 4. Determine if Status Should Update (only for completed stages, not skipped)
       if (potentialNewStatus && !isSkipped) {
@@ -1195,13 +1164,33 @@ export default function DepartmentTasksManager({
         }
       }
 
-      // 5. Prepare Stage Data
       const stageUpdate: any = {
         ...task.stages?.[stageId],
-        date: value,
+        date: statusValue, // Use statusValue instead of value
         updatedAt: timestamp
       };
 
+      // Handle extracted data if provided
+      if (extractedData && Object.keys(extractedData).length > 0) {
+        stageUpdate.extractedData = extractedData;
+        stageUpdate.extracted_at = timestamp;
+
+        // Save extracted data to the document if documentId is provided
+        if (documentId) {
+          const { error: docError } = await supabase
+            .from('acc_portal_directors_documents')
+            .update({
+              extracted_details: extractedData,
+              updated_at: timestamp
+            })
+            .eq('id', documentId);
+
+          if (docError) {
+            console.error('Error updating document extracted details:', docError);
+            throw new Error('Failed to update document with extracted data');
+          }
+        }
+      }
       if (isSkipped) {
         stageUpdate.status = 'skipped';
         stageUpdate.skippedAt = updatedExtractedDetails.skippedAt || timestamp;
@@ -1778,6 +1767,7 @@ export default function DepartmentTasksManager({
         renderMode={renderMode}
         taskName={task.name}
         clientName={task.client_name || task.clientName}
+        onFetchData={() => loadTasksData(activeDepartmentTab, activeSubdepartmentTab)}
       />
     );
   };
@@ -2662,15 +2652,6 @@ export default function DepartmentTasksManager({
                               )}
                             </Button>
 
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-2"
-                              onClick={() => setIsReportDialogOpen(true)}
-                            >
-                              <FileText className="h-4 w-4" /> Reports
-                            </Button>
-
                             <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => handleExport(tasksToRender, title)}>
                               <Download className="h-4 w-4" />Export to Excel
                             </Button>
@@ -2701,34 +2682,7 @@ export default function DepartmentTasksManager({
                           )} */}
                       </CardHeader>
                       <CardContent className="p-2 sm:p-4">
-                        {activeReport ? (
-                          <div>
-                            <div className="flex items-center justify-between mb-4 p-2 bg-blue-50 border border-blue-200 rounded-lg">
-                              <div>
-                                <h3 className="font-semibold text-blue-800">Viewing Report: {activeReport.name}</h3>
-                                <p className="text-sm text-blue-700">Displaying columns as defined in the selected report.</p>
-                              </div>
-                              <Button variant="outline" onClick={() => setActiveReport(null)}>
-                                <X className="mr-2 h-4 w-4" /> Back to Overall Table
-                              </Button>
-                            </div>
-                            <ReportTable
-                              tasks={tasksToRender}
-                              report={activeReport}
-                              loading={false}
-                              stages={stages}
-                              kycDocuments={kycDocuments}
-                              tableHeaders={currentTableHeaders}
-                              // Pass RAW data context only
-                              companies={companies}
-                              tmUsers={tmUsers}
-                              allDocuments={allDocuments}
-                              departments={departments}
-                              // Pass computed data models (treated as static data)
-                              enhancedTasksData={enhancedTasksData}
-                            />
-                          </div>
-                        ) : isTransposedView ? (
+                        {isTransposedView ? (
                           <EnhancedTable
                             departments={departments}
                             tasks={tasksToRender}
@@ -3209,17 +3163,6 @@ export default function DepartmentTasksManager({
           </div>
         </DialogContent>
       </Dialog>
-
-      <MemorizedReportDialog
-        open={isReportDialogOpen}
-        onOpenChange={setIsReportDialogOpen}
-        department={departments.find(d => d.id.toString() === activeDepartmentTab) || null}
-        stages={stages}
-        kycDocuments={kycDocuments}
-        onApplyReport={handleApplyReport}
-        tableHeaders={currentTableHeaders}
-      />
-
     </div>
   )
 }

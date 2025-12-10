@@ -252,6 +252,21 @@ export default function ReportsPage() {
   const [itemsPerPage, setItemsPerPage] = useState(100); // Default 100
   const [expandedSections, setExpandedSections] = useState(() => new Set(['task_details']));
 
+  // --- NEW: State for toggling stage doc columns ---
+  const [expandedStageColumns, setExpandedStageColumns] = useState<Set<string>>(new Set());
+
+  const toggleStageColumns = useCallback((stageId: string) => {
+    setExpandedStageColumns(prev => {
+      const next = new Set(prev);
+      if (next.has(stageId)) {
+        next.delete(stageId);
+      } else {
+        next.add(stageId);
+      }
+      return next;
+    });
+  }, []);
+
   // --- 1. Initialization ---
   useEffect(() => {
     const initReports = async () => {
@@ -544,7 +559,6 @@ export default function ReportsPage() {
                   {stageStatus.stageName}
                 </Badge>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-1.5"><div className={`h-1.5 rounded-full ${isOverdue ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${progress}%` }} /></div>
               <div className="text-[10px] text-gray-500">{timeStatus?.formattedElapsed} / {formatDuration(allowedMinutes)}</div>
             </div>
           </TooltipTrigger>
@@ -592,6 +606,15 @@ export default function ReportsPage() {
       if (!stage) return <span className="text-slate-300">-</span>;
       if (!isStageApplicableToTask(stage, task)) return <span className="text-sm text-gray-400 italic">N/A</span>;
 
+      // Get current stage status to check if this stage is after the current stage
+      const currentStageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
+      const currentStage = stages.find(s => s.name === currentStageStatus?.stageName);
+      
+      // If this stage is after the current stage, show dash
+      if (currentStage?.order_num !== undefined && stage.order_num > currentStage.order_num) {
+        return <span className="text-slate-300">-</span>;
+      }
+
       const stageData = task.stages?.[col.stageId];
       const estimatedMinutes = stage.estimated_time;
 
@@ -620,40 +643,18 @@ export default function ReportsPage() {
       // --- 2. DETERMINE COMPLETION DATE (Priority: Manually entered Date > Extracted > Timestamp) ---
       let completionDateStr = stageData?.date;
 
-      console.log(`[DEBUG] Processing Task: ${task.applicant_name}`);
-      console.log(`[DEBUG] Stage: ${stage.name}`);
-      console.log(`[DEBUG] Initial Date from Stage Data:`, completionDateStr);
-
       // FORCE DOCUMENT CHECK EVEN IF DATE EXISTS (To ensure we catch latest document date if applicable)
       if (stage.documents?.length > 0) {
         
-        // Log raw links to debug availability
-        const rawLinks = task.source_document_id?.[stage.id];
-        console.log(`[DEBUG] Raw Task Source Docs for ${stage.name}:`, rawLinks);
-
         const allLinkedDocs = stage.documents.flatMap(docConfig => {
-             // Log the doc config we are trying to match
-             console.log(`[DEBUG] Checking Doc Config:`, docConfig);
-
              const isApplicable = isDocumentApplicable(docConfig, task);
-             console.log(`[DEBUG] Is Applicable? ${isApplicable}`);
-
              if (!isApplicable) return [];
 
              // This now calls the updated helper which checks both source_document_id and task.stages
              const foundDocs = getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
-             console.log(`[DEBUG] Found ${foundDocs.length} linked documents for this config`);
-             
-             // Log details of found docs
-             foundDocs.forEach(d => {
-                 console.log(`[DEBUG] Found Doc ID: ${d.id}, Extracted:`, d.extracted_details);
-             });
-
              return foundDocs;
           })
           .filter(d => d && !d.indicator);
-
-        console.log(`[DEBUG] Total Linked Docs Found: ${allLinkedDocs.length}`);
 
         if (allLinkedDocs.length > 0) {
            // We need to find the LATEST date among all uploaded documents
@@ -676,7 +677,6 @@ export default function ReportsPage() {
                     const parsed = parseDateString(details[key]);
                     if (parsed) {
                         validDates.push(parsed);
-                        console.log(`[DEBUG] Found valid date in field '${field}': ${parsed}`);
                         break; // Stop at first valid date field for THIS document
                     }
                  }
@@ -690,16 +690,12 @@ export default function ReportsPage() {
               
               // Always use the document date if found, regardless of completionDateStr
               completionDateStr = latestDocDate;
-              console.log(`[DEBUG] Using extracted document date:`, latestDocDate);
-           } else {
-              console.log(`[DEBUG] No valid dates found in extracted details.`);
            }
         }
       }
 
       if (!completionDateStr && stageData?.status === 'completed' && stageData?.completedAt) {
         completionDateStr = stageData.completedAt;
-        console.log(`[DEBUG] Using completedAt timestamp:`, completionDateStr);
       }
 
       const completionDate = parseDateString(completionDateStr);
@@ -753,7 +749,6 @@ export default function ReportsPage() {
       // Calculate time status
       const timeStatus = getTimeStatus(effectiveStartTime, estimatedMinutes);
       const isOverdue = timeStatus?.isOverdue || false;
-      const progress = timeStatus?.progress || 0;
       const hasEstimate = estimatedMinutes && estimatedMinutes > 0;
 
       return (
@@ -762,18 +757,10 @@ export default function ReportsPage() {
             <div className="flex flex-col gap-1 min-w-[100px]">
               <span className="text-xs font-medium text-slate-700">In Progress</span>
               {hasEstimate ? (
-                <>
-                  <div className="w-full bg-gray-200 rounded-full h-1.5 mt-0.5">
-                    <div
-                      className={`h-1.5 rounded-full ${isOverdue ? 'bg-red-500' : 'bg-blue-500'}`}
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                  <div className="flex justify-between items-center text-[9px] text-gray-500">
-                    <span>{timeStatus?.formattedElapsed}</span>
-                    {isOverdue && <span className="text-red-500 font-bold">!</span>}
-                  </div>
-                </>
+                <div className="flex justify-between items-center text-[9px] text-gray-500">
+                  <span>{timeStatus?.formattedElapsed} elapsed</span>
+                  {isOverdue && <span className="text-red-500 font-bold">!</span>}
+                </div>
               ) : (
                 <span className="text-[9px] text-slate-400">{timeStatus?.formattedElapsed} elapsed</span>
               )}
@@ -941,8 +928,11 @@ export default function ReportsPage() {
       const config = activeReport.configuration.stages[stage.id];
       const isSpecialStage = SPECIAL_STAGE_IDS.includes(stage.id);
 
+      // Check if there are documents config
+      const hasDocuments = config.documents && Object.keys(config.documents).length > 0;
+
       // FORCE ADD DATE COLUMN IF EITHER EXPLICITLY SELECTED *OR* DOCUMENTS ARE PRESENT
-      const shouldShowDateColumn = config.isStageDateSelected || (config.documents && Object.keys(config.documents).length > 0);
+      const shouldShowDateColumn = config.isStageDateSelected || hasDocuments;
 
       if (shouldShowDateColumn) {
         console.log(`[DEBUG] Adding Date Column for: ${stage.name}`);
@@ -951,11 +941,13 @@ export default function ReportsPage() {
           label: `${stage.name} (Date)`, 
           type: 'stage_date', 
           stageId: stage.id, 
-          stageName: stage.name
+          stageName: stage.name,
+          hasSubColumns: hasDocuments // NEW: Flag to indicate expandable
         });
       }
 
-      if (config.documents) {
+      // NEW LOGIC: Only show sub-columns if expanded
+      if (hasDocuments && expandedStageColumns.has(stage.id)) {
         if (isSpecialStage) {
           let wefAdded = false, toAdded = false;
           for (const [kycId] of Object.entries(config.documents)) {
@@ -1010,7 +1002,7 @@ export default function ReportsPage() {
       }
     });
     return cols;
-  }, [activeReport, stages, kycDocuments, isStageApplicableToCurrentFilter]);
+  }, [activeReport, stages, kycDocuments, isStageApplicableToCurrentFilter, expandedStageColumns]); // Add dependency
 
   // ... [Keep rest of the component exactly as is] ...
   const sortedTasks = useMemo(() => {
@@ -1335,7 +1327,26 @@ export default function ReportsPage() {
                         className="whitespace-nowrap px-4 py-3 font-semibold text-white border-b border-r border-blue-400 text-xs bg-blue-500 cursor-pointer hover:bg-blue-600 transition-colors group"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          {col.label}
+                          <div className="flex items-center gap-2">
+                             {col.label}
+                             {/* TOGGLE BUTTON HERE */}
+                             {col.hasSubColumns && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation(); // Prevent sorting
+                                    toggleStageColumns(col.stageId);
+                                  }}
+                                  className="p-0.5 hover:bg-blue-400 rounded transition-colors text-white"
+                                >
+                                  {expandedStageColumns.has(col.stageId) ? (
+                                    <Minus className="h-3 w-3" />
+                                  ) : (
+                                    <Plus className="h-3 w-3" />
+                                  )}
+                                </button>
+                              )}
+                          </div>
+                          
                           {sortConfig?.key === col.id ? (
                             <ArrowUpDown className={`h-3 w-3 ${sortConfig.direction === 'asc' ? 'text-white' : 'text-blue-200'}`} />
                           ) : (

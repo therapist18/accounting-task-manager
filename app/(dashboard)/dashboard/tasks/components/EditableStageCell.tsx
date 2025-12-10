@@ -40,6 +40,7 @@ interface EditableStageCellProps {
   renderMode?: 'date' | 'actions'  // NEW: Specify what to render
   taskName?: string
   clientName?: string
+  onFetchData?: () => Promise<void>;
 }
 
 const isStageApplicableToTask = (stage: any, task: any, departments: any[] = []): boolean => {
@@ -106,6 +107,7 @@ export default function EditableStageCell({
   renderMode = 'date',
   taskName,
   clientName,
+  onFetchData
 }: EditableStageCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
@@ -658,66 +660,69 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
     }
   }, [linkedDocument, linkedDocuments, buildPreviewDocumentsData]);
 
-  const handlePreviewSave = useCallback(async (data: any) => {
-    if (!onSave || previewDocuments.length === 0) {
-      console.error('Missing required data for save:', { onSave, previewDocuments });
-      return;
+const handlePreviewSave = useCallback(async (data: any) => {
+  if (!onSave || previewDocuments.length === 0) {
+    console.error('Missing required data for save:', { onSave, previewDocuments });
+    return;
+  }
+
+  try {
+    const currentDoc = previewDocuments[currentPreviewIndex];
+    if (!currentDoc) {
+      throw new Error('No active document to save');
     }
 
-    try {
-      // Get the current document being viewed
-      const currentDoc = previewDocuments[currentPreviewIndex];
-      if (!currentDoc) {
-        throw new Error('No active document to save');
+    console.log('Saving document data:', {
+      stageId: stage.id,
+      taskId: task.id,
+      documentId: currentDoc.documentId,
+      extractedData: data
+    });
+
+    // Call onSave with the extracted data
+    await onSave(
+      stage.id,
+      task.id,
+      'completed',
+      {
+        extractedData: data,
+        documentId: currentDoc.documentId
       }
+    );
 
-      console.log('Saving document data:', {
-        stageId: stage.id,
-        taskId: task.id,
-        documentId: currentDoc.documentId,
-        extractedData: currentDoc.extractedData || data
-      });
+    // Update local state
+    const updatedDocs = [...previewDocuments];
+    updatedDocs[currentPreviewIndex] = {
+      ...currentDoc,
+      extractedData: { ...data }
+    };
+    setPreviewDocuments(updatedDocs);
 
-      // Save the current document
-      await onSave(
-        stage.id,
-        task.id,
-        'completed',
-        {
-          extractedData: currentDoc.extractedData || data,
-          documentId: currentDoc.documentId
-        }
-      );
-
-      // Update the local state to reflect the saved data
-      const updatedDocs = [...previewDocuments];
-      updatedDocs[currentPreviewIndex] = {
-        ...currentDoc,
-        extractedData: { ...(currentDoc.extractedData || {}), ...(data || {}) }
-      };
-      setPreviewDocuments(updatedDocs);
-
-      toast({
-        title: 'Success',
-        description: 'Document data saved successfully.'
-      });
-
-      // Only close the preview if this is the last document
-      if (currentPreviewIndex >= previewDocuments.length - 1) {
-        setIsPreviewOpen(false);
-      } else {
-        // Move to the next document
-        setCurrentPreviewIndex(prev => prev + 1);
-      }
-    } catch (error) {
-      console.error('Error saving document data:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to save document data.',
-        variant: 'destructive'
-      });
+    // Call the fetch function to refresh the data
+    if (onFetchData) {
+      await onFetchData();
     }
-  }, [onSave, previewDocuments, currentPreviewIndex, stage.id, task.id]);
+
+    toast({
+      title: 'Success',
+      description: 'Document data saved and refreshed successfully.'
+    });
+
+    // Move to next document or close
+    if (currentPreviewIndex >= previewDocuments.length - 1) {
+      setIsPreviewOpen(false);
+    } else {
+      setCurrentPreviewIndex(prev => prev + 1);
+    }
+  } catch (error) {
+    console.error('Error saving document data:', error);
+    toast({
+      title: 'Error',
+      description: error instanceof Error ? error.message : 'Failed to save document data.',
+      variant: 'destructive'
+    });
+  }
+}, [onSave, previewDocuments, currentPreviewIndex, stage.id, task.id, onFetchData]);
 
   if (renderMode === 'date') {
     if (!isStageApplicable) {

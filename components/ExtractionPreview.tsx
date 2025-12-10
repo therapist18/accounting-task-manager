@@ -392,10 +392,11 @@ export const ExtractionPreview = ({
           parsedData = match && match[1] ? JSON.parse(match[1]) : JSON.parse(newRawData);
         } catch (e) {
           console.warn("Failed to parse extracted JSON string", e);
-          // Fallback: assume it is what it is or empty
           parsedData = {};
         }
       }
+
+      console.log('Parsed extraction data:', parsedData); // Debug log
 
       // Update Local Data and Notify Parent of Changes
       const newLocalData = { ...localData };
@@ -404,21 +405,23 @@ export const ExtractionPreview = ({
       fields.forEach(field => {
         const value = parsedData[field.name];
         if (value !== undefined) {
-          // Handle arrays or primitives
           newLocalData[field.name] = value;
-          // Notify parent component of field update
           if (onDataChange) {
             onDataChange(field.name, value);
           }
         }
       });
 
+      // Update state with the new data
       setLocalData(newLocalData);
       toast.success("Extraction complete", { id: toastId });
 
-      // Auto-save the new results
+      // Auto-save the new results - pass the parsed data directly
       if (onSave) {
-        await handleSave();
+        await onSave({
+          ...newLocalData,
+          ...parsedData
+        });
       }
 
     } catch (error) {
@@ -429,58 +432,87 @@ export const ExtractionPreview = ({
     }
   };
 
-  const handleSave = async () => {
-    if (!documentId && !file?.id) {
-      toast.error('Cannot save: Missing document ID');
+const handleSave = async () => {
+  if (!documentId && !file?.id) {
+    toast.error('Cannot save: Missing document ID');
+    return;
+  }
+
+  try {
+    setIsSaving(true);
+    const documentIdToUpdate = documentId || file?.id;
+
+    // Prepare the data to save - merge extractedData and localData
+    const dataToSave = {
+      ...extractedData,
+      ...localData
+    };
+
+    console.log('Saving data:', dataToSave);
+
+    // Call the parent's onSave with the complete data
+    if (onSave) {
+      await onSave(dataToSave);
+      
+      // After successful save, fetch the updated data
+      try {
+        // Call your fetch function here, for example:
+        // const updatedData = await fetchUpdatedDocument(documentIdToUpdate);
+        // Update local state with the new data
+        // setExtractedData(updatedData.extracted_details || {});
+        // setLocalData(updatedData.extracted_details || {});
+        
+        // If you have a parent component that handles the data, you might want to call a callback
+        if (onDataChange) {
+          // Trigger a data refresh in the parent component
+          onDataChange('refresh', null);
+        }
+        
+        toast.success('Document updated and refreshed successfully');
+      } catch (fetchError) {
+        console.error('Error fetching updated data:', fetchError);
+        toast.error('Document saved, but could not refresh data');
+      }
       return;
     }
 
-    try {
-      setIsSaving(true);
-      const documentIdToUpdate = documentId || file?.id;
-
-      // Prepare the data to update
-      const updateData = {
-        extracted_details: {
-          ...extractedData,
-          ...localData
-        },
+    // Fallback to direct database update if no parent onSave
+    const { error } = await supabase
+      .from('acc_portal_directors_documents')
+      .update({
+        extracted_details: dataToSave,
         updated_at: new Date().toISOString()
-      };
+      })
+      .eq('id', documentIdToUpdate);
 
-      // Update the document in acc_portal_directors_documents
-      const { error } = await supabase
+    if (error) throw error;
+
+    // After successful direct save, fetch the updated data
+    try {
+      const { data: updatedDocument, error: fetchError } = await supabase
         .from('acc_portal_directors_documents')
-        .update(updateData)
-        .eq('id', documentIdToUpdate);
+        .select('*')
+        .eq('id', documentIdToUpdate)
+        .single();
 
-      if (error) throw error;
+      if (fetchError) throw fetchError;
 
-      toast.success('Document updated successfully');
-
-      // If there's an onSave prop, call it with the updated data
-      if (onSave) {
-        await onSave({
-          ...localData,
-          extractedData: {
-            ...extractedData,
-            ...localData
-          },
-          fileUrl,
-          fileName,
-          documentName,
-          type,
-          file,
-          documentId: documentIdToUpdate
-        });
-      }
-    } catch (error) {
-      console.error('Error saving document:', error);
-      toast.error(error.message || 'Failed to save document');
-    } finally {
-      setIsSaving(false);
+      // Update local state with the new data
+      setExtractedData(updatedDocument.extracted_details || {});
+      setLocalData(updatedDocument.extracted_details || {});
+      
+      toast.success('Document updated and refreshed successfully');
+    } catch (fetchError) {
+      console.error('Error fetching updated data:', fetchError);
+      toast.error('Document saved, but could not refresh data');
     }
-  };
+  } catch (error) {
+    console.error('Error saving document:', error);
+    toast.error(error.message || 'Failed to save document');
+  } finally {
+    setIsSaving(false);
+  }
+};
 
   const renderField = (field: Field, index: number) => {
     const value = localData[field.name];
