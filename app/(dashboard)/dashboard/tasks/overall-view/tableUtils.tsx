@@ -205,13 +205,89 @@ export const getEnhancedImmigrationStatus = (
     };
   }
 
+  const docsWithEffectiveTo = relevantDocs.flatMap(doc => {
+    if (!doc.extracted_details) {
+      return [];
+    }
+
+    const kycData = kycDocuments.get(doc.document_id);
+
+    if (!kycData?.fields) {
+      return [];
+    }
+
+    // Find all fields marked as effective to
+    const effectiveToFields = kycData.fields
+      .filter((f: any) => {
+        const fieldName = f.name || f.fieldName || '';
+        const isEffectiveTo = f.isEffectiveTo === true ||
+          (f.fieldType === 'date' && fieldName === 'Expiry_Date');
+        return isEffectiveTo;
+      })
+      .map((f: any) => f.name || f.fieldName)
+      .filter(Boolean);
+
+
+    if (effectiveToFields.length === 0) {
+      return [];
+    }
+
+    const docType = kycData.display_name || kycData.name || 'Document';
+    const extracted = doc.extracted_details || {};
+
+    // Find the first effective to date
+    for (const field of effectiveToFields) {
+      const dateValue = extracted[field];
+
+      if (dateValue) {
+        const date = parseDate(dateValue);
+        const isValidDate = date && isValid(date);
+
+        if (isValidDate) {
+          return [{
+            date,
+            documentType: docType,
+            document: doc,
+            isEffectiveTo: true,
+            sourceField: field
+          }];
+        }
+      }
+    }
+    return [];
+  });
+
+  // If we found documents with effective to dates, use the latest one
+  if (docsWithEffectiveTo.length > 0) {
+    const latestDoc = docsWithEffectiveTo.reduce((latest, current) =>
+      isAfter(current.date, latest.date) ? current : latest, docsWithEffectiveTo[0]);
+
+    const today = startOfToday();
+    const isFuture = isAfter(latestDoc.date, today) || isEqual(latestDoc.date, today);
+    const timeDiff = latestDoc.date.getTime() - today.getTime();
+    const daysRemaining = Math.ceil(timeDiff / (1000 * 3600 * 24));
+    const statusType = isFuture
+      ? (daysRemaining <= 30 ? 'expiring_soon' : 'active')
+      : 'expired';
+
+    return {
+      status: isFuture
+        ? `Valid until ${format(latestDoc.date, 'dd MMM yyyy')} (from ${latestDoc.sourceField})`
+        : `Expired on ${format(latestDoc.date, 'dd MMM yyyy')} (from ${latestDoc.sourceField})`,
+      date: latestDoc.date,
+      type: statusType,
+      documentType: latestDoc.documentType,
+      daysRemaining: isFuture ? daysRemaining : null
+    };
+  }
+
   const allDatesWithTypes = relevantDocs.flatMap(doc => {
     if (!doc.extracted_details) return [];
 
     const kycData = kycDocuments.get(doc.document_id);
     const documentTypeName = kycData?.display_name || kycData?.name || 'Document';
-
     const dates = findDatesInObject(doc.extracted_details, DATE_FIELDS);
+
     return dates.map(date => ({
       date,
       documentType: documentTypeName,
@@ -231,7 +307,6 @@ export const getEnhancedImmigrationStatus = (
 
   const latestDateInfo = allDatesWithTypes.reduce((latest, current) =>
     isAfter(current.date, latest.date) ? current : latest, allDatesWithTypes[0]);
-
   const today = startOfToday();
   const isFuture = isAfter(latestDateInfo.date, today) || isEqual(latestDateInfo.date, today);
   const timeDiff = latestDateInfo.date.getTime() - today.getTime();
@@ -243,8 +318,8 @@ export const getEnhancedImmigrationStatus = (
 
   return {
     status: isFuture
-      ? `Valid until ${format(latestDateInfo.date, 'dd MMM yyyy')}`
-      : `Expired on ${format(latestDateInfo.date, 'dd MMM yyyy')}`,
+      ? `Valid until ${format(latestDateInfo.date, 'dd MMM yyyy')} (fallback)`
+      : `Expired on ${format(latestDateInfo.date, 'dd MMM yyyy')} (fallback)`,
     date: latestDateInfo.date,
     type: statusType,
     documentType: latestDateInfo.documentType,
@@ -592,13 +667,13 @@ export const getCellContent = (
       if (!stageFollowUp) return '-';
       return <span className="whitespace-nowrap text-sm text-white">{stageFollowUp}</span>;
     })(),
-   company_name: (() => {
-  if (!task.company_id) return 'N/A';
-  if (companies instanceof Map) {
-    return companies.get(task.company_id) || 'N/A';
-  }
-  return companies?.[task.company_id] || 'N/A';
-})(),
+    company_name: (() => {
+      if (!task.company_id) return 'N/A';
+      if (companies instanceof Map) {
+        return companies.get(task.company_id) || 'N/A';
+      }
+      return companies?.[task.company_id] || 'N/A';
+    })(),
     job_level: (() => {
       const jobLevel = task.job_level;
 

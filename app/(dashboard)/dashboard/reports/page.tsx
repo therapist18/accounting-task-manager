@@ -121,7 +121,7 @@ const parseDateString = (dateInput: any): Date | null => {
 const formatDateForDisplay = (date: any): string => {
   const d = parseDateString(date);
   if (!d) return '-';
-  
+
   try {
     const day = String(d.getDate()).padStart(2, '0');
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -450,23 +450,23 @@ export default function ReportsPage() {
   // UPDATED getDocumentForTaskStage to check task.stages too
   const getDocumentForTaskStage = useCallback((task, stage) => {
     let linked = task.source_document_id?.[stage.id];
-    
+
     // Fallback: Check task.stages[stage.id].documents
     if (!linked && task.stages?.[stage.id]?.documents) {
-        linked = Object.values(task.stages[stage.id].documents).map((doc:any) => 
-            doc.document_id || doc.id // Handle different ID locations
-        );
+      linked = Object.values(task.stages[stage.id].documents).map((doc: any) =>
+        doc.document_id || doc.id // Handle different ID locations
+      );
     }
 
     if (!linked) return [];
-    
+
     const linkedIds = Array.isArray(linked) ? linked : [linked];
-    
+
     return linkedIds
       .map(ref => {
-          const docId = typeof ref === 'string' ? ref : ref.id;
-          if (!docId) return null;
-          return allDocuments.find(d => d.id.toString() === docId.toString());
+        const docId = typeof ref === 'string' ? ref : ref.id;
+        if (!docId) return null;
+        return allDocuments.find(d => d.id.toString() === docId.toString());
       })
       .filter(Boolean);
   }, [allDocuments]);
@@ -578,23 +578,29 @@ export default function ReportsPage() {
     }
     if (['imm_status_doc', 'imm_status_expiry', 'imm_status_days'].includes(col.type)) {
       const statusData = getEnhancedImmigrationStatusWrapper(task);
-      const currentDoc = statusData?.current;
-      if (col.type === 'imm_status_doc') return currentDoc ? <span className="text-xs font-medium text-slate-700">{currentDoc.name || 'Document'}</span> : <span className="text-red-500 text-xs font-semibold">Missing</span>;
-      let expiry = null;
-      if (currentDoc) {
-        const kycConfig = kycDocuments.get(currentDoc.document_id || currentDoc.kyc_id);
-        const extracted = currentDoc.extracted_details || {};
-        if (kycConfig?.fields) {
-          const effectiveToField = kycConfig.fields.find(f => f.isEffectiveTo === true);
-          if (effectiveToField) expiry = extracted[effectiveToField.name];
-        }
-      } else if (statusData) expiry = statusData.date;
-      const expiryDate = parseDateString(expiry);
-      if (col.type === 'imm_status_expiry') return <span className="text-xs text-slate-700">{expiryDate ? formatDateForDisplay(expiryDate) : 'N/A'}</span>;
+      
+      if (col.type === 'imm_status_doc') {
+        return statusData?.documentType 
+          ? <span className="text-xs font-medium text-slate-700">{statusData.documentType}</span> 
+          : <span className="text-red-500 text-xs font-semibold">Missing</span>;
+      }
+      
+      if (col.type === 'imm_status_expiry') {
+        const expiryDate = statusData?.date;
+        return <span className="text-xs text-slate-700">{
+          expiryDate 
+            ? formatDateForDisplay(expiryDate) 
+            : 'N/A'
+        }</span>;
+      }
+      
       if (col.type === 'imm_status_days') {
+        const expiryDate = statusData?.date;
         if (!expiryDate) return <span className="text-gray-400 text-xs">-</span>;
         const days = Math.ceil((expiryDate.getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
-        return <span className={`text-xs ${days < 0 ? 'text-red-600 font-bold' : 'text-green-600'}`}>{days} days</span>;
+        return <span className={`text-xs ${days < 0 ? 'text-red-600 font-bold' : 'text-green-600'}`}>
+          {days} days
+        </span>;
       }
     }
 
@@ -609,7 +615,7 @@ export default function ReportsPage() {
       // Get current stage status to check if this stage is after the current stage
       const currentStageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
       const currentStage = stages.find(s => s.name === currentStageStatus?.stageName);
-      
+
       // If this stage is after the current stage, show dash
       if (currentStage?.order_num !== undefined && stage.order_num > currentStage.order_num) {
         return <span className="text-slate-300">-</span>;
@@ -645,52 +651,62 @@ export default function ReportsPage() {
 
       // FORCE DOCUMENT CHECK EVEN IF DATE EXISTS (To ensure we catch latest document date if applicable)
       if (stage.documents?.length > 0) {
-        
-        const allLinkedDocs = stage.documents.flatMap(docConfig => {
-             const isApplicable = isDocumentApplicable(docConfig, task);
-             if (!isApplicable) return [];
 
-             // This now calls the updated helper which checks both source_document_id and task.stages
-             const foundDocs = getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
-             return foundDocs;
-          })
+        const allLinkedDocs = stage.documents.flatMap(docConfig => {
+          const isApplicable = isDocumentApplicable(docConfig, task);
+          if (!isApplicable) return [];
+
+          // This now calls the updated helper which checks both source_document_id and task.stages
+          const foundDocs = getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
+          return foundDocs;
+        })
           .filter(d => d && !d.indicator);
 
         if (allLinkedDocs.length > 0) {
-           // We need to find the LATEST date among all uploaded documents
-           // Fields to check in priority order
-           const dateFields = [
-             'application_date', 'date', 'Date', 'upload_date', 'created_date', 'With_Effect_From', 'date_and_time_generated',
-             'date_of_application', 'Application Date', 'submission_date', 'Submission Date'
-           ];
-           
-           let validDates = [];
-           
-           allLinkedDocs.forEach(linkedDoc => {
-              const details = linkedDoc.extracted_details || {};
-              
-              for (const field of dateFields) {
-                 // Try strict match first, then case-insensitive
-                 const key = Object.keys(details).find(k => k.toLowerCase() === field.toLowerCase()) || field;
-                 
-                 if (details[key]) {
-                    const parsed = parseDateString(details[key]);
-                    if (parsed) {
-                        validDates.push(parsed);
-                        break; // Stop at first valid date field for THIS document
-                    }
-                 }
+          // We need to find the LATEST date among all uploaded documents
+          let validDates = [];
+
+          allLinkedDocs.forEach(linkedDoc => {
+            const details = linkedDoc.extracted_details || {};
+            const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
+            
+            if (kycDoc?.fields) {
+              // Get all fields that are marked as immigration dates
+              const immigrationDateFields = kycDoc.fields
+                .filter((field: any) => field.isImmigrationDate === true)
+                .map((field: any) => field.fieldName || field.name || '')
+                .filter(Boolean);
+
+              // If no specific immigration date fields, check all date fields
+              const dateFieldsToCheck = immigrationDateFields.length > 0 
+                ? immigrationDateFields 
+                : kycDoc.fields
+                    .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
+                    .map((field: any) => field.fieldName || field.name || '')
+                    .filter(Boolean);
+
+              // Check each potential date field
+              for (const field of dateFieldsToCheck) {
+                const key = field;
+                if (details[key]) {
+                  const parsed = parseDateString(details[key]);
+                  if (parsed) {
+                    validDates.push(parsed);
+                    break; // Stop at first valid date field for THIS document
+                  }
+                }
               }
-           });
-           
-           if (validDates.length > 0) {
-              // Sort descending and pick the latest date as completion
-              validDates.sort((a, b) => b.getTime() - a.getTime());
-              const latestDocDate = validDates[0];
-              
-              // Always use the document date if found, regardless of completionDateStr
-              completionDateStr = latestDocDate;
-           }
+            }
+          });
+
+          if (validDates.length > 0) {
+            // Sort descending and pick the latest date as completion
+            validDates.sort((a, b) => b.getTime() - a.getTime());
+            const latestDocDate = validDates[0];
+
+            // Always use the document date if found, regardless of completionDateStr
+            completionDateStr = latestDocDate;
+          }
         }
       }
 
@@ -921,8 +937,8 @@ export default function ReportsPage() {
       // Check if applicable to current filter (but log it regardless)
       const isApplicable = isStageApplicableToCurrentFilter(stage.id);
       if (!isApplicable) {
-         console.log(`[DEBUG] Skipping stage ${stage.name} due to filter non-applicability`);
-         return; 
+        console.log(`[DEBUG] Skipping stage ${stage.name} due to filter non-applicability`);
+        return;
       }
 
       const config = activeReport.configuration.stages[stage.id];
@@ -937,10 +953,10 @@ export default function ReportsPage() {
       if (shouldShowDateColumn) {
         console.log(`[DEBUG] Adding Date Column for: ${stage.name}`);
         cols.push({
-          id: `stage_date_${stage.id}`, 
-          label: `${stage.name} (Date)`, 
-          type: 'stage_date', 
-          stageId: stage.id, 
+          id: `stage_date_${stage.id}`,
+          label: `${stage.name} (Date)`,
+          type: 'stage_date',
+          stageId: stage.id,
           stageName: stage.name,
           hasSubColumns: hasDocuments // NEW: Flag to indicate expandable
         });
@@ -971,16 +987,16 @@ export default function ReportsPage() {
                 return name === 'expiry_date' || f.isEffectiveTo === true || name.includes('expiry') || name.includes('effective_to');
               });
               if (toField) {
-                cols.push({ 
-                  id: `field_${stage.id}_to`, 
-                  label: `${stage.name} - TO`, 
-                  type: 'extracted_field', 
-                  stageId: stage.id, 
-                  kycId, 
-                  fieldId: toField.id || toField.name, 
-                  fieldName: toField.name || toField.fieldName, 
-                  fieldType: toField.type || toField.fieldType || 'date', 
-                  isAutoAdded: true 
+                cols.push({
+                  id: `field_${stage.id}_to`,
+                  label: `${stage.name} - TO`,
+                  type: 'extracted_field',
+                  stageId: stage.id,
+                  kycId,
+                  fieldId: toField.id || toField.name,
+                  fieldName: toField.name || toField.fieldName,
+                  fieldType: toField.type || toField.fieldType || 'date',
+                  isAutoAdded: true
                 });
                 toAdded = true;
               }
@@ -1328,25 +1344,25 @@ export default function ReportsPage() {
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
-                             {col.label}
-                             {/* TOGGLE BUTTON HERE */}
-                             {col.hasSubColumns && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation(); // Prevent sorting
-                                    toggleStageColumns(col.stageId);
-                                  }}
-                                  className="p-0.5 hover:bg-blue-400 rounded transition-colors text-white"
-                                >
-                                  {expandedStageColumns.has(col.stageId) ? (
-                                    <Minus className="h-3 w-3" />
-                                  ) : (
-                                    <Plus className="h-3 w-3" />
-                                  )}
-                                </button>
-                              )}
+                            {col.label}
+                            {/* TOGGLE BUTTON HERE */}
+                            {col.hasSubColumns && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation(); // Prevent sorting
+                                  toggleStageColumns(col.stageId);
+                                }}
+                                className="p-0.5 hover:bg-blue-400 rounded transition-colors text-white"
+                              >
+                                {expandedStageColumns.has(col.stageId) ? (
+                                  <Minus className="h-3 w-3" />
+                                ) : (
+                                  <Plus className="h-3 w-3" />
+                                )}
+                              </button>
+                            )}
                           </div>
-                          
+
                           {sortConfig?.key === col.id ? (
                             <ArrowUpDown className={`h-3 w-3 ${sortConfig.direction === 'asc' ? 'text-white' : 'text-blue-200'}`} />
                           ) : (
