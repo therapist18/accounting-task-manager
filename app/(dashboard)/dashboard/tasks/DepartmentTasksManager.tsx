@@ -1216,12 +1216,6 @@ export default function DepartmentTasksManager({
         updated_at: timestamp
       };
 
-      // Only update current_stage_id for completed stages, not skipped ones
-      if (!isSkipped && currentStage) {
-        updateData.current_stage_id = currentStage.id;
-        updateData.current_stage_started_at = timestamp;
-      }
-
       // 7. Execute Update
       const { error } = await supabase
         .from('tm_tasks')
@@ -1369,10 +1363,14 @@ export default function DepartmentTasksManager({
                   }
 
                   // Get all linked documents for this task and stage
-                  const linkedDocuments = task.source_document_id?.[stage.id] || [];
+                  const linkedDocuments = task.source_document_id?.[stage.id];
+                  // Ensure linkedDocuments is an array before calling find
+                  const documentsArray = Array.isArray(linkedDocuments) 
+                    ? linkedDocuments 
+                    : linkedDocuments ? [linkedDocuments] : [];
 
                   // Find if this specific document is linked
-                  const linkedDocument = linkedDocuments.find(
+                  const linkedDocument = documentsArray.find(
                     (d: any) => d.document_id === doc.kycId
                   );
 

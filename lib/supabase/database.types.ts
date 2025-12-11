@@ -47,8 +47,6 @@ export type Task = {
   task_assistant_id: string
   client_id: string
   date_initiated: string
-  current_stage_id: string
-  current_stage_started_at: string
   created_at: string
   updated_at: string
 }

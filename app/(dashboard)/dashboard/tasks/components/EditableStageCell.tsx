@@ -121,11 +121,10 @@ export default function EditableStageCell({
   const [skipReason, setSkipReason] = useState('');
   const [selectedSkipReason, setSelectedSkipReason] = useState('');
   const [isCheckingPreviousStages, setIsCheckingPreviousStages] = useState(false);
-  // Add this near the top with other state variables
-  const isStageCompleted = useMemo(() => {
+const isStageCompleted = useMemo(() => {
+    // When status is 'in_progress', this returns false, showing the skip button
     return task.stages?.[stage.id]?.status === 'completed' || task.stages?.[stage.id]?.status === 'skipped';
   }, [task.stages, stage.id]);
-
   // Debug logs
   useEffect(() => {
     if (previewDocuments.length > 0) {
@@ -232,52 +231,98 @@ export default function EditableStageCell({
 
   useEffect(() => {
     if (stageDate && stageDate !== 'NaN/NaN/NaN') {
-      const parsedDate = parse(stageDate, 'dd/MM/yyyy', new Date());
+      // Try parsing with time first, then fall back to date only
+      let parsedDate = parse(stageDate, "yyyy-MM-dd'T'HH:mm", new Date());
+      if (!isValid(parsedDate)) {
+        parsedDate = parse(stageDate, 'dd/MM/yyyy', new Date());
+      }
       if (isValid(parsedDate)) {
-        setEditValue(format(parsedDate, 'yyyy-MM-dd'));
+        setEditValue(format(parsedDate, "yyyy-MM-dd'T'HH:mm"));
       }
     } else {
       setEditValue('');
     }
   }, [stageDate]);
-const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string): string => {
-  if (status === 'skipped') {
-    if (skippedAt) {
-      try {
-        const date = new Date(skippedAt);
-        if (isValid(date)) {
-          return `Skipped (${format(date, 'dd/MM/yyyy')})`;
+
+  const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string): string => {
+    if (status === 'skipped') {
+      if (skippedAt) {
+        try {
+          const date = new Date(skippedAt);
+          if (isValid(date)) {
+            return `Skipped (${format(date, 'dd/MM/yyyy HH:mm')})`;
+          }
+        } catch (e) {
+          console.error('Error formatting skipped date:', e);
         }
-      } catch (e) {
-        console.error('Error formatting skipped date:', e);
+      }
+      return 'Skipped';
+    }
+    
+    if (!dateStr) return '';
+    
+    // Try datetime format first
+    const dateTimeFormats = [
+      "yyyy-MM-dd'T'HH:mm",
+      'dd/MM/yyyy HH:mm',
+      'yyyy-MM-dd',
+      'dd/MM/yyyy',
+      'MM/dd/yyyy',
+      'dd-MM-yyyy'
+    ];
+    
+    for (const formatStr of dateTimeFormats) {
+      const parsedDate = parse(dateStr, formatStr, new Date());
+      if (isValid(parsedDate)) {
+        return format(parsedDate, 'dd/MM/yyyy HH:mm');
       }
     }
-    return 'Skipped';
-  }
-  
-  if (!dateStr) return '';
-  
-  const formatsToTry = ['dd/MM/yyyy', 'yyyy-MM-dd', 'MM/dd/yyyy', 'dd-MM-yyyy'];
-  for (const formatStr of formatsToTry) {
-    const parsedDate = parse(dateStr, formatStr, new Date());
-    if (isValid(parsedDate)) {
-      return format(parsedDate, 'dd/MM/yyyy');
-    }
-  }
 
-  return dateStr;
-};
+    return dateStr;
+  };
+
   const handleSave = useCallback(async (isSkipped = false, skipReason = '') => {
     if (!onSave) {
       toast({ title: "Error", description: "Save handler not available", variant: "destructive" });
       return;
     }
 
-    const dateObj = parse(editValue, 'yyyy-MM-dd', new Date());
-    const formattedDate = isSkipped ? '' : format(dateObj, 'dd/MM/yyyy');
+    if (isSkipped) {
+      // Skip date validation for skipped stages
+      await onSave(stage.id, task.id, '', {
+        ...(linkedDocument?.extracted_details || {}),
+        status: 'skipped',
+        skippedAt: new Date().toISOString(),
+        skippedBy: 'userId',
+        reason: skipReason || selectedSkipReason || 'Not specified',
+      });
+      setIsEditing(false);
+      setIsSkipDialogOpen(false);
+      toast({ title: "Success", description: "Stage marked as skipped" });
+      return;
+    }
 
-    if (!isSkipped && (!editValue.trim() || !isValid(dateObj))) {
-      toast({ title: "Error", description: "Please enter a valid date", variant: "destructive" });
+    // Handle date with time
+    let dateObj = new Date(editValue);
+
+    // If the date is today and no time is provided, set the current time
+    const today = new Date();
+    if (
+      dateObj.getDate() === today.getDate() &&
+      dateObj.getMonth() === today.getMonth() &&
+      dateObj.getFullYear() === today.getFullYear() &&
+      editValue.split('T')[1] === '00:00' // Check if time was not specified (defaults to 00:00)
+    ) {
+      // Create a new date with today's date but keep the time part from the input
+      dateObj = new Date();
+      const [year, month, day] = editValue.split('T')[0].split('-').map(Number);
+      dateObj.setFullYear(year, month - 1, day);
+    }
+
+    const formattedDate = format(dateObj, "dd/MM/yyyy HH:mm");
+
+    if (!editValue.trim() || !isValid(dateObj)) {
+      toast({ title: "Error", description: "Please enter a valid date and time", variant: "destructive" });
       return;
     }
 
@@ -338,6 +383,50 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
 
   const handleSkipClick = async () => {
     setIsSkipDialogOpen(true);
+  };
+
+const handleUnskip = async () => {
+    if (!onSave) {
+      toast({ title: "Error", description: "Save handler not available", variant: "destructive" });
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      // Create a clean reset object
+      const resetData = {
+        ...(linkedDocument?.extracted_details || {}),
+        // 👇 CHANGE: Explicitly set status to 'in_progress'
+        status: 'in_progress', 
+        skippedAt: null,
+        skippedBy: null,
+        reason: null,
+        date: null,
+        completedAt: null,
+        // Ensure we don't have any status flags set
+        documentsUploaded: requiresUpload ? false : undefined
+      };
+
+      // Call onSave with empty value and the reset data containing the status
+      await onSave(stage.id, task.id, '', resetData);
+      
+      setEditValue('');
+      
+      toast({ 
+        title: "Success", 
+        description: "Stage reset.",
+        variant: "default"
+      });
+      
+      if (onFetchData) {
+        await onFetchData();
+      }
+    } catch (error) {
+      console.error('Error unskipping stage:', error);
+      toast({ title: "Error", description: "Failed to reset stage", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const confirmSkip = async () => {
@@ -491,7 +580,7 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
     if (stageDate) {
       const parsedDate = parse(stageDate, 'dd/MM/yyyy', new Date());
       if (isValid(parsedDate)) {
-        setEditValue(format(parsedDate, 'yyyy-MM-dd'));
+        setEditValue(format(parsedDate, "yyyy-MM-dd'T'HH:mm"));
       }
     } else {
       setEditValue('');
@@ -499,8 +588,12 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
   }, [stageDate]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') handleSave();
-    else if (e.key === 'Escape') handleCancel();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSave();
+    } else if (e.key === 'Escape') {
+      handleCancel();
+    }
   }, [handleSave, handleCancel]);
 
   const handleDocumentUpload = useCallback(() => {
@@ -660,71 +753,71 @@ const formatDateDisplay = (dateStr: string, status?: string, skippedAt?: string)
     }
   }, [linkedDocument, linkedDocuments, buildPreviewDocumentsData]);
 
-const handlePreviewSave = useCallback(async (data: any) => {
-  if (!onSave || previewDocuments.length === 0) {
-    console.error('Missing required data for save:', { onSave, previewDocuments });
-    return;
-  }
-
-  try {
-    const currentDoc = previewDocuments[currentPreviewIndex];
-    if (!currentDoc) {
-      throw new Error('No active document to save');
+  const handlePreviewSave = useCallback(async (data: any) => {
+    if (!onSave || previewDocuments.length === 0) {
+      console.error('Missing required data for save:', { onSave, previewDocuments });
+      return;
     }
 
-    console.log('Saving document data:', {
-      stageId: stage.id,
-      taskId: task.id,
-      documentId: currentDoc.documentId,
-      extractedData: data
-    });
-
-    // Call onSave with the extracted data
-    await onSave(
-      stage.id,
-      task.id,
-      'completed',
-      {
-        extractedData: data,
-        documentId: currentDoc.documentId
+    try {
+      const currentDoc = previewDocuments[currentPreviewIndex];
+      if (!currentDoc) {
+        throw new Error('No active document to save');
       }
-    );
 
-    // Update local state
-    const updatedDocs = [...previewDocuments];
-    updatedDocs[currentPreviewIndex] = {
-      ...currentDoc,
-      extractedData: { ...data }
-    };
-    setPreviewDocuments(updatedDocs);
+      console.log('Saving document data:', {
+        stageId: stage.id,
+        taskId: task.id,
+        documentId: currentDoc.documentId,
+        extractedData: data
+      });
 
-    // Call the fetch function to refresh the data
-    if (onFetchData) {
-      await onFetchData();
+      // Call onSave with the extracted data
+      await onSave(
+        stage.id,
+        task.id,
+        'completed',
+        {
+          extractedData: data,
+          documentId: currentDoc.documentId
+        }
+      );
+
+      // Update local state
+      const updatedDocs = [...previewDocuments];
+      updatedDocs[currentPreviewIndex] = {
+        ...currentDoc,
+        extractedData: { ...data }
+      };
+      setPreviewDocuments(updatedDocs);
+
+      // Call the fetch function to refresh the data
+      if (onFetchData) {
+        await onFetchData();
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Document data saved and refreshed successfully.'
+      });
+
+      // Move to next document or close
+      if (currentPreviewIndex >= previewDocuments.length - 1) {
+        setIsPreviewOpen(false);
+      } else {
+        setCurrentPreviewIndex(prev => prev + 1);
+      }
+    } catch (error) {
+      console.error('Error saving document data:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to save document data.',
+        variant: 'destructive'
+      });
     }
+  }, [onSave, previewDocuments, currentPreviewIndex, stage.id, task.id, onFetchData]);
 
-    toast({
-      title: 'Success',
-      description: 'Document data saved and refreshed successfully.'
-    });
-
-    // Move to next document or close
-    if (currentPreviewIndex >= previewDocuments.length - 1) {
-      setIsPreviewOpen(false);
-    } else {
-      setCurrentPreviewIndex(prev => prev + 1);
-    }
-  } catch (error) {
-    console.error('Error saving document data:', error);
-    toast({
-      title: 'Error',
-      description: error instanceof Error ? error.message : 'Failed to save document data.',
-      variant: 'destructive'
-    });
-  }
-}, [onSave, previewDocuments, currentPreviewIndex, stage.id, task.id, onFetchData]);
-
-  if (renderMode === 'date') {
+ if (renderMode === 'date') {
     if (!isStageApplicable) {
       return <span className="text-sm text-gray-400 italic">N/A</span>;
     }
@@ -736,53 +829,67 @@ const handlePreviewSave = useCallback(async (data: any) => {
 
     // 1. RENDER SKIPPED BADGE WITH TOOLTIP
     if (isSkipped) {
-      const skippedAt = stageData?.skippedAt;
+         const skippedAt = stageData?.skippedAt;
       const reason = stageData?.reason || 'No reason provided';
       
       let formattedSkippedDate = 'N/A';
       if (skippedAt) {
         try {
-          // Handle ISO string from skippedAt
           const date = new Date(skippedAt);
-          if (isValid(date)) formattedSkippedDate = format(date, 'dd/MM/yyyy');
+          if (isValid(date)) formattedSkippedDate = format(date, 'dd/MM/yyyy HH:mm');
         } catch (e) { console.error(e); }
       }
 
       return (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Badge 
-                variant="secondary" 
-                className="bg-amber-100 text-amber-700 hover:bg-amber-200 border-amber-200 cursor-help font-normal"
-              >
-                Skipped
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent className="bg-slate-900 text-white border-slate-800">
-              <div className="text-xs text-left space-y-1">
-                <p><span className="font-semibold text-slate-300">Reason:</span> {reason}</p>
-                <p><span className="font-semibold text-slate-300">Date:</span> {formattedSkippedDate}</p>
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <div className="flex items-center gap-2">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge 
+                  variant="secondary" 
+                  className="bg-amber-100 text-amber-700 hover:bg-amber-200 border-amber-200 cursor-help font-normal"
+                >
+                  Skipped
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent className="bg-slate-900 text-white border-slate-800">
+                <div className="text-xs text-left space-y-1">
+                  <p><span className="font-semibold text-slate-300">Reason:</span> {reason}</p>
+                  <p><span className="font-semibold text-slate-300">Date:</span> {formattedSkippedDate}</p>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 text-xs text-blue-600 hover:bg-blue-50"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleUnskip();
+            }}
+            disabled={isLoading}
+          >
+            Unskip
+          </Button>
+        </div>
       );
     }
 
     // 2. Date editing mode (Only if NOT skipped)
     if (isEditing && !requiresUpload) {
-      return (
+         return (
         <div className="flex items-center gap-2 min-w-[150px]">
           <Input
             ref={inputRef}
-            type="date"
+            type="datetime-local"
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={handleKeyDown}
             onBlur={handleSave}
             className="text-sm h-7"
             disabled={isLoading}
+            step="60"
           />
           <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-green-600" onClick={handleSave} disabled={isLoading}>
             <Check className="h-3 w-3" />
@@ -794,8 +901,11 @@ const handlePreviewSave = useCallback(async (data: any) => {
       );
     }
 
-    // 3. Displaying Completed Date
-    if (stageDate && stageDate !== 'NaN/NaN/NaN') {
+ // 3. Displaying Completed Date
+    const isExplicitlyCompleted = stageStatus === 'completed';
+    const isLegacyCompleted = !stageStatus && (!!value || stageData?.documentsUploaded === true);
+
+    if ((isExplicitlyCompleted || isLegacyCompleted) && stageDate && stageDate !== 'NaN/NaN/NaN') {
       return (
         <div
           className="flex items-center gap-2 group cursor-pointer"

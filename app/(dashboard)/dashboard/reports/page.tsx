@@ -12,7 +12,7 @@ import {
   ChevronDown, ChevronsRight, ChevronsDown, X, FileText, ArrowLeft,
   List, ChevronLeft, ChevronRight, RefreshCw, Filter, AlertTriangle,
   Calendar, ShieldCheck, Clock, ArrowUpDown, Search, Timer, AlertCircle,
-  Check
+  Check, Clock3
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -89,7 +89,15 @@ const parseDateString = (dateInput: any): Date | null => {
       return isValid(d) ? d : null;
     }
 
-    // Handle DD/MM/YYYY format
+    // Handle DD/MM/YYYY HH:mm format (with time)
+    const dmyTimeMatch = strInput.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}) (\d{1,2}):(\d{2})$/);
+    if (dmyTimeMatch) {
+      const [_, day, month, year, hours, minutes] = dmyTimeMatch.map(Number);
+      const d = new Date(year, month - 1, day, hours, minutes);
+      return isValid(d) ? d : null;
+    }
+
+    // Handle DD/MM/YYYY format (without time)
     const dmyMatch = strInput.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
     if (dmyMatch) {
       const [_, day, month, year] = dmyMatch.map(Number);
@@ -121,14 +129,28 @@ const parseDateString = (dateInput: any): Date | null => {
 const formatDateForDisplay = (date: any): string => {
   const d = parseDateString(date);
   if (!d) return '-';
-
   try {
     const day = String(d.getDate()).padStart(2, '0');
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const year = d.getFullYear();
     return `${day}/${month}/${year}`;
   } catch (e) {
-    console.error("Error formatting date:", e, "Input:", date);
+    return '-';
+  }
+};
+
+// NEW: Helper to display Date AND Time
+const formatDateTimeForDisplay = (date: any): string => {
+  const d = parseDateString(date);
+  if (!d) return '-';
+  try {
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+  } catch (e) {
     return '-';
   }
 };
@@ -154,9 +176,7 @@ const getTimeStatus = (startTime: Date | string | null, estimatedMinutes: number
   if (!startTime) return null;
 
   try {
-    // Ensure we have a Date object using the strict parser
     const startDate = parseDateString(startTime);
-
     if (!startDate) return null;
 
     const now = new Date();
@@ -219,7 +239,7 @@ const safeRender = (content: any) => {
 };
 
 export default function ReportsPage() {
-
+  // ... (State variables and useEffects remain unchanged) ...
   // --- State ---
   const [activeReport, setActiveReport] = useState<any | null>(null);
   const [availableReports, setAvailableReports] = useState<any[]>([]);
@@ -249,7 +269,7 @@ export default function ReportsPage() {
   // View & Pagination State
   const [view, setView] = useState<'standard' | 'transposed'>('standard');
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(100); // Default 100
+  const [itemsPerPage, setItemsPerPage] = useState(100); 
   const [expandedSections, setExpandedSections] = useState(() => new Set(['task_details']));
 
   // --- NEW: State for toggling stage doc columns ---
@@ -267,7 +287,7 @@ export default function ReportsPage() {
     });
   }, []);
 
-  // --- 1. Initialization ---
+  // --- 1. Initialization & 2. Data Fetching ---
   useEffect(() => {
     const initReports = async () => {
       setReportLoading(true);
@@ -293,7 +313,6 @@ export default function ReportsPage() {
     initReports();
   }, []);
 
-  // --- 2. Data Fetching ---
   const refreshData = useCallback(async () => {
     if (!activeReport) return;
     setLoading(true);
@@ -355,8 +374,7 @@ export default function ReportsPage() {
     setIsReportDialogOpen(false);
   };
 
-  // --- 3. Filtering & Sorting Logic ---
-
+  // --- 3. Filtering & Sorting Logic --- (Same as original)
   const activeDepartment = useMemo(() =>
     departments.find(d => d.id.toString() === activeDeptId),
     [departments, activeDeptId]);
@@ -391,19 +409,16 @@ export default function ReportsPage() {
     );
   }, [filteredTasks, searchQuery, companies]);
 
-  // Helper to extract value for sorting
+  // Sorting Helper
   const getSortableValue = (task: any, col: any) => {
     if (!col) return '';
-
     if (col.type === 'imm_status_days') {
       const statusData = getEnhancedImmigrationStatusWrapper(task);
       const currentDoc = statusData?.current;
       if (!currentDoc) return -9999;
-
       let expiry = null;
       const kycConfig = kycDocuments.get(currentDoc.document_id || currentDoc.kyc_id);
       const extracted = currentDoc.extracted_details || {};
-
       if (kycConfig?.fields) {
         const effTo = kycConfig.fields.find(f => f.isEffectiveTo === true);
         if (effTo) expiry = extracted[effTo.name];
@@ -413,12 +428,10 @@ export default function ReportsPage() {
         const expiryKey = keys.find(k => k.toLowerCase() === 'expiry_date' || k.toLowerCase() === 'valid_until');
         if (expiryKey) expiry = extracted[expiryKey];
       }
-
       const d = parseDateString(expiry);
       if (!d) return -9999;
       return d.getTime();
     }
-
     if (col.type === 'task') {
       if (col.field === 'applicant_name') return task.applicant_name || '';
       if (col.field === 'company_name') return companies.get(task.company_id) || '';
@@ -428,15 +441,12 @@ export default function ReportsPage() {
       }
       return task[col.field] || '';
     }
-
     if (col.type === 'stage_date') {
       const d = task.stages?.[col.stageId]?.date;
       return d ? parseDateString(d)?.getTime() || 0 : 0;
     }
-
     return '';
   };
-
 
   const handleNextPage = () => setCurrentPage(prev => Math.min(prev + 1, totalPages));
   const handlePreviousPage = () => setCurrentPage(prev => Math.max(prev - 1, 1));
@@ -447,21 +457,15 @@ export default function ReportsPage() {
   const getEnhancedImmigrationStatusWrapper = useCallback((task) => getEnhancedImmigrationStatus(task, stages, allDocuments, kycDocuments), [stages, allDocuments, kycDocuments]);
   const getStaffName = useCallback(() => '', []);
 
-  // UPDATED getDocumentForTaskStage to check task.stages too
   const getDocumentForTaskStage = useCallback((task, stage) => {
     let linked = task.source_document_id?.[stage.id];
-
-    // Fallback: Check task.stages[stage.id].documents
     if (!linked && task.stages?.[stage.id]?.documents) {
       linked = Object.values(task.stages[stage.id].documents).map((doc: any) =>
-        doc.document_id || doc.id // Handle different ID locations
+        doc.document_id || doc.id 
       );
     }
-
     if (!linked) return [];
-
     const linkedIds = Array.isArray(linked) ? linked : [linked];
-
     return linkedIds
       .map(ref => {
         const docId = typeof ref === 'string' ? ref : ref.id;
@@ -471,7 +475,7 @@ export default function ReportsPage() {
       .filter(Boolean);
   }, [allDocuments]);
 
-  // --- 5. Applicability Helpers ---
+  // --- 5. Applicability Helpers --- (Same as original)
   const isStageApplicableToTask = useCallback((stage: any, task: any): boolean => {
     if (!task || !stage || !departments?.length) return true;
     try {
@@ -522,101 +526,100 @@ export default function ReportsPage() {
 
   // --- 6. Render Logic ---
   const renderCellValue = (task, col) => {
-    // --- Current Stage & Time Status ---
-    if (col.type === 'task' && col.field === 'current_stage_status') {
-      const stageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
+    // ... (Imm status and basic task fields remain the same) ...
 
-      if (!stageStatus || stageStatus.stageName === 'No Stage') return <span className="text-slate-300 text-xs">-</span>;
-      const stage = stages.find(s => s.name === stageStatus.stageName);
-      const startTimeStr = task.current_stage_started_at || task.created_at;
-      const startedAt = parseDateString(startTimeStr);
-      const allowedMinutes = stage?.estimated_time;
-      const timeStatus = getTimeStatus(startedAt, allowedMinutes);
-      if (!allowedMinutes || allowedMinutes <= 0) {
+    if (col.type === 'task' && col.field === 'current_stage_status') {
+        const stageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
+  
+        if (!stageStatus || stageStatus.stageName === 'No Stage') return <span className="text-slate-300 text-xs">-</span>;
+        const stage = stages.find(s => s.name === stageStatus.stageName);
+        const startTimeStr = task.current_stage_started_at || task.created_at;
+        const startedAt = parseDateString(startTimeStr);
+        const allowedMinutes = stage?.estimated_time;
+        const timeStatus = getTimeStatus(startedAt, allowedMinutes);
+        if (!allowedMinutes || allowedMinutes <= 0) {
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 text-[10px] px-1 gap-1">
+                  <ShieldCheck className="h-3 w-3" /> {stageStatus.stageName}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Status: {stageStatus.stageStatus}</p>
+                {startedAt && <p>Started: {formatDateTimeForDisplay(startedAt)}</p>}
+              </TooltipContent>
+            </Tooltip>
+          );
+        }
+        const progress = timeStatus ? Math.min(100, Math.max(0, timeStatus.progress)) : 0;
+        const isOverdue = timeStatus?.isOverdue || false;
         return (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 text-[10px] px-1 gap-1">
-                <ShieldCheck className="h-3 w-3" /> {stageStatus.stageName}
-              </Badge>
+              <div className="flex flex-col gap-1 w-full">
+                <div className="flex items-center gap-1.5">
+                  <Badge variant={isOverdue ? "destructive" : "outline"} className={`${isOverdue ? "bg-red-50 text-red-600 border-red-200" : "bg-green-50 text-green-600 border-green-200"} text-[10px] px-1 gap-1`}>
+                    {isOverdue ? <AlertCircle className="h-3 w-3" /> : <ShieldCheck className="h-3 w-3" />}
+                    {stageStatus.stageName}
+                  </Badge>
+                </div>
+                <div className="text-[10px] text-gray-500">{timeStatus?.formattedElapsed} / {formatDuration(allowedMinutes)}</div>
+              </div>
             </TooltipTrigger>
-            <TooltipContent>
-              <p>Status: {stageStatus.stageStatus}</p>
-              {startedAt && <p>Started: {formatDateForDisplay(startedAt)}</p>}
+            <TooltipContent className="max-w-[300px]">
+              <div className="space-y-1">
+                <div className="flex justify-between"><span className="font-medium">Stage:</span><span>{stageStatus.stageName}</span></div>
+                <div className="flex justify-between"><span className="font-medium">Status:</span><span className={isOverdue ? 'text-red-600' : 'text-green-600'}>{isOverdue ? 'Overdue' : 'In Progress'}</span></div>
+                <div className="flex justify-between"><span className="font-medium">Time Elapsed:</span><span>{timeStatus?.formattedElapsed}</span></div>
+              </div>
             </TooltipContent>
           </Tooltip>
         );
       }
-      const progress = timeStatus ? Math.min(100, Math.max(0, timeStatus.progress)) : 0;
-      const isOverdue = timeStatus?.isOverdue || false;
-      return (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div className="flex flex-col gap-1 w-full">
-              <div className="flex items-center gap-1.5">
-                <Badge variant={isOverdue ? "destructive" : "outline"} className={`${isOverdue ? "bg-red-50 text-red-600 border-red-200" : "bg-green-50 text-green-600 border-green-200"} text-[10px] px-1 gap-1`}>
-                  {isOverdue ? <AlertCircle className="h-3 w-3" /> : <ShieldCheck className="h-3 w-3" />}
-                  {stageStatus.stageName}
-                </Badge>
-              </div>
-              <div className="text-[10px] text-gray-500">{timeStatus?.formattedElapsed} / {formatDuration(allowedMinutes)}</div>
-            </div>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-[300px]">
-            <div className="space-y-1">
-              <div className="flex justify-between"><span className="font-medium">Stage:</span><span>{stageStatus.stageName}</span></div>
-              <div className="flex justify-between"><span className="font-medium">Status:</span><span className={isOverdue ? 'text-red-600' : 'text-green-600'}>{isOverdue ? 'Overdue' : 'In Progress'}</span></div>
-              <div className="flex justify-between"><span className="font-medium">Time Elapsed:</span><span>{timeStatus?.formattedElapsed}</span></div>
-            </div>
-          </TooltipContent>
-        </Tooltip>
-      );
-    }
-    if (col.type === 'task' && col.field === 'current_stage_name') {
-      const stageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
-      return <div className="flex flex-col"><span className="text-xs font-medium text-blue-700">{stageStatus?.stageName || 'No Stage'}</span>{stageStatus?.stageStatus && <span className="text-xs text-slate-500">{stageStatus.stageStatus}</span>}</div>;
-    }
-    if (['imm_status_doc', 'imm_status_expiry', 'imm_status_days'].includes(col.type)) {
-      const statusData = getEnhancedImmigrationStatusWrapper(task);
-
-      if (col.type === 'imm_status_doc') {
-        return statusData?.documentType
-          ? <span className="text-xs font-medium text-slate-700">{statusData.documentType}</span>
-          : <span className="text-red-500 text-xs font-semibold">Missing</span>;
+      if (col.type === 'task' && col.field === 'current_stage_name') {
+        const stageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
+        return <div className="flex flex-col"><span className="text-xs font-medium text-blue-700">{stageStatus?.stageName || 'No Stage'}</span>{stageStatus?.stageStatus && <span className="text-xs text-slate-500">{stageStatus.stageStatus}</span>}</div>;
       }
-
-      if (col.type === 'imm_status_expiry') {
-        const expiryDate = statusData?.date;
-        return <span className="text-xs text-slate-700">{
-          expiryDate
-            ? formatDateForDisplay(expiryDate)
-            : 'N/A'
-        }</span>;
+      if (['imm_status_doc', 'imm_status_expiry', 'imm_status_days'].includes(col.type)) {
+        const statusData = getEnhancedImmigrationStatusWrapper(task);
+  
+        if (col.type === 'imm_status_doc') {
+          return statusData?.documentType
+            ? <span className="text-xs font-medium text-slate-700">{statusData.documentType}</span>
+            : <span className="text-red-500 text-xs font-semibold">Missing</span>;
+        }
+  
+        if (col.type === 'imm_status_expiry') {
+          const expiryDate = statusData?.date;
+          return <span className="text-xs text-slate-700">{
+            expiryDate
+              ? formatDateForDisplay(expiryDate)
+              : 'N/A'
+          }</span>;
+        }
+  
+        if (col.type === 'imm_status_days') {
+          const expiryDate = statusData?.date;
+          if (!expiryDate) return <span className="text-gray-400 text-xs">-</span>;
+          const days = Math.ceil((expiryDate.getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
+          return <span className={`text-xs ${days < 0 ? 'text-red-600 font-bold' : 'text-green-600'}`}>
+            {days} days
+          </span>;
+        }
       }
-
-      if (col.type === 'imm_status_days') {
-        const expiryDate = statusData?.date;
-        if (!expiryDate) return <span className="text-gray-400 text-xs">-</span>;
-        const days = Math.ceil((expiryDate.getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
-        return <span className={`text-xs ${days < 0 ? 'text-red-600 font-bold' : 'text-green-600'}`}>
-          {days} days
-        </span>;
-      }
-    }
 
     // ==================================================================================
-    // ⬇️⬇️⬇️ UPDATED SECTION: STAGE DATE WITH SKIPPED BADGE & PREVIOUS DATE FIX ⬇️⬇️⬇️
+    // ⬇️⬇️⬇️ UPDATED SECTION: STAGE DATE WITH STATUS LOGIC ⬇️⬇️⬇️
     // ==================================================================================
     if (col.type === 'stage_date') {
       const stage = stages.find(s => s.id === col.stageId);
       if (!stage) return <span className="text-slate-300">-</span>;
       if (!isStageApplicableToTask(stage, task)) return <span className="text-sm text-gray-400 italic">N/A</span>;
 
-      // Get current stage status to check if this stage is after the current stage
+      // Current stage Check
       const currentStageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
       const currentStage = stages.find(s => s.name === currentStageStatus?.stageName);
-
-      // If this stage is after the current stage, show dash
       if (currentStage?.order_num !== undefined && stage.order_num > currentStage.order_num) {
         return <span className="text-slate-300">-</span>;
       }
@@ -624,11 +627,52 @@ export default function ReportsPage() {
       const stageData = task.stages?.[col.stageId];
       const estimatedMinutes = stage.estimated_time;
 
-      // --- 1. HANDLE SKIPPED STATUS ---
+      // --- 1. CALCULATE EFFECTIVE START TIME (Moved Up to Apply to Completed Tasks too) ---
+      let effectiveStartTime = task.created_at ? parseDateString(task.created_at) : null;
+      const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+      const currentStageIndex = sortedStages.findIndex(s => s.id === col.stageId);
+
+      if (currentStageIndex > 0) {
+        const prevStage = sortedStages[currentStageIndex - 1];
+        const prevStageData = task.stages?.[prevStage.id];
+        if (prevStageData) {
+          let docDate = null;
+          if (prevStage.documents?.length > 0) {
+            const allLinkedDocs = prevStage.documents.flatMap(docConfig => {
+              if (!isDocumentApplicable(docConfig, task)) return [];
+              return getDocumentForTaskStage(task, { ...prevStage, documents: [docConfig] });
+            }).filter(d => d && !d.indicator);
+
+            if (allLinkedDocs.length > 0) {
+              allLinkedDocs.forEach(linkedDoc => {
+                const details = linkedDoc.extracted_details || {};
+                const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
+                if (kycDoc?.fields) {
+                  const dateFields = kycDoc.fields
+                    .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
+                    .map((field: any) => field.fieldName || field.name || '')
+                    .filter(Boolean);
+                  for (const field of dateFields) {
+                    const parsedDate = parseDateString(details[field]);
+                    if (parsedDate && (!docDate || parsedDate > docDate)) docDate = parsedDate;
+                  }
+                }
+              });
+            }
+          }
+          if (docDate) effectiveStartTime = docDate;
+          else if (prevStageData.date) effectiveStartTime = parseDateString(prevStageData.date);
+          else if (prevStageData.completedAt) effectiveStartTime = parseDateString(prevStageData.completedAt);
+          else if (prevStageData.status === 'skipped' && prevStageData.skippedAt) effectiveStartTime = parseDateString(prevStageData.skippedAt);
+        }
+      }
+      if (!effectiveStartTime && task.date_initiated) effectiveStartTime = parseDateString(task.date_initiated);
+
+
+      // --- 2. HANDLE SKIPPED STATUS ---
       if (stageData?.status === 'skipped') {
         const reason = stageData?.reason || 'No reason provided';
         const skippedAt = stageData?.skippedAt ? parseDateString(stageData.skippedAt) : null;
-
         return (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -639,222 +683,139 @@ export default function ReportsPage() {
             <TooltipContent className="bg-slate-900 text-white border-slate-800">
               <div className="text-xs text-left space-y-1">
                 <p><span className="font-semibold text-slate-300">Reason:</span> {reason}</p>
-                {skippedAt && <p><span className="font-semibold text-slate-300">Date:</span> {formatDateForDisplay(skippedAt)}</p>}
+                {skippedAt && <p><span className="font-semibold text-slate-300">Date:</span> {formatDateTimeForDisplay(skippedAt)}</p>}
               </div>
             </TooltipContent>
           </Tooltip>
         );
       }
 
-      // --- 2. DETERMINE COMPLETION DATE (Priority: Manually entered Date > Extracted > Timestamp) ---
+      // --- 3. DETERMINE COMPLETION DATE ---
       let completionDateStr = stageData?.date;
-
-      // FORCE DOCUMENT CHECK EVEN IF DATE EXISTS (To ensure we catch latest document date if applicable)
       if (stage.documents?.length > 0) {
-
         const allLinkedDocs = stage.documents.flatMap(docConfig => {
-          const isApplicable = isDocumentApplicable(docConfig, task);
-          if (!isApplicable) return [];
-
-          // This now calls the updated helper which checks both source_document_id and task.stages
-          const foundDocs = getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
-          return foundDocs;
-        })
-          .filter(d => d && !d.indicator);
+          if (!isDocumentApplicable(docConfig, task)) return [];
+          return getDocumentForTaskStage(task, { ...stage, documents: [docConfig] });
+        }).filter(d => d && !d.indicator);
 
         if (allLinkedDocs.length > 0) {
-          // We need to find the LATEST date among all uploaded documents
           let validDates = [];
-
           allLinkedDocs.forEach(linkedDoc => {
             const details = linkedDoc.extracted_details || {};
             const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
-
             if (kycDoc?.fields) {
-              // Get all fields that are marked as immigration dates
-              const immigrationDateFields = kycDoc.fields
-                .filter((field: any) => field.isImmigrationDate === true)
-                .map((field: any) => field.fieldName || field.name || '')
-                .filter(Boolean);
+               // Get all fields that are marked as immigration dates
+               const immigrationDateFields = kycDoc.fields
+               .filter((field: any) => field.isImmigrationDate === true)
+               .map((field: any) => field.fieldName || field.name || '')
+               .filter(Boolean);
 
-              // If no specific immigration date fields, check all date fields
-              const dateFieldsToCheck = immigrationDateFields.length > 0
-                ? immigrationDateFields
-                : kycDoc.fields
-                  .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
-                  .map((field: any) => field.fieldName || field.name || '')
-                  .filter(Boolean);
+             // If no specific immigration date fields, check all date fields
+             const dateFieldsToCheck = immigrationDateFields.length > 0
+               ? immigrationDateFields
+               : kycDoc.fields
+                 .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
+                 .map((field: any) => field.fieldName || field.name || '')
+                 .filter(Boolean);
 
-              // Check each potential date field
               for (const field of dateFieldsToCheck) {
-                const key = field;
-                if (details[key]) {
-                  const parsed = parseDateString(details[key]);
-                  if (parsed) {
-                    validDates.push(parsed);
-                    break; // Stop at first valid date field for THIS document
-                  }
-                }
+                const parsed = parseDateString(details[field]);
+                if (parsed) { validDates.push(parsed); break; }
               }
             }
           });
-
           if (validDates.length > 0) {
-            // Sort descending and pick the latest date as completion
             validDates.sort((a, b) => b.getTime() - a.getTime());
-            const latestDocDate = validDates[0];
-
-            // Always use the document date if found, regardless of completionDateStr
-            completionDateStr = latestDocDate;
+            completionDateStr = validDates[0];
           }
         }
       }
-
       if (!completionDateStr && stageData?.status === 'completed' && stageData?.completedAt) {
         completionDateStr = stageData.completedAt;
       }
-
       const completionDate = parseDateString(completionDateStr);
 
-      // --- SCENARIO A: STAGE IS COMPLETED ---
+
+      // --- 4. SCENARIO A: STAGE IS COMPLETED ---
       if (completionDate) {
+        let isCompletedOverdue = false;
+        let durationTakenText = 'N/A';
+        
+        if (effectiveStartTime && estimatedMinutes && estimatedMinutes > 0) {
+           const durationMs = completionDate.getTime() - effectiveStartTime.getTime();
+           const durationMinutes = Math.floor(durationMs / (1000 * 60));
+           isCompletedOverdue = durationMinutes > estimatedMinutes;
+           durationTakenText = formatDuration(durationMinutes);
+        }
+
+        const statusLabel = isCompletedOverdue ? "Completed but Overdue" : "Completed On Time";
+        const badgeColorClass = isCompletedOverdue 
+            ? "bg-amber-50 text-amber-700 border-amber-200" 
+            : "bg-green-50 text-green-700 border-green-200";
+
         return (
-          <div className="flex flex-col gap-1 min-w-[100px]">
-            <span className="text-xs font-medium text-green-700 flex items-center gap-1">
-              <Check className="h-3 w-3" />
-              {formatDateForDisplay(completionDate)}
-            </span>
-            <span className="text-[9px] text-slate-400">Completed</span>
-          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+                <div className="flex flex-col gap-1 min-w-[120px] items-start">
+                    <span className="text-xs font-semibold text-slate-700 flex items-center gap-1">
+                        <Calendar className="h-3 w-3 text-slate-400" />
+                        {formatDateTimeForDisplay(completionDate)}
+                    </span>
+                    <Badge variant="outline" className={`${badgeColorClass} text-[10px] px-1.5 py-0 font-normal`}>
+                        {isCompletedOverdue ? <Clock className="h-3 w-3 mr-1" /> : <Check className="h-3 w-3 mr-1" />}
+                        {statusLabel}
+                    </Badge>
+                </div>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-[280px]">
+                <div className="space-y-2">
+                    <div className="flex justify-between border-b pb-1"><span className="font-bold">{stage.name}</span></div>
+                    <div className="flex justify-between gap-4"><span className="text-slate-400">Started:</span> <span>{effectiveStartTime ? formatDateTimeForDisplay(effectiveStartTime) : '-'}</span></div>
+                    <div className="flex justify-between gap-4"><span className="text-slate-400">Completed:</span> <span>{formatDateTimeForDisplay(completionDate)}</span></div>
+                    <div className="flex justify-between gap-4"><span className="text-slate-400">Duration:</span> <span>{durationTakenText}</span></div>
+                    {estimatedMinutes > 0 && (
+                         <div className="flex justify-between gap-4"><span className="text-slate-400">Allowed:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
+                    )}
+                </div>
+            </TooltipContent>
+          </Tooltip>
         );
       }
 
-      // --- SCENARIO B: STAGE IS IN PROGRESS (Fix Calculation Logic) ---
-
-      // Calculate Start Time: Look at previous stage's MANUAL date first
-      let effectiveStartTime = task.created_at ? parseDateString(task.created_at) : null;
-
-      // Sort stages to find sequence
-      const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
-      const currentStageIndex = sortedStages.findIndex(s => s.id === col.stageId);
-
-  // In the section where we determine the effective start time for a stage (around line 735-760)
-if (currentStageIndex > 0) {
-  const prevStage = sortedStages[currentStageIndex - 1];
-  const prevStageData = task.stages?.[prevStage.id];
-
-  if (prevStageData) {
-    let docDate = null;
-    
-    // 1. First priority: Check for document date
-    if (prevStage.documents?.length > 0) {
-      const allLinkedDocs = prevStage.documents.flatMap(docConfig => {
-        const isApplicable = isDocumentApplicable(docConfig, task);
-        if (!isApplicable) return [];
-
-        const foundDocs = getDocumentForTaskStage(task, { ...prevStage, documents: [docConfig] });
-        return foundDocs;
-      }).filter(d => d && !d.indicator);
-
-      // Find the latest document date
-      if (allLinkedDocs.length > 0) {
-        allLinkedDocs.forEach(linkedDoc => {
-          const details = linkedDoc.extracted_details || {};
-          const kycDoc = kycDocuments.get(linkedDoc.kyc_id || linkedDoc.document_id);
-          
-          if (kycDoc?.fields) {
-            const dateFields = kycDoc.fields
-              .filter((field: any) => field.fieldType === 'date' || field.type === 'date')
-              .map((field: any) => field.fieldName || field.name || '')
-              .filter(Boolean);
-
-            for (const field of dateFields) {
-              const dateValue = details[field];
-              if (dateValue) {
-                const parsedDate = parseDateString(dateValue);
-                if (parsedDate && (!docDate || parsedDate > docDate)) {
-                  docDate = parsedDate;
-                }
-              }
-            }
-          }
-        });
-      }
-    }
-
-    // Set effectiveStartTime based on priority
-    if (docDate) {
-      effectiveStartTime = docDate;
-    } 
-    // 2. Second priority: Manual date from stage data
-    else if (prevStageData.date) {
-      effectiveStartTime = parseDateString(prevStageData.date);
-    } 
-    // 3. Third priority: completedAt date
-    else if (prevStageData.completedAt) {
-      effectiveStartTime = parseDateString(prevStageData.completedAt);
-    }
-    // Keep the existing fallback for skipped status
-    else if (prevStageData.status === 'skipped' && prevStageData.skippedAt) {
-      effectiveStartTime = parseDateString(prevStageData.skippedAt);
-    }
-  }
-}
-      // Fallback to task initiation if explicit start time missing
-      if (!effectiveStartTime && task.date_initiated) {
-        effectiveStartTime = parseDateString(task.date_initiated);
-      }
-
+      // --- 5. SCENARIO B: STAGE IS IN PROGRESS ---
       if (!effectiveStartTime) return <span className="text-slate-300">-</span>;
 
-      // Calculate time status
       const timeStatus = getTimeStatus(effectiveStartTime, estimatedMinutes);
       const isOverdue = timeStatus?.isOverdue || false;
-      const hasEstimate = estimatedMinutes && estimatedMinutes > 0;
-
+      const statusLabel = isOverdue ? "In Progress (Overdue)" : "In Progress";
+      
       return (
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex flex-col gap-1 min-w-[100px]">
-          <span className={`text-xs font-medium ${isOverdue ? 'text-red-600' : 'text-slate-700'}`}>
-  {isOverdue ? 'Overdue' : 'In Progress'}
-</span>
-
-              {hasEstimate ? (
-                <div className="flex justify-between items-center text-[9px] text-gray-500">
-                  <span>{timeStatus?.formattedElapsed} elapsed</span>
-                  {isOverdue && <span className="text-red-500 font-bold">!</span>}
-                </div>
-              ) : (
-                <span className="text-[9px] text-slate-400">{timeStatus?.formattedElapsed} elapsed</span>
-              )}
+            <div className="flex flex-col gap-1 min-w-[120px] items-start">
+               <span className="text-xs font-medium text-slate-500 flex items-center gap-1">
+                  <Timer className="h-3 w-3" />
+                  {timeStatus?.formattedElapsed} elapsed
+               </span>
+               <Badge variant="outline" className={`${isOverdue ? 'bg-red-50 text-red-600 border-red-200' : 'bg-blue-50 text-blue-600 border-blue-200'} text-[10px] px-1.5 py-0 font-normal`}>
+                   {isOverdue ? <AlertTriangle className="h-3 w-3 mr-1" /> : <Clock3 className="h-3 w-3 mr-1" />}
+                   {statusLabel}
+               </Badge>
             </div>
           </TooltipTrigger>
           <TooltipContent className="max-w-[250px]">
-            <div className="space-y-1">
-              <div className="flex justify-between">
-                <span className="font-medium">Stage:</span>
-                <span>{stage.name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="font-medium">Started:</span>
-                {/* Shows the calculated effective start time (e.g. 03/12/2025) */}
-                <span>{formatDateForDisplay(effectiveStartTime)}</span>
-              </div>
-              {hasEstimate && (
+            <div className="space-y-2">
+              <div className="flex justify-between border-b pb-1"><span className="font-bold">{stage.name}</span></div>
+              <div className="flex justify-between gap-4"><span className="text-slate-400">Started:</span> <span>{formatDateTimeForDisplay(effectiveStartTime)}</span></div>
+              {estimatedMinutes > 0 && (
                 <>
-                  <div className="flex justify-between">
-                    <span className="font-medium">Time Remaining:</span>
-                    <span className={isOverdue ? 'text-red-600' : ''}>
-                      {isOverdue
-                        ? `Overdue by ${timeStatus?.formattedOverdue || '-'}`
-                        : timeStatus?.formattedRemaining || '-'}
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-400">Time Remaining:</span>
+                    <span className={isOverdue ? 'text-red-400' : 'text-green-400'}>
+                      {isOverdue ? `Overdue by ${timeStatus?.formattedOverdue}` : timeStatus?.formattedRemaining}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="font-medium">Estimated Duration:</span>
-                    <span>{formatDuration(estimatedMinutes)}</span>
-                  </div>
+                  <div className="flex justify-between gap-4"><span className="text-slate-400">Estimate:</span> <span>{formatDuration(estimatedMinutes)}</span></div>
                 </>
               )}
             </div>
@@ -862,6 +823,8 @@ if (currentStageIndex > 0) {
         </Tooltip>
       );
     }
+    
+    // ... (Extracted fields and task fields logic remain the same) ...
     if (col.type === 'extracted_field') {
       const stage = stages.find(s => s.id === col.stageId);
       if (!stage) return <span className="text-slate-300">-</span>;
@@ -877,10 +840,7 @@ if (currentStageIndex > 0) {
           const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
           if (val) { foundValue = val; foundDoc = linked; break; }
         }
-
-        // UPDATED: Red text for Missing extracted fields
         if (!foundDoc) return <span className="text-red-500 text-xs font-bold">Missing</span>;
-
         const isOld = foundDoc.created_at && task.created_at && new Date(foundDoc.created_at) < new Date(task.created_at);
         const display = col.fieldType === 'Date' ? formatDateForDisplay(foundValue) : foundValue;
         return <span className={`text-xs ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || '-'}</span>;
@@ -890,15 +850,11 @@ if (currentStageIndex > 0) {
       if (!stageDocInfo) return <span className="text-slate-300">-</span>;
       if (!isDocumentApplicable(stageDocInfo, task)) return <span className="text-sm text-gray-400 italic">N/A</span>;
       const linked = getDocumentForTaskStage(task, { ...stage, documents: [stageDocInfo] })[0];
-
-      // UPDATED: Red text for Missing extracted fields
       if (!linked) return <span className="text-red-500 text-xs font-bold">Missing</span>;
 
       if (linked.indicator) return <Badge variant="destructive" className="text-[10px] px-1 h-5">Indicator</Badge>;
       const val = linked.extracted_details?.[col.fieldName] || linked.extracted_details?.[col.fieldId];
       const isOld = linked.created_at && task.created_at && new Date(linked.created_at) < new Date(task.created_at);
-
-      // Use helper for DD/MM/YYYY
       const display = col.fieldType === 'Date' ? formatDateForDisplay(val) : val;
 
       return <span className={`text-xs ${isOld ? 'text-amber-600 italic' : 'text-slate-700'}`}>{display || '-'}</span>;
@@ -952,65 +908,41 @@ if (currentStageIndex > 0) {
     const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
 
-  // --- 7. Configuration Building ---
+  // --- 7. Configuration Building --- (Same as original)
   const columns = useMemo(() => {
     if (!activeReport || !stages.length) return [];
-
-    console.log("[DEBUG] Building Columns for Report:", activeReport.name);
-    console.log("[DEBUG] Config Stages Keys:", Object.keys(activeReport.configuration?.stages || {}));
-
     const getLabel = (id: string) => id.replace(/_/g, ' ').toUpperCase();
     const cols: any[] = [];
-
-    // Add Task Fields
     activeReport.configuration?.taskFields?.forEach((field: any) => {
       cols.push({ id: `task_${field}`, label: getLabel(field), type: 'task', field });
     });
-
-    // --- ADD NEW: Current Stage Columns ---
     cols.push({ id: 'current_stage_name', label: 'Current Stage', type: 'task', field: 'current_stage_name' });
     cols.push({ id: 'current_stage_status', label: 'Stage Status', type: 'task', field: 'current_stage_status' });
-
-    // --- ADD NEW: Immigration Status Columns ---
     cols.push({ id: 'imm_status_doc', label: 'Imm Status', type: 'imm_status_doc' });
     cols.push({ id: 'imm_status_expiry', label: 'Expiry Date', type: 'imm_status_expiry' });
     cols.push({ id: 'imm_status_days', label: 'Days To Go', type: 'imm_status_days' });
 
     const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
-
-    // Iterate through ALL stages (filtered by active report config)
     stages.filter(s => activeStageIds.includes(s.id)).forEach(stage => {
-      console.log(`[DEBUG] Processing Column for Stage: ${stage.name} (${stage.id})`);
-
-      // Check if applicable to current filter (but log it regardless)
       const isApplicable = isStageApplicableToCurrentFilter(stage.id);
-      if (!isApplicable) {
-        console.log(`[DEBUG] Skipping stage ${stage.name} due to filter non-applicability`);
-        return;
-      }
+      if (!isApplicable) return;
 
       const config = activeReport.configuration.stages[stage.id];
       const isSpecialStage = SPECIAL_STAGE_IDS.includes(stage.id);
-
-      // Check if there are documents config
       const hasDocuments = config.documents && Object.keys(config.documents).length > 0;
-
-      // FORCE ADD DATE COLUMN IF EITHER EXPLICITLY SELECTED *OR* DOCUMENTS ARE PRESENT
       const shouldShowDateColumn = config.isStageDateSelected || hasDocuments;
 
       if (shouldShowDateColumn) {
-        console.log(`[DEBUG] Adding Date Column for: ${stage.name}`);
         cols.push({
           id: `stage_date_${stage.id}`,
           label: `${stage.name} (Date)`,
           type: 'stage_date',
           stageId: stage.id,
           stageName: stage.name,
-          hasSubColumns: hasDocuments // NEW: Flag to indicate expandable
+          hasSubColumns: hasDocuments 
         });
       }
 
-      // NEW LOGIC: Only show sub-columns if expanded
       if (hasDocuments && expandedStageColumns.has(stage.id)) {
         if (isSpecialStage) {
           let wefAdded = false, toAdded = false;
@@ -1066,20 +998,16 @@ if (currentStageIndex > 0) {
       }
     });
     return cols;
-  }, [activeReport, stages, kycDocuments, isStageApplicableToCurrentFilter, expandedStageColumns]); // Add dependency
+  }, [activeReport, stages, kycDocuments, isStageApplicableToCurrentFilter, expandedStageColumns]);
 
-  // ... [Keep rest of the component exactly as is] ...
   const sortedTasks = useMemo(() => {
     if (!sortConfig || !columns.length) return searchedTasks;
     const sorted = [...searchedTasks];
-
     sorted.sort((a, b) => {
       const colDef = columns.find(c => c.id === sortConfig.key);
       if (!colDef) return 0;
-
       const aValue = getSortableValue(a, colDef);
       const bValue = getSortableValue(b, colDef);
-
       if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
       if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
       return 0;
@@ -1106,12 +1034,9 @@ if (currentStageIndex > 0) {
     if (!columns.length) return [];
     const groups = [];
     const taskCols = columns.filter(c => c.type === 'task');
-    // Task columns + 3 Imm Status columns
     const immStatusColsCount = 3;
     const taskSpan = taskCols.length + immStatusColsCount;
-
     if (taskCols.length) groups.push({ id: 'task_info', label: 'Task Details', span: taskSpan });
-
     const stageMap = new Map();
     columns.filter(c => c.type !== 'task' && !['imm_status_doc', 'imm_status_expiry', 'imm_status_days'].includes(c.type)).forEach(col => {
       if (!stageMap.has(col.stageId)) stageMap.set(col.stageId, { id: col.stageId, label: '', count: 0 });
@@ -1148,7 +1073,6 @@ if (currentStageIndex > 0) {
     return rows;
   }, [activeReport, columns, expandedSections, stages]);
 
-  // --- 8. Export ---
   const handleExport = async (type: 'excel' | 'pdf') => {
     if (type === 'excel') {
       const wb = new ExcelJS.Workbook();
@@ -1175,12 +1099,10 @@ if (currentStageIndex > 0) {
     }
   };
 
-  // --- RENDER ---
   if (reportLoading) return <div className="h-screen flex items-center justify-center bg-slate-50"><Loader2 className="h-10 w-10 animate-spin text-blue-600" /></div>;
 
   return (
     <div className="flex flex-col h-screen bg-slate-50/50">
-
       {/* 1. TOP HEADER */}
       <header className="bg-white border-b px-6 py-3 flex items-center justify-between shadow-sm sticky top-0 z-50">
         <div className="flex items-center gap-4">
@@ -1214,7 +1136,6 @@ if (currentStageIndex > 0) {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* SEARCH INPUT */}
           {activeReport && (
             <div className="relative w-64 hidden md:block">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
@@ -1256,7 +1177,6 @@ if (currentStageIndex > 0) {
 
       {/* 2. MAIN CONTENT AREA */}
       <main className="flex-1 overflow-hidden p-4 flex flex-col gap-4">
-
         {/* --- DEPARTMENT TABS --- */}
         {departments.length > 0 && (
           <Tabs value={activeDeptId} onValueChange={(val) => { setActiveDeptId(val); setActiveSubDeptId('all'); setCurrentPage(1); }} className="w-full">
@@ -1393,11 +1313,10 @@ if (currentStageIndex > 0) {
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             {col.label}
-                            {/* TOGGLE BUTTON HERE */}
                             {col.hasSubColumns && (
                               <button
                                 onClick={(e) => {
-                                  e.stopPropagation(); // Prevent sorting
+                                  e.stopPropagation(); 
                                   toggleStageColumns(col.stageId);
                                 }}
                                 className="p-0.5 hover:bg-blue-400 rounded transition-colors text-white"
@@ -1436,7 +1355,6 @@ if (currentStageIndex > 0) {
                       ))}
                     </TableRow>
                   )) : (
-                    // --- EMPTY STATE BODY ---
                     <TableRow>
                       <TableCell colSpan={columns.length + 1} className="h-48 text-center bg-white">
                         <div className="flex flex-col items-center justify-center text-slate-400">
@@ -1477,7 +1395,6 @@ if (currentStageIndex > 0) {
                 </TableHeader>
                 <TableBody className="divide-y divide-slate-200">
                   {paginatedTasks.length > 0 ? transposedRows.map((row, rIdx) => {
-                    // Section Header Row
                     if (row.type === 'section_header') {
                       const Icon = row.icon;
                       return (
@@ -1506,8 +1423,6 @@ if (currentStageIndex > 0) {
                         </TableRow>
                       )
                     }
-
-                    // Data Row
                     const isSub = row.isSubRow;
                     return (
                       <TableRow key={rIdx} className="hover:bg-slate-50 group border-b border-slate-200">

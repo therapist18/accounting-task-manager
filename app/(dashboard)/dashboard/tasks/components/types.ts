@@ -36,8 +36,6 @@ export interface Task {
   status: string;
   department_id: number;
   subdepartment_id: number;
-  current_stage_id: number | null;
-  current_stage_started_at: string | null;
   task_manager_id: number | null;
   task_assistant_id: number | null;
   date_initiated: string;

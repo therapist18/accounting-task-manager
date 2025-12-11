@@ -17,7 +17,6 @@ export interface Task {
   age?: number;
   individual_id: number;
   created_at: string;
-  current_stage_id?: number;
   job_description?: string;
   job_level?: {
     level: number;
@@ -343,7 +342,7 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
   }
 
   /**
-   * Format date to dd/MM/yyyy format
+   * Format date to dd/MM/yyyy HH:mm format
    */
   export const formatDateValue = (dateString: string | Date | null | undefined): string => {
     if (!dateString) return 'N/A'
@@ -352,7 +351,8 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
       let date: Date
 
       if (typeof dateString === 'string') {
-        if (dateString.includes('/')) {
+        // If it's already in the expected format, return as is
+        if (dateString.includes('/') && dateString.includes(':')) {
           return dateString
         }
         date = new Date(dateString)
@@ -363,8 +363,10 @@ export const fetchTasks = async (departmentId?: string, subdepartmentId?: string
       const day = String(date.getDate()).padStart(2, '0')
       const month = String(date.getMonth() + 1).padStart(2, '0')
       const year = date.getFullYear()
+      const hours = String(date.getHours()).padStart(2, '0')
+      const minutes = String(date.getMinutes()).padStart(2, '0')
 
-      return `${day}/${month}/${year}`
+      return `${day}/${month}/${year} ${hours}:${minutes}`
     } catch (e) {
       console.error('Error formatting date:', dateString, e)
       return 'Invalid Date'
