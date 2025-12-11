@@ -6,6 +6,7 @@ import { Plus, Minus, LinkIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import React, { useMemo, useCallback, useEffect, useState } from "react";
+import supabase from '@/lib/supabase/client';
 
 // Types
 interface TableHeader {
@@ -45,7 +46,6 @@ const DATE_FIELDS = [
   'effective_date', 'effective_from', 'effective_to', 'with_effect_from'
 ] as const;
 
-// Table headers configuration
 export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'id', label: 'Task ID', default: true, width: 'w-20' },
   { id: 'applicant_name', label: 'Applicant Name', default: true, width: 'w-48' },
@@ -61,6 +61,7 @@ export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'job_description', label: 'Job Description', default: false, width: 'w-32' },
   { id: 'case_status', label: 'Case Status', default: false, width: 'w-28' },
   { id: 'nationality', label: 'Nationality', default: false, width: 'w-32' },
+  { id: 'full_name', label: 'Full Name', default: false, width: 'w-32' },
   { id: 'age', label: 'Age', default: false, width: 'w-20' },
   { id: 'task_manager', label: 'Task Manager', default: false, width: 'w-32' },
   { id: 'officer', label: 'Officer', default: false, width: 'w-32' },
@@ -85,7 +86,6 @@ export const STATS_HEADERS = [
   { id: 'stats_na', label: 'N/A Stages', default: false },
 ];
 
-// Date Utilities
 export const parseDate = (dateStr: string): Date | null => {
   if (!dateStr) return null;
 
@@ -100,7 +100,6 @@ export const parseDate = (dateStr: string): Date | null => {
   return isValid(parsed) ? parsed : null;
 };
 
-// Memoized date finder
 const findDatesInObject = (obj: any, dateFields: readonly string[]): Date[] => {
   if (!obj) return [];
 
@@ -130,7 +129,6 @@ const findDatesInObject = (obj: any, dateFields: readonly string[]): Date[] => {
   }, []);
 };
 
-// Memoized age calculator
 export const calculateAge = (dateOfBirth: string | null): number | null => {
   if (!dateOfBirth) return null;
 
@@ -155,7 +153,71 @@ export const calculateAge = (dateOfBirth: string | null): number | null => {
   }
 };
 
-// Helper function to calculate age from a Date object
+export const getJobLevelDisplay = (task: any, departments: any[]): string => {
+  const jobLevel = task.job_level;
+
+  if (!jobLevel) return 'N/A';
+
+  // Handle both string and object formats
+  if (typeof jobLevel === 'string') {
+    const levels = jobLevel.split('>').map(s => s.trim());
+    return levels[levels.length - 1] || 'N/A';
+  }
+
+  if (typeof jobLevel === 'object' && jobLevel !== null) {
+    try {
+      // Find the department
+      const department = departments.find(d => d.id == jobLevel.department_id);
+      if (!department) return 'N/A';
+
+      // Find the subdepartment
+      const subdepartment = department.tm_subdepartments?.find(
+        (sd: any) => sd.id == jobLevel.subdepartment_id
+      );
+
+      // Find the class
+      if (subdepartment?.classes?.length && jobLevel.class_id) {
+        const classItem = subdepartment.classes.find(
+          (c: any) => c.id == jobLevel.class_id
+        );
+        if (classItem?.name) return classItem.name;
+      }
+
+      // Fallback to showing just the ID if name not found
+      if (jobLevel.class_id) return `Class ${jobLevel.class_id}`;
+      if (jobLevel.subclass_id) return `Subclass ${jobLevel.subclass_id}`;
+      if (jobLevel.subdepartment_id) return `SubDept ${jobLevel.subdepartment_id}`;
+      if (jobLevel.department_id) return `Dept ${jobLevel.department_id}`;
+    } catch (error) {
+      console.error('Error processing job level:', error);
+    }
+  }
+
+  return 'N/A';
+};
+
+export const getCompanyName = (task: any, companies: Map<number, string>): string => {
+  if (!task.company_id) return 'N/A';
+  if (companies instanceof Map) {
+    return companies.get(task.company_id) || 'N/A';
+  }
+  return companies?.[task.company_id] || 'N/A';
+};
+
+export const formatImmigrationDocumentType = (task: any, getEnhancedStatus: (task: any) => StatusInfo): string => {
+  return getEnhancedStatus(task).documentType || '-';
+};
+
+export const formatImmigrationExpiryDate = (task: any, getEnhancedStatus: (task: any) => StatusInfo): string => {
+  const date = getEnhancedStatus(task).date;
+  return date ? format(date as Date, 'dd MMM yyyy') : '-';
+};
+
+export const getCurrentStageFollowUp = (task: any, getStageStatus: (task: any) => StageStatusInfo): string => {
+  const { stageFollowUp } = getStageStatus(task);
+  return stageFollowUp || '-';
+};
+
 const calculateAgeFromDate = (birthDate: Date): number => {
   const today = new Date();
   let age = today.getFullYear() - birthDate.getFullYear();
@@ -168,7 +230,6 @@ const calculateAgeFromDate = (birthDate: Date): number => {
   return age;
 };
 
-// Memoized immigration status getter
 export const getEnhancedImmigrationStatus = (
   task: any,
   stages: any[] = [],
@@ -327,7 +388,161 @@ export const getEnhancedImmigrationStatus = (
   };
 };
 
-// Optimized stage status getter
+export const fetchAndEnhanceIndividuals = async (
+  tasks: any[]
+): Promise<{
+  dependantsMap: Map<number, any>;
+  applicantsMap: Map<number, any>;
+}> => {
+  try {
+    const allIndividualIds = new Set<number>();
+
+    // Collect applicant IDs
+    tasks.forEach(task => {
+      if (task.individual_id) {
+        allIndividualIds.add(task.individual_id);
+      }
+    });
+
+    // Collect dependant IDs
+    tasks.forEach(task => {
+      if (task.dependant_member && Array.isArray(task.dependant_member)) {
+        task.dependant_member.forEach(dep => {
+          if (dep?.id) {
+            allIndividualIds.add(dep.id);
+
+            // Log warning for missing DOB
+            if (dep.full_name) {
+              const age = calculateAge(dep.date_of_birth);
+              if (age === null) {
+                console.warn(
+                  `Skipping age assumption for dependant: ${dep.full_name} (ID: ${dep.id}) - missing or invalid date of birth`
+                );
+              }
+            }
+          }
+        });
+      }
+    });
+
+    if (allIndividualIds.size === 0) {
+      return { dependantsMap: new Map(), applicantsMap: new Map() };
+    }
+
+    // Convert Set to array and filter out any null/undefined values
+    const individualIds = Array.from(allIndividualIds).filter(id => id != null);
+
+    if (individualIds.length === 0) {
+      return { dependantsMap: new Map(), applicantsMap: new Map() };
+    }
+
+    // Fetch all unique individuals (both applicants and dependants) in a single query
+    const { data, error } = await supabase
+      .from('registry_individuals')
+      .select('id, full_name, nationality, date_of_birth, relationships')
+      .in('id', individualIds);
+
+    if (error) {
+      console.error('Error fetching all individuals:', error);
+      return { dependantsMap: new Map(), applicantsMap: new Map() };
+    }
+
+    // Separate dependants and applicants
+    const dependantsMap = new Map<number, any>();
+    const applicantsMap = new Map<number, any>();
+
+    data.forEach(individual => {
+      const enhancedIndividual = {
+        ...individual,
+        age: calculateAge(individual.date_of_birth),
+        individual_id: individual.id
+      };
+
+      // Check if this individual is an applicant
+      const isApplicant = tasks.some(task => task.individual_id === individual.id);
+      if (isApplicant) {
+        applicantsMap.set(individual.id, enhancedIndividual);
+      }
+
+      // Check if this individual is a dependant
+      const isDependant = tasks.some(task =>
+        task.dependant_member &&
+        Array.isArray(task.dependant_member) &&
+        task.dependant_member.some(dep => dep?.id === individual.id)
+      );
+      if (isDependant) {
+        dependantsMap.set(individual.id, enhancedIndividual);
+      }
+    });
+
+    return { dependantsMap, applicantsMap };
+  } catch (error) {
+    console.error('Error in fetchAndEnhanceIndividuals:', error);
+    return { dependantsMap: new Map(), applicantsMap: new Map() };
+  }
+};
+
+export const createEnhancedTaskData = (
+  tasks: any[],
+  applicantsMap: Map<number, any>,
+  dependantsMap: Map<number, any>
+): {
+  enhancedTasksData: Map<string, any>;
+  taskDependants: Map<string, any[]>;
+} => {
+  const taskDependantsMap = new Map<string, any[]>();
+  const enhancedTasksMap = new Map<string, any>();
+
+  tasks.forEach(task => {
+    // Enhance task with applicant data
+    const applicantData = applicantsMap.get(task.individual_id);
+
+    enhancedTasksMap.set(task.id.toString(), {
+      ...task,
+      applicant_data: applicantData,
+      full_name: applicantData?.full_name || task.full_name,
+      nationality: applicantData?.nationality || task.nationality,
+      age: applicantData?.age // This should be the calculated age or null
+    });
+
+    // Map dependants
+    if (task.dependant_member && Array.isArray(task.dependant_member)) {
+      const taskDependants = task.dependant_member
+        .filter(dep => dep?.id && dependantsMap.has(dep.id))
+        .map(dep => ({
+          ...dependantsMap.get(dep.id),
+          relationship: dep.relationship || 'Dependant'
+        }));
+
+      if (taskDependants.length > 0) {
+        taskDependantsMap.set(task.id.toString(), taskDependants);
+      }
+    }
+  });
+
+  return {
+    enhancedTasksData: enhancedTasksMap,
+    taskDependants: taskDependantsMap
+  };
+};
+
+export const enhanceTasksWithIndividualData = async (
+  tasks: any[]
+): Promise<{
+  enhancedTasksData: Map<string, any>;
+  taskDependants: Map<string, any[]>;
+}> => {
+  if (!tasks || tasks.length === 0) {
+    return {
+      enhancedTasksData: new Map(),
+      taskDependants: new Map()
+    };
+  }
+
+  const { dependantsMap, applicantsMap } = await fetchAndEnhanceIndividuals(tasks);
+  return createEnhancedTaskData(tasks, applicantsMap, dependantsMap);
+};
+
 export const getCurrentStageStatus = (
   task: any,
   stages: any[],
@@ -450,7 +665,6 @@ export const getCurrentStageStatus = (
   };
 };
 
-// Helper functions for stage management
 const findFirstApplicableStage = (sortedStages: any[], task: any, departments: any[]): any => {
   return sortedStages.find(stage => isStageApplicableToTask(stage, task, departments)) || null;
 };
@@ -485,7 +699,6 @@ const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boo
   return deptStage?.applicable !== false;
 };
 
-// UI Components
 const StatusBadge = ({ status, type }: { status: string; type: string }) => {
   const getColor = () => {
     switch (type) {
@@ -522,7 +735,6 @@ const ExpandButton = ({
   </Button>
 );
 
-// Cell Renderers
 export const renderImmigrationStatusCell = (
   task: any,
   getEnhancedStatus: (task: any) => StatusInfo,
@@ -591,16 +803,14 @@ export const renderImmigrationStatusCell = (
 
 export const renderCurrentStageStatusCell = (task: any, getStageStatus: (task: any) => StageStatusInfo) => {
   const { stageStatus } = getStageStatus(task);
-  const getStatusColor = (status: string) => 'text-white'; // Add your color logic here
 
   return (
-    <span className={`whitespace-normal text-sm ${getStatusColor(stageStatus)}`}>
+    <span className={`whitespace-normal`}>
       {stageStatus}
     </span>
   );
 };
 
-// Data processing
 export const getCellContent = (
   departments: any[],
   task: any,
@@ -623,8 +833,33 @@ export const getCellContent = (
   const taskDeps = task?.id ? taskDependants.get(task.id.toString()) || [] : [];
   const isExpanded = task?.id ? expandedDependants.has(task.id.toString()) : false;
 
-  const cellContentMap = {
+  // Map of simple cell values that don't need complex rendering
+  const simpleCellMap: Record<string, any> = {
     id: task.id,
+    immigration_document_type: formatImmigrationDocumentType(task, getEnhancedStatus),
+    immigration_expiry_date: formatImmigrationExpiryDate(task, getEnhancedStatus),
+    current_stage_name: getStageStatus(task).stageName || 'N/A',
+    current_stage_follow_up: getCurrentStageFollowUp(task, getStageStatus),
+    company_name: getCompanyName(task, companies),
+    job_level: getJobLevelDisplay(task, departments),
+    job_description: task.job_description || 'N/A',
+    renewal_new: task.renewal_status || 'New',
+    case_status: task.status || 'pending',
+    nationality: enhancedTask.nationality || 'N/A',
+    full_name: enhancedTask.full_name || 'N/A',
+    age: enhancedTask.age?.toString() || 'N/A',
+    task_manager: task.task_manager_id ? getStaffName(task.task_manager_id) : <span className="text-red-500 font-semibold">Unallocated</span>,
+    officer: task.officer_id ? getStaffName(task.officer_id) : <span className="text-red-500 font-semibold">Unallocated</span>,
+    task_assistant: task.task_assistant_id ? getStaffName(task.task_assistant_id) : <span className="text-red-500 font-semibold">Unallocated</span>
+  };
+
+  // Check if it's a simple cell first
+  if (headerId in simpleCellMap) {
+    return simpleCellMap[headerId];
+  }
+
+  // Complex cells that need JSX rendering
+  const complexCellMap: Record<string, React.ReactNode> = {
     applicant_name: (
       <div className="flex items-center justify-between gap-1 w-[300px]">
         <div className="flex-grow">
@@ -655,80 +890,56 @@ export const getCellContent = (
         </div>
       </div>
     ),
-    immigration_document_type: getEnhancedStatus(task).documentType || '-',
-    immigration_expiry_date: getEnhancedStatus(task).date
-      ? format(getEnhancedStatus(task).date as Date, 'dd MMM yyyy')
-      : '-',
     immigration_status: renderStatusCell(task),
-    current_stage_name: getStageStatus(task).stageName || 'N/A',
     current_stage_status_value: renderStageStatusCell(task),
-    current_stage_follow_up: (() => {
-      const { stageFollowUp } = getStageStatus(task);
-      if (!stageFollowUp) return '-';
-      return <span className="whitespace-nowrap text-sm text-white">{stageFollowUp}</span>;
-    })(),
-    company_name: (() => {
-      if (!task.company_id) return 'N/A';
-      if (companies instanceof Map) {
-        return companies.get(task.company_id) || 'N/A';
-      }
-      return companies?.[task.company_id] || 'N/A';
-    })(),
-    job_level: (() => {
-      const jobLevel = task.job_level;
+  };
 
-      if (!jobLevel) return 'N/A';
+  // Return complex cell if it exists
+  if (headerId in complexCellMap) {
+    return complexCellMap[headerId];
+  }
 
-      // Handle both string and object formats
-      if (typeof jobLevel === 'string') {
-        const levels = jobLevel.split('>').map(s => s.trim());
-        return levels[levels.length - 1] || 'N/A';
-      }
+  // Fallback to task property
+  return task[headerId] || 'N/A';
+};
 
-      if (typeof jobLevel === 'object' && jobLevel !== null) {
-        try {
-          // Find the department
-          const department = departments.find(d => d.id == jobLevel.department_id);
-          if (!department) return 'N/A';
+export const getRawCellValue = (
+  departments: any[],
+  task: any,
+  headerId: string,
+  enhancedTasksData: Map<string, any>,
+  companies: Map<number, string>,
+  getStaffName: (id: string) => string,
+  getEnhancedStatus: (task: any) => StatusInfo,
+  getStageStatus: (task: any) => StageStatusInfo
+): string => {
+  const enhancedTask = task?.id ? enhancedTasksData.get(task.id.toString()) || task : task;
 
-          // Find the subdepartment
-          const subdepartment = department.tm_subdepartments?.find(
-            (sd: any) => sd.id == jobLevel.subdepartment_id
-          );
-
-          // Find the class
-          if (subdepartment?.classes?.length && jobLevel.class_id) {
-            const classItem = subdepartment.classes.find(
-              (c: any) => c.id == jobLevel.class_id
-            );
-            if (classItem?.name) return classItem.name;
-          }
-
-          // Fallback to showing just the ID if name not found
-          if (jobLevel.class_id) return `Class ${jobLevel.class_id}`;
-          if (jobLevel.subclass_id) return `Subclass ${jobLevel.subclass_id}`;
-          if (jobLevel.subdepartment_id) return `SubDept ${jobLevel.subdepartment_id}`;
-          if (jobLevel.department_id) return `Dept ${jobLevel.department_id}`;
-        } catch (error) {
-          console.error('Error processing job level:', error);
-        }
-      }
-
-      return 'N/A';
-    })(),
-    renewal_new: <span className="text-sm font-semibold">{task.renewal_status || 'New'}</span>,
-    case_status: <span className="text-sm font-semibold">{task.status || 'pending'}</span>,
+  const valueMap: Record<string, string> = {
+    id: task.id?.toString() || '',
+    applicant_name: task.applicant_name || 'N/A',
+    immigration_document_type: formatImmigrationDocumentType(task, getEnhancedStatus),
+    immigration_expiry_date: formatImmigrationExpiryDate(task, getEnhancedStatus),
+    immigration_status: getEnhancedStatus(task).status,
+    current_stage_name: getStageStatus(task).stageName || 'N/A',
+    current_stage_status_value: getStageStatus(task).stageStatus || 'N/A',
+    current_stage_follow_up: getCurrentStageFollowUp(task, getStageStatus),
+    company_name: getCompanyName(task, companies),
+    job_level: getJobLevelDisplay(task, departments),
+    job_description: task.job_description || 'N/A',
+    renewal_new: task.renewal_status || 'New',
+    case_status: task.status || 'pending',
     nationality: enhancedTask.nationality || 'N/A',
+    full_name: enhancedTask.full_name || 'N/A',
     age: enhancedTask.age?.toString() || 'N/A',
     task_manager: task.task_manager_id ? getStaffName(task.task_manager_id) : 'N/A',
     officer: task.officer_id ? getStaffName(task.officer_id) : 'N/A',
     task_assistant: task.task_assistant_id ? getStaffName(task.task_assistant_id) : 'N/A'
   };
 
-  return cellContentMap[headerId as keyof typeof cellContentMap] || task[headerId] || 'N/A';
+  return valueMap[headerId] || task[headerId]?.toString() || 'N/A';
 };
 
-// Sorting and filtering
 export const sortTasks = (
   tasks: any[],
   sortConfig: { key: string; direction: 'asc' | 'desc' } | null,

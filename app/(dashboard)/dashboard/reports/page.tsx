@@ -43,7 +43,9 @@ import {
   getEnhancedImmigrationStatus,
   renderImmigrationStatusCell,
   renderCurrentStageStatusCell,
-  ENHANCED_TABLE_HEADERS_IMMIGRATION
+  ENHANCED_TABLE_HEADERS_IMMIGRATION,
+  enhanceTasksWithIndividualData,
+  getRawCellValue
 } from "../tasks/overall-view/tableUtils";
 import { calculateAge } from "@/lib/utils/utils";
 import {
@@ -258,6 +260,7 @@ export default function ReportsPage() {
   const [kycDocuments, setKycDocuments] = useState<Map<string, any>>(new Map());
   const [taskDependants, setTaskDependants] = useState<Map<string, any[]>>(new Map());
   const [enhancedTasksData, setEnhancedTasksData] = useState<Map<string, any>>(new Map());
+  const [tmUsers, setTmUsers] = useState<Map<number, any>>(new Map());
 
   // Filter & Search State
   const [activeDeptId, setActiveDeptId] = useState<string>("");
@@ -289,6 +292,26 @@ export default function ReportsPage() {
     });
   }, []);
 
+  // --- Helpers for Cell Content ---
+  const getStaffName = useCallback((userId) => {
+    if (!userId) return '';
+    const user = tmUsers.get(parseInt(userId.toString()));
+    return user?.name || `User ${userId}`;
+  }, [tmUsers]);
+
+  const getTaskHierarchy = useCallback((task: any) => {
+    if (!task || !departments.length) return null
+    const dept = departments.find(d => d.id === task.department?.id)
+    if (!dept) return null
+    const subdept = dept.tm_subdepartments?.find(s => s.id === task.subdepartment?.id)
+    const cls = subdept?.classes?.find(c => c.id.toString() === task.class_id?.toString())
+    const subCls = cls?.subClasses?.find(sc => sc.id.toString() === task.subclass_id?.toString())
+    return { department: dept, subdepartment: subdept, class: cls, subclass: subCls }
+  }, [departments]);
+
+  const getCurrentStageStatusWrapper = useCallback((task) => getCurrentStageStatus(task, stages, departments, allDocuments), [stages, departments, allDocuments]);
+  const getEnhancedImmigrationStatusWrapper = useCallback((task) => getEnhancedImmigrationStatus(task, stages, allDocuments, kycDocuments), [stages, allDocuments, kycDocuments]);
+
   // --- 1. Initialization & 2. Data Fetching ---
   useEffect(() => {
     const initReports = async () => {
@@ -305,6 +328,13 @@ export default function ReportsPage() {
         if (reports && reports.length > 0) {
           setActiveReport(reports[0]);
         }
+        
+        // Fetch Users for Staff Name resolution
+        const { data: users } = await supabase.from('tm_users').select('*');
+        const usersMap = new Map();
+        users?.forEach(u => usersMap.set(u.id, u));
+        setTmUsers(usersMap);
+
       } catch (err) {
         console.error("❌ Failed to fetch reports:", err);
         toast({ title: "Error", description: "Could not load saved reports.", variant: "destructive" });
@@ -333,15 +363,10 @@ export default function ReportsPage() {
       ]);
 
       const safeTasks = Array.isArray(tasksData) ? tasksData : [];
-      const enhancedMap = new Map();
-      const dependantsMap = new Map();
-
-      safeTasks.forEach(task => {
-        enhancedMap.set(task.id.toString(), { ...task, age: calculateAge ? calculateAge(task.date_of_birth) : null });
-        if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          dependantsMap.set(task.id.toString(), task.dependant_member);
-        }
-      });
+      
+      // Use utility to enhance tasks
+      const { enhancedTasksData: enhancedMap, taskDependants: dependantsMap } = 
+        await enhanceTasksWithIndividualData(safeTasks);
 
       setDepartments(depts);
       setCompanies(comps);
@@ -435,13 +460,17 @@ export default function ReportsPage() {
       return d.getTime();
     }
     if (col.type === 'task') {
-      if (col.field === 'applicant_name') return task.applicant_name || '';
-      if (col.field === 'company_name') return companies.get(task.company_id) || '';
-      if (col.field === 'current_stage_name') {
-        const stage = stages.find(s => s.id === task.current_stage_id);
-        return stage ? stage.name : '';
-      }
-      return task[col.field] || '';
+        // Use raw cell value from tableUtils for accurate sorting of enhanced fields
+        return getRawCellValue(
+            departments, 
+            task, 
+            col.field, 
+            enhancedTasksData, 
+            companies, 
+            getStaffName, 
+            getEnhancedImmigrationStatusWrapper, 
+            getCurrentStageStatusWrapper
+        );
     }
     if (col.type === 'stage_date') {
       const d = task.stages?.[col.stageId]?.date;
@@ -453,11 +482,6 @@ export default function ReportsPage() {
   const handleNextPage = () => setCurrentPage(prev => Math.min(prev + 1, totalPages));
   const handlePreviousPage = () => setCurrentPage(prev => Math.max(prev - 1, 1));
   const handleItemsPerPageChange = (val: string) => { setItemsPerPage(Number(val)); setCurrentPage(1); };
-
-  // --- 4. Cell Render Helpers ---
-  const getCurrentStageStatusWrapper = useCallback((task) => getCurrentStageStatus(task, stages, departments, allDocuments), [stages, departments, allDocuments]);
-  const getEnhancedImmigrationStatusWrapper = useCallback((task) => getEnhancedImmigrationStatus(task, stages, allDocuments, kycDocuments), [stages, allDocuments, kycDocuments]);
-  const getStaffName = useCallback(() => '', []);
 
   const getDocumentForTaskStage = useCallback((task, stage) => {
     let linked = task.source_document_id?.[stage.id];
@@ -815,52 +839,22 @@ export default function ReportsPage() {
     }
 
     if (col.type === 'task') {
-      const value = (() => {
-        switch (col.field) {
-          case 'applicant_name': return task.applicant_name || enhancedTasksData.get(task.id.toString())?.applicant_name || 'N/A';
-          case 'company_name': return task.company_id ? (companies.get(task.company_id) || 'N/A') : 'N/A';
-          case 'job_level':
-            const jobLevel = task.job_level;
-            if (!jobLevel) return '-';
-            if (typeof jobLevel === 'string') return jobLevel.split('>').pop() || '-';
-            if (typeof jobLevel === 'object') {
-              try {
-                const dept = departments.find(d => d.id == jobLevel.department_id);
-                if (!dept) return '-';
-                let sub = dept.tm_subdepartments?.find(sd => sd.id == jobLevel.subdepartment_id);
-                if (jobLevel.class_id && sub?.classes) {
-                  const cls = sub.classes.find(c => c.id == jobLevel.class_id);
-                  if (cls?.subClasses && jobLevel.subclass_id) {
-                    const subc = cls.subClasses.find(sc => sc.id == jobLevel.subclass_id);
-                    if (subc) return subc.name;
-                  }
-                  if (cls) return cls.name;
-                }
-                return sub?.name || dept.name || '-';
-              } catch (e) { return '-'; }
-            }
-            return '-';
-          case 'officer': return task.officer_name || (typeof task.officer === 'string' ? task.officer : task.officer?.name) || <span className="text-red-500 text-xs font-bold">Unallocated</span>;
-          case 'task_manager': return task.task_manager_name || (typeof task.task_manager === 'string' ? task.task_manager : task.task_manager?.name) || task.assigned_to_name || <span className="text-red-500 text-xs font-bold">Unallocated</span>;
-          default:
-            return getCellContent(
-              task, 
-              col.field, 
-              // Defensive check: Ensure enhancedTasksData is a Map
-              enhancedTasksData instanceof Map ? enhancedTasksData : new Map(), 
-              // Defensive check: Ensure taskDependants is a Map to prevent .get() crash
-              taskDependants instanceof Map ? taskDependants : new Map(), 
-              new Set(), 
-              companies,
-              (t) => ({ department: departments.find(d => d.id === t.department_id), job_level: t.job_level, officer: t.officer || t.officer_name, task_manager: t.task_manager || t.task_manager_name || t.assigned_to_name }),
-              getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper,
-              (t) => renderImmigrationStatusCell(t, getEnhancedImmigrationStatusWrapper, new Set(), () => { }),
-              (t) => renderCurrentStageStatusCell(t, getCurrentStageStatusWrapper),
-              () => { }, () => { }, () => { }
-            );
-        }
-      })();
-      return value === '-' ? <span className="text-slate-300">-</span> : value;
+       return getCellContent(
+         departments,
+         task,
+         col.field,
+         enhancedTasksData,
+         taskDependants,
+         new Set(), // No expansion tracking in reports
+         companies,
+         getTaskHierarchy,
+         getStaffName,
+         getEnhancedImmigrationStatusWrapper,
+         getCurrentStageStatusWrapper,
+         (t) => renderImmigrationStatusCell(t, getEnhancedImmigrationStatusWrapper, new Set(), () => {}),
+         (t) => renderCurrentStageStatusCell(t, getCurrentStageStatusWrapper),
+         () => {}, () => {}, () => {} // No-op callbacks for interactions
+       );
     }
     return <span className="text-slate-300">-</span>;
   };
@@ -872,13 +866,16 @@ export default function ReportsPage() {
   // --- 7. Configuration Building --- (Same as original)
   const columns = useMemo(() => {
     if (!activeReport || !stages.length) return [];
-const getLabel = (id: any) => {
-  if (typeof id !== 'string') {
-    console.warn('Expected string id, got:', id);
-    return String(id || '').toUpperCase();
-  }
-  return id.replace(/_/g, ' ').toUpperCase();
-};
+    
+    // Helper to get labels from constants if available
+    const getLabel = (id: any) => {
+        const constantHeader = ENHANCED_TABLE_HEADERS_IMMIGRATION.find(h => h.id === id);
+        if (constantHeader) return constantHeader.label;
+        
+        if (typeof id !== 'string') return String(id || '').toUpperCase();
+        return id.replace(/_/g, ' ').toUpperCase();
+    };
+
     const cols: any[] = [];
     activeReport.configuration?.taskFields?.forEach((fieldItem: any) => {
       // Fix for "Expected string id" error: Extract id if fieldItem is an object
@@ -1051,6 +1048,12 @@ const getLabel = (id: any) => {
       ws.addRow(['Task ID', ...headerRow]);
       filteredTasks.forEach(t => {
         const row = [t.id, ...columns.map(c => {
+          if (c.type === 'task') {
+             // Use Raw value for export
+             return getRawCellValue(
+                departments, t, c.field, enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper
+             );
+          }
           const content = renderCellValue(t, c);
           if (React.isValidElement(content)) {
             if (content.props && content.props.children) return content.props.children;

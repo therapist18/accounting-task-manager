@@ -29,47 +29,11 @@ import { fetchTasks, fetchStages, fetchCompanies, fetchAllDocuments, fetchAllKyc
 import { LinkSourceDocumentDialog } from './components/LinkSourceDocumentDialog';
 import { StandardTable } from './overall-view/StandardTable';
 import { EnhancedTable } from './overall-view/EnhancedTable';
-import { ENHANCED_TABLE_HEADERS_IMMIGRATION, STATS_HEADERS, calculateAge, getEnhancedImmigrationStatus, getCurrentStageStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, getCellContent as utilGetCellContent, sortTasks, filterTasksBySearch, ENHANCED_TABLE_HEADERS, isDocumentApplicable } from './overall-view/tableUtils';
+import { ENHANCED_TABLE_HEADERS_IMMIGRATION, STATS_HEADERS, calculateAge, getEnhancedImmigrationStatus, getCurrentStageStatus, renderImmigrationStatusCell, renderCurrentStageStatusCell, getCellContent as utilGetCellContent, sortTasks, filterTasksBySearch, ENHANCED_TABLE_HEADERS, isDocumentApplicable, fetchAndEnhanceIndividuals, getRawCellValue, enhanceTasksWithIndividualData } from './overall-view/tableUtils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { OtherDialog } from "./components/OtherDialog"
 import { ExtractionPreview } from "@/components/ExtractionPreview"
 import EditableStageCell from "./components/EditableStageCell"
-
-type ReportConfiguration = {
-  taskFields: string[];
-  stages: {
-    [stageId: string]: {
-      documents: {
-        [kycId: string]: {
-          fields: string[];
-        }
-      }
-    }
-  }
-};
-type MemorizedReport = {
-  id: string;
-  name: string;
-  description?: string;
-  configuration: ReportConfiguration;
-  department_id: number;
-};
-
-interface MemorizedReportDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  department: Department | null;
-  stages: any[];
-  kycDocuments: Map<string, KycDocument>;
-  onApplyReport: (report: MemorizedReport) => void;
-}
-
-const DEFAULT_TASK_FIELDS = [
-  { id: 'applicant_name', label: 'Applicant Name' },
-  { id: 'company_id', label: 'Company' },
-  { id: 'task_manager_id', label: 'Task Manager' },
-  { id: 'officer_id', label: 'Officer' },
-];
 
 export default function DepartmentTasksManager({
   error,
@@ -210,134 +174,18 @@ export default function DepartmentTasksManager({
     loadKycData();
   }, []);
 
-  // Enhanced function to fetch all dependants and applicant data
-  const fetchAllDependantsAndApplicants = useCallback(async (tasks: UtilTask[]) => {
-    try {
-      const allIndividualIds = new Set<number>();
-
-      // Collect applicant IDs
-      tasks.forEach(task => {
-        if (task.individual_id) {
-          allIndividualIds.add(task.individual_id);
-        }
-      });
-
-      // Collect dependant IDs
-      tasks.forEach(task => {
-        if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          task.dependant_member.forEach(dep => {
-            if (dep?.id) {
-              allIndividualIds.add(dep.id);
-
-              // Log dependant information for debugging
-              if (dep.full_name) {
-                const age = calculateAge(dep.date_of_birth);
-                if (age === null) {
-                  console.warn(`Skipping age assumption for dependant: ${dep.full_name} (ID: ${dep.id}) - missing or invalid date of birth`);
-                }
-              }
-            }
-          });
-        }
-      });
-
-      if (allIndividualIds.size === 0) return { dependantsMap: new Map(), applicantsMap: new Map() };
-
-      // Convert Set to array and filter out any null/undefined values
-      const individualIds = Array.from(allIndividualIds).filter(id => id != null);
-
-      // If no valid IDs, return empty maps
-      if (individualIds.length === 0) return { dependantsMap: new Map(), applicantsMap: new Map() };
-
-      // Fetch all unique individuals (both applicants and dependants) in a single query
-      const { data, error } = await supabase
-        .from('registry_individuals')
-        .select('id, full_name, nationality, date_of_birth, relationships')
-        .in('id', individualIds);
-
-      if (error) {
-        console.error('Error fetching all individuals:', error);
-        return { dependantsMap: new Map(), applicantsMap: new Map() };
-      }
-
-      // Separate dependants and applicants
-      const dependantsMap = new Map<number, any>();
-      const applicantsMap = new Map<number, any>();
-
-      data.forEach(individual => {
-        const enhancedIndividual = {
-          ...individual,
-          age: calculateAge(individual.date_of_birth),
-          individual_id: individual.id
-        };
-
-        // Check if this individual is an applicant
-        const isApplicant = tasks.some(task => task.individual_id === individual.id);
-
-        if (isApplicant) {
-          applicantsMap.set(individual.id, enhancedIndividual);
-        }
-
-        // Check if this individual is a dependant
-        const isDependant = tasks.some(task =>
-          task.dependant_member && Array.isArray(task.dependant_member) &&
-          task.dependant_member.some(dep => dep?.id === individual.id)
-        );
-
-        if (isDependant) {
-          dependantsMap.set(individual.id, enhancedIndividual);
-        }
-      });
-
-      return { dependantsMap, applicantsMap };
-    } catch (error) {
-      console.error('Error in fetchAllDependantsAndApplicants:', error);
-      return { dependantsMap: new Map(), applicantsMap: new Map() };
-    }
-  }, []);
-
   useEffect(() => {
-    const fetchAndMapIndividuals = async () => {
+    const enhanceTaskData = async () => {
       if (!tasks.length) return;
 
-      const { dependantsMap, applicantsMap } = await fetchAllDependantsAndApplicants(tasks);
+      const { enhancedTasksData, taskDependants } = await enhanceTasksWithIndividualData(tasks);
 
-      // Map each task to its dependants
-      const taskDependantsMap = new Map<string, any[]>();
-      const enhancedTasksMap = new Map<string, any>();
-
-      tasks.forEach(task => {
-        // Enhance task with applicant data
-        const applicantData = applicantsMap.get(task.individual_id);
-
-        enhancedTasksMap.set(task.id.toString(), {
-          ...task,
-          applicant_data: applicantData,
-          nationality: applicantData?.nationality || task.nationality,
-          age: applicantData?.age // This should be the calculated age or null
-        });
-
-        // Map dependants
-        if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          const taskDependants = task.dependant_member
-            .filter(dep => dep?.id && dependantsMap.has(dep.id))
-            .map(dep => ({
-              ...dependantsMap.get(dep.id),
-              relationship: dep.relationship || 'Dependant'
-            }));
-
-          if (taskDependants.length > 0) {
-            taskDependantsMap.set(task.id.toString(), taskDependants);
-          }
-        }
-      });
-
-      setTaskDependants(taskDependantsMap);
-      setEnhancedTasksData(enhancedTasksMap);
+      setTaskDependants(taskDependants);
+      setEnhancedTasksData(enhancedTasksData);
     };
 
-    fetchAndMapIndividuals();
-  }, [tasks, fetchAllDependantsAndApplicants]);
+    enhanceTaskData();
+  }, [tasks]);
 
   const getStaffName = useCallback((userId) => {
     if (!userId) return '';
@@ -885,44 +733,100 @@ export default function DepartmentTasksManager({
   const wipTasks = useMemo(() => filterTasksBySearchWrapper(getWIPTasksByFollowUp(activeFollowUpFilter)), [getWIPTasksByFollowUp, activeFollowUpFilter, filterTasksBySearchWrapper])
   const completedTasks = useMemo(() => filterTasksBySearchWrapper(getFilteredTasks('write_up_completed')), [getFilteredTasks, filterTasksBySearchWrapper])
 
-  // Enhanced Excel export function
   const handleExport = useCallback(async (tasks: any[], tableType: string) => {
     if (!tasks.length) {
-      toast({ title: "No Data", description: "No data available to export.", variant: "destructive" })
-      return
+      toast({ title: "No Data", description: "No data available to export.", variant: "destructive" });
+      return;
     }
 
     try {
       const workbook = XLSX.utils.book_new();
       const exportData = [];
+
       for (const task of tasks) {
         const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
         const taskDeps = taskDependants.get(task.id.toString()) || [];
-        const statusInfo = getEnhancedImmigrationStatusWrapper(task);
-        const stageStatusInfo = getCurrentStageStatusWrapper(task);
+
+        // Main row (Applicant)
         const mainRow = {
-          'Task ID': task.id, 'Type': 'Applicant', 'Name': task.applicant_name, 'Nationality': enhancedTask.nationality || 'N/A', 'Age': enhancedTask.age || 'N/A', 'Relationship': 'Principal', 'Company': companies.get(task.company_id) || 'N/A', 'Job Level': getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || 'N/A', 'Immigration Status': statusInfo.status, 'Immigration Document Type': statusInfo.documentType || 'N/A', 'Immigration Expiry Date': statusInfo.date ? format(statusInfo.date, 'dd MMM yyyy') : 'N/A', 'Current Stage': stageStatusInfo.stageName, 'Stage Status': stageStatusInfo.stageStatus, 'Stage Follow-up': stageStatusInfo.stageFollowUp || 'N/A', 'Task Manager': getStaffName(task.task_manager_id), 'Officer': getStaffName(task.officer_id), 'Task Assistant': getStaffName(task.task_assistant_id), 'Case Status': task.status, 'Renewal Status': task.renewal_status || 'New'
+          'Task ID': getRawCellValue(departments, task, 'id', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Type': 'Applicant',
+          'Name': getRawCellValue(departments, task, 'applicant_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Nationality': getRawCellValue(departments, task, 'nationality', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Age': getRawCellValue(departments, task, 'age', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Relationship': 'Principal',
+          'Company': getRawCellValue(departments, task, 'company_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Job Level': getRawCellValue(departments, task, 'job_level', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Immigration Status': getRawCellValue(departments, task, 'immigration_status', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Immigration Document Type': getRawCellValue(departments, task, 'immigration_document_type', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Immigration Expiry Date': getRawCellValue(departments, task, 'immigration_expiry_date', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Current Stage': getRawCellValue(departments, task, 'current_stage_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Stage Status': getRawCellValue(departments, task, 'current_stage_status_value', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Stage Follow-up': getRawCellValue(departments, task, 'current_stage_follow_up', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Task Manager': getRawCellValue(departments, task, 'task_manager', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Officer': getRawCellValue(departments, task, 'officer', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Task Assistant': getRawCellValue(departments, task, 'task_assistant', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Case Status': getRawCellValue(departments, task, 'case_status', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+          'Renewal Status': getRawCellValue(departments, task, 'renewal_new', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper)
         };
         exportData.push(mainRow);
+
+        // Dependant rows
         taskDeps.forEach(dep => {
           const depRow = {
-            'Task ID': task.id, 'Type': 'Dependant', 'Name': dep.full_name, 'Nationality': dep.nationality || 'N/A', 'Age': dep.age || 'N/A', 'Relationship': dep.relationship || 'Dependant', 'Company': companies.get(task.company_id) || 'N/A', 'Job Level': getTaskHierarchy(task)?.subclass?.name || getTaskHierarchy(task)?.class?.name || 'N/A', 'Immigration Status': 'N/A', 'Immigration Document Type': 'N/A', 'Immigration Expiry Date': 'N/A', 'Current Stage': 'N/A', 'Stage Status': 'N/A', 'Stage Follow-up': 'N/A', 'Task Manager': getStaffName(task.task_manager_id), 'Officer': getStaffName(task.officer_id), 'Task Assistant': getStaffName(task.task_assistant_id), 'Case Status': task.status, 'Renewal Status': task.renewal_status || 'New'
+            'Task ID': task.id,
+            'Type': 'Dependant',
+            'Name': dep.full_name,
+            'Nationality': dep.nationality || 'N/A',
+            'Age': dep.age?.toString() || 'N/A',
+            'Relationship': dep.relationship || 'Dependant',
+            'Company': getRawCellValue(departments, task, 'company_name', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+            'Job Level': getRawCellValue(departments, task, 'job_level', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+            'Immigration Status': 'N/A',
+            'Immigration Document Type': 'N/A',
+            'Immigration Expiry Date': 'N/A',
+            'Current Stage': 'N/A',
+            'Stage Status': 'N/A',
+            'Stage Follow-up': 'N/A',
+            'Task Manager': getRawCellValue(departments, task, 'task_manager', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+            'Officer': getRawCellValue(departments, task, 'officer', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+            'Task Assistant': getRawCellValue(departments, task, 'task_assistant', enhancedTasksData, companies, getStaffName, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper),
+            'Case Status': task.status,
+            'Renewal Status': task.renewal_status || 'New'
           };
           exportData.push(depRow);
         });
       }
+
       const worksheet = XLSX.utils.json_to_sheet(exportData);
       XLSX.utils.book_append_sheet(workbook, worksheet, tableType);
+
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
       const filename = `${tableType}_${timestamp}.xlsx`;
+
       XLSX.writeFile(workbook, filename);
-      toast({ title: "Export Successful", description: `${tableType} data exported to ${filename}` });
+
+      toast({
+        title: "Export Successful",
+        description: `${tableType} data exported to ${filename}`
+      });
     } catch (error) {
       console.error('Export error:', error);
-      toast({ title: "Export Failed", description: "Failed to export data to Excel.", variant: "destructive" });
+      toast({
+        title: "Export Failed",
+        description: "Failed to export data to Excel.",
+        variant: "destructive"
+      });
     }
-  }, [enhancedTasksData, taskDependants, getEnhancedImmigrationStatusWrapper, getCurrentStageStatusWrapper, companies, getTaskHierarchy, getStaffName]);
-
+  }, [
+    enhancedTasksData,
+    taskDependants,
+    departments,
+    companies,
+    getStaffName,
+    getEnhancedImmigrationStatusWrapper,
+    getCurrentStageStatusWrapper
+  ]);
   const getClassesForSubdepartment = useCallback((deptId: number, subDeptId: number) => {
     const department = departments.find(d => d.id === deptId);
     if (!department) return [];
@@ -991,28 +895,153 @@ export default function DepartmentTasksManager({
         };
       }
 
-      // Rest of the function remains the same...
-      const { dependantsMap } = await fetchAllDependantsAndApplicants([task]);
+      // Use the new function from tableUtils
+      const { dependantsMap } = await fetchAndEnhanceIndividuals([task]);
       const dependants = [];
       let skippedMinors = 0;
 
       if (isReEntry) {
-        if (!isPrincipalMember) tasksToCreate.push({ status: 'in_progress', department_id: targetDeptId, subdepartment_id: targetSubDeptId, class_id: applicantClassId ? Number(applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: false, understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(task.applicant_name || ''), individual_id: String(task.individual_id || '') });
+        if (!isPrincipalMember) {
+          tasksToCreate.push({
+            status: 'in_progress',
+            department_id: targetDeptId,
+            subdepartment_id: targetSubDeptId,
+            class_id: applicantClassId ? Number(applicantClassId) : null,
+            subclass_id: null,
+            created_by: 'system',
+            date_initiated: currentDate,
+            stages: { ...stages },
+            task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null,
+            task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null,
+            officer_id: task.officer_id ? Number(task.officer_id) : null,
+            account_used: task.account_used ? String(task.account_used) : null,
+            batch: task.batch ? String(task.batch) : null,
+            applied_by: task.applied_by ? String(task.applied_by) : null,
+            applicant_type: 'dependant',
+            r_number: task.r_number ? String(task.r_number) : null,
+            principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null,
+            renewal_status: task.renewal_status ? String(task.renewal_status) : null,
+            selections: task.selections ? JSON.stringify(task.selections) : null,
+            company_id: task.company_id ? Number(task.company_id) : null,
+            principal_member: false,
+            understudy: task.understudy ? String(task.understudy) : null,
+            references: task.references ? JSON.stringify(task.references) : '[]',
+            job_description: task.job_description ? String(task.job_description) : null,
+            document_id: null,
+            source_document_id: null,
+            applicant_name: String(task.applicant_name || ''),
+            individual_id: String(task.individual_id || '')
+          });
+        }
+
         if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          task.dependant_member.forEach(dep => { if (dep?.id && dependantsMap.has(dep.id)) dependants.push({ ...dependantsMap.get(dep.id), relationship: dep.relationship || 'Dependant' }); });
-          for (const dependant of dependants) tasksToCreate.push({ status: 'in_progress', department_id: Number(targetDeptId) || null, subdepartment_id: Number(targetSubDeptId) || null, class_id: dependantClassId || applicantClassId ? Number(dependantClassId || applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: false, understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(dependant.full_name || ''), individual_id: String(dependant.individual_id || '') });
+          task.dependant_member.forEach(dep => {
+            if (dep?.id && dependantsMap.has(dep.id)) {
+              dependants.push({
+                ...dependantsMap.get(dep.id),
+                relationship: dep.relationship || 'Dependant'
+              });
+            }
+          });
+
+          for (const dependant of dependants) {
+            tasksToCreate.push({
+              status: 'in_progress',
+              department_id: Number(targetDeptId) || null,
+              subdepartment_id: Number(targetSubDeptId) || null,
+              class_id: dependantClassId || applicantClassId ? Number(dependantClassId || applicantClassId) : null,
+              subclass_id: null,
+              created_by: 'system',
+              date_initiated: currentDate,
+              stages: { ...stages },
+              task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null,
+              task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null,
+              officer_id: task.officer_id ? Number(task.officer_id) : null,
+              account_used: task.account_used ? String(task.account_used) : null,
+              batch: task.batch ? String(task.batch) : null,
+              applied_by: task.applied_by ? String(task.applied_by) : null,
+              applicant_type: 'dependant',
+              r_number: task.r_number ? String(task.r_number) : null,
+              principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null,
+              renewal_status: task.renewal_status ? String(task.renewal_status) : null,
+              selections: task.selections ? JSON.stringify(task.selections) : null,
+              company_id: task.company_id ? Number(task.company_id) : null,
+              principal_member: false,
+              understudy: task.understudy ? String(task.understudy) : null,
+              references: task.references ? JSON.stringify(task.references) : '[]',
+              job_description: task.job_description ? String(task.job_description) : null,
+              document_id: null,
+              source_document_id: null,
+              applicant_name: String(dependant.full_name || ''),
+              individual_id: String(dependant.individual_id || '')
+            });
+          }
         }
       } else {
-        const baseTaskData = { status: 'in_progress', department_id: Number(targetDeptId) || null, subdepartment_id: Number(targetSubDeptId) || null, class_id: applicantClassId ? Number(applicantClassId) : null, subclass_id: null, created_by: 'system', date_initiated: currentDate, stages: { ...stages }, task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null, task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null, officer_id: task.officer_id ? Number(task.officer_id) : null, account_used: task.account_used ? String(task.account_used) : null, batch: task.batch ? String(task.batch) : null, applied_by: task.applied_by ? String(task.applied_by) : null, applicant_type: isPrincipalMember ? 'principal' : 'dependant', r_number: task.r_number ? String(task.r_number) : null, principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null, renewal_status: task.renewal_status ? String(task.renewal_status) : null, selections: task.selections ? JSON.stringify(task.selections) : null, company_id: task.company_id ? Number(task.company_id) : null, principal_member: Boolean(isPrincipalMember), understudy: task.understudy ? String(task.understudy) : null, references: task.references ? JSON.stringify(task.references) : '[]', job_description: task.job_description ? String(task.job_description) : null, document_id: null, source_document_id: null, applicant_name: String(task.applicant_name || ''), individual_id: String(task.individual_id || '') };
+        const baseTaskData = {
+          status: 'in_progress',
+          department_id: Number(targetDeptId) || null,
+          subdepartment_id: Number(targetSubDeptId) || null,
+          class_id: applicantClassId ? Number(applicantClassId) : null,
+          subclass_id: null,
+          created_by: 'system',
+          date_initiated: currentDate,
+          stages: { ...stages },
+          task_manager_id: task.task_manager_id ? Number(task.task_manager_id) : null,
+          task_assistant_id: task.task_assistant_id ? Number(task.task_assistant_id) : null,
+          officer_id: task.officer_id ? Number(task.officer_id) : null,
+          account_used: task.account_used ? String(task.account_used) : null,
+          batch: task.batch ? String(task.batch) : null,
+          applied_by: task.applied_by ? String(task.applied_by) : null,
+          applicant_type: isPrincipalMember ? 'principal' : 'dependant',
+          r_number: task.r_number ? String(task.r_number) : null,
+          principal_member_name: task.principal_member_name ? String(task.principal_member_name) : null,
+          renewal_status: task.renewal_status ? String(task.renewal_status) : null,
+          selections: task.selections ? JSON.stringify(task.selections) : null,
+          company_id: task.company_id ? Number(task.company_id) : null,
+          principal_member: Boolean(isPrincipalMember),
+          understudy: task.understudy ? String(task.understudy) : null,
+          references: task.references ? JSON.stringify(task.references) : '[]',
+          job_description: task.job_description ? String(task.job_description) : null,
+          document_id: null,
+          source_document_id: null,
+          applicant_name: String(task.applicant_name || ''),
+          individual_id: String(task.individual_id || '')
+        };
+
         tasksToCreate.push(baseTaskData);
+
         if (task.dependant_member && Array.isArray(task.dependant_member)) {
-          task.dependant_member.forEach(dep => { if (dep?.id && dependantsMap.has(dep.id)) dependants.push({ ...dependantsMap.get(dep.id), relationship: dep.relationship || 'Dependant' }); });
+          task.dependant_member.forEach(dep => {
+            if (dep?.id && dependantsMap.has(dep.id)) {
+              dependants.push({
+                ...dependantsMap.get(dep.id),
+                relationship: dep.relationship || 'Dependant'
+              });
+            }
+          });
+
           for (const dependant of dependants) {
-            if (isAlien) { const age = dependant.age; if (age === null || age < 18) { skippedMinors++; continue; } }
-            tasksToCreate.push({ ...baseTaskData, class_id: dependantClassId || applicantClassId, applicant_name: dependant.full_name, individual_id: dependant.individual_id, applicant_type: 'dependant', principal_member: false });
+            if (isAlien) {
+              const age = dependant.age;
+              if (age === null || age < 18) {
+                skippedMinors++;
+                continue;
+              }
+            }
+
+            tasksToCreate.push({
+              ...baseTaskData,
+              class_id: dependantClassId || applicantClassId,
+              applicant_name: dependant.full_name,
+              individual_id: dependant.individual_id,
+              applicant_type: 'dependant',
+              principal_member: false
+            });
           }
         }
       }
+
       const { data: newTasks, error } = await supabase
         .from('tm_tasks')
         .insert(tasksToCreate)
@@ -1049,7 +1078,7 @@ export default function DepartmentTasksManager({
     } finally {
       setIsPushingCase(false);
     }
-  }, [refreshAllData, fetchAllDependantsAndApplicants]);
+  }, [refreshAllData]);
 
   const handleDownloadZip = useCallback(async (task: UtilTask) => {
     setIsDownloading(true);
@@ -1365,8 +1394,8 @@ export default function DepartmentTasksManager({
                   // Get all linked documents for this task and stage
                   const linkedDocuments = task.source_document_id?.[stage.id];
                   // Ensure linkedDocuments is an array before calling find
-                  const documentsArray = Array.isArray(linkedDocuments) 
-                    ? linkedDocuments 
+                  const documentsArray = Array.isArray(linkedDocuments)
+                    ? linkedDocuments
                     : linkedDocuments ? [linkedDocuments] : [];
 
                   // Find if this specific document is linked
@@ -1836,7 +1865,6 @@ export default function DepartmentTasksManager({
     );
   };
 
-  // Extracted DeleteButton component
   const DeleteButton = ({ task }: { task: any }) => {
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -1896,7 +1924,6 @@ export default function DepartmentTasksManager({
     );
   };
 
-  // Extracted ActionMenuItems component
   const ActionMenuItems = ({ task }: { task: any }) => {
     return (
       <DropdownMenuContent align="end">
@@ -1922,7 +1949,6 @@ export default function DepartmentTasksManager({
     );
   };
 
-  // Helper function for automation click
   const handleAutomationClick = (e: React.MouseEvent, stage: any, taskId: string) => {
     e.stopPropagation();
     if (stage.automation) {
@@ -1934,6 +1960,7 @@ export default function DepartmentTasksManager({
       setAutomationDialogOpen(true);
     }
   };
+
   const loadRows = useCallback(async (tasks: any[]) => {
     if (!tasks || tasks.length === 0) return;
     try {
@@ -2337,6 +2364,7 @@ export default function DepartmentTasksManager({
       setActiveAssistantTab(null);
     }
   }, [activeManagerTab, activeSubdepartmentTab, getAssistantsForManager, getActiveStaffFromSubdepartment, tmUsers]);
+ 
   useEffect(() => {
     setActiveOfficerTab(null);
     setActiveManagerTab(null);
