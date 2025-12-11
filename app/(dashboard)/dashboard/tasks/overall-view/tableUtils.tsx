@@ -30,6 +30,17 @@ interface StageStatusInfo {
   stageFollowUp: string | null;
 }
 
+export interface TimeStatus {
+  elapsed: number;
+  remaining?: number;
+  isOverdue: boolean;
+  progress?: number;
+  percentage?: string;
+  formattedElapsed: string;
+  formattedRemaining: string;
+  formattedOverdue: string;
+}
+
 // Constants
 const DATE_FORMATS = [
   'dd/MM/yyyy HH:mm:ss',
@@ -54,12 +65,12 @@ export const ENHANCED_TABLE_HEADERS_IMMIGRATION: TableHeader[] = [
   { id: 'renewal_new', label: 'Renewal/New', default: true, width: 'w-28' },
   { id: 'immigration_document_type', label: 'Current Immigration Doc Type', default: false, width: 'w-48' },
   { id: 'immigration_expiry_date', label: 'Current Immigration Expiry Date', default: false, width: 'w-40' },
-  { id: 'immigration_status', label: 'Current Immigration Status', default: true, width: 'w-48' },
+  { id: 'immigration_days_to_go', label: 'Days To Go', default: false, width: 'w-32' }, // New Column
+  // { id: 'immigration_status', label: 'Current Immigration Status', default: true, width: 'w-48' },
   { id: 'current_stage_name', label: 'Current Stage Name', default: true, width: 'w-48' },
   { id: 'current_stage_status_value', label: 'Current Stage Status', default: true, width: 'w-48' },
   { id: 'current_stage_follow_up', label: 'Current Stage Follow-up', default: false, width: 'w-40' },
   { id: 'job_description', label: 'Job Description', default: false, width: 'w-32' },
-  { id: 'case_status', label: 'Case Status', default: false, width: 'w-28' },
   { id: 'nationality', label: 'Nationality', default: false, width: 'w-32' },
   { id: 'full_name', label: 'Full Name', default: false, width: 'w-32' },
   { id: 'age', label: 'Age', default: false, width: 'w-20' },
@@ -74,7 +85,6 @@ export const ENHANCED_TABLE_HEADERS: TableHeader[] = [
   { id: 'job_description', label: 'Job Description', default: true, width: 'w-32' },
   { id: 'job_level', label: 'Job Level', default: true, width: 'w-32' },
   { id: 'renewal_new', label: 'Renewal/New', default: false, width: 'w-28' },
-  { id: 'case_status', label: 'Case Status', default: false, width: 'w-28' },
   { id: 'task_manager', label: 'Task Manager', default: false, width: 'w-32' },
   { id: 'officer', label: 'Officer', default: false, width: 'w-32' },
   { id: 'task_assistant', label: 'Task Assistant', default: false, width: 'w-32' },
@@ -86,8 +96,14 @@ export const STATS_HEADERS = [
   { id: 'stats_na', label: 'N/A Stages', default: false },
 ];
 
+// --- Helper Functions ---
+
 export const parseDate = (dateStr: string): Date | null => {
   if (!dateStr) return null;
+  // If it's already a date object
+  if (dateStr instanceof Date) {
+    return isValid(dateStr) ? dateStr : null;
+  }
 
   for (const fmt of DATE_FORMATS) {
     const parsed = parse(dateStr, fmt, new Date());
@@ -133,19 +149,14 @@ export const calculateAge = (dateOfBirth: string | null): number | null => {
   if (!dateOfBirth) return null;
 
   try {
-    // First try parsing with our custom parseDate function
     const birthDate = parseDate(dateOfBirth);
-
-    // If that fails, try direct Date parsing as fallback
     if (!birthDate || isNaN(birthDate.getTime())) {
       const fallbackDate = new Date(dateOfBirth);
       if (isNaN(fallbackDate.getTime())) {
-        console.warn('Invalid date of birth:', dateOfBirth);
         return null;
       }
       return calculateAgeFromDate(fallbackDate);
     }
-
     return calculateAgeFromDate(birthDate);
   } catch (error) {
     console.error('Error calculating age:', error);
@@ -153,12 +164,95 @@ export const calculateAge = (dateOfBirth: string | null): number | null => {
   }
 };
 
+const calculateAgeFromDate = (birthDate: Date): number => {
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+
+  return age;
+};
+
+// --- Time & Duration Logic (Moved from ReportsPage) ---
+
+export const formatDuration = (minutes: number): string => {
+  if (isNaN(minutes) || !isFinite(minutes)) return 'N/A';
+
+  const absMinutes = Math.abs(Math.round(minutes));
+  const days = Math.floor(absMinutes / (60 * 24));
+  const hours = Math.floor((absMinutes % (60 * 24)) / 60);
+  const mins = absMinutes % 60;
+
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0 || days > 0) parts.push(`${hours}h`);
+  if (mins > 0 || parts.length === 0) parts.push(`${mins}m`);
+
+  return parts.join(' ');
+};
+
+export const getTimeStatus = (startTime: Date | string | null, estimatedMinutes: number): TimeStatus | null => {
+  if (!startTime) return null;
+
+  try {
+    const startDate = parseDate(startTime instanceof Date ? startTime.toISOString() : startTime);
+    if (!startDate) return null;
+
+    const now = new Date();
+    const elapsedMs = now.getTime() - startDate.getTime();
+    const elapsedMinutes = Math.floor(elapsedMs / (1000 * 60));
+
+    // If no estimated minutes, just return elapsed
+    if (!estimatedMinutes || estimatedMinutes <= 0) {
+      return {
+        elapsed: Math.max(0, elapsedMinutes),
+        remaining: 0,
+        isOverdue: false,
+        progress: 100,
+        percentage: '100%',
+        formattedElapsed: formatDuration(elapsedMinutes),
+        formattedRemaining: '-',
+        formattedOverdue: '-'
+      };
+    }
+
+    const remainingMinutes = Math.max(0, estimatedMinutes - elapsedMinutes);
+    const isOverdue = elapsedMinutes > estimatedMinutes;
+    const progress = Math.min(100, Math.max(0, (elapsedMinutes / estimatedMinutes) * 100));
+
+    return {
+      elapsed: Math.max(0, elapsedMinutes),
+      remaining: remainingMinutes,
+      isOverdue,
+      progress,
+      percentage: `${Math.round(progress)}%`,
+      formattedElapsed: formatDuration(elapsedMinutes),
+      formattedRemaining: formatDuration(remainingMinutes),
+      formattedOverdue: isOverdue ? formatDuration(elapsedMinutes - estimatedMinutes) : '0m'
+    };
+  } catch (e) {
+    console.error("Error in getTimeStatus:", e);
+    return null;
+  }
+};
+
+export const calculateDaysRemaining = (expiryDate: Date | null): string => {
+    if (!expiryDate) return '-';
+    const today = startOfToday();
+    const diffTime = expiryDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays.toString();
+};
+
+// --- Display Getters ---
+
 export const getJobLevelDisplay = (task: any, departments: any[]): string => {
   const jobLevel = task.job_level;
-
   if (!jobLevel) return 'N/A';
 
-  // Handle both string and object formats
   if (typeof jobLevel === 'string') {
     const levels = jobLevel.split('>').map(s => s.trim());
     return levels[levels.length - 1] || 'N/A';
@@ -166,16 +260,13 @@ export const getJobLevelDisplay = (task: any, departments: any[]): string => {
 
   if (typeof jobLevel === 'object' && jobLevel !== null) {
     try {
-      // Find the department
       const department = departments.find(d => d.id == jobLevel.department_id);
       if (!department) return 'N/A';
 
-      // Find the subdepartment
       const subdepartment = department.tm_subdepartments?.find(
         (sd: any) => sd.id == jobLevel.subdepartment_id
       );
 
-      // Find the class
       if (subdepartment?.classes?.length && jobLevel.class_id) {
         const classItem = subdepartment.classes.find(
           (c: any) => c.id == jobLevel.class_id
@@ -183,7 +274,6 @@ export const getJobLevelDisplay = (task: any, departments: any[]): string => {
         if (classItem?.name) return classItem.name;
       }
 
-      // Fallback to showing just the ID if name not found
       if (jobLevel.class_id) return `Class ${jobLevel.class_id}`;
       if (jobLevel.subclass_id) return `Subclass ${jobLevel.subclass_id}`;
       if (jobLevel.subdepartment_id) return `SubDept ${jobLevel.subdepartment_id}`;
@@ -192,7 +282,6 @@ export const getJobLevelDisplay = (task: any, departments: any[]): string => {
       console.error('Error processing job level:', error);
     }
   }
-
   return 'N/A';
 };
 
@@ -213,21 +302,30 @@ export const formatImmigrationExpiryDate = (task: any, getEnhancedStatus: (task:
   return date ? format(date as Date, 'dd MMM yyyy') : '-';
 };
 
+export const formatImmigrationDaysToGo = (task: any, getEnhancedStatus: (task: any) => StatusInfo): React.ReactNode => {
+    const statusInfo = getEnhancedStatus(task);
+    if (!statusInfo.date) return '-';
+    
+    // Logic extracted from ReportsPage
+    const days = Math.ceil((statusInfo.date.getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
+    
+    return (
+        <span className={`font-medium ${days < 0 ? 'text-red-600' : days <= 30 ? 'text-amber-600' : 'text-green-600'}`}>
+            {days} days
+        </span>
+    );
+};
+
+export const getRawImmigrationDaysToGo = (task: any, getEnhancedStatus: (task: any) => StatusInfo): string => {
+    const statusInfo = getEnhancedStatus(task);
+    if (!statusInfo.date) return '-9999'; // For sorting
+    const days = Math.ceil((statusInfo.date.getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
+    return days.toString();
+};
+
 export const getCurrentStageFollowUp = (task: any, getStageStatus: (task: any) => StageStatusInfo): string => {
   const { stageFollowUp } = getStageStatus(task);
   return stageFollowUp || '-';
-};
-
-const calculateAgeFromDate = (birthDate: Date): number => {
-  const today = new Date();
-  let age = today.getFullYear() - birthDate.getFullYear();
-  const monthDiff = today.getMonth() - birthDate.getMonth();
-
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-    age--;
-  }
-
-  return age;
 };
 
 export const getEnhancedImmigrationStatus = (
@@ -267,17 +365,10 @@ export const getEnhancedImmigrationStatus = (
   }
 
   const docsWithEffectiveTo = relevantDocs.flatMap(doc => {
-    if (!doc.extracted_details) {
-      return [];
-    }
-
+    if (!doc.extracted_details) return [];
     const kycData = kycDocuments.get(doc.document_id);
+    if (!kycData?.fields) return [];
 
-    if (!kycData?.fields) {
-      return [];
-    }
-
-    // Find all fields marked as effective to
     const effectiveToFields = kycData.fields
       .filter((f: any) => {
         const fieldName = f.name || f.fieldName || '';
@@ -288,22 +379,16 @@ export const getEnhancedImmigrationStatus = (
       .map((f: any) => f.name || f.fieldName)
       .filter(Boolean);
 
-
-    if (effectiveToFields.length === 0) {
-      return [];
-    }
+    if (effectiveToFields.length === 0) return [];
 
     const docType = kycData.display_name || kycData.name || 'Document';
     const extracted = doc.extracted_details || {};
 
-    // Find the first effective to date
     for (const field of effectiveToFields) {
       const dateValue = extracted[field];
-
       if (dateValue) {
         const date = parseDate(dateValue);
         const isValidDate = date && isValid(date);
-
         if (isValidDate) {
           return [{
             date,
@@ -318,7 +403,6 @@ export const getEnhancedImmigrationStatus = (
     return [];
   });
 
-  // If we found documents with effective to dates, use the latest one
   if (docsWithEffectiveTo.length > 0) {
     const latestDoc = docsWithEffectiveTo.reduce((latest, current) =>
       isAfter(current.date, latest.date) ? current : latest, docsWithEffectiveTo[0]);
@@ -344,7 +428,6 @@ export const getEnhancedImmigrationStatus = (
 
   const allDatesWithTypes = relevantDocs.flatMap(doc => {
     if (!doc.extracted_details) return [];
-
     const kycData = kycDocuments.get(doc.document_id);
     const documentTypeName = kycData?.display_name || kycData?.name || 'Document';
     const dates = findDatesInObject(doc.extracted_details, DATE_FIELDS);
@@ -396,47 +479,17 @@ export const fetchAndEnhanceIndividuals = async (
 }> => {
   try {
     const allIndividualIds = new Set<number>();
-
-    // Collect applicant IDs
-    tasks.forEach(task => {
-      if (task.individual_id) {
-        allIndividualIds.add(task.individual_id);
-      }
-    });
-
-    // Collect dependant IDs
+    tasks.forEach(task => { if (task.individual_id) allIndividualIds.add(task.individual_id); });
     tasks.forEach(task => {
       if (task.dependant_member && Array.isArray(task.dependant_member)) {
-        task.dependant_member.forEach(dep => {
-          if (dep?.id) {
-            allIndividualIds.add(dep.id);
-
-            // Log warning for missing DOB
-            if (dep.full_name) {
-              const age = calculateAge(dep.date_of_birth);
-              if (age === null) {
-                console.warn(
-                  `Skipping age assumption for dependant: ${dep.full_name} (ID: ${dep.id}) - missing or invalid date of birth`
-                );
-              }
-            }
-          }
-        });
+        task.dependant_member.forEach(dep => { if (dep?.id) allIndividualIds.add(dep.id); });
       }
     });
 
-    if (allIndividualIds.size === 0) {
-      return { dependantsMap: new Map(), applicantsMap: new Map() };
-    }
-
-    // Convert Set to array and filter out any null/undefined values
+    if (allIndividualIds.size === 0) return { dependantsMap: new Map(), applicantsMap: new Map() };
     const individualIds = Array.from(allIndividualIds).filter(id => id != null);
+    if (individualIds.length === 0) return { dependantsMap: new Map(), applicantsMap: new Map() };
 
-    if (individualIds.length === 0) {
-      return { dependantsMap: new Map(), applicantsMap: new Map() };
-    }
-
-    // Fetch all unique individuals (both applicants and dependants) in a single query
     const { data, error } = await supabase
       .from('registry_individuals')
       .select('id, full_name, nationality, date_of_birth, relationships')
@@ -447,7 +500,6 @@ export const fetchAndEnhanceIndividuals = async (
       return { dependantsMap: new Map(), applicantsMap: new Map() };
     }
 
-    // Separate dependants and applicants
     const dependantsMap = new Map<number, any>();
     const applicantsMap = new Map<number, any>();
 
@@ -457,22 +509,13 @@ export const fetchAndEnhanceIndividuals = async (
         age: calculateAge(individual.date_of_birth),
         individual_id: individual.id
       };
-
-      // Check if this individual is an applicant
       const isApplicant = tasks.some(task => task.individual_id === individual.id);
-      if (isApplicant) {
-        applicantsMap.set(individual.id, enhancedIndividual);
-      }
-
-      // Check if this individual is a dependant
+      if (isApplicant) applicantsMap.set(individual.id, enhancedIndividual);
+      
       const isDependant = tasks.some(task =>
-        task.dependant_member &&
-        Array.isArray(task.dependant_member) &&
-        task.dependant_member.some(dep => dep?.id === individual.id)
+        task.dependant_member && Array.isArray(task.dependant_member) && task.dependant_member.some(dep => dep?.id === individual.id)
       );
-      if (isDependant) {
-        dependantsMap.set(individual.id, enhancedIndividual);
-      }
+      if (isDependant) dependantsMap.set(individual.id, enhancedIndividual);
     });
 
     return { dependantsMap, applicantsMap };
@@ -494,18 +537,15 @@ export const createEnhancedTaskData = (
   const enhancedTasksMap = new Map<string, any>();
 
   tasks.forEach(task => {
-    // Enhance task with applicant data
     const applicantData = applicantsMap.get(task.individual_id);
-
     enhancedTasksMap.set(task.id.toString(), {
       ...task,
       applicant_data: applicantData,
       full_name: applicantData?.full_name || task.full_name,
       nationality: applicantData?.nationality || task.nationality,
-      age: applicantData?.age // This should be the calculated age or null
+      age: applicantData?.age 
     });
 
-    // Map dependants
     if (task.dependant_member && Array.isArray(task.dependant_member)) {
       const taskDependants = task.dependant_member
         .filter(dep => dep?.id && dependantsMap.has(dep.id))
@@ -520,10 +560,7 @@ export const createEnhancedTaskData = (
     }
   });
 
-  return {
-    enhancedTasksData: enhancedTasksMap,
-    taskDependants: taskDependantsMap
-  };
+  return { enhancedTasksData: enhancedTasksMap, taskDependants: taskDependantsMap };
 };
 
 export const enhanceTasksWithIndividualData = async (
@@ -532,13 +569,7 @@ export const enhanceTasksWithIndividualData = async (
   enhancedTasksData: Map<string, any>;
   taskDependants: Map<string, any[]>;
 }> => {
-  if (!tasks || tasks.length === 0) {
-    return {
-      enhancedTasksData: new Map(),
-      taskDependants: new Map()
-    };
-  }
-
+  if (!tasks || tasks.length === 0) return { enhancedTasksData: new Map(), taskDependants: new Map() };
   const { dependantsMap, applicantsMap } = await fetchAndEnhanceIndividuals(tasks);
   return createEnhancedTaskData(tasks, applicantsMap, dependantsMap);
 };
@@ -550,89 +581,59 @@ export const getCurrentStageStatus = (
   allDocuments: any[] = []
 ): StageStatusInfo => {
   if (!stages.length || !task) {
-    return {
-      stageName: 'No Stage',
-      stageStatus: 'N/A',
-      stageFollowUp: null
-    };
+    return { stageName: 'No Stage', stageStatus: 'N/A', stageFollowUp: null };
   }
 
   const sortedStages = [...stages].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
 
-  sortedStages.forEach((s, idx) => {
-    const isApplicable = isStageApplicableToTask(s, task, departments);
-  });
-
   const isStageCompleted = (stage: any, task: any, allDocuments: any[] = []) => {
-    if (!task || !stage) {
-      return false;
-    }
-
+    if (!task || !stage) return false;
     const stageData = task.stages?.[stage.id];
     const requiresDocuments = stage.documents?.length > 0;
 
-    // Check if stage is marked as completed in task.stages
     const isCompleted = stageData && (
       stageData.status === 'completed' ||
       stageData.completedAt ||
       (stageData.documents && Object.keys(stageData.documents).length > 0)
     );
 
-    if (isCompleted) {
-      return true;
-    }
-
-    // For non-document stages, check if they have a date
-    if (!requiresDocuments && stageData?.date) {
-      return true;
-    }
-
-    // For document-requiring stages, check if any documents are uploaded
+    if (isCompleted) return true;
+    if (!requiresDocuments && stageData?.date) return true;
     if (requiresDocuments && stageData?.documents) {
       const hasUploadedDocs = Object.values(stageData.documents).some(
         (doc: any) => doc.status === 'uploaded' || doc.status === 'linked'
       );
-
-      if (hasUploadedDocs) {
-        return true;
-      }
+      if (hasUploadedDocs) return true;
     }
     return false;
   };
 
-  // Find the highest index completed stage and track all completed stages
   let highestCompletedIndex = -1;
   const completedStages: { index: number, stage: any }[] = [];
 
   for (let i = 0; i < sortedStages.length; i++) {
     const stage = sortedStages[i];
-    const isApplicable = isStageApplicableToTask(stage, task, departments);
     const completed = isStageCompleted(stage, task, allDocuments);
-
     if (completed) {
       highestCompletedIndex = i;
       completedStages.push({ index: i, stage });
     }
   }
 
-  // Determine current stage and status
   let currentStage;
   let stageStatus = 'Pending';
 
   if (highestCompletedIndex === -1) {
-    // No stages completed yet, find first applicable stage
     currentStage = findFirstApplicableStage(sortedStages, task, departments) || sortedStages[0];
     if (currentStage) {
       const stageData = task.stages?.[currentStage.id];
       stageStatus = stageData?.status || currentStage.status || 'Pending';
     }
   } else {
-    // Use the status from the highest completed stage
     currentStage = sortedStages[highestCompletedIndex];
     const stageData = task.stages?.[currentStage.id];
     stageStatus = stageData?.status || currentStage.status || 'Completed';
 
-    // Check if there's a next stage that's applicable
     const nextStageIndex = highestCompletedIndex + 1;
     if (nextStageIndex < sortedStages.length) {
       const nextStage = findNextApplicableStage(
@@ -651,11 +652,7 @@ export const getCurrentStageStatus = (
   }
 
   if (!currentStage) {
-    return {
-      stageName: 'No Stage',
-      stageStatus: 'N/A',
-      stageFollowUp: null
-    };
+    return { stageName: 'No Stage', stageStatus: 'N/A', stageFollowUp: null };
   }
 
   return {
@@ -675,26 +672,17 @@ const findNextApplicableStage = (currentStage: any, remainingStages: any[], task
 
 const isStageApplicableToTask = (stage: any, task: any, departments: any[]): boolean => {
   if (!task || !departments.length) return true;
-
   const dept = departments.find(d => d.id === (task.department?.id || task.department_id));
   if (!dept) return true;
-
-  const subdept = dept.tm_subdepartments?.find((s: any) =>
-    s.id === (task.subdepartment?.id || task.subdepartment_id)
-  );
-
+  const subdept = dept.tm_subdepartments?.find((s: any) => s.id === (task.subdepartment?.id || task.subdepartment_id));
   if (subdept) {
     const subdeptStage = subdept.stages?.find((s: any) => s.stage_id === stage.id);
     if (subdeptStage?.applicable === false) return false;
-
     if (task.class_id) {
       const cls = subdept.classes?.find((c: any) => c.id.toString() === task.class_id.toString());
-      if (cls?.stages?.some((s: any) => s.stage_id === stage.id && s.applicable === false)) {
-        return false;
-      }
+      if (cls?.stages?.some((s: any) => s.stage_id === stage.id && s.applicable === false)) return false;
     }
   }
-
   const deptStage = dept.stages?.find((s: any) => s.stage_id === stage.id);
   return deptStage?.applicable !== false;
 };
@@ -708,29 +696,11 @@ const StatusBadge = ({ status, type }: { status: string; type: string }) => {
       default: return 'bg-slate-600';
     }
   };
-
-  return (
-    <Badge className={`whitespace-normal text-sm text-white ${getColor()}`}>
-      {status}
-    </Badge>
-  );
+  return <Badge className={`whitespace-normal text-sm text-white ${getColor()}`}>{status}</Badge>;
 };
 
-const ExpandButton = ({
-  isExpanded,
-  onClick,
-  className = ''
-}: {
-  isExpanded: boolean;
-  onClick: () => void;
-  className?: string;
-}) => (
-  <Button
-    variant="ghost"
-    size="icon"
-    className={`h-5 w-5 p-0 text-white hover:text-white ${className}`}
-    onClick={onClick}
-  >
+const ExpandButton = ({ isExpanded, onClick, className = '' }: { isExpanded: boolean; onClick: () => void; className?: string; }) => (
+  <Button variant="ghost" size="icon" className={`h-5 w-5 p-0 text-white hover:text-white ${className}`} onClick={onClick}>
     {isExpanded ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
   </Button>
 );
@@ -744,39 +714,22 @@ export const renderImmigrationStatusCell = (
   const statusInfo = getEnhancedStatus(task);
   const isExpanded = task?.id ? expandedStatuses.has(task.id.toString()) : false;
 
-  if (statusInfo.type === 'na') {
-    return <StatusBadge status={statusInfo.status} type={statusInfo.type} />;
-  }
-
-  const handleExpandClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (task?.id) {
-      toggleExpansion(task.id.toString());
-    }
-  };
+  if (statusInfo.type === 'na') return <StatusBadge status={statusInfo.status} type={statusInfo.type} />;
 
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <StatusBadge status={statusInfo.status} type={statusInfo.type} />
-        {task?.id && (
-          <ExpandButton
-            isExpanded={isExpanded}
-            onClick={handleExpandClick}
-          />
-        )}
+        {task?.id && <ExpandButton isExpanded={isExpanded} onClick={(e) => { e.stopPropagation(); toggleExpansion(task.id.toString()); }} />}
       </div>
-
       {isExpanded && (
         <div className="space-y-1 p-2 bg-slate-50 rounded border text-sm text-left">
           <div className="flex justify-between">
-            <span className="font-medium">Document Type:</span>
-            <span>{statusInfo.documentType || 'Unknown'}</span>
+            <span className="font-medium">Document Type:</span><span>{statusInfo.documentType || 'Unknown'}</span>
           </div>
           {statusInfo.date && (
             <div className="flex justify-between">
-              <span className="font-medium">Expiry Date:</span>
-              <span>{format(statusInfo.date, 'dd MMM yyyy')}</span>
+              <span className="font-medium">Expiry Date:</span><span>{format(statusInfo.date, 'dd MMM yyyy')}</span>
             </div>
           )}
           {statusInfo.type !== 'expired' && statusInfo.daysRemaining !== null && (
@@ -790,9 +743,7 @@ export const renderImmigrationStatusCell = (
           {statusInfo.type === 'expired' && (
             <div className="flex justify-between">
               <span className="font-medium">Days Overdue:</span>
-              <span className="text-red-600 font-semibold">
-                {Math.abs(statusInfo.daysRemaining || 0)} days
-              </span>
+              <span className="text-red-600 font-semibold">{Math.abs(statusInfo.daysRemaining || 0)} days</span>
             </div>
           )}
         </div>
@@ -803,12 +754,7 @@ export const renderImmigrationStatusCell = (
 
 export const renderCurrentStageStatusCell = (task: any, getStageStatus: (task: any) => StageStatusInfo) => {
   const { stageStatus } = getStageStatus(task);
-
-  return (
-    <span className={`whitespace-normal`}>
-      {stageStatus}
-    </span>
-  );
+  return <span className={`whitespace-normal`}>{stageStatus}</span>;
 };
 
 export const getCellContent = (
@@ -833,18 +779,17 @@ export const getCellContent = (
   const taskDeps = task?.id ? taskDependants.get(task.id.toString()) || [] : [];
   const isExpanded = task?.id ? expandedDependants.has(task.id.toString()) : false;
 
-  // Map of simple cell values that don't need complex rendering
   const simpleCellMap: Record<string, any> = {
     id: task.id,
     immigration_document_type: formatImmigrationDocumentType(task, getEnhancedStatus),
     immigration_expiry_date: formatImmigrationExpiryDate(task, getEnhancedStatus),
+    immigration_days_to_go: formatImmigrationDaysToGo(task, getEnhancedStatus),
     current_stage_name: getStageStatus(task).stageName || 'N/A',
     current_stage_follow_up: getCurrentStageFollowUp(task, getStageStatus),
     company_name: getCompanyName(task, companies),
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',
     renewal_new: task.renewal_status || 'New',
-    case_status: task.status || 'pending',
     nationality: enhancedTask.nationality || 'N/A',
     full_name: enhancedTask.full_name || 'N/A',
     age: enhancedTask.age?.toString() || 'N/A',
@@ -853,12 +798,8 @@ export const getCellContent = (
     task_assistant: task.task_assistant_id ? getStaffName(task.task_assistant_id) : <span className="text-red-500 font-semibold">Unallocated</span>
   };
 
-  // Check if it's a simple cell first
-  if (headerId in simpleCellMap) {
-    return simpleCellMap[headerId];
-  }
+  if (headerId in simpleCellMap) return simpleCellMap[headerId];
 
-  // Complex cells that need JSX rendering
   const complexCellMap: Record<string, React.ReactNode> = {
     applicant_name: (
       <div className="flex items-center justify-between gap-1 w-[300px]">
@@ -869,37 +810,19 @@ export const getCellContent = (
         </div>
         <div className="flex gap-1">
           {taskDeps.length > 0 && (
-            <ExpandButton
-              isExpanded={isExpanded}
-              onClick={() => toggleDependants(task.id.toString())}
-              className="text-white hover:bg-green-100 flex-shrink-0"
-            />
+            <ExpandButton isExpanded={isExpanded} onClick={() => toggleDependants(task.id.toString())} className="text-white hover:bg-green-100 flex-shrink-0" />
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-white hover:bg-blue-100 flex-shrink-0"
-            title="Link source documents"
-            onClick={() => {
-              setLinkingTask(task);
-              setIsLinkDialogOpen(true);
-            }}
-          >
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-blue-100 flex-shrink-0" title="Link source documents" onClick={() => { setLinkingTask(task); setIsLinkDialogOpen(true); }}>
             <LinkIcon className="h-4 w-4" />
           </Button>
         </div>
       </div>
     ),
-    immigration_status: renderStatusCell(task),
+    // immigration_status: renderStatusCell(task),
     current_stage_status_value: renderStageStatusCell(task),
   };
 
-  // Return complex cell if it exists
-  if (headerId in complexCellMap) {
-    return complexCellMap[headerId];
-  }
-
-  // Fallback to task property
+  if (headerId in complexCellMap) return complexCellMap[headerId];
   return task[headerId] || 'N/A';
 };
 
@@ -920,7 +843,8 @@ export const getRawCellValue = (
     applicant_name: task.applicant_name || 'N/A',
     immigration_document_type: formatImmigrationDocumentType(task, getEnhancedStatus),
     immigration_expiry_date: formatImmigrationExpiryDate(task, getEnhancedStatus),
-    immigration_status: getEnhancedStatus(task).status,
+    immigration_days_to_go: getRawImmigrationDaysToGo(task, getEnhancedStatus),
+    // immigration_status: getEnhancedStatus(task).status,
     current_stage_name: getStageStatus(task).stageName || 'N/A',
     current_stage_status_value: getStageStatus(task).stageStatus || 'N/A',
     current_stage_follow_up: getCurrentStageFollowUp(task, getStageStatus),
@@ -928,7 +852,6 @@ export const getRawCellValue = (
     job_level: getJobLevelDisplay(task, departments),
     job_description: task.job_description || 'N/A',
     renewal_new: task.renewal_status || 'New',
-    case_status: task.status || 'pending',
     nationality: enhancedTask.nationality || 'N/A',
     full_name: enhancedTask.full_name || 'N/A',
     age: enhancedTask.age?.toString() || 'N/A',
@@ -985,7 +908,6 @@ export const filterTasksBySearch = (
     const enhancedTask = enhancedTasksData.get(task.id.toString()) || task;
     const hierarchy = getTaskHierarchy(task);
 
-    // Basic fields to search in
     const searchFields = [
       task.id?.toString(),
       task.applicant_name,
@@ -1006,20 +928,13 @@ export const filterTasksBySearch = (
 
     if (searchFields.includes(term)) return true;
 
-    // Search in dependants
     const dependants = taskDependants.get(task.id.toString()) || [];
     if (dependants.length > 0) {
       const dependantText = dependants
-        .map(dep => [dep.full_name, dep.nationality, dep.age, dep.relationship]
-          .filter(Boolean)
-          .join(' ')
-        )
-        .join(' ')
-        .toLowerCase();
-
+        .map(dep => [dep.full_name, dep.nationality, dep.age, dep.relationship].filter(Boolean).join(' '))
+        .join(' ').toLowerCase();
       if (dependantText.includes(term)) return true;
     }
-
     return false;
   });
 };

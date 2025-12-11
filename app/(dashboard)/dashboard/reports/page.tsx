@@ -1,3 +1,4 @@
+
 // @ts-nocheck
 "use client";
 
@@ -45,7 +46,10 @@ import {
   renderCurrentStageStatusCell,
   ENHANCED_TABLE_HEADERS_IMMIGRATION,
   enhanceTasksWithIndividualData,
-  getRawCellValue
+  getRawCellValue,
+  getTimeStatus,
+  formatDuration,
+  parseDate
 } from "../tasks/overall-view/tableUtils";
 import { calculateAge } from "@/lib/utils/utils";
 import {
@@ -73,61 +77,7 @@ const SPECIAL_STAGE_IDS = [
 ];
 
 const parseDateString = (dateInput: any): Date | null => {
-  if (!dateInput) return null;
-
-  // If it's already a date object
-  if (dateInput instanceof Date) {
-    return isValid(dateInput) ? dateInput : null;
-  }
-
-  try {
-    const strInput = String(dateInput).trim();
-    if (!strInput) return null;
-
-    // Handle YYYY-MM-DD HH:MM:SS format (with or without time)
-    const dateTimeMatch = strInput.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?: (\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
-    if (dateTimeMatch) {
-      const [_, year, month, day, hours = 0, minutes = 0, seconds = 0] = dateTimeMatch.map(Number);
-      // Adjust month to 0-indexed for JavaScript Date
-      const d = new Date(year, month - 1, day, hours, minutes, seconds);
-      return isValid(d) ? d : null;
-    }
-
-    // Handle DD/MM/YYYY HH:mm format (with time)
-    const dmyTimeMatch = strInput.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}) (\d{1,2}):(\d{2})$/);
-    if (dmyTimeMatch) {
-      const [_, day, month, year, hours, minutes] = dmyTimeMatch.map(Number);
-      const d = new Date(year, month - 1, day, hours, minutes);
-      return isValid(d) ? d : null;
-    }
-
-    // Handle DD/MM/YYYY format (without time)
-    const dmyMatch = strInput.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (dmyMatch) {
-      const [_, day, month, year] = dmyMatch.map(Number);
-      const d = new Date(year, month - 1, day);
-      return isValid(d) ? d : null;
-    }
-
-    // Try parsing as ISO date string
-    const isoDate = new Date(strInput);
-    if (isValid(isoDate)) {
-      return isoDate;
-    }
-
-    // Try parsing as timestamp (milliseconds since epoch)
-    if (/^\d+$/.test(strInput)) {
-      const timestamp = parseInt(strInput, 10);
-      const d = new Date(timestamp);
-      return isValid(d) ? d : null;
-    }
-
-    console.warn("Unrecognized date format:", strInput);
-    return null;
-  } catch (e) {
-    console.error("Error parsing date:", e, "Input:", dateInput);
-    return null;
-  }
+  return parseDate(dateInput instanceof Date ? dateInput.toISOString() : dateInput);
 };
 
 const formatDateForDisplay = (date: any): string => {
@@ -156,68 +106,6 @@ const formatDateTimeForDisplay = (date: any): string => {
     return `${day}/${month}/${year} ${hours}:${minutes}`;
   } catch (e) {
     return '-';
-  }
-};
-
-// --- Time Formatting Helpers ---
-const formatDuration = (minutes: number): string => {
-  if (isNaN(minutes) || !isFinite(minutes)) return 'N/A';
-
-  const absMinutes = Math.abs(Math.round(minutes));
-  const days = Math.floor(absMinutes / (60 * 24));
-  const hours = Math.floor((absMinutes % (60 * 24)) / 60);
-  const mins = absMinutes % 60;
-
-  const parts = [];
-  if (days > 0) parts.push(`${days}d`);
-  if (hours > 0 || days > 0) parts.push(`${hours}h`);
-  if (mins > 0 || parts.length === 0) parts.push(`${mins}m`);
-
-  return parts.join(' ');
-};
-
-const getTimeStatus = (startTime: Date | string | null, estimatedMinutes: number) => {
-  if (!startTime) return null;
-
-  try {
-    const startDate = parseDateString(startTime);
-    if (!startDate) return null;
-
-    const now = new Date();
-    const elapsedMs = now.getTime() - startDate.getTime();
-    const elapsedMinutes = Math.floor(elapsedMs / (1000 * 60));
-
-    // If no estimated minutes, just return elapsed
-    if (!estimatedMinutes || estimatedMinutes <= 0) {
-      return {
-        elapsed: Math.max(0, elapsedMinutes),
-        remaining: 0,
-        isOverdue: false,
-        progress: 100,
-        percentage: '100%',
-        formattedElapsed: formatDuration(elapsedMinutes),
-        formattedRemaining: '-',
-        formattedOverdue: '-'
-      };
-    }
-
-    const remainingMinutes = Math.max(0, estimatedMinutes - elapsedMinutes);
-    const isOverdue = elapsedMinutes > estimatedMinutes;
-    const progress = Math.min(100, Math.max(0, (elapsedMinutes / estimatedMinutes) * 100));
-
-    return {
-      elapsed: Math.max(0, elapsedMinutes),
-      remaining: remainingMinutes,
-      isOverdue,
-      progress,
-      percentage: `${Math.round(progress)}%`,
-      formattedElapsed: formatDuration(elapsedMinutes),
-      formattedRemaining: formatDuration(remainingMinutes),
-      formattedOverdue: isOverdue ? formatDuration(elapsedMinutes - estimatedMinutes) : '0m'
-    };
-  } catch (e) {
-    console.error("Error in getTimeStatus:", e);
-    return null;
   }
 };
 
@@ -552,40 +440,6 @@ export default function ReportsPage() {
 
   // --- 6. Render Logic ---
   const renderCellValue = (task, col) => {
-    if (col.type === 'task' && col.field === 'current_stage_name') {
-      const stageStatus = getCurrentStageStatus(task, stages, departments, allDocuments);
-      return stageStatus?.stageStatus === 'Unallocated'
-        ? <span className="text-xs text-amber-500">{stageStatus.stageStatus}</span>
-        : <span className="text-xs text-slate-700">{stageStatus?.stageStatus}</span>;
-    }
-    if (['imm_status_doc', 'imm_status_expiry', 'imm_status_days'].includes(col.type)) {
-      const statusData = getEnhancedImmigrationStatusWrapper(task);
-
-      if (col.type === 'imm_status_doc') {
-        return statusData?.documentType
-          ? <span className="text-xs font-medium text-slate-700">{statusData.documentType}</span>
-          : <span className="text-red-500 text-xs font-semibold">Missing</span>;
-      }
-
-      if (col.type === 'imm_status_expiry') {
-        const expiryDate = statusData?.date;
-        return <span className="text-xs text-slate-700">{
-          expiryDate
-            ? formatDateForDisplay(expiryDate)
-            : 'N/A'
-        }</span>;
-      }
-
-      if (col.type === 'imm_status_days') {
-        const expiryDate = statusData?.date;
-        if (!expiryDate) return <span className="text-gray-400 text-xs">-</span>;
-        const days = Math.ceil((expiryDate.getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
-        return <span className={`text-xs ${days < 0 ? 'text-red-600 font-bold' : 'text-green-600'}`}>
-          {days} days
-        </span>;
-      }
-    }
-
     // ==================================================================================
     // ⬇️⬇️⬇️ UPDATED SECTION: STAGE DATE WITH STATUS LOGIC ⬇️⬇️⬇️
     // ==================================================================================
@@ -884,10 +738,6 @@ export default function ReportsPage() {
       
       cols.push({ id: `task_${fieldId}`, label: getLabel(fieldId), type: 'task', field: fieldId });
     });
-    cols.push({ id: 'current_stage_name', label: 'Current Stage', type: 'task', field: 'current_stage_name' });
-    cols.push({ id: 'imm_status_doc', label: 'Imm Status', type: 'imm_status_doc' });
-    cols.push({ id: 'imm_status_expiry', label: 'Expiry Date', type: 'imm_status_expiry' });
-    cols.push({ id: 'imm_status_days', label: 'Days To Go', type: 'imm_status_days' });
 
     const activeStageIds = Object.keys(activeReport.configuration?.stages || {});
     stages.filter(s => activeStageIds.includes(s.id)).forEach(stage => {
@@ -1001,11 +851,9 @@ export default function ReportsPage() {
     if (!columns.length) return [];
     const groups = [];
     const taskCols = columns.filter(c => c.type === 'task');
-    const immStatusColsCount = 3;
-    const taskSpan = taskCols.length + immStatusColsCount;
-    if (taskCols.length) groups.push({ id: 'task_info', label: 'Task Details', span: taskSpan });
+    if (taskCols.length) groups.push({ id: 'task_info', label: 'Task Details', span: taskCols.length });
     const stageMap = new Map();
-    columns.filter(c => c.type !== 'task' && !['imm_status_doc', 'imm_status_expiry', 'imm_status_days'].includes(c.type)).forEach(col => {
+    columns.filter(c => c.type !== 'task').forEach(col => {
       if (!stageMap.has(col.stageId)) stageMap.set(col.stageId, { id: col.stageId, label: '', count: 0 });
       const group = stageMap.get(col.stageId);
       const stageName = stages.find(s => s.id === col.stageId)?.name || 'Stage Info';
@@ -1021,9 +869,9 @@ export default function ReportsPage() {
     const rows = [];
     rows.push({ type: 'section_header', id: 'task_details', label: 'Task Details', icon: Briefcase });
     if (expandedSections.has('task_details')) {
-      columns.filter(c => c.type === 'task' || ['imm_status_doc', 'imm_status_expiry', 'imm_status_days'].includes(c.type)).forEach(c => rows.push({ ...c, isSubRow: true }));
+      columns.filter(c => c.type === 'task').forEach(c => rows.push({ ...c, isSubRow: true }));
     }
-    const stageGroups = new Set(columns.filter(c => c.type !== 'task' && !['imm_status_doc', 'imm_status_expiry', 'imm_status_days'].includes(c.type)).map(c => c.stageId));
+    const stageGroups = new Set(columns.filter(c => c.type !== 'task').map(c => c.stageId));
     stageGroups.forEach(stageId => {
       const stage = stages.find(s => s.id === stageId);
       if (!stage) return;
@@ -1263,12 +1111,12 @@ export default function ReportsPage() {
                 <TableHeader className="sticky top-0 z-30 bg-slate-100/80 backdrop-blur-sm">
                   {/* Group Header Row */}
                   <TableRow className="bg-blue-600 hover:bg-blue-600">
-                    <TableHead className="w-16 border-b border-r border-blue-500 bg-blue-700 text-white sticky left-0 z-40 text-center font-bold">#</TableHead>
+                    <TableHead className="w-16 border-b border-r bg-blue-700 text-white sticky left-0 z-40 text-center font-bold">#</TableHead>
                     {columnGroups.map((group, i) => (
                       <TableHead
                         key={i}
                         colSpan={group.span}
-                        className="text-center font-bold text-white border-b border-r border-blue-500 last:border-r-0 bg-blue-600 py-3 text-sm"
+                        className="text-center font-bold text-white border-b border-r last:border-r-0 bg-blue-600 py-3 text-sm"
                       >
                         {group.label}
                       </TableHead>
@@ -1276,12 +1124,12 @@ export default function ReportsPage() {
                   </TableRow>
                   {/* Column Header Row */}
                   <TableRow className="bg-blue-500 hover:bg-blue-500">
-                    <TableHead className="w-16 border-b border-r border-blue-400 bg-blue-600 text-white sticky left-0 z-40 text-center font-semibold text-xs">#</TableHead>
+                    <TableHead className="w-16 border-b border-r bg-blue-600 text-white sticky left-0 z-40 text-center font-semibold text-xs">#</TableHead>
                     {columns.map(col => (
                       <TableHead
                         key={col.id}
                         onClick={() => handleSort(col.id)}
-                        className="whitespace-nowrap px-4 py-3 font-semibold text-white border-b border-r border-blue-400 text-xs bg-blue-500 cursor-pointer hover:bg-blue-600 transition-colors group"
+                        className="whitespace-nowrap px-4 py-3 font-semibold text-white border-b border-r text-xs bg-blue-500 cursor-pointer hover:bg-blue-600 transition-colors group"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
@@ -1306,7 +1154,7 @@ export default function ReportsPage() {
                           {sortConfig?.key === col.id ? (
                             <ArrowUpDown className={`h-3 w-3 ${sortConfig.direction === 'asc' ? 'text-white' : 'text-blue-200'}`} />
                           ) : (
-                            <ArrowUpDown className="h-3 w-3 text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <ArrowUpDown className="h-3 w-3 text-white" />
                           )}
                         </div>
                       </TableHead>
